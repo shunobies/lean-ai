@@ -27,19 +27,24 @@ export function formatStageName(stage: string): string {
 
 export function formatApprovalMessage(msg: Record<string, unknown>): string {
     const parts: string[] = [];
-    parts.push("**Plan review passed!** Approve to proceed, or type feedback to revise.\n");
+    parts.push("**Plan ready.** Approve to proceed, or type feedback to revise.\n");
 
-    const plan = msg.plan as Record<string, unknown> | undefined;
-    if (plan) {
-        if (plan.steps && Array.isArray(plan.steps)) {
+    const plan = msg.plan;
+    if (typeof plan === "string") {
+        // Backend sends plan as a markdown string
+        parts.push(plan);
+    } else if (plan && typeof plan === "object") {
+        // Legacy structured plan format
+        const p = plan as Record<string, unknown>;
+        if (p.steps && Array.isArray(p.steps)) {
             parts.push("**Plan steps:**");
-            for (const step of plan.steps) {
+            for (const step of p.steps) {
                 const s = step as Record<string, unknown>;
                 parts.push(`${s.order}. ${s.description}`);
             }
         }
-        if (plan.affected_files && Array.isArray(plan.affected_files)) {
-            parts.push(`\n**Files:** ${(plan.affected_files as string[]).join(", ")}`);
+        if (p.affected_files && Array.isArray(p.affected_files)) {
+            parts.push(`\n**Files:** ${(p.affected_files as string[]).join(", ")}`);
         }
     }
 
@@ -203,24 +208,25 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
 
         // --- Tool progress: show tool execution status ---
         case "tool_progress": {
-            const tool = raw.tool_name as string;
+            const tool = (raw.tool || raw.tool_name) as string;
             const toolStatus = raw.status as string;
-            if (toolStatus === "started") {
+            const desc = (raw.description || raw.output || "") as string;
+            if (toolStatus === "running" || toolStatus === "started") {
                 ctx.postMessage({
                     type: "reply",
-                    text: `Running tool: \`${tool}\`...`,
+                    text: `Running tool: \`${tool}\`${desc ? ` — ${desc}` : ""}`,
                     cls: "msg-system",
                 });
-            } else if (toolStatus === "completed") {
+            } else if (toolStatus === "complete" || toolStatus === "completed") {
                 ctx.postMessage({
                     type: "reply",
                     text: `Tool \`${tool}\` completed.`,
                     cls: "msg-system",
                 });
-            } else if (toolStatus === "failed") {
+            } else if (toolStatus === "error" || toolStatus === "failed") {
                 ctx.postMessage({
                     type: "reply",
-                    text: `Tool \`${tool}\` failed.`,
+                    text: `Tool \`${tool}\` failed.${desc ? `\n\`\`\`\n${desc}\n\`\`\`` : ""}`,
                     cls: "msg-system",
                 });
             }
@@ -229,7 +235,7 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
 
         // --- Diff: show file modification ---
         case "diff": {
-            const filePath = raw.file_path as string;
+            const filePath = (raw.file || raw.file_path) as string;
             const diffContent = raw.diff as string;
             const preview = diffContent
                 .split("\n")
