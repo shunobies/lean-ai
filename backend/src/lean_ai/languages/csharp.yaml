@@ -1,0 +1,40 @@
+name: C#
+extensions: [".cs"]
+ts_grammar: tree_sitter_c_sharp
+
+ts_class_query: |
+  (class_declaration
+    name: (identifier) @name) @class
+  (interface_declaration
+    name: (identifier) @name) @class
+  (enum_declaration
+    name: (identifier) @name) @class
+
+ts_function_query: |
+  (method_declaration
+    name: (identifier) @name
+    parameters: (parameter_list) @params) @function
+
+ts_import_query: |
+  (using_directive
+    (qualified_name) @module)
+
+stdlib_prefixes:
+  - System
+  - Microsoft
+
+fan_in:
+  strategy: dot_to_slash
+  suffix: ".cs"
+
+test_patterns:
+  directories: ["Tests", "tests"]
+  file_prefixes: []
+  file_suffixes: ["Tests.cs", "Test.cs"]
+
+key_files:
+  - "*.csproj"
+  - "*.sln"
+
+entry_points:
+  - Program.cs

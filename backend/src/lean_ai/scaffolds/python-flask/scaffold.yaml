@@ -1,0 +1,65 @@
+name: python-flask
+display_name: Flask
+description: Python Flask web application
+language: python
+framework: flask
+aliases:
+  - flask
+setup:
+  type: files
+  directories:
+    - "src/{package_name}"
+    - "tests"
+  files:
+    - path: "src/{package_name}/__init__.py"
+      content: ""
+    - path: "src/{package_name}/app.py"
+      content: |
+        from flask import Flask, jsonify
+
+        app = Flask(__name__)
+
+
+        @app.get("/health")
+        def health():
+            return jsonify({"status": "ok"})
+
+
+        if __name__ == "__main__":
+            app.run(debug=True)
+    - path: "tests/__init__.py"
+      content: ""
+    - path: "tests/test_app.py"
+      content: |
+        import pytest
+        from {package_name}.app import app
+
+
+        @pytest.fixture
+        def client():
+            app.config["TESTING"] = True
+            with app.test_client() as c:
+                yield c
+
+
+        def test_health(client) -> None:
+            resp = client.get("/health")
+            assert resp.status_code == 200
+    - path: "pyproject.toml"
+      content: |
+        [project]
+        name = "{project_name}"
+        version = "0.1.0"
+        requires-python = ">=3.11"
+        dependencies = ["flask"]
+
+        [project.optional-dependencies]
+        dev = ["pytest"]
+    - path: ".gitignore"
+      content: |
+        __pycache__/
+        *.pyc
+        .venv/
+        dist/
+        instance/
+        *.egg-info/

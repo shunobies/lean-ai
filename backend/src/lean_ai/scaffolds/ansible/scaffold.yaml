@@ -1,0 +1,55 @@
+name: ansible
+display_name: Ansible
+description: Ansible playbook project with role structure
+language: yaml
+framework: ansible
+aliases: []
+setup:
+  type: files
+  directories:
+    - "roles/common/tasks"
+    - "roles/common/defaults"
+    - "roles/common/meta"
+    - "inventory"
+  files:
+    - path: "site.yml"
+      content: |
+        ---
+        - name: {project_name}
+          hosts: all
+          become: true
+          roles:
+            - common
+    - path: "inventory/hosts.ini"
+      content: |
+        [all]
+        # Add your hosts here
+        # 192.168.1.10 ansible_user=ubuntu
+    - path: "roles/common/tasks/main.yml"
+      content: |
+        ---
+        - name: Ensure project marker is present
+          ansible.builtin.debug:
+            msg: "Role 'common' running on {{ inventory_hostname }}"
+    - path: "roles/common/defaults/main.yml"
+      content: |
+        ---
+        # Default variables for the common role
+    - path: "roles/common/meta/main.yml"
+      content: |
+        ---
+        galaxy_info:
+          role_name: common
+          author: your_name
+          description: Common base configuration
+          min_ansible_version: "2.14"
+        dependencies: []
+    - path: "ansible.cfg"
+      content: |
+        [defaults]
+        inventory = inventory/hosts.ini
+        roles_path = roles
+    - path: ".gitignore"
+      content: |
+        *.retry
+        .vault_pass

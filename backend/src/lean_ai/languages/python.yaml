@@ -1,0 +1,104 @@
+name: Python
+extensions: [".py", ".pyw"]
+ts_grammar: tree_sitter_python
+
+ts_class_query: |
+  (class_definition
+    name: (identifier) @name) @class
+
+ts_function_query: |
+  (function_definition
+    name: (identifier) @name
+    parameters: (parameters) @params) @function
+
+ts_import_query: |
+  (import_statement
+    name: (dotted_name) @module)
+  (import_from_statement
+    module_name: (dotted_name) @module)
+
+stdlib_prefixes:
+  - builtins
+  - os
+  - sys
+  - io
+  - re
+  - json
+  - math
+  - time
+  - datetime
+  - collections
+  - functools
+  - itertools
+  - pathlib
+  - typing
+  - logging
+  - unittest
+  - asyncio
+  - hashlib
+  - uuid
+  - copy
+  - enum
+  - dataclasses
+  - abc
+  - contextlib
+  - textwrap
+  - string
+  - secrets
+  - base64
+  - urllib
+  - http
+  - socket
+  - subprocess
+  - shutil
+  - tempfile
+  - glob
+  - fnmatch
+  - csv
+  - sqlite3
+  - xml
+  - html
+  - email
+  - argparse
+  - configparser
+  - struct
+  - codecs
+  - traceback
+  - warnings
+  - inspect
+  - importlib
+  - pkgutil
+  - threading
+  - multiprocessing
+  - concurrent
+  - signal
+  - mmap
+  - ctypes
+  - pprint
+  - dis
+
+fan_in:
+  strategy: dot_to_slash
+  suffix: ".py"
+  package_markers: ["__init__.py"]
+
+test_patterns:
+  directories: ["tests", "test"]
+  file_prefixes: ["test_"]
+  file_suffixes: ["_test.py"]
+
+key_files:
+  - pyproject.toml
+  - setup.py
+  - setup.cfg
+  - requirements.txt
+  - Pipfile
+  - poetry.lock
+
+entry_points:
+  - main.py
+  - app.py
+  - server.py
+  - manage.py
+  - wsgi.py
+  - asgi.py

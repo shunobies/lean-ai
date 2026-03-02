@@ -1,0 +1,13 @@
+name: rust
+display_name: Rust
+description: Rust binary project via Cargo
+language: rust
+framework: null
+aliases:
+  - rs
+setup:
+  type: command
+  # Runs in parent_dir. Creates parent_dir/{project_name}/ automatically.
+  command: 'cargo new "{project_name}"'
+  requirements:
+    - cargo

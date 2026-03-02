@@ -1,0 +1,15 @@
+name: python-django
+display_name: Django
+description: Python Django web framework project
+language: python
+framework: django
+aliases:
+  - django
+setup:
+  type: command
+  # django-admin startproject creates the package inside the project dir.
+  # Runner creates parent_dir/{project_name}/ first, then runs the command inside it.
+  command: 'django-admin startproject {package_name} .'
+  pre_create_project_dir: true
+  requirements:
+    - django-admin

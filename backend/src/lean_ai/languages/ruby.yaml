@@ -1,0 +1,34 @@
+name: Ruby
+extensions: [".rb"]
+ts_grammar: tree_sitter_ruby
+
+ts_class_query: |
+  (class
+    name: (constant) @name) @class
+  (module
+    name: (constant) @name) @class
+
+ts_function_query: |
+  (method
+    name: (identifier) @name) @function
+
+ts_import_query: ""
+
+stdlib_prefixes: []
+
+fan_in:
+  strategy: none
+  suffix: ".rb"
+
+test_patterns:
+  directories: ["test", "spec"]
+  file_prefixes: ["test_"]
+  file_suffixes: ["_test.rb", "_spec.rb"]
+
+key_files:
+  - Gemfile
+  - Gemfile.lock
+
+entry_points:
+  - app.rb
+  - config.ru

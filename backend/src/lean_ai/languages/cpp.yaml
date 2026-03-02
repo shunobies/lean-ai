@@ -1,0 +1,55 @@
+name: C++
+extensions: [".cpp", ".cc", ".cxx", ".hpp", ".hxx"]
+ts_grammar: tree_sitter_cpp
+
+ts_class_query: |
+  (class_specifier
+    name: (type_identifier) @name) @class
+  (struct_specifier
+    name: (type_identifier) @name) @class
+
+ts_function_query: |
+  (function_definition
+    declarator: (function_declarator
+      declarator: (identifier) @name
+      parameters: (parameter_list) @params)) @function
+
+ts_import_query: |
+  (preproc_include
+    path: (string_literal) @module)
+  (preproc_include
+    path: (system_lib_string) @module)
+
+stdlib_prefixes:
+  - iostream
+  - vector
+  - string
+  - map
+  - set
+  - algorithm
+  - memory
+  - functional
+  - utility
+  - numeric
+  - cmath
+  - cstdio
+  - cstdlib
+  - cassert
+
+fan_in:
+  strategy: none
+  suffix: ".cpp"
+
+test_patterns:
+  directories: ["tests", "test"]
+  file_prefixes: ["test_"]
+  file_suffixes: ["_test.cpp", "_test.cc"]
+
+key_files:
+  - CMakeLists.txt
+  - Makefile
+  - meson.build
+
+entry_points:
+  - main.cpp
+  - main.cc

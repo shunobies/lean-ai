@@ -1,0 +1,38 @@
+name: PHP
+extensions: [".php"]
+ts_grammar: tree_sitter_php
+
+ts_class_query: |
+  (class_declaration
+    name: (name) @name) @class
+  (interface_declaration
+    name: (name) @name) @class
+
+ts_function_query: |
+  (function_definition
+    name: (name) @name
+    parameters: (formal_parameters) @params) @function
+  (method_declaration
+    name: (name) @name
+    parameters: (formal_parameters) @params) @function
+
+ts_import_query: ""
+
+stdlib_prefixes: []
+
+fan_in:
+  strategy: none
+  suffix: ".php"
+
+test_patterns:
+  directories: ["tests", "test"]
+  file_prefixes: []
+  file_suffixes: ["Test.php"]
+
+key_files:
+  - composer.json
+  - composer.lock
+
+entry_points:
+  - index.php
+  - artisan

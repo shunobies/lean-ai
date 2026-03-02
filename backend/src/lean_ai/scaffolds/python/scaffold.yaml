@@ -1,0 +1,45 @@
+name: python
+display_name: Python
+description: Plain Python project with src layout
+language: python
+framework: null
+aliases:
+  - py
+setup:
+  type: files
+  directories:
+    - "src/{package_name}"
+    - "tests"
+  files:
+    - path: "src/{package_name}/__init__.py"
+      content: ""
+    - path: "src/{package_name}/main.py"
+      content: |
+        def main() -> None:
+            pass
+
+
+        if __name__ == "__main__":
+            main()
+    - path: "tests/__init__.py"
+      content: ""
+    - path: "tests/test_main.py"
+      content: |
+        from {package_name}.main import main
+
+
+        def test_main() -> None:
+            main()
+    - path: "pyproject.toml"
+      content: |
+        [project]
+        name = "{project_name}"
+        version = "0.1.0"
+        requires-python = ">=3.11"
+    - path: ".gitignore"
+      content: |
+        __pycache__/
+        *.pyc
+        .venv/
+        dist/
+        *.egg-info/

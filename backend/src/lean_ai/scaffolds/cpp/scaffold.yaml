@@ -1,0 +1,38 @@
+name: cpp
+display_name: C++
+description: C++ project with CMake build system
+language: cpp
+framework: null
+aliases:
+  - c++
+setup:
+  type: files
+  directories:
+    - "src"
+    - "include"
+    - "tests"
+  files:
+    - path: "src/main.cpp"
+      content: |
+        #include <iostream>
+
+        int main() {
+            std::cout << "Hello from {project_name}" << std::endl;
+            return 0;
+        }
+    - path: "CMakeLists.txt"
+      content: |
+        cmake_minimum_required(VERSION 3.20)
+        project({project_name} CXX)
+
+        set(CMAKE_CXX_STANDARD 20)
+        set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+        add_executable({project_name} src/main.cpp)
+        target_include_directories({project_name} PRIVATE include)
+    - path: ".gitignore"
+      content: |
+        build/
+        CMakeCache.txt
+        CMakeFiles/
+        *.o

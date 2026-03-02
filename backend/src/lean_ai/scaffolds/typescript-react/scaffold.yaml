@@ -1,0 +1,13 @@
+name: typescript-react
+display_name: React (TypeScript)
+description: React application with TypeScript via Create React App
+language: typescript
+framework: react
+aliases:
+  - react
+setup:
+  type: command
+  # Runs in parent_dir. Creates parent_dir/{project_name}/ automatically.
+  command: 'npx create-react-app "{project_name}" --template typescript'
+  requirements:
+    - npx

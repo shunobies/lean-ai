@@ -1,0 +1,66 @@
+name: Go
+extensions: [".go"]
+ts_grammar: tree_sitter_go
+
+ts_class_query: |
+  (type_declaration
+    (type_spec
+      name: (type_identifier) @name)) @class
+
+ts_function_query: |
+  (function_declaration
+    name: (identifier) @name
+    parameters: (parameter_list) @params) @function
+  (method_declaration
+    name: (field_identifier) @name
+    parameters: (parameter_list) @params) @function
+
+ts_import_query: |
+  (import_spec
+    path: (interpreted_string_literal) @module)
+
+stdlib_prefixes:
+  - fmt
+  - os
+  - io
+  - net
+  - log
+  - sync
+  - time
+  - math
+  - sort
+  - strings
+  - strconv
+  - bytes
+  - errors
+  - context
+  - encoding
+  - crypto
+  - path
+  - regexp
+  - testing
+  - reflect
+  - unsafe
+  - runtime
+  - debug
+  - flag
+  - bufio
+  - unicode
+
+fan_in:
+  strategy: none
+  suffix: ".go"
+  package_markers: []
+
+test_patterns:
+  directories: []
+  file_prefixes: []
+  file_suffixes: ["_test.go"]
+
+key_files:
+  - go.mod
+  - go.sum
+
+entry_points:
+  - main.go
+  - cmd/main.go

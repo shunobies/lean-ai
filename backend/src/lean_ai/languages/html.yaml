@@ -1,0 +1,19 @@
+name: HTML
+extensions: [".html", ".htm"]
+ts_grammar: tree_sitter_html
+
+ts_class_query: ""
+ts_function_query: ""
+ts_import_query: ""
+
+stdlib_prefixes: []
+
+fan_in:
+  strategy: none
+
+test_patterns:
+  directories: []
+
+key_files: []
+entry_points:
+  - index.html

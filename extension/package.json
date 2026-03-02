@@ -1,0 +1,170 @@
+{
+  "name": "lean-ai",
+  "displayName": "Lean AI",
+  "description": "Single-Model Deterministic Agentic Architecture - Chat Agent & Inline Predictions",
+  "version": "0.1.0",
+  "publisher": "lean-ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lean-ai/lean-ai"
+  },
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "lean-ai-sidebar",
+          "title": "Lean AI",
+          "icon": "$(hubot)"
+        }
+      ]
+    },
+    "views": {
+      "lean-ai-sidebar": [
+        {
+          "type": "webview",
+          "id": "lean-ai.chatView",
+          "name": "Chat"
+        },
+        {
+          "id": "lean-ai.sessionsView",
+          "name": "Sessions"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "lean-ai.approve",
+        "title": "Lean AI: Approve Plan"
+      },
+      {
+        "command": "lean-ai.reject",
+        "title": "Lean AI: Reject Plan"
+      },
+      {
+        "command": "lean-ai.focus",
+        "title": "Lean AI: Focus Chat Panel"
+      },
+      {
+        "command": "lean-ai.restartBackend",
+        "title": "Lean AI: Restart Backend Server"
+      },
+      {
+        "command": "lean-ai.stopBackend",
+        "title": "Lean AI: Stop Backend Server"
+      },
+      {
+        "command": "lean-ai.refreshSessions",
+        "title": "Lean AI: Refresh Sessions",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "lean-ai.viewSession",
+        "title": "Lean AI: View Session Details",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "lean-ai.mergeSession",
+        "title": "Lean AI: Merge Session Branch",
+        "icon": "$(git-merge)"
+      },
+      {
+        "command": "lean-ai.abandonSession",
+        "title": "Lean AI: Abandon Session",
+        "icon": "$(trash)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "lean-ai.refreshSessions",
+          "when": "view == lean-ai.sessionsView",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "lean-ai.viewSession",
+          "when": "view == lean-ai.sessionsView && viewItem == session",
+          "group": "inline"
+        },
+        {
+          "command": "lean-ai.mergeSession",
+          "when": "view == lean-ai.sessionsView && viewItem == session",
+          "group": "session@1"
+        },
+        {
+          "command": "lean-ai.abandonSession",
+          "when": "view == lean-ai.sessionsView && viewItem == session",
+          "group": "session@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Lean AI",
+      "properties": {
+        "lean-ai.backendUrl": {
+          "type": "string",
+          "default": "http://localhost:8422",
+          "description": "URL of the Lean AI backend server"
+        },
+        "lean-ai.enableInlinePredictions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Copilot-style inline predictions"
+        },
+        "lean-ai.autoStartBackend": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the Python backend server when the extension activates"
+        },
+        "lean-ai.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Path to the Python interpreter (e.g. 'python', 'python3', or a full path to a virtualenv)"
+        },
+        "lean-ai.backendDir": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the backend directory containing pyproject.toml. If empty, auto-detects from workspace."
+        },
+        "lean-ai.chatFontSize": {
+          "type": "number",
+          "default": 13,
+          "minimum": 10,
+          "maximum": 20,
+          "description": "Font size (px) for chat messages in the Lean AI sidebar. Adjusts live without restarting."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
+    "lint": "eslint src --ext ts",
+    "package": "npm run build && vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.93.0",
+    "@types/ws": "^8.5.0",
+    "@vscode/vsce": "^3.7.1",
+    "esbuild": "^0.24.0",
+    "eslint": "^9.0.0",
+    "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

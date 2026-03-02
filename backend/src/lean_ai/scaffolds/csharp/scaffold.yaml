@@ -1,0 +1,14 @@
+name: csharp
+display_name: C# Console App
+description: .NET C# console application via dotnet CLI
+language: csharp
+framework: null
+aliases:
+  - cs
+  - dotnet
+setup:
+  type: command
+  # Runs in parent_dir. -o flag creates parent_dir/{project_name}/ automatically.
+  command: 'dotnet new console -n "{project_name}" -o "{project_name}"'
+  requirements:
+    - dotnet

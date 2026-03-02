@@ -1,0 +1,51 @@
+name: C
+extensions: [".c", ".h"]
+ts_grammar: tree_sitter_c
+
+ts_class_query: |
+  (struct_specifier
+    name: (type_identifier) @name) @class
+
+ts_function_query: |
+  (function_definition
+    declarator: (function_declarator
+      declarator: (identifier) @name
+      parameters: (parameter_list) @params)) @function
+
+ts_import_query: |
+  (preproc_include
+    path: (string_literal) @module)
+  (preproc_include
+    path: (system_lib_string) @module)
+
+stdlib_prefixes:
+  - stdio
+  - stdlib
+  - string
+  - math
+  - time
+  - errno
+  - assert
+  - ctype
+  - signal
+  - stdarg
+  - stddef
+  - limits
+  - float
+
+fan_in:
+  strategy: none
+  suffix: ".c"
+
+test_patterns:
+  directories: ["tests", "test"]
+  file_prefixes: ["test_"]
+  file_suffixes: ["_test.c"]
+
+key_files:
+  - Makefile
+  - CMakeLists.txt
+  - meson.build
+
+entry_points:
+  - main.c

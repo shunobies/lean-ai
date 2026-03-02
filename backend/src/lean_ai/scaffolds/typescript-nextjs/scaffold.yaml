@@ -1,0 +1,14 @@
+name: typescript-nextjs
+display_name: Next.js (TypeScript)
+description: Next.js React framework with TypeScript
+language: typescript
+framework: nextjs
+aliases:
+  - nextjs
+  - next
+setup:
+  type: command
+  # Runs in parent_dir. Creates parent_dir/{project_name}/ automatically.
+  command: 'npx create-next-app@latest "{project_name}" --typescript --eslint'
+  requirements:
+    - npx

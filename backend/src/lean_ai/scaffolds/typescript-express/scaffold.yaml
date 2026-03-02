@@ -1,0 +1,90 @@
+name: typescript-express
+display_name: Express (TypeScript)
+description: Express.js REST API with TypeScript
+language: typescript
+framework: express
+aliases:
+  - express-ts
+setup:
+  type: files
+  directories:
+    - "src"
+    - "tests"
+  files:
+    - path: "src/app.ts"
+      content: |
+        import express, { Application, Request, Response } from "express";
+
+        export const app: Application = express();
+
+        app.use(express.json());
+
+        app.get("/health", (_req: Request, res: Response) => {
+          res.json({ status: "ok" });
+        });
+    - path: "src/server.ts"
+      content: |
+        import { app } from "./app";
+
+        const PORT = process.env.PORT ?? 3000;
+
+        app.listen(PORT, () => {
+          console.log(`{project_name} listening on port ${PORT}`);
+        });
+    - path: "tests/health.test.ts"
+      content: |
+        import request from "supertest";
+        import { app } from "../src/app";
+
+        describe("GET /health", () => {
+          it("returns 200", async () => {
+            const res = await request(app).get("/health");
+            expect(res.status).toBe(200);
+            expect(res.body.status).toBe("ok");
+          });
+        });
+    - path: "tsconfig.json"
+      content: |
+        {
+          "compilerOptions": {
+            "target": "ES2022",
+            "module": "commonjs",
+            "outDir": "dist",
+            "rootDir": "src",
+            "strict": true,
+            "esModuleInterop": true,
+            "skipLibCheck": true
+          },
+          "include": ["src"],
+          "exclude": ["node_modules", "dist"]
+        }
+    - path: "package.json"
+      content: |
+        {
+          "name": "{project_name}",
+          "version": "0.1.0",
+          "scripts": {
+            "build": "tsc",
+            "start": "node dist/server.js",
+            "dev": "ts-node src/server.ts",
+            "test": "jest"
+          },
+          "dependencies": {
+            "express": "^4.18.0"
+          },
+          "devDependencies": {
+            "typescript": "^5.0.0",
+            "@types/express": "^4.17.0",
+            "@types/node": "^20.0.0",
+            "ts-node": "^10.9.0",
+            "jest": "^29.0.0",
+            "ts-jest": "^29.0.0",
+            "@types/jest": "^29.0.0",
+            "supertest": "^6.3.0",
+            "@types/supertest": "^2.0.0"
+          }
+        }
+    - path: ".gitignore"
+      content: |
+        node_modules/
+        dist/

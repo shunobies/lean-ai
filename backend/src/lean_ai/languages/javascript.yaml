@@ -1,0 +1,39 @@
+name: JavaScript
+extensions: [".js", ".jsx", ".mjs", ".cjs"]
+ts_grammar: tree_sitter_javascript
+
+ts_class_query: |
+  (class_declaration
+    name: (identifier) @name) @class
+
+ts_function_query: |
+  (function_declaration
+    name: (identifier) @name
+    parameters: (formal_parameters) @params) @function
+
+ts_import_query: |
+  (import_statement
+    source: (string) @module)
+
+stdlib_prefixes: []
+
+fan_in:
+  strategy: relative_path
+  suffix: ""
+  package_markers: ["index.js", "index.jsx"]
+
+test_patterns:
+  directories: ["__tests__", "tests", "test"]
+  file_prefixes: []
+  file_suffixes: [".test.js", ".test.jsx", ".spec.js", ".spec.jsx"]
+
+key_files:
+  - package.json
+  - package-lock.json
+  - yarn.lock
+
+entry_points:
+  - index.js
+  - main.js
+  - app.js
+  - server.js

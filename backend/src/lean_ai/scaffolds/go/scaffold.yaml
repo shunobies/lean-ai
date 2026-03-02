@@ -1,0 +1,38 @@
+name: go
+display_name: Go
+description: Go module with a main package
+language: go
+framework: null
+aliases:
+  - golang
+setup:
+  type: files
+  directories: []
+  files:
+    - path: "main.go"
+      content: |
+        package main
+
+        import "fmt"
+
+        func main() {
+        	fmt.Println("Hello from {project_name}")
+        }
+    - path: "main_test.go"
+      content: |
+        package main
+
+        import "testing"
+
+        func TestMain(t *testing.T) {
+        	// smoke test: main runs without panicking
+        }
+    - path: "go.mod"
+      content: |
+        module {project_name}
+
+        go 1.22
+    - path: ".gitignore"
+      content: |
+        /bin/
+        *.exe

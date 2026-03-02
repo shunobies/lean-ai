@@ -1,0 +1,13 @@
+name: ruby-rails
+display_name: Ruby on Rails
+description: Ruby on Rails full-stack web framework
+language: ruby
+framework: rails
+aliases:
+  - rails
+setup:
+  type: command
+  # Runs in parent_dir. Creates parent_dir/{project_name}/ automatically.
+  command: 'rails new "{project_name}"'
+  requirements:
+    - rails

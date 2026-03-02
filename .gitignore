@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# lean_ai workspace artifacts
+.lean_ai/
+.lean_ai_index/
+.lean_ai_knowledge_index/
+
+# Environment
+.env
+*.db
+
+# Node
+node_modules/
+extension/out/
+extension/dist/
+package-lock.json
+
+# OS
+.DS_Store
+Thumbs.db

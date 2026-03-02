@@ -1,0 +1,18 @@
+name: CSS
+extensions: [".css"]
+ts_grammar: tree_sitter_css
+
+ts_class_query: ""
+ts_function_query: ""
+ts_import_query: ""
+
+stdlib_prefixes: []
+
+fan_in:
+  strategy: none
+
+test_patterns:
+  directories: []
+
+key_files: []
+entry_points: []

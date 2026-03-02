@@ -1,0 +1,43 @@
+name: Rust
+extensions: [".rs"]
+ts_grammar: tree_sitter_rust
+
+ts_class_query: |
+  (struct_item
+    name: (type_identifier) @name) @class
+  (enum_item
+    name: (type_identifier) @name) @class
+  (trait_item
+    name: (type_identifier) @name) @class
+
+ts_function_query: |
+  (function_item
+    name: (identifier) @name
+    parameters: (parameters) @params) @function
+
+ts_import_query: |
+  (use_declaration
+    argument: (scoped_identifier) @module)
+  (use_declaration
+    argument: (identifier) @module)
+
+stdlib_prefixes:
+  - std
+
+fan_in:
+  strategy: none
+  suffix: ".rs"
+  package_markers: ["mod.rs", "lib.rs"]
+
+test_patterns:
+  directories: ["tests"]
+  file_prefixes: []
+  file_suffixes: ["_test.rs"]
+
+key_files:
+  - Cargo.toml
+  - Cargo.lock
+
+entry_points:
+  - main.rs
+  - lib.rs

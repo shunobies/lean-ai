@@ -1,0 +1,55 @@
+name: python-fastapi
+display_name: FastAPI
+description: Python FastAPI async web API
+language: python
+framework: fastapi
+aliases:
+  - fastapi
+setup:
+  type: files
+  directories:
+    - "src/{package_name}"
+    - "tests"
+  files:
+    - path: "src/{package_name}/__init__.py"
+      content: ""
+    - path: "src/{package_name}/main.py"
+      content: |
+        from fastapi import FastAPI
+
+        app = FastAPI(title="{project_name}")
+
+
+        @app.get("/health")
+        def health() -> dict:
+            return {"status": "ok"}
+    - path: "tests/__init__.py"
+      content: ""
+    - path: "tests/test_health.py"
+      content: |
+        from fastapi.testclient import TestClient
+        from {package_name}.main import app
+
+        client = TestClient(app)
+
+
+        def test_health() -> None:
+            resp = client.get("/health")
+            assert resp.status_code == 200
+    - path: "pyproject.toml"
+      content: |
+        [project]
+        name = "{project_name}"
+        version = "0.1.0"
+        requires-python = ">=3.11"
+        dependencies = ["fastapi", "uvicorn[standard]"]
+
+        [project.optional-dependencies]
+        dev = ["pytest", "httpx"]
+    - path: ".gitignore"
+      content: |
+        __pycache__/
+        *.pyc
+        .venv/
+        dist/
+        *.egg-info/

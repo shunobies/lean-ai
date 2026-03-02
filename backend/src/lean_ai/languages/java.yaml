@@ -1,0 +1,53 @@
+name: Java
+extensions: [".java"]
+ts_grammar: tree_sitter_java
+
+ts_class_query: |
+  (class_declaration
+    name: (identifier) @name) @class
+  (interface_declaration
+    name: (identifier) @name) @class
+  (enum_declaration
+    name: (identifier) @name) @class
+
+ts_function_query: |
+  (method_declaration
+    name: (identifier) @name
+    parameters: (formal_parameters) @params) @function
+
+ts_import_query: |
+  (import_declaration
+    (scoped_identifier) @module)
+
+stdlib_prefixes:
+  - java.lang
+  - java.util
+  - java.io
+  - java.nio
+  - java.net
+  - java.math
+  - java.time
+  - java.text
+  - java.security
+  - java.sql
+  - javax
+
+fan_in:
+  strategy: dot_to_slash
+  suffix: ".java"
+  package_markers: []
+
+test_patterns:
+  directories: ["test", "tests", "src/test"]
+  file_prefixes: []
+  file_suffixes: ["Test.java", "Tests.java", "Spec.java"]
+
+key_files:
+  - pom.xml
+  - build.gradle
+  - build.gradle.kts
+
+entry_points:
+  - Main.java
+  - Application.java
+  - App.java

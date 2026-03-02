@@ -1,0 +1,36 @@
+name: c
+display_name: C
+description: C project with CMake build system
+language: c
+framework: null
+aliases: []
+setup:
+  type: files
+  directories:
+    - "src"
+    - "include"
+    - "tests"
+  files:
+    - path: "src/main.c"
+      content: |
+        #include <stdio.h>
+
+        int main(void) {
+            printf("Hello from {project_name}\n");
+            return 0;
+        }
+    - path: "CMakeLists.txt"
+      content: |
+        cmake_minimum_required(VERSION 3.20)
+        project({project_name} C)
+
+        set(CMAKE_C_STANDARD 17)
+
+        add_executable({project_name} src/main.c)
+        target_include_directories({project_name} PRIVATE include)
+    - path: ".gitignore"
+      content: |
+        build/
+        CMakeCache.txt
+        CMakeFiles/
+        *.o

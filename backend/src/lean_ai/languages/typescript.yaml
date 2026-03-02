@@ -1,0 +1,43 @@
+name: TypeScript
+extensions: [".ts", ".tsx"]
+ts_grammar: tree_sitter_typescript
+
+ts_class_query: |
+  (class_declaration
+    name: (type_identifier) @name) @class
+
+ts_function_query: |
+  (function_declaration
+    name: (identifier) @name
+    parameters: (formal_parameters) @params) @function
+  (method_definition
+    name: (property_identifier) @name
+    parameters: (formal_parameters) @params) @function
+
+ts_import_query: |
+  (import_statement
+    source: (string) @module)
+
+stdlib_prefixes: []
+
+fan_in:
+  strategy: relative_path
+  suffix: ""
+  package_markers: ["index.ts", "index.tsx"]
+
+test_patterns:
+  directories: ["__tests__", "tests", "test"]
+  file_prefixes: []
+  file_suffixes: [".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx"]
+
+key_files:
+  - package.json
+  - tsconfig.json
+  - package-lock.json
+  - yarn.lock
+
+entry_points:
+  - index.ts
+  - main.ts
+  - app.ts
+  - server.ts

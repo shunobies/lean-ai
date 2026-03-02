@@ -1,0 +1,102 @@
+name: java-spring
+display_name: Spring Boot
+description: Java Spring Boot REST application
+language: java
+framework: spring
+aliases:
+  - spring
+  - springboot
+setup:
+  type: files
+  directories:
+    - "src/main/java/com/example"
+    - "src/main/resources"
+    - "src/test/java/com/example"
+  files:
+    - path: "src/main/java/com/example/Application.java"
+      content: |
+        package com.example;
+
+        import org.springframework.boot.SpringApplication;
+        import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+        @SpringBootApplication
+        public class Application {
+            public static void main(String[] args) {
+                SpringApplication.run(Application.class, args);
+            }
+        }
+    - path: "src/main/java/com/example/HealthController.java"
+      content: |
+        package com.example;
+
+        import org.springframework.web.bind.annotation.GetMapping;
+        import org.springframework.web.bind.annotation.RestController;
+        import java.util.Map;
+
+        @RestController
+        public class HealthController {
+
+            @GetMapping("/health")
+            public Map<String, String> health() {
+                return Map.of("status", "ok");
+            }
+        }
+    - path: "src/main/resources/application.properties"
+      content: |
+        spring.application.name={project_name}
+        server.port=8080
+    - path: "src/test/java/com/example/ApplicationTest.java"
+      content: |
+        package com.example;
+
+        import org.junit.jupiter.api.Test;
+        import org.springframework.boot.test.context.SpringBootTest;
+
+        @SpringBootTest
+        class ApplicationTest {
+            @Test
+            void contextLoads() {}
+        }
+    - path: "pom.xml"
+      content: |
+        <?xml version="1.0" encoding="UTF-8"?>
+        <project xmlns="http://maven.apache.org/POM/4.0.0"
+                 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                 xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+          <modelVersion>4.0.0</modelVersion>
+          <parent>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-parent</artifactId>
+            <version>3.2.0</version>
+          </parent>
+          <groupId>com.example</groupId>
+          <artifactId>{project_name}</artifactId>
+          <version>0.0.1-SNAPSHOT</version>
+          <name>{project_name}</name>
+          <dependencies>
+            <dependency>
+              <groupId>org.springframework.boot</groupId>
+              <artifactId>spring-boot-starter-web</artifactId>
+            </dependency>
+            <dependency>
+              <groupId>org.springframework.boot</groupId>
+              <artifactId>spring-boot-starter-test</artifactId>
+              <scope>test</scope>
+            </dependency>
+          </dependencies>
+          <build>
+            <plugins>
+              <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+              </plugin>
+            </plugins>
+          </build>
+        </project>
+    - path: ".gitignore"
+      content: |
+        target/
+        *.class
+        .idea/
+        *.iml

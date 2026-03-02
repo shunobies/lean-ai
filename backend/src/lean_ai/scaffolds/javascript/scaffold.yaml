@@ -1,0 +1,49 @@
+name: javascript
+display_name: JavaScript (Node.js)
+description: Plain Node.js JavaScript project
+language: javascript
+framework: null
+aliases:
+  - js
+  - node
+setup:
+  type: files
+  directories:
+    - "src"
+    - "tests"
+  files:
+    - path: "src/index.js"
+      content: |
+        function main() {
+          console.log("Hello from {project_name}");
+        }
+
+        module.exports = { main };
+
+        if (require.main === module) {
+          main();
+        }
+    - path: "tests/index.test.js"
+      content: |
+        const { main } = require("../src/index");
+
+        test("main runs without throwing", () => {
+          expect(() => main()).not.toThrow();
+        });
+    - path: "package.json"
+      content: |
+        {
+          "name": "{project_name}",
+          "version": "0.1.0",
+          "main": "src/index.js",
+          "scripts": {
+            "start": "node src/index.js",
+            "test": "jest"
+          },
+          "devDependencies": {
+            "jest": "^29.0.0"
+          }
+        }
+    - path: ".gitignore"
+      content: |
+        node_modules/

@@ -1,0 +1,41 @@
+name: ruby
+display_name: Ruby
+description: Plain Ruby project with RSpec
+language: ruby
+framework: null
+aliases:
+  - rb
+setup:
+  type: files
+  directories:
+    - "lib"
+    - "spec"
+  files:
+    - path: "lib/{package_name}.rb"
+      content: |
+        module {project_name}
+          def self.hello
+            "Hello from {project_name}"
+          end
+        end
+    - path: "spec/{package_name}_spec.rb"
+      content: |
+        require_relative "../lib/{package_name}"
+
+        RSpec.describe {project_name} do
+          it "returns a greeting" do
+            expect({project_name}.hello).to include("{project_name}")
+          end
+        end
+    - path: "Gemfile"
+      content: |
+        source "https://rubygems.org"
+
+        group :development, :test do
+          gem "rspec"
+        end
+    - path: ".gitignore"
+      content: |
+        .bundle/
+        vendor/bundle/
+        Gemfile.lock

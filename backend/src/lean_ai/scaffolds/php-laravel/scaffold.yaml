@@ -1,0 +1,13 @@
+name: php-laravel
+display_name: Laravel
+description: PHP Laravel web application framework
+language: php
+framework: laravel
+aliases:
+  - laravel
+setup:
+  type: command
+  # Runs in parent_dir. Creates parent_dir/{project_name}/ automatically.
+  command: 'composer create-project --prefer-dist laravel/laravel "{project_name}"'
+  requirements:
+    - composer

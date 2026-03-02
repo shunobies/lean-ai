@@ -1,0 +1,68 @@
+name: typescript
+display_name: TypeScript
+description: Plain TypeScript project with Node.js
+language: typescript
+framework: null
+aliases:
+  - ts
+setup:
+  type: files
+  directories:
+    - "src"
+    - "tests"
+  files:
+    - path: "src/index.ts"
+      content: |
+        export function main(): void {
+          console.log("Hello from {project_name}");
+        }
+
+        main();
+    - path: "tests/index.test.ts"
+      content: |
+        import { main } from "../src/index";
+
+        describe("main", () => {
+          it("runs without throwing", () => {
+            expect(() => main()).not.toThrow();
+          });
+        });
+    - path: "tsconfig.json"
+      content: |
+        {
+          "compilerOptions": {
+            "target": "ES2022",
+            "module": "commonjs",
+            "lib": ["ES2022"],
+            "outDir": "dist",
+            "rootDir": "src",
+            "strict": true,
+            "esModuleInterop": true,
+            "skipLibCheck": true
+          },
+          "include": ["src"],
+          "exclude": ["node_modules", "dist"]
+        }
+    - path: "package.json"
+      content: |
+        {
+          "name": "{project_name}",
+          "version": "0.1.0",
+          "scripts": {
+            "build": "tsc",
+            "start": "node dist/index.js",
+            "test": "jest"
+          },
+          "devDependencies": {
+            "typescript": "^5.0.0",
+            "@types/node": "^20.0.0",
+            "jest": "^29.0.0",
+            "ts-jest": "^29.0.0",
+            "@types/jest": "^29.0.0"
+          }
+        }
+    - path: ".gitignore"
+      content: |
+        node_modules/
+        dist/
+        *.js.map
