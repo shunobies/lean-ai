@@ -178,7 +178,7 @@ function killProcessOnPort(port: string, channel: vscode.OutputChannel): void {
 async function pollHealth(url: string): Promise<boolean> {
     for (let i = 0; i < HEALTH_POLL_MAX_ATTEMPTS; i++) {
         try {
-            const resp = await fetch(`${url}/health`);
+            const resp = await fetch(`${url}/api/health`);
             if (resp.ok) {
                 return true;
             }
@@ -226,7 +226,7 @@ function startHealthMonitor(): void {
         // Quick health probe
         let isUp = false;
         try {
-            const resp = await fetch(`${backendUrl}/health`, {
+            const resp = await fetch(`${backendUrl}/api/health`, {
                 signal: AbortSignal.timeout(5000),
             });
             isUp = resp.ok;
@@ -307,7 +307,7 @@ export async function startBackend(): Promise<boolean> {
     // another window that may be launching the process concurrently.
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
-            const resp = await fetch(`${backendUrl}/health`, {
+            const resp = await fetch(`${backendUrl}/api/health`, {
                 signal: AbortSignal.timeout(3000),
             });
             if (resp.ok) {

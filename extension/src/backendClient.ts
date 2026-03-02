@@ -320,7 +320,7 @@ export class BackendClient {
 
     async healthCheck(): Promise<boolean> {
         try {
-            const resp = await fetch(`${this.baseUrl}/health`);
+            const resp = await fetch(`${this.baseUrl}/api/health`);
             return resp.ok;
         } catch {
             return false;
