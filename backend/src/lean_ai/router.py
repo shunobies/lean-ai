@@ -66,7 +66,7 @@ _inline_client: LLMClient = (
 
 class CreateSessionRequest(BaseModel):
     repo_root: str
-    task: str
+    task: str = ""
 
 
 class CreateSessionResponse(BaseModel):
