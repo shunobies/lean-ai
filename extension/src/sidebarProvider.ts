@@ -300,7 +300,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         // over the existing WebSocket to the running workflow.
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.postMessage({ type: "thinking", show: true, text: "Sending feedback..." });
-            this.ws.send(JSON.stringify({ type: "user_message", content: text }));
+            this.ws.send(JSON.stringify({ type: "user_message", content: text, repo_root: this.getRepoRoot() }));
             return;
         }
 
@@ -720,7 +720,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         }
 
         // Send message over WebSocket — the workflow runs server-side
-        ws.send(JSON.stringify({ type: "user_message", content: text }));
+        ws.send(JSON.stringify({ type: "user_message", content: text, repo_root: this.getRepoRoot() }));
     }
 
     private handleApprove(): void {
