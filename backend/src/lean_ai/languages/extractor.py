@@ -39,10 +39,16 @@ def _compile_query(grammar_module: str, query_str: str) -> tree_sitter.Query | N
     try:
         mod = __import__(grammar_module)
         lang = tree_sitter.Language(mod.language())
-        return lang.query(query_str)
+        return tree_sitter.Query(lang, query_str)
     except Exception as e:
         logger.warning("Failed to compile query for %s: %s", grammar_module, e)
         return None
+
+
+def _query_matches(query: tree_sitter.Query, node: tree_sitter.Node) -> list[tuple]:
+    """Run a query against a node using QueryCursor (tree-sitter 0.25+ API)."""
+    cursor = tree_sitter.QueryCursor(query)
+    return list(cursor.matches(node))
 
 
 def _node_text(node: tree_sitter.Node, source: bytes) -> str:
@@ -67,20 +73,20 @@ def extract_file_metadata(text: str, lang: LanguageDefinition) -> FileMetadata:
     if lang.ts_class_query:
         query = _compile_query(lang.ts_grammar, lang.ts_class_query)
         if query:
-            for match in query.matches(tree.root_node):
+            for match in _query_matches(query, tree.root_node):
                 _process_definition_match(match, source, meta, "class")
 
     if lang.ts_function_query:
         query = _compile_query(lang.ts_grammar, lang.ts_function_query)
         if query:
-            for match in query.matches(tree.root_node):
+            for match in _query_matches(query, tree.root_node):
                 _process_definition_match(match, source, meta, "function")
 
     # Extract imports
     if lang.ts_import_query:
         query = _compile_query(lang.ts_grammar, lang.ts_import_query)
         if query:
-            for match in query.matches(tree.root_node):
+            for match in _query_matches(query, tree.root_node):
                 _process_import_match(match, source, meta, lang)
 
     return meta
