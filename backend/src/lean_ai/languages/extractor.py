@@ -19,16 +19,34 @@ logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=32)
-def _get_parser(grammar_module: str) -> tree_sitter.Parser | None:
-    """Load and cache a tree-sitter parser for a given grammar."""
+def _get_language(grammar_module: str) -> tree_sitter.Language | None:
+    """Load and cache a tree-sitter Language for a grammar module.
+
+    Handles packages like tree_sitter_php that expose language_php()
+    instead of the standard language() function.
+    """
     try:
         mod = __import__(grammar_module)
-        lang = tree_sitter.Language(mod.language())
-        parser = tree_sitter.Parser(lang)
-        return parser
+        if hasattr(mod, "language"):
+            return tree_sitter.Language(mod.language())
+        # Fallback: look for language_<suffix>() (e.g. language_php)
+        suffix = grammar_module.removeprefix("tree_sitter_")
+        alt = getattr(mod, f"language_{suffix}", None)
+        if alt is not None:
+            return tree_sitter.Language(alt())
+        raise AttributeError(f"no language() or language_{suffix}() in {grammar_module}")
     except Exception as e:
         logger.warning("Failed to load tree-sitter grammar %s: %s", grammar_module, e)
         return None
+
+
+@lru_cache(maxsize=32)
+def _get_parser(grammar_module: str) -> tree_sitter.Parser | None:
+    """Load and cache a tree-sitter parser for a given grammar."""
+    lang = _get_language(grammar_module)
+    if lang is None:
+        return None
+    return tree_sitter.Parser(lang)
 
 
 @lru_cache(maxsize=64)
@@ -36,9 +54,10 @@ def _compile_query(grammar_module: str, query_str: str) -> tree_sitter.Query | N
     """Compile and cache a tree-sitter query."""
     if not query_str.strip():
         return None
+    lang = _get_language(grammar_module)
+    if lang is None:
+        return None
     try:
-        mod = __import__(grammar_module)
-        lang = tree_sitter.Language(mod.language())
         return tree_sitter.Query(lang, query_str)
     except Exception as e:
         logger.warning("Failed to compile query for %s: %s", grammar_module, e)
