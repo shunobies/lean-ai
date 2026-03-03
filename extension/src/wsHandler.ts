@@ -210,23 +210,25 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
         case "tool_progress": {
             const tool = (raw.tool || raw.tool_name) as string;
             const toolStatus = raw.status as string;
-            const desc = (raw.description || raw.output || "") as string;
+            const desc = (raw.description || "") as string;
+            const output = (raw.output || "") as string;
             if (toolStatus === "running" || toolStatus === "started") {
                 ctx.postMessage({
                     type: "reply",
-                    text: `Running tool: \`${tool}\`${desc ? ` — ${desc}` : ""}`,
+                    text: `▶ \`${tool}\`${desc ? ` ${desc}` : ""}`,
                     cls: "msg-system",
                 });
             } else if (toolStatus === "complete" || toolStatus === "completed") {
+                const preview = output.split("\n").slice(0, 6).join("\n");
                 ctx.postMessage({
                     type: "reply",
-                    text: `Tool \`${tool}\` completed.`,
+                    text: `✓ \`${tool}\`${preview ? `\n\`\`\`\n${preview}\n\`\`\`` : ""}`,
                     cls: "msg-system",
                 });
             } else if (toolStatus === "error" || toolStatus === "failed") {
                 ctx.postMessage({
                     type: "reply",
-                    text: `Tool \`${tool}\` failed.${desc ? `\n\`\`\`\n${desc}\n\`\`\`` : ""}`,
+                    text: `✗ \`${tool}\` failed${output ? `\n\`\`\`\n${output}\n\`\`\`` : ""}`,
                     cls: "msg-system",
                 });
             }
