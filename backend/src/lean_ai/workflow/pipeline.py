@@ -1,7 +1,8 @@
-"""Linear workflow pipeline: plan -> approve -> execute -> done.
+"""Direct agentic workflow: give the LLM the task and tools, let it work.
 
-No FSM. No stagnation detection. No implementation review.
-Give the LLM the plan and tools, let it work.
+No separate planning phase. The model explores the codebase, plans
+naturally via chain-of-thought, and executes — all in one continuous
+conversation with full context.
 """
 
 import logging
@@ -11,7 +12,6 @@ from typing import TYPE_CHECKING
 from fastapi import WebSocket
 
 from lean_ai.config import settings
-from lean_ai.llm.planner import create_plan
 from lean_ai.llm.prompts import IMPLEMENTATION_SYSTEM_PROMPT
 from lean_ai.llm.tool_definitions import IMPLEMENTATION_TOOLS
 from lean_ai.tools import file_ops, shell
@@ -36,63 +36,20 @@ async def run_workflow(
     llm_client: "LLMClient",
     context: str = "",
 ) -> None:
-    """Run the full workflow: plan -> approve -> execute -> done.
+    """Run the agentic workflow: task + tools → let the model work.
 
-    This is the entire pipeline in one function. No FSM needed.
+    Single conversation, single context. The model explores, plans,
+    and executes in one continuous tool-calling loop.
     """
-    # ── Phase 1: Planning ──
-    await ws_send(ws, "stage_change", {"stage": "planning"})
-    logger.info("Workflow: planning for task: %s", task[:100])
-
-    plan = await create_plan(task, repo_root, llm_client, context=context)
-
-    # ── Phase 2: User Approval ──
-    await ws_send(ws, "approval_required", {"plan": plan})
-
-    # Wait for user response
-    while True:
-        msg = await ws.receive_json()
-        msg_type = msg.get("type", "")
-
-        if msg_type == "approve":
-            break
-        elif msg_type == "deny" or msg_type == "reject":
-            await ws_send(ws, "complete", {"summary": "Plan rejected by user."})
-            return
-        elif msg_type == "revise":
-            feedback = msg.get("feedback", "")
-            await ws_send(ws, "stage_change", {"stage": "planning"})
-            revision_context = f"PREVIOUS PLAN:\n{plan}\n\nUSER FEEDBACK:\n{feedback}"
-            plan = await create_plan(
-                task, repo_root, llm_client,
-                context=context, revision_context=revision_context,
-            )
-            await ws_send(ws, "approval_required", {"plan": plan})
-        elif msg_type == "user_message":
-            # Treat messages during approval as revision requests
-            feedback = msg.get("content", msg.get("text", ""))
-            if feedback:
-                await ws_send(ws, "stage_change", {"stage": "planning"})
-                revision_context = f"PREVIOUS PLAN:\n{plan}\n\nUSER FEEDBACK:\n{feedback}"
-                plan = await create_plan(
-                    task, repo_root, llm_client,
-                    context=context, revision_context=revision_context,
-                )
-                await ws_send(ws, "approval_required", {"plan": plan})
-
-    # ── Phase 3: Implementation ──
     await ws_send(ws, "stage_change", {"stage": "implementing"})
-    logger.info("Workflow: implementing plan")
+    logger.info("Workflow: starting task: %s", task[:100])
 
-    # Pre-read files referenced in the plan
-    file_contents = await _pre_read_plan_files(plan, repo_root)
-
-    # Build the implementation prompt
-    user_prompt = _build_implementation_prompt(task, plan, file_contents)
+    # Build system prompt with codebase context baked in
+    system_prompt = _build_system_prompt(context)
 
     messages = [
-        {"role": "system", "content": IMPLEMENTATION_SYSTEM_PROMPT},
-        {"role": "user", "content": user_prompt},
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": task},
     ]
 
     # Create tool executor
@@ -114,7 +71,7 @@ async def run_workflow(
             "output": result[:500],
         })
 
-    # Let the LLM loose with tools
+    # Let the LLM work — single conversation, all tools available
     executed, explanation = await llm_client.chat_with_tools(
         messages=messages,
         tools=IMPLEMENTATION_TOOLS,
@@ -125,7 +82,7 @@ async def run_workflow(
         on_tool_result=on_tool_result,
     )
 
-    # ── Phase 4: Done ──
+    # Done
     files_modified = list({
         tc.parameters.get("path", "")
         for tc in executed
@@ -143,56 +100,19 @@ async def run_workflow(
     logger.info("Workflow complete: %d tool calls, %d files", len(executed), len(files_modified))
 
 
-async def _pre_read_plan_files(plan: str, repo_root: str, max_files: int = 8) -> str:
-    """Read existing files referenced in the plan for context."""
-    # Simple heuristic: find file paths in the plan text
-    # Look for lines that contain paths with extensions
-    paths_found: list[str] = []
-    for line in plan.splitlines():
-        for word in line.split():
-            # Strip markdown formatting
-            cleaned = word.strip("`*_-[]()#>")
-            if "/" in cleaned and "." in cleaned.split("/")[-1]:
-                # Looks like a file path
-                candidate = cleaned
-                # Verify it exists
-                full_path = Path(repo_root) / candidate
-                if full_path.is_file() and candidate not in paths_found:
-                    paths_found.append(candidate)
+def _build_system_prompt(context: str) -> str:
+    """Build the system prompt with optional codebase context."""
+    if not context:
+        return IMPLEMENTATION_SYSTEM_PROMPT
 
-    if not paths_found:
-        return ""
-
-    contents: list[str] = []
-    for path in paths_found[:max_files]:
-        try:
-            text = (Path(repo_root) / path).read_text(encoding="utf-8")
-            # Truncate very large files
-            if len(text) > 5000:
-                text = text[:5000] + "\n[... truncated ...]"
-            contents.append(f"=== {path} ===\n{text}")
-        except (OSError, UnicodeDecodeError):
-            pass
-
-    return "\n\n".join(contents)
-
-
-def _build_implementation_prompt(
-    task: str, plan: str, file_contents: str,
-) -> str:
-    """Build the user message for the implementation phase."""
-    parts = [f"TASK: {task}", f"\nPLAN:\n{plan}"]
-    if file_contents:
-        parts.append(f"\nEXISTING FILE CONTENTS:\n{file_contents}")
-    parts.append(
-        "\nImplement this plan now. Work through the steps, reading files "
-        "before editing them. Run tests when appropriate."
+    return (
+        f"{IMPLEMENTATION_SYSTEM_PROMPT}\n"
+        f"## Project Context\n\n{context}"
     )
-    return "\n".join(parts)
 
 
 def _make_tool_executor(repo_root: str, ws: WebSocket):
-    """Create a tool executor closure for the implementation phase."""
+    """Create a tool executor closure for the workflow."""
 
     async def execute(name: str, arguments: dict) -> str:
         """Execute a tool and return the result as a string."""

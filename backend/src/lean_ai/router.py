@@ -376,16 +376,12 @@ async def session_stream(websocket: WebSocket, session_id: str):
 
     Client messages:
       - {"type": "user_message", "content": "...", "repo_root": "..."}
-        Start the workflow with a task.
-      - {"type": "approve"} — approve plan
-      - {"type": "deny"} / {"type": "reject"} — reject plan
-      - {"type": "revise", "feedback": "..."} — revise plan
-      - {"type": "approve_tool", ...} — approve a pending command
+        Start the agentic workflow with a task.
+      - {"type": "approve_tool", ...} — approve a pending shell command
       - {"type": "ping"} — keepalive
 
     Server messages:
       - {"type": "stage_change", "stage": "..."}
-      - {"type": "approval_required", "plan": "..."}
       - {"type": "tool_progress", "tool": "...", "status": "...", ...}
       - {"type": "diff", "file": "...", "diff": "..."}
       - {"type": "test_result", ...}
@@ -458,7 +454,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
             elif msg_type == "ping":
                 await websocket.send_json({"type": "pong"})
 
-            # approve/deny/revise are handled within run_workflow's receive loop
+            # approve_tool is handled within run_workflow's tool executor
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected for session %s", session_id)
