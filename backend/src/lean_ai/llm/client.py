@@ -236,6 +236,7 @@ class LLMClient:
         max_tokens: int | None = None,
         on_tool_call: Callable | None = None,
         on_tool_result: Callable | None = None,
+        on_content: Callable | None = None,
     ) -> tuple[list[ToolCall], str]:
         """Multi-turn tool calling loop using Ollama's native tools= parameter.
 
@@ -278,6 +279,8 @@ class LLMClient:
 
             if content.strip():
                 explanation_parts.append(content.strip())
+                if on_content:
+                    await on_content(content.strip())
 
             if not tool_calls:
                 break

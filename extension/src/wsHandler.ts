@@ -334,6 +334,15 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
         case "pong":
             break;
 
+        // --- Assistant reasoning text: streamed per-turn ---
+        case "assistant_content": {
+            const content = (raw.content || "") as string;
+            if (content) {
+                ctx.postMessage({ type: "reply", text: content, cls: "msg-ai" });
+            }
+            break;
+        }
+
         // --- Tool approval gate: destructive command needs user confirmation ---
         case "tool_approval_required": {
             // Forward to the webview which renders the inline approve/deny card.

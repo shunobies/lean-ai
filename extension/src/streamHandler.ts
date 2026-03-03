@@ -23,6 +23,7 @@ export interface StreamCallbacks {
     onBranchCreated?: (branchName: string, baseBranch: string, baseCommitSha: string) => void;
     onCheckpoint?: (stepIndex: number, stepDescription: string, status: string, headCommitSha: string | null) => void;
     onMergeComplete?: (mergeSha: string, branchDeleted: boolean) => void;
+    onAssistantContent?: (content: string) => void;
 }
 
 export function handleStreamMessage(msg: WSMessage, callbacks: StreamCallbacks): void {
@@ -78,6 +79,9 @@ export function handleStreamMessage(msg: WSMessage, callbacks: StreamCallbacks):
             break;
         case "merge_complete":
             callbacks.onMergeComplete?.(msg.merge_sha, msg.branch_deleted);
+            break;
+        case "assistant_content":
+            callbacks.onAssistantContent?.((msg as import("./types").AssistantContentMessage).content);
             break;
     }
 }

@@ -21,7 +21,8 @@ export type WSMessage =
     | PongMessage
     | BranchCreatedMessage
     | CheckpointMessage
-    | MergeCompleteMessage;
+    | MergeCompleteMessage
+    | AssistantContentMessage;
 
 export interface TokenMessage {
     type: "token";
@@ -131,6 +132,11 @@ export interface MergeCompleteMessage {
     type: "merge_complete";
     merge_sha: string;
     branch_deleted: boolean;
+}
+
+export interface AssistantContentMessage {
+    type: "assistant_content";
+    content: string;
 }
 
 // --- REST API Types ---

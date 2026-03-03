@@ -35,6 +35,18 @@ from lean_ai.indexer.tree import list_repo_tree
 from lean_ai.llm.client import LLMClient
 from lean_ai.llm.prompts import CHAT_SYSTEM_PROMPT
 from lean_ai.tools import internet
+from lean_ai.tools.git_ops import (
+    git_add_and_commit,
+    git_checkout,
+    git_create_branch,
+    git_current_branch,
+    git_current_sha,
+    git_delete_branch,
+    git_is_repo,
+    git_merge_branch,
+    git_stash_pop,
+    git_stash_push,
+)
 from lean_ai.workflow.pipeline import run_workflow
 
 if TYPE_CHECKING:
@@ -410,24 +422,70 @@ async def session_stream(websocket: WebSocket, session_id: str):
                     continue
 
                 try:
-                    # Save the task to the session
                     db = await get_db(repo_root)
                     try:
                         session = await get_session(db, session_id)
                         if session:
-                            # Load existing context if available
+                            # --- Git branch setup ---
+                            branch_name = ""
+                            base_branch = ""
+                            stashed = False
+                            is_git = await git_is_repo(repo_root)
+
+                            if is_git:
+                                br = await git_current_branch(repo_root)
+                                base_branch = br.output.strip() if br.success else "main"
+                                branch_name = f"lean-ai/{session_id}"
+
+                                # Stash uncommitted changes
+                                stashed = await git_stash_push(repo_root)
+
+                                # Create and switch to the agent branch
+                                create_result = await git_create_branch(branch_name, repo_root)
+                                if create_result.success:
+                                    await update_session(
+                                        db, session_id,
+                                        branch_name=branch_name,
+                                        base_branch=base_branch,
+                                        stashed=stashed,
+                                    )
+                                    await websocket.send_json({
+                                        "type": "branch_created",
+                                        "branch_name": branch_name,
+                                        "base_branch": base_branch,
+                                    })
+                                else:
+                                    logger.warning(
+                                        "Failed to create branch %s: %s",
+                                        branch_name, create_result.error,
+                                    )
+                                    branch_name = ""
+
+                            # --- Load context and run workflow ---
                             context_path = Path(repo_root) / ".lean_ai" / "project_context.md"
                             context = ""
                             if context_path.is_file():
                                 context = context_path.read_text(encoding="utf-8", errors="replace")
 
-                            await run_workflow(
+                            commit_msg = await run_workflow(
                                 task=content,
                                 repo_root=repo_root,
                                 ws=websocket,
                                 llm_client=llm_client,
                                 context=context,
+                                branch_name=branch_name,
                             )
+
+                            # --- Auto-commit agent changes ---
+                            if branch_name:
+                                commit_result = await git_add_and_commit(
+                                    commit_msg, repo_root,
+                                )
+                                if commit_result.success:
+                                    logger.info(
+                                        "Auto-committed agent changes on %s",
+                                        branch_name,
+                                    )
 
                             await update_session(db, session_id, status="completed")
                         else:
@@ -460,6 +518,98 @@ async def session_stream(websocket: WebSocket, session_id: str):
         logger.info("WebSocket disconnected for session %s", session_id)
     except Exception:
         logger.exception("WebSocket error for session %s", session_id)
+
+
+# ── Session Branch Operations ──
+
+
+@router.post("/sessions/{session_id}/merge")
+async def merge_session(session_id: str, repo_root: str):
+    """Merge the agent's branch into the base branch and clean up."""
+    db = await get_db(repo_root)
+    try:
+        session = await get_session(db, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        branch_name = session.get("branch_name")
+        base_branch = session.get("base_branch")
+        stashed = bool(session.get("stashed", 0))
+
+        if not branch_name or not base_branch:
+            raise HTTPException(status_code=400, detail="Session has no branch to merge")
+
+        # Checkout base branch
+        co_result = await git_checkout(base_branch, repo_root)
+        if not co_result.success:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to checkout {base_branch}: {co_result.error}",
+            )
+
+        # Merge the agent branch
+        merge_result = await git_merge_branch(branch_name, repo_root)
+        if not merge_result.success:
+            raise HTTPException(status_code=500, detail=f"Merge failed: {merge_result.error}")
+
+        # Delete the branch
+        await git_delete_branch(branch_name, repo_root)
+
+        # Pop stash if we stashed before
+        if stashed:
+            await git_stash_pop(repo_root)
+
+        # Get merge commit SHA
+        sha_result = await git_current_sha(repo_root)
+        merge_sha = sha_result.output.strip() if sha_result.success else ""
+
+        await update_session(db, session_id, status="merged")
+
+        return {
+            "status": "merged",
+            "merge_sha": merge_sha,
+            "branch_deleted": True,
+        }
+    finally:
+        await db.close()
+
+
+@router.post("/sessions/{session_id}/abandon")
+async def abandon_session(session_id: str, repo_root: str):
+    """Abandon the agent's branch — checkout base and delete the branch."""
+    db = await get_db(repo_root)
+    try:
+        session = await get_session(db, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        branch_name = session.get("branch_name")
+        base_branch = session.get("base_branch")
+        stashed = bool(session.get("stashed", 0))
+
+        if not branch_name or not base_branch:
+            raise HTTPException(status_code=400, detail="Session has no branch to abandon")
+
+        # Checkout base branch
+        co_result = await git_checkout(base_branch, repo_root)
+        if not co_result.success:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to checkout {base_branch}: {co_result.error}",
+            )
+
+        # Force-delete the unmerged branch
+        await git_delete_branch(branch_name, repo_root, force=True)
+
+        # Pop stash if we stashed before
+        if stashed:
+            await git_stash_pop(repo_root)
+
+        await update_session(db, session_id, status="abandoned")
+
+        return {"status": "abandoned", "branch_deleted": True}
+    finally:
+        await db.close()
 
 
 # ── Init Workspace ──

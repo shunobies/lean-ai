@@ -42,6 +42,9 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     // Slash command registry
     private slashCommands: Map<string, (args: string) => Promise<void>>;
 
+    // Tracks the most recently completed workflow session for /approve and /reject
+    private lastCompletedSessionId: string | undefined;
+
     // Set by extension.ts when a scaffold was just created and this window is the new project
     private _pendingInit = false;
 
@@ -57,6 +60,8 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         this.slashCommands.set("/scaffold", (args) => this.handleScaffoldCommand(args));
         this.slashCommands.set("/agent",    (args) => this.handleAgentCommand(args));
         this.slashCommands.set("/reboot",   (args) => this.handleRebootCommand(args));
+        this.slashCommands.set("/approve",  (args) => this.handleApproveCommand(args));
+        this.slashCommands.set("/reject",   (args) => this.handleRejectCommand(args));
     }
 
     resolveWebviewView(
@@ -102,6 +107,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                     await this.persistCurrentConversation();
                     this.closeWebSocket();
                     this.sessionId = undefined;
+                    this.lastCompletedSessionId = undefined;
                     this.chatHistory = [];
                     this.currentConversationId = undefined;
                     this.viewingHistoricConversation = false;
@@ -267,7 +273,10 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         const ctx: WsHandlerContext = {
             postMessage: (m) => this.postMessage(m),
             closeWebSocket: () => this.closeWebSocket(),
-            clearSession: () => { this.sessionId = undefined; },
+            clearSession: () => {
+                this.lastCompletedSessionId = this.sessionId;
+                this.sessionId = undefined;
+            },
         };
         handleWsMessage(msg, ctx);
     }
@@ -689,6 +698,65 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             this.postMessage({ type: "thinking", show: false });
             const error = e instanceof Error ? e.message : String(e);
             this.postMessage({ type: "error", text: `Reboot failed: ${error}` });
+        }
+    }
+
+    // ── Slash command: /approve — merge agent branch into base ────────
+
+    private async handleApproveCommand(_args: string): Promise<void> {
+        const sessionId = this.lastCompletedSessionId;
+        if (!sessionId) {
+            this.postMessage({
+                type: "error",
+                text: "No completed workflow to approve. Run `/agent` first.",
+            });
+            return;
+        }
+
+        this.postMessage({ type: "thinking", show: true, text: "Merging branch..." });
+        try {
+            const result = await this.client.mergeSession(sessionId, this.getRepoRoot());
+            this.postMessage({ type: "thinking", show: false });
+            const sha = ((result.merge_sha as string) || "").slice(0, 7);
+            this.postMessage({
+                type: "reply",
+                text: `Branch merged successfully${sha ? ` (${sha})` : ""}. Back on base branch.`,
+                cls: "msg-system",
+            });
+            this.lastCompletedSessionId = undefined;
+        } catch (e) {
+            this.postMessage({ type: "thinking", show: false });
+            const error = e instanceof Error ? e.message : String(e);
+            this.postMessage({ type: "error", text: `Merge failed: ${error}` });
+        }
+    }
+
+    // ── Slash command: /reject — abandon agent branch ────────────────
+
+    private async handleRejectCommand(_args: string): Promise<void> {
+        const sessionId = this.lastCompletedSessionId;
+        if (!sessionId) {
+            this.postMessage({
+                type: "error",
+                text: "No completed workflow to reject. Run `/agent` first.",
+            });
+            return;
+        }
+
+        this.postMessage({ type: "thinking", show: true, text: "Abandoning branch..." });
+        try {
+            await this.client.abandonSession(sessionId, this.getRepoRoot());
+            this.postMessage({ type: "thinking", show: false });
+            this.postMessage({
+                type: "reply",
+                text: "Branch discarded. Back on base branch, changes reverted.",
+                cls: "msg-system",
+            });
+            this.lastCompletedSessionId = undefined;
+        } catch (e) {
+            this.postMessage({ type: "thinking", show: false });
+            const error = e instanceof Error ? e.message : String(e);
+            this.postMessage({ type: "error", text: `Reject failed: ${error}` });
         }
     }
 

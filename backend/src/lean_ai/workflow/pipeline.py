@@ -35,11 +35,14 @@ async def run_workflow(
     ws: WebSocket,
     llm_client: "LLMClient",
     context: str = "",
-) -> None:
+    branch_name: str = "",
+) -> str:
     """Run the agentic workflow: task + tools → let the model work.
 
     Single conversation, single context. The model explores, plans,
     and executes in one continuous tool-calling loop.
+
+    Returns a structured commit message summarising the actions taken.
     """
     await ws_send(ws, "stage_change", {"stage": "implementing"})
     logger.info("Workflow: starting task: %s", task[:100])
@@ -71,6 +74,9 @@ async def run_workflow(
             "output": result[:500],
         })
 
+    async def on_content(text: str) -> None:
+        await ws_send(ws, "assistant_content", {"content": text})
+
     # Let the LLM work — single conversation, all tools available
     executed, explanation = await llm_client.chat_with_tools(
         messages=messages,
@@ -80,6 +86,7 @@ async def run_workflow(
         max_tokens=settings.implementation_max_tokens,
         on_tool_call=on_tool_call,
         on_tool_result=on_tool_result,
+        on_content=on_content,
     )
 
     # Done
@@ -93,11 +100,22 @@ async def run_workflow(
         f"Completed {len(executed)} tool calls. "
         f"Files modified: {', '.join(files_modified) if files_modified else 'none'}."
     )
-    if explanation:
-        summary += f"\n\n{explanation}"
 
-    await ws_send(ws, "complete", {"summary": summary, "files_modified": files_modified})
+    complete_data: dict = {"summary": summary, "files_modified": files_modified}
+    if branch_name:
+        complete_data["plan_branch"] = branch_name
+    await ws_send(ws, "complete", complete_data)
     logger.info("Workflow complete: %d tool calls, %d files", len(executed), len(files_modified))
+
+    # Build structured commit message from executed tool calls
+    task_summary = task[:72].replace("\n", " ")
+    commit_msg = f"lean-ai: {task_summary}"
+    action_lines = [f"- {tc.description or tc.tool_name}" for tc in executed]
+    if action_lines:
+        commit_msg += "\n\n" + "\n".join(action_lines)
+    if files_modified:
+        commit_msg += f"\n\nFiles modified: {', '.join(files_modified)}"
+    return commit_msg
 
 
 def _build_system_prompt(context: str) -> str:
