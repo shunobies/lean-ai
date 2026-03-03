@@ -245,11 +245,23 @@ class LLMClient:
         results, and calls the LLM again. Repeats until the LLM responds
         with text-only (no tool_calls) or max_turns is reached.
 
+        If the model produces a text-only response but has not yet made any
+        write operations (edit_file, create_file), it gets one nudge asking
+        it to continue with tool calls before the loop exits.
+
         Returns (executed_tool_calls, final_explanation).
         """
+        write_tools = {"edit_file", "create_file"}
+        nudge_msg = (
+            "You responded with text but have not made any file changes yet. "
+            "The task is not complete. Continue by calling the appropriate "
+            "tools (edit_file, create_file, etc.) to implement the changes."
+        )
+
         tokens = max_tokens or self._max_tokens
         executed: list[ToolCall] = []
         explanation_parts: list[str] = []
+        nudged = False
 
         for turn in range(max_turns):
             logger.info(
@@ -283,6 +295,17 @@ class LLMClient:
                     await on_content(content.strip())
 
             if not tool_calls:
+                # Check if the model has performed any write operations yet
+                has_written = any(tc.tool_name in write_tools for tc in executed)
+                if not has_written and not nudged:
+                    # Model stopped before making changes — nudge it to continue
+                    logger.info(
+                        "chat_with_tools: no writes yet, nudging model to continue"
+                    )
+                    messages.append({"role": "assistant", "content": content})
+                    messages.append({"role": "user", "content": nudge_msg})
+                    nudged = True
+                    continue
                 break
 
             # Build assistant message with tool_calls for conversation history

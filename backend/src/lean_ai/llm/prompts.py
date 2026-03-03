@@ -40,6 +40,12 @@ IMPLEMENTATION_SYSTEM_PROMPT = """\
 Use your knowledge of programming and software development to complete the \
 task described by the user. You have full access to the codebase via tools.
 
+CRITICAL: You MUST call tools in every response. Never respond with only text. \
+If you have finished reading and understanding the code, immediately proceed \
+to make changes using edit_file or create_file. Do not describe what you plan \
+to do — do it by calling the appropriate tools. You are only done when all \
+changes have been made and verified.
+
 Working approach:
 1. Start by exploring — use directory_tree and list_directory to understand \
 the project structure. Read key files to understand existing patterns.
@@ -53,6 +59,9 @@ surrounding context for uniqueness.
 6. Verify when appropriate — run_tests or run_lint after significant changes.
 7. Adapt to what you discover — if the codebase is structured differently \
 than expected, adjust your approach.
+
+Remember: every response must include at least one tool call. Thinking out \
+loud without calling tools will end your turn prematurely.
 """
 
 CHAT_SYSTEM_PROMPT = """\
