@@ -107,12 +107,11 @@ async def run_workflow(
     await ws_send(ws, "complete", complete_data)
     logger.info("Workflow complete: %d tool calls, %d files", len(executed), len(files_modified))
 
-    # Build structured commit message from executed tool calls
+    # Build commit message: short subject + LLM's summary as body
     task_summary = task[:72].replace("\n", " ")
     commit_msg = f"lean-ai: {task_summary}"
-    action_lines = [f"- {tc.description or tc.tool_name}" for tc in executed]
-    if action_lines:
-        commit_msg += "\n\n" + "\n".join(action_lines)
+    if explanation:
+        commit_msg += f"\n\n{explanation}"
     if files_modified:
         commit_msg += f"\n\nFiles modified: {', '.join(files_modified)}"
     return commit_msg
