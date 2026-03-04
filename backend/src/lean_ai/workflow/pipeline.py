@@ -16,17 +16,12 @@ from lean_ai.llm.prompts import IMPLEMENTATION_SYSTEM_PROMPT
 from lean_ai.llm.tool_definitions import IMPLEMENTATION_TOOLS
 from lean_ai.tools import file_ops, shell
 from lean_ai.tools.command_safety import CommandRisk, check_command
+from lean_ai.workflow.ws_handler import safe_receive, ws_send
 
 if TYPE_CHECKING:
     from lean_ai.llm.client import LLMClient
 
 logger = logging.getLogger(__name__)
-
-
-async def ws_send(ws: WebSocket, msg_type: str, data: dict | None = None) -> None:
-    """Send a typed WebSocket message."""
-    payload = {"type": msg_type, **(data or {})}
-    await ws.send_json(payload)
 
 
 async def run_workflow(
@@ -175,8 +170,10 @@ def _make_tool_executor(repo_root: str, ws: WebSocket):
                 await ws_send(ws, "tool_approval_required", {
                     "tool": name, "command": command, "reason": reason,
                 })
-                # Wait for approval
-                approval_msg = await ws.receive_json()
+                # Wait for approval (safe_receive returns None on disconnect)
+                approval_msg = await safe_receive(ws)
+                if approval_msg is None:
+                    return "ERROR: WebSocket disconnected — command skipped (requires approval)"
                 if approval_msg.get("type") != "approve_tool":
                     return "ERROR: Command not approved by user"
 

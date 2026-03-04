@@ -83,6 +83,18 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.html = this.getHtml();
 
+        // Check if a workflow completed while the panel was disposed
+        if (this.lastCompletedSessionId) {
+            setTimeout(() => {
+                this.postMessage({
+                    type: "reply",
+                    text: "The agent workflow completed while the panel was closed.\n\nUse `/approve` to merge the changes or `/reject` to discard them.",
+                    cls: "msg-ai",
+                });
+                this.postMessage({ type: "sendEnabled" });
+            }, 500);
+        }
+
         webviewView.webview.onDidReceiveMessage(async (msg) => {
             switch (msg.type) {
                 case "sendMessage":
@@ -153,10 +165,12 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             }
         });
 
-        // Clean up WebSocket and persist conversation when view is disposed
+        // Persist conversation when view is disposed, but do NOT close the
+        // WebSocket. If a workflow is running, closing the WS would kill it.
+        // The WS 'complete' handler will clean up when the workflow finishes.
         webviewView.onDidDispose(() => {
             this.persistCurrentConversation();
-            this.closeWebSocket();
+            this.webviewView = undefined;
         });
 
         // If this window was opened for a freshly scaffolded project, auto-run /init
