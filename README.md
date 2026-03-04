@@ -13,6 +13,8 @@ Lean AI extracts the proven ideas from [single_ai](../single_ai) into a clean, m
 - **Minimal persistence** — 2 SQLite tables instead of ORM models
 - **Trust the LLM** — no stagnation detection, no implementation review loops, no rubric scoring
 
+![Example](Example.png)
+
 ## Quick Start
 
 ### Backend
