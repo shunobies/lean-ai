@@ -68,3 +68,60 @@ async def git_current_branch(repo_root: str = ".") -> ToolResult:
 
 async def git_current_sha(repo_root: str = ".") -> ToolResult:
     return await _run_git(["rev-parse", "HEAD"], cwd=repo_root)
+
+
+async def git_is_repo(repo_root: str = ".") -> bool:
+    """Check if the directory is inside a git repository."""
+    result = await _run_git(["rev-parse", "--is-inside-work-tree"], cwd=repo_root)
+    return result.success
+
+
+async def git_create_branch(name: str, repo_root: str = ".") -> ToolResult:
+    """Create and checkout a new branch."""
+    return await _run_git(["checkout", "-b", name], cwd=repo_root)
+
+
+async def git_checkout(name: str, repo_root: str = ".") -> ToolResult:
+    """Checkout an existing branch."""
+    return await _run_git(["checkout", name], cwd=repo_root)
+
+
+async def git_merge_branch(name: str, repo_root: str = ".") -> ToolResult:
+    """Merge a branch into the current branch."""
+    return await _run_git(["merge", name], cwd=repo_root)
+
+
+async def git_delete_branch(name: str, repo_root: str = ".", force: bool = False) -> ToolResult:
+    """Delete a branch (-d or -D if force)."""
+    flag = "-D" if force else "-d"
+    return await _run_git(["branch", flag, name], cwd=repo_root)
+
+
+async def git_stash_push(repo_root: str = ".") -> bool:
+    """Stash uncommitted changes (including untracked). Returns True if anything was stashed."""
+    # Check if there's anything to stash
+    status = await git_status(repo_root)
+    if not status.output.strip():
+        return False
+    result = await _run_git(
+        ["stash", "push", "--include-untracked", "-m", "lean-ai: auto-stash"],
+        cwd=repo_root,
+    )
+    return result.success
+
+
+async def git_stash_pop(repo_root: str = ".") -> ToolResult:
+    """Pop the latest stash."""
+    return await _run_git(["stash", "pop"], cwd=repo_root)
+
+
+async def git_add_and_commit(message: str, repo_root: str = ".") -> ToolResult:
+    """Stage all changes and commit. Returns error if nothing to commit."""
+    add_result = await _run_git(["add", "-A"], cwd=repo_root)
+    if not add_result.success:
+        return add_result
+    # Check if there's anything staged
+    status = await _run_git(["diff", "--cached", "--stat"], cwd=repo_root)
+    if not status.output.strip():
+        return ToolResult(success=True, output="Nothing to commit")
+    return await _run_git(["commit", "-m", message], cwd=repo_root)

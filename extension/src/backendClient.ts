@@ -298,8 +298,9 @@ export class BackendClient {
         return resp.json() as Promise<Record<string, unknown>>;
     }
 
-    async mergeSession(sessionId: string): Promise<Record<string, unknown>> {
-        const resp = await fetch(`${this.baseUrl}/api/sessions/${sessionId}/merge`, {
+    async mergeSession(sessionId: string, repoRoot: string): Promise<Record<string, unknown>> {
+        const params = new URLSearchParams({ repo_root: repoRoot });
+        const resp = await fetch(`${this.baseUrl}/api/sessions/${sessionId}/merge?${params}`, {
             method: "POST",
         });
         if (!resp.ok) {
@@ -308,8 +309,9 @@ export class BackendClient {
         return resp.json() as Promise<Record<string, unknown>>;
     }
 
-    async abandonSession(sessionId: string): Promise<Record<string, unknown>> {
-        const resp = await fetch(`${this.baseUrl}/api/sessions/${sessionId}/abandon`, {
+    async abandonSession(sessionId: string, repoRoot: string): Promise<Record<string, unknown>> {
+        const params = new URLSearchParams({ repo_root: repoRoot });
+        const resp = await fetch(`${this.baseUrl}/api/sessions/${sessionId}/abandon?${params}`, {
             method: "POST",
         });
         if (!resp.ok) {

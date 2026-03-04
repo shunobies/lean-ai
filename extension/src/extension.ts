@@ -122,7 +122,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (confirm === "Merge") {
                 try {
                     const client = BackendClient.getInstance();
-                    await client.mergeSession(sessionItem.session.session_id);
+                    const repoRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
+                    await client.mergeSession(sessionItem.session.session_id, repoRoot);
                     vscode.window.showInformationMessage("Session merged successfully.");
                     sessionTreeProvider.refresh();
                 } catch (e) {
@@ -142,7 +143,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (confirm === "Abandon") {
                 try {
                     const client = BackendClient.getInstance();
-                    await client.abandonSession(sessionItem.session.session_id);
+                    const repoRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
+                    await client.abandonSession(sessionItem.session.session_id, repoRoot);
                     vscode.window.showInformationMessage("Session abandoned.");
                     sessionTreeProvider.refresh();
                 } catch (e) {

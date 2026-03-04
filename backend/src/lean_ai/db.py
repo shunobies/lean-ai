@@ -22,7 +22,10 @@ CREATE TABLE IF NOT EXISTS sessions (
     plan TEXT,
     status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL,
-    completed_at TEXT
+    completed_at TEXT,
+    branch_name TEXT,
+    base_branch TEXT,
+    stashed INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS tool_logs (
@@ -49,7 +52,23 @@ async def get_db(repo_root: str) -> aiosqlite.Connection:
     db = await aiosqlite.connect(str(_db_path(repo_root)))
     db.row_factory = aiosqlite.Row
     await db.executescript(_SCHEMA)
+    await _ensure_columns(db)
     return db
+
+
+async def _ensure_columns(db: aiosqlite.Connection) -> None:
+    """Add columns that may be missing from older databases."""
+    new_columns = [
+        ("sessions", "branch_name", "TEXT"),
+        ("sessions", "base_branch", "TEXT"),
+        ("sessions", "stashed", "INTEGER NOT NULL DEFAULT 0"),
+    ]
+    for table, col, col_type in new_columns:
+        try:
+            await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+            await db.commit()
+        except Exception:
+            pass  # Column already exists
 
 
 # ── Session helpers ──
@@ -74,6 +93,9 @@ async def update_session(
     *,
     plan: str | None = None,
     status: str | None = None,
+    branch_name: str | None = None,
+    base_branch: str | None = None,
+    stashed: bool | None = None,
 ) -> None:
     """Update session fields."""
     parts: list[str] = []
@@ -87,6 +109,15 @@ async def update_session(
         if status in ("completed", "failed"):
             parts.append("completed_at = ?")
             values.append(datetime.now(timezone.utc).isoformat())
+    if branch_name is not None:
+        parts.append("branch_name = ?")
+        values.append(branch_name)
+    if base_branch is not None:
+        parts.append("base_branch = ?")
+        values.append(base_branch)
+    if stashed is not None:
+        parts.append("stashed = ?")
+        values.append(int(stashed))
     if not parts:
         return
     values.append(session_id)
