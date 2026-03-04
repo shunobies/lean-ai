@@ -189,7 +189,12 @@ def _make_tool_executor(repo_root: str, ws: WebSocket):
                     "passed": result.success,
                     "output": result.output[:2000],
                 })
-            return result.output if result.success else f"ERROR: {result.error}"
+            # Always return the full output so the LLM can see what happened.
+            # Prefix with pass/fail so the model knows the result clearly.
+            if result.success:
+                return result.output
+            prefix = f"FAILED (exit code {result.exit_code})\n" if result.exit_code else "FAILED\n"
+            return prefix + (result.output or result.error or "No output")
 
         elif name == "list_directory":
             target = Path(repo_root) / arguments.get("path", "")
