@@ -28,15 +28,26 @@ pip install -e ".[dev,knowledge]"
 uvicorn lean_ai.main:app --reload --port 8422
 ```
 
-### VSCode Extension
+### VSCodium Extension
 
 ```bash
 cd extension
 npm install
 npm run build
+
+# Package the .vsix file
+npx vsce package --no-dependencies
 ```
 
-Load the extension in VSCode (Run Extension from the extension directory).
+This produces a file like `lean-ai-0.1.2.vsix`. To install it in VSCodium:
+
+```bash
+codium --install-extension lean-ai-0.1.2.vsix
+```
+
+Or from the VSCodium UI: **Extensions** sidebar → `⋯` menu (top-right) → **Install from VSIX...** → select the `.vsix` file.
+
+Reload VSCodium after installation.
 
 ## Configuration
 
@@ -151,7 +162,7 @@ LEAN_AI_ENABLE_EMBEDDINGS=true
 | `LEAN_AI_HOST` | `127.0.0.1` | Server bind address |
 | `LEAN_AI_PORT` | `8422` | Server port |
 
-### VSCode Extension Settings
+### VSCodium Extension Settings
 
 | Setting | Default | Description |
 |---|---|---|
@@ -166,7 +177,7 @@ LEAN_AI_ENABLE_EMBEDDINGS=true
 
 ### Workflow
 
-1. **User submits a task** via the VSCode sidebar chat or `/agent` command
+1. **User submits a task** via the VSCodium sidebar chat or `/agent` command
 2. **Chat mode (optional)** — the chat helps build a detailed, specific prompt through interactive Q&A before handing it to the agent
 3. **Agent execution** — the LLM receives the task, project context, and tools, then works autonomously in one continuous tool-calling loop: exploring the codebase, reading files, making edits, running tests
 4. **Nudge recovery** — if the model stops after gathering context without making changes, the system nudges it to continue
@@ -191,7 +202,7 @@ Shell commands (`run_tests`, `run_lint`, `format_code`) pass through a safety ga
 
 ## Slash Commands
 
-Commands available in the VSCode sidebar chat:
+Commands available in the VSCodium sidebar chat:
 
 | Command | Description |
 |---|---|
@@ -202,7 +213,7 @@ Commands available in the VSCode sidebar chat:
 | `/reject` | Abandon the agent's working branch and discard all changes |
 | `/reboot` | Restart the backend Python server |
 
-### VSCode Commands
+### VSCodium Commands
 
 Available from the Command Palette (`Ctrl+Shift+P`):
 
@@ -297,12 +308,12 @@ lean_ai/
 │       │   └── pipeline.py    # Direct agentic workflow
 │       └── scaffolds/         # 19 YAML scaffold recipes
 │
-└── extension/                 # VSCode extension
+└── extension/                 # VSCodium extension
     ├── package.json           # Commands, settings, chat participant
     └── src/
         ├── extension.ts       # Extension entry point
         ├── sidebarProvider.ts # Sidebar chat panel + slash commands
-        ├── chatParticipant.ts # VSCode Chat Participant API
+        ├── chatParticipant.ts # VSCodium Chat Participant API
         ├── inlineProvider.ts  # Copilot-style inline completions
         ├── backendClient.ts   # HTTP/WebSocket client for the backend
         └── sessionTree.ts     # Sessions tree view
@@ -321,7 +332,7 @@ lean_ai/
 | HTML sanitization | BeautifulSoup4 |
 | Testing | pytest + pytest-asyncio |
 | Linting | ruff |
-| VSCode extension | Chat Participant API + InlineCompletionItemProvider |
+| VSCodium extension | Chat Participant API + InlineCompletionItemProvider |
 
 ## Requirements
 
