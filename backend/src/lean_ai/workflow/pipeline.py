@@ -208,38 +208,69 @@ def _make_tool_executor(repo_root: str, ws: WebSocket):
                     "passed": result.success,
                     "output": result.output[:2000],
                 })
-            # Always return the full output so the LLM can see what happened.
+            # Return output to the LLM, capped to avoid flooding context.
             # Prefix with pass/fail so the model knows the result clearly.
             if result.success:
-                return result.output
-            prefix = f"FAILED (exit code {result.exit_code})\n" if result.exit_code else "FAILED\n"
-            return prefix + (result.output or result.error or "No output")
+                output = result.output or ""
+            else:
+                prefix = (
+                    f"FAILED (exit code {result.exit_code})\n"
+                    if result.exit_code else "FAILED\n"
+                )
+                output = prefix + (
+                    result.output or result.error or "No output"
+                )
+            max_output = 8000
+            if len(output) > max_output:
+                output = (
+                    output[:max_output]
+                    + f"\n\n[OUTPUT TRUNCATED — showing first"
+                    f" {max_output} of {len(output)} characters]"
+                )
+            return output
 
         elif name == "list_directory":
             target = Path(repo_root) / arguments.get("path", "")
             if not target.is_dir():
                 return f"ERROR: Not a directory: {arguments.get('path', '')}"
             max_entries = arguments.get("max_entries", 100)
-            entries = sorted(target.iterdir())[:max_entries]
+            all_entries = sorted(target.iterdir())
+            total = len(all_entries)
+            entries = all_entries[:max_entries]
             lines = []
             for e in entries:
                 prefix = "d" if e.is_dir() else "f"
                 lines.append(f"  {prefix}  {e.name}")
-            return "\n".join(lines) or "(empty)"
+            output = "\n".join(lines) or "(empty)"
+            if total > max_entries:
+                output += (
+                    f"\n\n[TRUNCATED — showing {max_entries} of {total}"
+                    f" entries. Use max_entries parameter to see more.]"
+                )
+            return output
 
         elif name == "directory_tree":
             from lean_ai.indexer.tree import list_repo_tree
             sub_path = arguments.get("path", "")
             tree_root = f"{repo_root}/{sub_path}" if sub_path else repo_root
             entries = list_repo_tree(tree_root)
+            total = len(entries)
+            max_entries = 200
             max_depth = arguments.get("max_depth", 3)
             lines = []
-            for e in entries[:200]:
+            for e in entries[:max_entries]:
                 depth = e.path.count("/")
                 if depth <= max_depth:
                     indent = "  " * depth
                     lines.append(f"{indent}{e.path.split('/')[-1]}")
-            return "\n".join(lines) or "(empty)"
+            output = "\n".join(lines) or "(empty)"
+            if total > max_entries:
+                output += (
+                    f"\n\n[TRUNCATED — showing {max_entries} of"
+                    f" {total} entries. Use path parameter to"
+                    f" focus on a subtree, or increase max_depth.]"
+                )
+            return output
 
         return f"ERROR: Unknown tool: {name}"
 

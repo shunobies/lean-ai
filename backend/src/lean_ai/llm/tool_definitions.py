@@ -150,7 +150,8 @@ IMPLEMENTATION_TOOLS: list[dict] = [
             "name": "list_directory",
             "description": (
                 "List files and subdirectories in a directory. "
-                "Returns entries sorted with directories first, then files."
+                "Returns up to max_entries entries (default 100). "
+                "If truncated, increase max_entries or list a subdirectory."
             ),
             "parameters": {
                 "type": "object",
@@ -177,7 +178,8 @@ IMPLEMENTATION_TOOLS: list[dict] = [
             "name": "directory_tree",
             "description": (
                 "Show the recursive file tree of the repository or a subtree. "
-                "Returns an indented tree structure similar to the 'tree' command."
+                "Returns up to 200 entries at max_depth 3 by default. "
+                "If truncated, use path to focus on a subtree."
             ),
             "parameters": {
                 "type": "object",
