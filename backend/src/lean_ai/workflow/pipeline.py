@@ -16,8 +16,9 @@ from fastapi import WebSocket
 from lean_ai.config import settings
 from lean_ai.llm.prompts import IMPLEMENTATION_SYSTEM_PROMPT
 from lean_ai.llm.tool_definitions import IMPLEMENTATION_TOOLS
-from lean_ai.tools import file_ops, shell
+from lean_ai.tools import file_ops, scratchpad, shell
 from lean_ai.tools.command_safety import CommandRisk, check_command
+from lean_ai.tools.scratchpad import delete_scratchpad, read_scratchpad
 from lean_ai.workflow.ws_handler import safe_receive, ws_send
 
 if TYPE_CHECKING:
@@ -45,6 +46,9 @@ async def run_workflow(
     await ws_send(ws, "stage_change", {"stage": "implementing"})
     logger.info("Workflow: starting task: %s", task[:100])
 
+    # Clear any stale scratchpad from a previous/crashed session
+    delete_scratchpad(repo_root)
+
     # Build system prompt with codebase context baked in
     system_prompt = _build_system_prompt(context)
 
@@ -57,22 +61,38 @@ async def run_workflow(
     if conversation_logger:
         await conversation_logger("user", task)
 
-    # Build task reminder for periodic re-injection so the LLM doesn't
-    # lose track of the original task as the conversation grows.
+    # Build dynamic task reminder that includes live scratchpad content.
+    # This is a callable so each injection reads the latest scratchpad.
     max_context_in_reminder = 1500
     context_summary = context[:max_context_in_reminder] if context else ""
     if context and len(context) > max_context_in_reminder:
         context_summary += "\n... (condensed)"
-    task_reminder = (
-        f"TASK REMINDER — stay focused on this task:\n{task}\n\n"
-        "TOOL INSTRUCTIONS: You MUST call tools in every response. "
-        "Do not respond with only text. Always read_file before edit_file "
-        "so search blocks match exactly. Keep edit_file search blocks small — "
-        "only the lines being changed plus 1-2 lines of context. "
-        "Continue calling tools until the task is fully complete."
-    )
-    if context_summary:
-        task_reminder += f"\n\nKEY PROJECT CONTEXT (condensed):\n{context_summary}"
+
+    def build_task_reminder() -> str:
+        """Build task reminder with current scratchpad state."""
+        parts = [
+            f"TASK REMINDER — stay focused on this task:\n{task}\n",
+            "TOOL INSTRUCTIONS: You MUST call tools in every response. "
+            "Do not respond with only text. Always read_file before edit_file "
+            "so search blocks match exactly. Keep edit_file search blocks small — "
+            "only the lines being changed plus 1-2 lines of context. "
+            "Continue calling tools until the task is fully complete.",
+        ]
+
+        # Inject live scratchpad content
+        pad = read_scratchpad(repo_root)
+        if pad:
+            parts.append(
+                "\n\nSCRATCHPAD (your progress notes — "
+                "DO NOT redo completed items):\n" + pad
+            )
+
+        if context_summary:
+            parts.append(
+                f"\n\nKEY PROJECT CONTEXT (condensed):\n{context_summary}"
+            )
+
+        return "\n".join(parts)
 
     # Create tool executor
     tool_executor = _make_tool_executor(repo_root, ws)
@@ -115,7 +135,7 @@ async def run_workflow(
         tool_executor_fn=tool_executor,
         max_turns=settings.implementation_max_turns,
         max_tokens=settings.implementation_max_tokens,
-        task_reminder=task_reminder,
+        task_reminder=build_task_reminder,
         reminder_interval=settings.reminder_interval,
         on_tool_call=on_tool_call,
         on_tool_result=on_tool_result,
@@ -139,6 +159,9 @@ async def run_workflow(
         complete_data["plan_branch"] = branch_name
     await ws_send(ws, "complete", complete_data)
     logger.info("Workflow complete: %d tool calls, %d files", len(executed), len(files_modified))
+
+    # Clean up session-scoped scratchpad
+    delete_scratchpad(repo_root)
 
     # Build commit message: short subject + LLM's summary as body
     task_summary = task[:72].replace("\n", " ")
@@ -267,6 +290,13 @@ def _make_tool_executor(repo_root: str, ws: WebSocket):
                     f" entries. Use max_entries parameter to see more.]"
                 )
             return output
+
+        elif name == "update_scratchpad":
+            result = await scratchpad.update_scratchpad(
+                content=arguments["content"],
+                repo_root=repo_root,
+            )
+            return result.output if result.success else f"ERROR: {result.error}"
 
         elif name == "directory_tree":
             from lean_ai.indexer.tree import list_repo_tree

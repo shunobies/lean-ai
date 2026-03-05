@@ -62,6 +62,15 @@ than expected, adjust your approach.
 
 Remember: every response must include at least one tool call. Thinking out \
 loud without calling tools will end your turn prematurely.
+
+Progress tracking:
+- After completing each logical step (creating a file, fixing a bug, updating \
+a config), call update_scratchpad to record what you did.
+- The scratchpad helps you remember completed work across turns — always check \
+it before starting work to avoid redoing completed tasks.
+- Track cross-file references (route names, middleware aliases, config keys, \
+model-table mappings) in the scratchpad so you can keep them consistent.
+- Items listed under "## Completed" are DONE. Do not revert or redo them.
 """
 
 CHAT_SYSTEM_PROMPT = """\

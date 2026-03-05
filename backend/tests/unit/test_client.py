@@ -197,3 +197,47 @@ async def test_reminder_is_user_role():
     assert len(reminders) == 2  # At turn 3 and turn 6
     for r in reminders:
         assert r["role"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_callable_reminder_invoked_at_interval():
+    """When task_reminder is a callable, it should be called at each injection."""
+    call_count = 0
+
+    def dynamic_reminder() -> str:
+        nonlocal call_count
+        call_count += 1
+        return f"REMINDER #{call_count}"
+
+    responses = [
+        _make_tool_call_response(
+            "edit_file", {"path": "f.py", "search": "a", "replace": "b"},
+        )
+        for _ in range(12)
+    ] + [_make_text_response()]
+
+    client, _fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=20,
+        task_reminder=dynamic_reminder,
+        reminder_interval=5,
+    )
+
+    # Should have been called at turn 5 and turn 10
+    assert call_count == 2
+    # Each call should produce a distinct, fresh value
+    reminder_msgs = [
+        m for m in messages
+        if m["role"] == "user" and "REMINDER #" in m.get("content", "")
+    ]
+    assert len(reminder_msgs) == 2
+    assert reminder_msgs[0]["content"] == "REMINDER #1"
+    assert reminder_msgs[1]["content"] == "REMINDER #2"

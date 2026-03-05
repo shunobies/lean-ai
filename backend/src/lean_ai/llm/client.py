@@ -234,7 +234,7 @@ class LLMClient:
         *,
         max_turns: int = 50,
         max_tokens: int | None = None,
-        task_reminder: str | None = None,
+        task_reminder: str | Callable[[], str] | None = None,
         reminder_interval: int = 10,
         on_tool_call: Callable | None = None,
         on_tool_result: Callable | None = None,
@@ -362,10 +362,12 @@ class LLMClient:
                 and (turn + 1) % reminder_interval == 0
                 and turn + 1 < max_turns
             ):
+                reminder_text = task_reminder() if callable(task_reminder) else task_reminder
                 logger.info(
-                    "chat_with_tools: injecting task reminder at turn %d", turn + 1,
+                    "chat_with_tools: injecting task reminder at turn %d (%d chars)",
+                    turn + 1, len(reminder_text),
                 )
-                messages.append({"role": "user", "content": task_reminder})
+                messages.append({"role": "user", "content": reminder_text})
         else:
             logger.warning(
                 "chat_with_tools: reached max_turns=%d without completion", max_turns,

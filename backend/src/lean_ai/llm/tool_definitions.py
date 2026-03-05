@@ -200,6 +200,41 @@ IMPLEMENTATION_TOOLS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_scratchpad",
+            "description": (
+                "Update the session scratchpad to track your progress. Call this "
+                "after completing each logical step. Write the ENTIRE scratchpad "
+                "content (previous content is overwritten, not appended). "
+                "Use these sections:\n"
+                "## Completed — tasks done (DO NOT redo these)\n"
+                "## Current State — what works, what's broken, current errors\n"
+                "## Cross-File References — route names, middleware aliases, "
+                "model-table mappings, config keys that must stay consistent "
+                "across files\n"
+                "## Files Modified — files changed this session\n"
+                "## Next Step — what to do next\n\n"
+                "Keep it concise (under 2000 chars). This scratchpad is "
+                "injected into your context periodically so you remember "
+                "what you have done."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": (
+                            "The complete scratchpad content with structured "
+                            "sections. Overwrites previous content."
+                        ),
+                    },
+                },
+                "required": ["content"],
+            },
+        },
+    },
 ]
 
 
