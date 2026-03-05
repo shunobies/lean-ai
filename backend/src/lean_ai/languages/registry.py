@@ -103,6 +103,13 @@ class LanguageRegistry:
     def all_languages(self) -> list[LanguageDefinition]:
         return list(self._all)
 
+    def all_package_markers(self) -> set[str]:
+        """All package marker filenames across all languages."""
+        markers: set[str] = set()
+        for lang in self._all:
+            markers.update(lang.fan_in.package_markers)
+        return markers
+
     def is_test_file(self, path: str) -> bool:
         """Check if a file path matches test file patterns."""
         parts = path.replace("\\", "/").split("/")

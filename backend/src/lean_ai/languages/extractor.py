@@ -214,4 +214,5 @@ _DEFINITION_NODE_TYPES = frozenset({
     "declaration",
     # PHP
     "function_definition", "class_declaration", "method_declaration",
+    "trait_declaration",
 })

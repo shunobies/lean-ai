@@ -163,6 +163,55 @@ def _resolve_fan_in(
                         fan_in[candidate] += 1
                         break
 
+            elif lang.fan_in.strategy == "backslash_to_slash":
+                suffix = lang.fan_in.suffix or ".php"
+                # PHP: App\Models\User -> App/Models/User.php
+                base_path = module.replace("\\", "/") + suffix
+                # Also try lowercase first segment for PSR-4 (App -> app)
+                candidates_to_try = [base_path]
+                parts = base_path.split("/")
+                if len(parts) > 1:
+                    lowered = parts[0].lower() + "/" + "/".join(parts[1:])
+                    candidates_to_try.append(lowered)
+
+                matched = False
+                for base in source_prefixes:
+                    for candidate in candidates_to_try:
+                        full = (base + candidate).replace("\\", "/")
+                        if full in file_paths:
+                            fan_in[full] += 1
+                            matched = True
+                            break
+                    if matched:
+                        break
+
+            elif lang.fan_in.strategy == "relative_path":
+                # Strip quotes from module path (JS/TS imports include quotes)
+                mod = module.strip("'\"")
+                # Only handle relative imports
+                if not mod.startswith("."):
+                    continue
+                # Resolve relative to the importing file's directory
+                importer_dir = str(Path(fpath).parent).replace("\\", "/")
+                joined = str(Path(importer_dir) / mod).replace("\\", "/")
+                # Normalize path (collapse ../ segments) — posixpath handles
+                # relative paths correctly unlike Path.resolve()
+                resolved = os.path.normpath(joined).replace("\\", "/")
+
+                # Try direct file with extensions, then package markers
+                attempts: list[str] = []
+                markers = lang.fan_in.package_markers or []
+                for ext_try in [".ts", ".tsx", ".js", ".jsx"]:
+                    attempts.append(resolved + ext_try)
+                for marker in markers:
+                    attempts.append(resolved + "/" + marker)
+
+                for attempt in attempts:
+                    normalized = str(Path(attempt)).replace("\\", "/")
+                    if normalized in file_paths:
+                        fan_in[normalized] += 1
+                        break
+
     return dict(fan_in)
 
 

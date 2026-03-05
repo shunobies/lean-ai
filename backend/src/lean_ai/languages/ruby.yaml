@@ -12,9 +12,46 @@ ts_function_query: |
   (method
     name: (identifier) @name) @function
 
-ts_import_query: ""
+ts_import_query: |
+  (call
+    method: (identifier) @_method
+    arguments: (argument_list (string (string_content) @module))
+    (#match? @_method "^require"))
 
-stdlib_prefixes: []
+stdlib_prefixes:
+  - json
+  - yaml
+  - csv
+  - net
+  - uri
+  - fileutils
+  - pathname
+  - set
+  - ostruct
+  - logger
+  - benchmark
+  - digest
+  - base64
+  - securerandom
+  - socket
+  - tempfile
+  - erb
+  - cgi
+  - date
+  - time
+  - singleton
+  - forwardable
+  - delegate
+  - open-uri
+  - optparse
+  - stringio
+  - io
+  - pp
+  - English
+  - strscan
+  - bigdecimal
+  - openssl
+  - readline
 
 fan_in:
   strategy: none
@@ -28,7 +65,14 @@ test_patterns:
 key_files:
   - Gemfile
   - Gemfile.lock
+  - Rakefile
+  - config/routes.rb
+  - config/database.yml
+  - config/application.rb
+  - config/environments/production.rb
 
 entry_points:
   - app.rb
   - config.ru
+  - bin/rails
+  - config/routes.rb

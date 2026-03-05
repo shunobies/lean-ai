@@ -31,6 +31,11 @@ key_files:
   - package.json
   - package-lock.json
   - yarn.lock
+  - next.config.js
+  - next.config.mjs
+  - vite.config.js
+  - vite.config.mjs
+  - webpack.config.js
 
 entry_points:
   - index.js
