@@ -63,7 +63,14 @@ async def run_workflow(
     context_summary = context[:max_context_in_reminder] if context else ""
     if context and len(context) > max_context_in_reminder:
         context_summary += "\n... (condensed)"
-    task_reminder = f"TASK REMINDER — stay focused on this task:\n{task}"
+    task_reminder = (
+        f"TASK REMINDER — stay focused on this task:\n{task}\n\n"
+        "TOOL INSTRUCTIONS: You MUST call tools in every response. "
+        "Do not respond with only text. Always read_file before edit_file "
+        "so search blocks match exactly. Keep edit_file search blocks small — "
+        "only the lines being changed plus 1-2 lines of context. "
+        "Continue calling tools until the task is fully complete."
+    )
     if context_summary:
         task_reminder += f"\n\nKEY PROJECT CONTEXT (condensed):\n{context_summary}"
 
