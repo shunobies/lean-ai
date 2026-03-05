@@ -43,6 +43,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     private slashCommands: Map<string, (args: string) => Promise<void>>;
 
     // Tracks the most recently completed workflow session for /approve and /reject
+    // Persisted in globalState so it survives window reloads.
     private lastCompletedSessionId: string | undefined;
 
     // Set by extension.ts when a scaffold was just created and this window is the new project
@@ -53,6 +54,11 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         private readonly context: vscode.ExtensionContext,
     ) {
         this.client = BackendClient.getInstance();
+
+        // Restore last completed session from globalState (survives reloads)
+        this.lastCompletedSessionId = this.context.globalState.get<string>(
+            "lean-ai.lastCompletedSessionId",
+        );
 
         // Register slash commands
         this.slashCommands = new Map();
@@ -120,6 +126,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                     this.closeWebSocket();
                     this.sessionId = undefined;
                     this.lastCompletedSessionId = undefined;
+                    this.context.globalState.update("lean-ai.lastCompletedSessionId", undefined);
                     this.chatHistory = [];
                     this.currentConversationId = undefined;
                     this.viewingHistoricConversation = false;
@@ -290,6 +297,10 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             clearSession: () => {
                 this.lastCompletedSessionId = this.sessionId;
                 this.sessionId = undefined;
+                this.context.globalState.update(
+                    "lean-ai.lastCompletedSessionId",
+                    this.lastCompletedSessionId,
+                );
             },
         };
         handleWsMessage(msg, ctx);
@@ -738,6 +749,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 cls: "msg-system",
             });
             this.lastCompletedSessionId = undefined;
+            this.context.globalState.update("lean-ai.lastCompletedSessionId", undefined);
         } catch (e) {
             this.postMessage({ type: "thinking", show: false });
             const error = e instanceof Error ? e.message : String(e);
@@ -767,6 +779,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 cls: "msg-system",
             });
             this.lastCompletedSessionId = undefined;
+            this.context.globalState.update("lean-ai.lastCompletedSessionId", undefined);
         } catch (e) {
             this.postMessage({ type: "thinking", show: false });
             const error = e instanceof Error ? e.message : String(e);
