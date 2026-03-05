@@ -942,11 +942,37 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         try {
             const [convLog, sessionInfo] = await Promise.all([
                 client.getConversationLog(sessionId, repoRoot),
-                client.getSession(sessionId).catch(() => null),
+                client.getSession(sessionId, repoRoot).catch(() => null),
             ]);
 
             const title = sessionInfo?.title
                 || `Session ${sessionId.slice(0, 8)}`;
+
+            // Handle empty conversation logs (sessions created before logging was added)
+            if (!convLog.entries || convLog.entries.length === 0) {
+                const taskDesc = sessionInfo?.task_track || null;
+                const fallbackMessages = [{
+                    role: "system" as const,
+                    content: taskDesc
+                        ? `**Task:** ${taskDesc}\n\nNo conversation log available — this session was created before conversation logging was enabled.`
+                        : "No conversation log available for this session.\n\nConversation logging was added after this session was created. New sessions will have full chain-of-thought logs.",
+                    timestamp: sessionInfo?.created_at || new Date().toISOString(),
+                }];
+
+                const conversation: StoredConversation = {
+                    id: `session-${sessionId}`,
+                    title,
+                    messages: fallbackMessages,
+                    createdAt: sessionInfo?.created_at || new Date().toISOString(),
+                    updatedAt: sessionInfo?.updated_at || new Date().toISOString(),
+                    repoRoot,
+                };
+
+                this.viewingHistoricConversation = true;
+                this.postMessage({ type: "showConversation", conversation });
+                vscode.commands.executeCommand("lean-ai.chatView.focus");
+                return;
+            }
 
             // Map conversation log entries to StoredConversation format
             const messages = convLog.entries.map((entry) => {

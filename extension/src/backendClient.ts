@@ -134,8 +134,9 @@ export class BackendClient {
         return resp.json() as Promise<CreateSessionResponse>;
     }
 
-    async getSession(sessionId: string): Promise<SessionState> {
-        const resp = await fetch(`${this.baseUrl}/api/sessions/${sessionId}`);
+    async getSession(sessionId: string, repoRoot?: string): Promise<SessionState> {
+        const params = repoRoot ? `?${new URLSearchParams({ repo_root: repoRoot })}` : "";
+        const resp = await fetch(`${this.baseUrl}/api/sessions/${sessionId}${params}`);
         if (!resp.ok) {
             throw new Error(`Failed to get session: ${resp.statusText}`);
         }
