@@ -409,6 +409,18 @@ async def get_session_conversation(session_id: str, repo_root: str):
         await db.close()
 
 
+@router.get("/sessions/{session_id}/checkpoints")
+async def list_checkpoints(session_id: str):
+    """List checkpoints for a session (stub — returns empty list)."""
+    return []
+
+
+@router.get("/sessions/{session_id}/git-events")
+async def list_git_events(session_id: str):
+    """List git events for a session (stub — returns empty list)."""
+    return []
+
+
 # ── WebSocket Workflow ──
 
 
