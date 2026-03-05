@@ -125,18 +125,35 @@ async def update_session(
     await db.commit()
 
 
+def _format_session(row: dict) -> dict:
+    """Map database row to the SessionSummary shape the frontend expects."""
+    task = row.get("task", "")
+    return {
+        "session_id": row["id"],
+        "title": task[:80] if task else None,
+        "session_status": row.get("status", "active"),
+        "workflow_stage": "completed" if row.get("status") == "completed" else "active",
+        "task_track": None,
+        "base_branch": row.get("base_branch"),
+        "plan_branch": row.get("branch_name"),
+        "merge_commit_sha": None,
+        "created_at": row.get("created_at", ""),
+        "updated_at": row.get("completed_at") or row.get("created_at", ""),
+    }
+
+
 async def get_session(db: aiosqlite.Connection, session_id: str) -> dict | None:
     """Fetch a single session as a dict."""
     cursor = await db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
     row = await cursor.fetchone()
-    return dict(row) if row else None
+    return _format_session(dict(row)) if row else None
 
 
 async def list_sessions(db: aiosqlite.Connection) -> list[dict]:
     """List all sessions, newest first."""
     cursor = await db.execute("SELECT * FROM sessions ORDER BY created_at DESC")
     rows = await cursor.fetchall()
-    return [dict(r) for r in rows]
+    return [_format_session(dict(r)) for r in rows]
 
 
 # ── Tool log helpers ──
