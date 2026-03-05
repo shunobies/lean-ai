@@ -108,7 +108,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             // item is a SessionItem from the tree view with a .session property
             const sessionItem = item as { session?: { session_id: string } };
             if (sessionItem?.session?.session_id) {
-                await sessionDetailProvider.show(sessionItem.session.session_id);
+                await sidebarProvider.loadSessionConversation(sessionItem.session.session_id);
             }
         }),
         vscode.commands.registerCommand("lean-ai.mergeSession", async (item: unknown) => {

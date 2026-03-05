@@ -36,6 +36,13 @@ class SessionItem extends vscode.TreeItem {
         this.description = formatSessionDescription(session);
         this.tooltip = formatSessionTooltip(session);
         this.iconPath = getSessionIcon(session.session_status);
+
+        // Clicking the row loads the conversation in the chat sidebar
+        this.command = {
+            command: "lean-ai.viewSession",
+            title: "View Session",
+            arguments: [this],
+        };
     }
 }
 

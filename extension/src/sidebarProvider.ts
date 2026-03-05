@@ -934,6 +934,74 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         });
     }
 
+    /** Load a session's conversation log into the chat sidebar for review */
+    async loadSessionConversation(sessionId: string): Promise<void> {
+        const repoRoot = this.getRepoRoot();
+        const client = BackendClient.getInstance();
+
+        try {
+            const [convLog, sessionInfo] = await Promise.all([
+                client.getConversationLog(sessionId, repoRoot),
+                client.getSession(sessionId).catch(() => null),
+            ]);
+
+            const title = sessionInfo?.title
+                || `Session ${sessionId.slice(0, 8)}`;
+
+            // Map conversation log entries to StoredConversation format
+            const messages = convLog.entries.map((entry) => {
+                let role: string;
+                let content: string;
+
+                switch (entry.role) {
+                    case "user":
+                        role = "user";
+                        content = entry.content;
+                        break;
+                    case "assistant":
+                        role = "assistant";
+                        content = entry.content;
+                        break;
+                    case "tool_call":
+                        role = "system";
+                        content = `🔧 **${entry.tool_name || "tool"}**\n${entry.content}`;
+                        break;
+                    case "tool_result":
+                        role = "system";
+                        content = `📋 **${entry.tool_name || "tool"} result**\n${entry.content.slice(0, 2000)}`;
+                        break;
+                    default:
+                        role = "system";
+                        content = entry.content;
+                }
+
+                return {
+                    role,
+                    content,
+                    timestamp: entry.created_at,
+                };
+            });
+
+            const conversation: StoredConversation = {
+                id: `session-${sessionId}`,
+                title,
+                messages,
+                createdAt: messages[0]?.timestamp || new Date().toISOString(),
+                updatedAt: messages[messages.length - 1]?.timestamp || new Date().toISOString(),
+                repoRoot,
+            };
+
+            this.viewingHistoricConversation = true;
+            this.postMessage({ type: "showConversation", conversation });
+
+            // Focus the chat panel
+            vscode.commands.executeCommand("lean-ai.chatView.focus");
+        } catch (e) {
+            const error = e instanceof Error ? e.message : String(e);
+            vscode.window.showErrorMessage(`Failed to load session: ${error}`);
+        }
+    }
+
     /** Provide session ID for approval commands (workflow mode) */
     getSessionId(): string | undefined {
         return this.sessionId;
