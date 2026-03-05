@@ -37,6 +37,16 @@ CREATE TABLE IF NOT EXISTS tool_logs (
     success INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS conversation_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    tool_name TEXT,
+    tool_args TEXT,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -175,3 +185,63 @@ async def log_tool_call(
         (session_id, tool_name, json.dumps(parameters), result, int(success), now),
     )
     await db.commit()
+
+
+# ── Conversation log helpers ──
+
+
+async def log_conversation_entry(
+    db: aiosqlite.Connection,
+    session_id: str,
+    role: str,
+    content: str,
+    tool_name: str | None = None,
+    tool_args: str | None = None,
+) -> None:
+    """Record a conversation entry (assistant thinking, tool call, or tool result)."""
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO conversation_logs "
+        "(session_id, role, content, tool_name, tool_args, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (session_id, role, content, tool_name, tool_args, now),
+    )
+    await db.commit()
+
+
+async def get_conversation_log(
+    db: aiosqlite.Connection,
+    session_id: str,
+) -> list[dict]:
+    """Retrieve the full conversation log for a session, oldest first."""
+    cursor = await db.execute(
+        "SELECT role, content, tool_name, tool_args, created_at "
+        "FROM conversation_logs WHERE session_id = ? ORDER BY id ASC",
+        (session_id,),
+    )
+    rows = await cursor.fetchall()
+    return [
+        {
+            "role": row[0],
+            "content": row[1],
+            "tool_name": row[2],
+            "tool_args": row[3],
+            "created_at": row[4],
+        }
+        for row in rows
+    ]
+
+
+# ── Session deletion ──
+
+
+async def delete_session(db: aiosqlite.Connection, session_id: str) -> bool:
+    """Delete a session and all associated data. Returns True if found."""
+    cursor = await db.execute("SELECT id FROM sessions WHERE id = ?", (session_id,))
+    if not await cursor.fetchone():
+        return False
+    await db.execute("DELETE FROM conversation_logs WHERE session_id = ?", (session_id,))
+    await db.execute("DELETE FROM tool_logs WHERE session_id = ?", (session_id,))
+    await db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+    await db.commit()
+    return True

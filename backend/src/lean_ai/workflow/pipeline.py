@@ -5,7 +5,9 @@ naturally via chain-of-thought, and executes — all in one continuous
 conversation with full context.
 """
 
+import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -31,6 +33,7 @@ async def run_workflow(
     llm_client: "LLMClient",
     context: str = "",
     branch_name: str = "",
+    conversation_logger: Callable | None = None,
 ) -> str:
     """Run the agentic workflow: task + tools → let the model work.
 
@@ -50,16 +53,25 @@ async def run_workflow(
         {"role": "user", "content": task},
     ]
 
+    # Log the initial task
+    if conversation_logger:
+        await conversation_logger("user", task)
+
     # Create tool executor
     tool_executor = _make_tool_executor(repo_root, ws)
 
-    # Callbacks for WebSocket progress
+    # Callbacks for WebSocket progress + conversation logging
     async def on_tool_call(name: str, args: dict) -> None:
         await ws_send(ws, "tool_progress", {
             "tool": name,
             "status": "running",
             "description": f"{name} {args.get('path', args.get('command', ''))}",
         })
+        if conversation_logger:
+            await conversation_logger(
+                "tool_call", f"{name} {args.get('path', args.get('command', ''))}",
+                tool_name=name, tool_args=json.dumps(args),
+            )
 
     async def on_tool_result(name: str, result: str) -> None:
         is_error = result.startswith("ERROR:")
@@ -68,9 +80,16 @@ async def run_workflow(
             "status": "error" if is_error else "complete",
             "output": result[:500],
         })
+        if conversation_logger:
+            await conversation_logger(
+                "tool_result", result[:2000],
+                tool_name=name,
+            )
 
     async def on_content(text: str) -> None:
         await ws_send(ws, "assistant_content", {"content": text})
+        if conversation_logger:
+            await conversation_logger("assistant", text)
 
     # Let the LLM work — single conversation, all tools available
     executed, explanation = await llm_client.chat_with_tools(

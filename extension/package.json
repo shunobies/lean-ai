@@ -83,6 +83,11 @@
         "command": "lean-ai.abandonSession",
         "title": "Lean AI: Abandon Session",
         "icon": "$(trash)"
+      },
+      {
+        "command": "lean-ai.deleteSession",
+        "title": "Lean AI: Delete Session",
+        "icon": "$(close)"
       }
     ],
     "menus": {
@@ -108,6 +113,11 @@
           "command": "lean-ai.abandonSession",
           "when": "view == lean-ai.sessionsView && viewItem == session",
           "group": "session@2"
+        },
+        {
+          "command": "lean-ai.deleteSession",
+          "when": "view == lean-ai.sessionsView && viewItem == session",
+          "group": "session@3"
         }
       ]
     },

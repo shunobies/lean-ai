@@ -320,6 +320,37 @@ export class BackendClient {
         return resp.json() as Promise<Record<string, unknown>>;
     }
 
+    async deleteSession(sessionId: string, repoRoot: string): Promise<void> {
+        const params = new URLSearchParams({ repo_root: repoRoot });
+        const resp = await fetch(`${this.baseUrl}/api/sessions/${sessionId}?${params}`, {
+            method: "DELETE",
+        });
+        if (!resp.ok) {
+            throw new Error(`Failed to delete session: ${resp.statusText}`);
+        }
+    }
+
+    async getConversationLog(
+        sessionId: string,
+        repoRoot: string,
+    ): Promise<{
+        session_id: string;
+        entries: Array<{
+            role: string;
+            content: string;
+            tool_name: string | null;
+            tool_args: string | null;
+            created_at: string;
+        }>;
+    }> {
+        const params = new URLSearchParams({ repo_root: repoRoot });
+        const resp = await fetch(`${this.baseUrl}/api/sessions/${sessionId}/conversation?${params}`);
+        if (!resp.ok) {
+            throw new Error(`Failed to get conversation log: ${resp.statusText}`);
+        }
+        return resp.json() as Promise<ReturnType<typeof this.getConversationLog> extends Promise<infer T> ? T : never>;
+    }
+
     async healthCheck(): Promise<boolean> {
         try {
             const resp = await fetch(`${this.baseUrl}/api/health`);

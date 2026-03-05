@@ -17,9 +17,12 @@ from pydantic import BaseModel
 from lean_ai.config import settings
 from lean_ai.db import (
     create_session,
+    delete_session,
+    get_conversation_log,
     get_db,
     get_session,
     list_sessions,
+    log_conversation_entry,
     update_session,
 )
 from lean_ai.indexer.indexer import (
@@ -379,6 +382,33 @@ async def get_session_detail(session_id: str, repo_root: str):
         await db.close()
 
 
+@router.delete("/sessions/{session_id}")
+async def delete_session_endpoint(session_id: str, repo_root: str):
+    """Delete a session and all its associated data (logs, conversation)."""
+    db = await get_db(repo_root)
+    try:
+        found = await delete_session(db, session_id)
+        if not found:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return {"status": "deleted", "session_id": session_id}
+    finally:
+        await db.close()
+
+
+@router.get("/sessions/{session_id}/conversation")
+async def get_session_conversation(session_id: str, repo_root: str):
+    """Get the full conversation log (chain-of-thought) for a session."""
+    db = await get_db(repo_root)
+    try:
+        session = await get_session(db, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        log = await get_conversation_log(db, session_id)
+        return {"session_id": session_id, "entries": log}
+    finally:
+        await db.close()
+
+
 # ── WebSocket Workflow ──
 
 
@@ -467,6 +497,21 @@ async def session_stream(websocket: WebSocket, session_id: str):
                             if context_path.is_file():
                                 context = context_path.read_text(encoding="utf-8", errors="replace")
 
+                            # Conversation logger — writes chain-of-thought to DB
+                            async def _log_conversation(
+                                role: str,
+                                log_content: str,
+                                tool_name: str | None = None,
+                                tool_args: str | None = None,
+                            ) -> None:
+                                try:
+                                    await log_conversation_entry(
+                                        db, session_id, role, log_content,
+                                        tool_name=tool_name, tool_args=tool_args,
+                                    )
+                                except Exception:
+                                    logger.debug("Failed to log conversation entry", exc_info=True)
+
                             commit_msg = await run_workflow(
                                 task=content,
                                 repo_root=repo_root,
@@ -474,6 +519,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                 llm_client=llm_client,
                                 context=context,
                                 branch_name=branch_name,
+                                conversation_logger=_log_conversation,
                             )
 
                             # --- Auto-commit agent changes ---

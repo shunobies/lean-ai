@@ -153,6 +153,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 }
             }
         }),
+        vscode.commands.registerCommand("lean-ai.deleteSession", async (item: unknown) => {
+            const sessionItem = item as { session?: { session_id: string; title?: string | null } };
+            if (!sessionItem?.session?.session_id) { return; }
+            const label = sessionItem.session.title || sessionItem.session.session_id.slice(0, 8);
+            const confirm = await vscode.window.showWarningMessage(
+                `Permanently delete session "${label}"? This cannot be undone.`,
+                { modal: true },
+                "Delete",
+            );
+            if (confirm === "Delete") {
+                try {
+                    const client = BackendClient.getInstance();
+                    const repoRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
+                    await client.deleteSession(sessionItem.session.session_id, repoRoot);
+                    vscode.window.showInformationMessage("Session deleted.");
+                    sessionTreeProvider.refresh();
+                } catch (e) {
+                    const error = e instanceof Error ? e.message : String(e);
+                    vscode.window.showErrorMessage(`Delete failed: ${error}`);
+                }
+            }
+        }),
     );
 
     console.log("Lean AI extension activated.");

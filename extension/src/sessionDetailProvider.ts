@@ -1,6 +1,7 @@
 /**
  * Session Detail Webview — shows detailed session info, checkpoints,
- * git events, and provides merge/resume/abandon actions.
+ * git events, conversation log (chain-of-thought), and provides
+ * merge/resume/abandon actions.
  *
  * Opened via command `lean-ai.viewSession` when a session is selected
  * in the SessionTreeProvider.
@@ -9,6 +10,14 @@
 import * as vscode from "vscode";
 import { BackendClient } from "./backendClient";
 import type { SessionSummary, CheckpointSummary, GitEventSummary } from "./types";
+
+interface ConversationEntry {
+    role: string;
+    content: string;
+    tool_name: string | null;
+    tool_args: string | null;
+    created_at: string;
+}
 
 export class SessionDetailProvider {
     private static panels = new Map<string, vscode.WebviewPanel>();
@@ -87,12 +96,18 @@ export class SessionDetailProvider {
         await this.updatePanel(panel, sessionId);
     }
 
+    private getRepoRoot(): string {
+        return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ".";
+    }
+
     private async updatePanel(panel: vscode.WebviewPanel, sessionId: string): Promise<void> {
         try {
-            const [session, checkpoints, gitEvents] = await Promise.all([
+            const repoRoot = this.getRepoRoot();
+            const [session, checkpoints, gitEvents, conversationData] = await Promise.all([
                 this.client.getSession(sessionId),
                 this.client.listCheckpoints(sessionId).catch(() => [] as CheckpointSummary[]),
                 this.client.listGitEvents(sessionId).catch(() => [] as GitEventSummary[]),
+                this.client.getConversationLog(sessionId, repoRoot).catch(() => ({ session_id: sessionId, entries: [] })),
             ]);
 
             const sessionSummary: SessionSummary = {
@@ -109,7 +124,12 @@ export class SessionDetailProvider {
             };
 
             panel.title = session.title || `Session ${sessionId.slice(0, 8)}`;
-            panel.webview.html = this.getHtml(sessionSummary, checkpoints, gitEvents);
+            panel.webview.html = this.getHtml(
+                sessionSummary,
+                checkpoints,
+                gitEvents,
+                conversationData.entries,
+            );
         } catch (e) {
             const error = e instanceof Error ? e.message : String(e);
             panel.webview.html = this.getErrorHtml(error);
@@ -120,6 +140,7 @@ export class SessionDetailProvider {
         session: SessionSummary,
         checkpoints: CheckpointSummary[],
         gitEvents: GitEventSummary[],
+        conversation: ConversationEntry[],
     ): string {
         const title = escapeHtml(session.title || `Session ${session.session_id.slice(0, 8)}`);
         const canMerge = session.session_status === "active" && session.plan_branch && !session.merge_commit_sha;
@@ -226,6 +247,118 @@ export class SessionDetailProvider {
         font-size: var(--vscode-editor-font-size);
     }
     .empty { opacity: 0.5; font-style: italic; font-size: 12px; }
+
+    /* Tab navigation */
+    .tabs {
+        display: flex;
+        gap: 0;
+        border-bottom: 2px solid var(--vscode-panel-border);
+        margin: 16px 0 0;
+    }
+    .tab {
+        padding: 8px 16px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        opacity: 0.6;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+        background: none;
+        border-top: none;
+        border-left: none;
+        border-right: none;
+        color: var(--vscode-foreground);
+    }
+    .tab.active {
+        opacity: 1;
+        border-bottom-color: var(--vscode-focusBorder);
+    }
+    .tab:hover { opacity: 0.9; }
+    .tab-content { display: none; padding-top: 12px; }
+    .tab-content.active { display: block; }
+
+    /* Conversation log */
+    .conv-entry {
+        margin-bottom: 12px;
+        border-left: 3px solid var(--vscode-panel-border);
+        padding: 8px 12px;
+        font-size: 12px;
+    }
+    .conv-entry.role-assistant {
+        border-left-color: #17a2b8;
+    }
+    .conv-entry.role-user {
+        border-left-color: #28a745;
+    }
+    .conv-entry.role-tool_call {
+        border-left-color: #fd7e14;
+    }
+    .conv-entry.role-tool_result {
+        border-left-color: #6c757d;
+    }
+    .conv-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 4px;
+    }
+    .conv-role {
+        font-weight: 700;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .conv-role.assistant { color: #17a2b8; }
+    .conv-role.user { color: #28a745; }
+    .conv-role.tool_call { color: #fd7e14; }
+    .conv-role.tool_result { color: #6c757d; }
+    .conv-time {
+        font-size: 10px;
+        opacity: 0.5;
+    }
+    .conv-tool {
+        font-size: 11px;
+        opacity: 0.7;
+        margin-bottom: 4px;
+    }
+    .conv-content {
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: var(--vscode-editor-font-family);
+        font-size: var(--vscode-editor-font-size);
+        line-height: 1.5;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+    .conv-content.collapsed {
+        max-height: 80px;
+        overflow: hidden;
+        position: relative;
+    }
+    .conv-content.collapsed::after {
+        content: "";
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 30px;
+        background: linear-gradient(transparent, var(--vscode-editor-background));
+    }
+    .conv-toggle {
+        font-size: 11px;
+        color: var(--vscode-textLink-foreground);
+        cursor: pointer;
+        margin-top: 4px;
+        display: inline-block;
+    }
+    .conv-toggle:hover { text-decoration: underline; }
+    .conv-count {
+        font-size: 11px;
+        opacity: 0.5;
+        margin-left: 4px;
+    }
 </style>
 </head>
 <body>
@@ -264,41 +397,63 @@ export class SessionDetailProvider {
         <button class="btn-secondary" onclick="refresh()">Refresh</button>
     </div>
 
-    <h2>Checkpoints (${checkpoints.length})</h2>
-    ${checkpoints.length > 0 ? `
-    <table>
-        <thead><tr><th>#</th><th>Description</th><th>Status</th><th>Commit</th><th>Time</th></tr></thead>
-        <tbody>
-            ${checkpoints.map((cp) => `
-                <tr>
-                    <td>${cp.step_index + 1}</td>
-                    <td>${escapeHtml(cp.step_description || "—")}</td>
-                    <td>${escapeHtml(cp.status)}</td>
-                    <td>${cp.head_commit_sha ? `<code>${escapeHtml(cp.head_commit_sha.slice(0, 7))}</code>` : "—"}</td>
-                    <td>${escapeHtml(cp.created_at)}</td>
-                </tr>
-            `).join("")}
-        </tbody>
-    </table>
-    ` : '<p class="empty">No checkpoints recorded.</p>'}
+    <div class="tabs">
+        <button class="tab active" data-tab="conversation">Chain of Thought<span class="conv-count">(${conversation.length})</span></button>
+        <button class="tab" data-tab="checkpoints">Checkpoints<span class="conv-count">(${checkpoints.length})</span></button>
+        <button class="tab" data-tab="git-events">Git Events<span class="conv-count">(${gitEvents.length})</span></button>
+    </div>
 
-    <h2>Git Events (${gitEvents.length})</h2>
-    ${gitEvents.length > 0 ? `
-    <table>
-        <thead><tr><th>Type</th><th>Ref</th><th>SHA</th><th>Message</th><th>Time</th></tr></thead>
-        <tbody>
-            ${gitEvents.map((ev) => `
-                <tr>
-                    <td>${escapeHtml(ev.event_type)}</td>
-                    <td>${ev.ref_name ? `<code>${escapeHtml(ev.ref_name)}</code>` : "—"}</td>
-                    <td>${ev.commit_sha ? `<code>${escapeHtml(ev.commit_sha.slice(0, 7))}</code>` : "—"}</td>
-                    <td>${ev.message ? escapeHtml(ev.message.split("\\n")[0].slice(0, 60)) : "—"}</td>
-                    <td>${escapeHtml(ev.created_at)}</td>
-                </tr>
-            `).join("")}
-        </tbody>
-    </table>
-    ` : '<p class="empty">No git events recorded.</p>'}
+    <div id="tab-conversation" class="tab-content active">
+        ${conversation.length > 0 ? conversation.map((entry, i) => `
+            <div class="conv-entry role-${escapeHtml(entry.role)}">
+                <div class="conv-header">
+                    <span class="conv-role ${escapeHtml(entry.role)}">${formatRole(entry.role)}</span>
+                    <span class="conv-time">${escapeHtml(entry.created_at)}</span>
+                </div>
+                ${entry.tool_name ? `<div class="conv-tool">${escapeHtml(entry.tool_name)}${entry.tool_args ? ` ${truncate(escapeHtml(entry.tool_args), 120)}` : ""}</div>` : ""}
+                <div class="conv-content${entry.content.length > 300 ? " collapsed" : ""}" id="conv-${i}">${escapeHtml(entry.content)}</div>
+                ${entry.content.length > 300 ? `<span class="conv-toggle" onclick="toggleContent(${i})">Show more</span>` : ""}
+            </div>
+        `).join("") : '<p class="empty">No conversation log recorded. Conversation logging is available for new sessions.</p>'}
+    </div>
+
+    <div id="tab-checkpoints" class="tab-content">
+        ${checkpoints.length > 0 ? `
+        <table>
+            <thead><tr><th>#</th><th>Description</th><th>Status</th><th>Commit</th><th>Time</th></tr></thead>
+            <tbody>
+                ${checkpoints.map((cp) => `
+                    <tr>
+                        <td>${cp.step_index + 1}</td>
+                        <td>${escapeHtml(cp.step_description || "\u2014")}</td>
+                        <td>${escapeHtml(cp.status)}</td>
+                        <td>${cp.head_commit_sha ? `<code>${escapeHtml(cp.head_commit_sha.slice(0, 7))}</code>` : "\u2014"}</td>
+                        <td>${escapeHtml(cp.created_at)}</td>
+                    </tr>
+                `).join("")}
+            </tbody>
+        </table>
+        ` : '<p class="empty">No checkpoints recorded.</p>'}
+    </div>
+
+    <div id="tab-git-events" class="tab-content">
+        ${gitEvents.length > 0 ? `
+        <table>
+            <thead><tr><th>Type</th><th>Ref</th><th>SHA</th><th>Message</th><th>Time</th></tr></thead>
+            <tbody>
+                ${gitEvents.map((ev) => `
+                    <tr>
+                        <td>${escapeHtml(ev.event_type)}</td>
+                        <td>${ev.ref_name ? `<code>${escapeHtml(ev.ref_name)}</code>` : "\u2014"}</td>
+                        <td>${ev.commit_sha ? `<code>${escapeHtml(ev.commit_sha.slice(0, 7))}</code>` : "\u2014"}</td>
+                        <td>${ev.message ? escapeHtml(ev.message.split("\\n")[0].slice(0, 60)) : "\u2014"}</td>
+                        <td>${escapeHtml(ev.created_at)}</td>
+                    </tr>
+                `).join("")}
+            </tbody>
+        </table>
+        ` : '<p class="empty">No git events recorded.</p>'}
+    </div>
 
 <script>
     const vscode = acquireVsCodeApi();
@@ -306,6 +461,29 @@ export class SessionDetailProvider {
     const lastCompletedCheckpointId = ${JSON.stringify(
             checkpoints.filter((cp) => cp.status === "completed").pop()?.id || null,
         )};
+
+    // Tab switching
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            tab.classList.add('active');
+            document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+        });
+    });
+
+    // Conversation content expand/collapse
+    function toggleContent(idx) {
+        const el = document.getElementById('conv-' + idx);
+        const toggle = el.parentElement.querySelector('.conv-toggle');
+        if (el.classList.contains('collapsed')) {
+            el.classList.remove('collapsed');
+            toggle.textContent = 'Show less';
+        } else {
+            el.classList.add('collapsed');
+            toggle.textContent = 'Show more';
+        }
+    }
 
     function merge() {
         if (confirm("Merge the plan branch back to the base branch?")) {
@@ -353,4 +531,19 @@ function escapeHtml(str: string): string {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
+}
+
+function formatRole(role: string): string {
+    switch (role) {
+        case "assistant": return "LLM Thinking";
+        case "user": return "Task";
+        case "tool_call": return "Tool Call";
+        case "tool_result": return "Tool Result";
+        default: return role;
+    }
+}
+
+function truncate(str: string, max: number): string {
+    if (str.length <= max) { return str; }
+    return str.slice(0, max) + "...";
 }
