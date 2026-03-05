@@ -21,6 +21,7 @@ from lean_ai.db import (
     get_conversation_log,
     get_db,
     get_session,
+    get_session_raw,
     list_sessions,
     log_conversation_entry,
     update_session,
@@ -586,7 +587,7 @@ async def merge_session(session_id: str, repo_root: str):
     """Merge the agent's branch into the base branch and clean up."""
     db = await get_db(repo_root)
     try:
-        session = await get_session(db, session_id)
+        session = await get_session_raw(db, session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
 
@@ -637,7 +638,7 @@ async def abandon_session(session_id: str, repo_root: str):
     """Abandon the agent's branch — checkout base and delete the branch."""
     db = await get_db(repo_root)
     try:
-        session = await get_session(db, session_id)
+        session = await get_session_raw(db, session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
 

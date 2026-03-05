@@ -153,10 +153,21 @@ def _format_session(row: dict) -> dict:
 
 
 async def get_session(db: aiosqlite.Connection, session_id: str) -> dict | None:
-    """Fetch a single session as a dict."""
+    """Fetch a single session as a dict (formatted for frontend)."""
     cursor = await db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
     row = await cursor.fetchone()
     return _format_session(dict(row)) if row else None
+
+
+async def get_session_raw(db: aiosqlite.Connection, session_id: str) -> dict | None:
+    """Fetch a single session as a raw dict (no field renaming).
+
+    Use this for backend-internal operations (merge, abandon) that need
+    the actual DB column names rather than the frontend-formatted shape.
+    """
+    cursor = await db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
+    row = await cursor.fetchone()
+    return dict(row) if row else None
 
 
 async def list_sessions(db: aiosqlite.Connection) -> list[dict]:
