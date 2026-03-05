@@ -57,6 +57,16 @@ async def run_workflow(
     if conversation_logger:
         await conversation_logger("user", task)
 
+    # Build task reminder for periodic re-injection so the LLM doesn't
+    # lose track of the original task as the conversation grows.
+    max_context_in_reminder = 1500
+    context_summary = context[:max_context_in_reminder] if context else ""
+    if context and len(context) > max_context_in_reminder:
+        context_summary += "\n... (condensed)"
+    task_reminder = f"TASK REMINDER — stay focused on this task:\n{task}"
+    if context_summary:
+        task_reminder += f"\n\nKEY PROJECT CONTEXT (condensed):\n{context_summary}"
+
     # Create tool executor
     tool_executor = _make_tool_executor(repo_root, ws)
 
@@ -98,6 +108,8 @@ async def run_workflow(
         tool_executor_fn=tool_executor,
         max_turns=settings.implementation_max_turns,
         max_tokens=settings.implementation_max_tokens,
+        task_reminder=task_reminder,
+        reminder_interval=settings.reminder_interval,
         on_tool_call=on_tool_call,
         on_tool_result=on_tool_result,
         on_content=on_content,

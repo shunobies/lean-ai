@@ -234,6 +234,8 @@ class LLMClient:
         *,
         max_turns: int = 50,
         max_tokens: int | None = None,
+        task_reminder: str | None = None,
+        reminder_interval: int = 10,
         on_tool_call: Callable | None = None,
         on_tool_result: Callable | None = None,
         on_content: Callable | None = None,
@@ -349,6 +351,21 @@ class LLMClient:
                     await on_tool_result(name, result_str)
 
                 messages.append({"role": "tool", "content": result_str})
+
+            # Inject periodic task reminder to keep the original task in
+            # the model's active attention window.  Ollama truncates from the
+            # beginning when messages exceed num_ctx, so the system prompt and
+            # original task are the first things evicted.
+            if (
+                task_reminder
+                and reminder_interval > 0
+                and (turn + 1) % reminder_interval == 0
+                and turn + 1 < max_turns
+            ):
+                logger.info(
+                    "chat_with_tools: injecting task reminder at turn %d", turn + 1,
+                )
+                messages.append({"role": "user", "content": task_reminder})
         else:
             logger.warning(
                 "chat_with_tools: reached max_turns=%d without completion", max_turns,
