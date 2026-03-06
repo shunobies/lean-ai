@@ -1,16 +1,18 @@
-"""5-phase decomposed planning pipeline with structured output.
+"""6-phase decomposed planning pipeline with structured output.
 
 Phase 1: Scope analysis
 Phase 2: File identification + content reading (with codebase exploration via tools)
-Phase 3: Change design (specific changes per file, using read file content)
+Phase 2.5: Compress exploration results (reduces token bloat for downstream phases)
+Phase 3: Change design (specific changes per file, using compressed file summary)
 Phase 4: Risk assessment
 Phase 5: Structured plan assembly (produces ExecutionPlan via chat_structured)
 
 Each phase is a focused LLM call. The planner uses read-only tools
-(read_file, list_directory, directory_tree) during Phase 2 to explore
-the codebase and read every file it plans to modify.  The file content
-flows into Phase 3/5 so the plan contains enough context for the
-executor to construct accurate tool calls without re-exploring.
+(read_file, list_directory, directory_tree, grep_files) during Phase 2
+to explore the codebase and read every file it plans to modify.
+Phase 2.5 compresses the raw exploration output into a structured
+summary to increase information density and reduce "lost in the middle"
+attention degradation in downstream phases.
 """
 
 import json
@@ -244,6 +246,55 @@ async def create_plan(
         tool_executor_fn=_read_only_executor,
         max_turns=50,
         max_tokens=phase_max_tokens,
+        task_reminder=(
+            f"REMINDER — You are exploring the codebase for this task: {task}\n\n"
+            "Have you used grep_files to trace ALL consumers of modified "
+            "entities? Do NOT finalize until you have searched for every "
+            "model/class being changed and read every file that references it."
+        ),
+        reminder_interval=15,
+    )
+
+    # Phase 2.5: Compress exploration results
+    # Raw file_identification from Phase 2 can be very large (50 turns of
+    # grep/read output).  Compressing it increases information density and
+    # keeps downstream phases within the high-attention zones of the context
+    # window ("Lost in the Middle" mitigation).
+    await _send_stage(ws, "Compressing exploration results...")
+    logger.info(
+        "Planning Phase 2.5: Compressing file identification "
+        "(%d chars raw)", len(file_identification),
+    )
+    file_summary = await llm_client.chat_raw(
+        messages=[
+            {"role": "system", "content": PLAN_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    f"TASK: {task}\n\n"
+                    f"EXPLORATION RESULTS:\n{file_identification}\n\n"
+                    "Compress the exploration results into a structured "
+                    "summary.\n\n"
+                    "For each file that needs to be CREATED or MODIFIED:\n"
+                    "- File path\n"
+                    "- Why it needs changes (one line)\n"
+                    "- The specific code sections that will be modified "
+                    "(only the relevant lines, not the entire file)\n\n"
+                    "For files read for CONTEXT only:\n"
+                    "- File path and the pattern/structure to follow "
+                    "(compact)\n\n"
+                    "IMPORTANT: Preserve all file paths, line numbers, and "
+                    "code snippets needed to construct accurate edits. Drop "
+                    "narrative, tool call logs, and redundant file content."
+                ),
+            },
+        ],
+        max_tokens=phase_max_tokens,
+    )
+    logger.info(
+        "Phase 2.5: compressed %d chars -> %d chars (%.0f%% reduction)",
+        len(file_identification), len(file_summary),
+        (1 - len(file_summary) / max(len(file_identification), 1)) * 100,
     )
 
     # Phase 3: Change Design
@@ -257,11 +308,11 @@ async def create_plan(
                 "content": (
                     f"TASK: {task}\n\n"
                     f"SCOPE:\n{scope}\n\n"
-                    f"FILES IDENTIFIED AND READ:\n{file_identification}\n\n"
+                    f"FILES IDENTIFIED AND READ:\n{file_summary}\n\n"
                     "For each identified file, describe the SPECIFIC changes:\n"
                     "- Functions/classes to add or modify (with signatures)\n"
                     "- What section of the file to modify (reference the content "
-                    "you read in Phase 2)\n"
+                    "from the file summary)\n"
                     "- Integration points with existing code\n"
                     "- For new files: structure, imports, patterns to follow "
                     "from existing files you read\n"
@@ -310,11 +361,15 @@ async def create_plan(
             {
                 "role": "user",
                 "content": (
+                    # -- U-curve optimized ordering --
+                    # Start (high attention): task + risks (actionable)
+                    # Middle (lower attention): reference material
+                    # End (high attention): assembly rules + checklist
                     f"TASK: {task}\n\n"
-                    f"SCOPE:\n{scope}\n\n"
-                    f"FILES AND CONTENT:\n{file_identification}\n\n"
+                    f"RISKS AND GAPS:\n{risks}\n\n"
                     f"CHANGE DESIGN:\n{change_design}\n\n"
-                    f"RISKS:\n{risks}\n\n"
+                    f"FILE SUMMARY:\n{file_summary}\n\n"
+                    f"SCOPE:\n{scope}\n\n"
                     "Assemble the final execution plan as structured JSON. "
                     "Each step must represent ONE tool call.\n\n"
                     "IMPORTANT: If the risk assessment identified missing files "
@@ -373,7 +428,17 @@ async def create_plan(
                     '  "file_path": "",\n'
                     '  "instruction": "pytest tests/test_config.py -v",\n'
                     '  "context": ""\n'
-                    "}"
+                    "}\n\n"
+                    "FINAL CHECKLIST — verify before producing the plan:\n"
+                    "- Every file identified in the risk assessment as missing "
+                    "is included as a step\n"
+                    "- The plan covers the full data flow: "
+                    "model -> controller -> view\n"
+                    "- Each edit_file step has specific line references and "
+                    "context\n"
+                    "- Steps are ordered so dependencies come first\n"
+                    "- Verification steps (run_tests/run_lint) follow groups "
+                    "of changes"
                 ),
             },
         ],
