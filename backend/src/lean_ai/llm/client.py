@@ -57,6 +57,9 @@ class LLMClient:
         self._temperature = (
             temperature if temperature is not None else settings.ollama_temperature
         )
+        self._top_p = settings.ollama_top_p
+        self._top_k = settings.ollama_top_k
+        self._repeat_penalty = settings.ollama_repeat_penalty
 
         effective_embed_url = embed_ollama_url or settings.effective_embedding_url
         if effective_embed_url != effective_url:
@@ -115,6 +118,9 @@ class LLMClient:
                 messages=messages,
                 options={
                     "temperature": temp,
+                    "top_p": self._top_p,
+                    "top_k": self._top_k,
+                    "repeat_penalty": self._repeat_penalty,
                     "num_predict": tokens,
                     "num_ctx": self._context_window,
                 },
@@ -169,6 +175,9 @@ class LLMClient:
                 format=schema.model_json_schema(),
                 options={
                     "temperature": temp,
+                    "top_p": self._top_p,
+                    "top_k": self._top_k,
+                    "repeat_penalty": self._repeat_penalty,
                     "num_predict": tokens,
                     "num_ctx": self._context_window,
                 },
@@ -214,6 +223,9 @@ class LLMClient:
                 stream=True,
                 options={
                     "temperature": temp,
+                    "top_p": self._top_p,
+                    "top_k": self._top_k,
+                    "repeat_penalty": self._repeat_penalty,
                     "num_predict": num_predict,
                     "num_ctx": self._context_window,
                 },
@@ -278,6 +290,9 @@ class LLMClient:
                     tools=tools,
                     options={
                         "temperature": self._temperature,
+                        "top_p": self._top_p,
+                        "top_k": self._top_k,
+                        "repeat_penalty": self._repeat_penalty,
                         "num_predict": tokens,
                         "num_ctx": self._context_window,
                     },
@@ -410,6 +425,9 @@ class LLMClient:
                     prompt=prompt,
                     options={
                         "temperature": self._temperature,
+                        "top_p": self._top_p,
+                        "top_k": self._top_k,
+                        "repeat_penalty": self._repeat_penalty,
                         "num_predict": self._max_tokens,
                         "num_ctx": self._context_window,
                     },

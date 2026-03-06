@@ -50,6 +50,9 @@ def _build_client(responses: list[dict]) -> tuple[LLMClient, FakeOllamaClient]:
     client._max_tokens = 1024
     client._context_window = 4096
     client._temperature = 0.0
+    client._top_p = 0.8
+    client._top_k = 20
+    client._repeat_penalty = 1.05
     return client, fake
 
 
