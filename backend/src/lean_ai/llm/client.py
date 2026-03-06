@@ -277,10 +277,15 @@ class LLMClient:
         explanation_parts: list[str] = []
         nudged = False
 
-        for turn in range(max_turns):
+        # 0 means unlimited — use a practically infinite ceiling
+        effective_max = max_turns if max_turns > 0 else 2**31
+
+        for turn in range(effective_max):
             logger.info(
-                "chat_with_tools turn %d/%d: %d messages",
-                turn + 1, max_turns, len(messages),
+                "chat_with_tools turn %d/%s: %d messages",
+                turn + 1,
+                max_turns if max_turns > 0 else "∞",
+                len(messages),
             )
 
             async def _chat():
@@ -397,7 +402,7 @@ class LLMClient:
                 task_reminder
                 and reminder_interval > 0
                 and (turn + 1) % reminder_interval == 0
-                and turn + 1 < max_turns
+                and turn + 1 < effective_max
             ):
                 reminder_text = task_reminder() if callable(task_reminder) else task_reminder
                 logger.info(
@@ -407,7 +412,8 @@ class LLMClient:
                 messages.append({"role": "user", "content": reminder_text})
         else:
             logger.warning(
-                "chat_with_tools: reached max_turns=%d without completion", max_turns,
+                "chat_with_tools: reached max_turns=%s without completion",
+                max_turns if max_turns > 0 else "∞",
             )
 
         return executed, "\n".join(explanation_parts)

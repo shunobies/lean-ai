@@ -31,9 +31,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Max tool-calling turns per step — one step should need at most
-# a read_file + the actual tool call + maybe one retry.
-_MAX_TURNS_PER_STEP = 5
+# Max tool-calling turns per step.
+# 0 = unlimited — the agent makes as many exploratory and fix-up
+# calls as it needs.  Override via LEAN_AI_IMPLEMENTATION_MAX_TURNS.
+_MAX_TURNS_PER_STEP = 0  # default unlimited; overridden by settings
 
 # Max plan revision rounds before giving up
 _MAX_REVISIONS = 5
@@ -296,12 +297,12 @@ async def _execute_plan(
             {"role": "user", "content": user_msg},
         ]
 
-        # Execute this step with a constrained turn budget
+        # Execute this step — turn budget comes from settings (0 = unlimited)
         executed, explanation = await llm_client.chat_with_tools(
             messages=messages,
             tools=IMPLEMENTATION_TOOLS,
             tool_executor_fn=tool_executor,
-            max_turns=_MAX_TURNS_PER_STEP,
+            max_turns=settings.implementation_max_turns,
             max_tokens=settings.implementation_max_tokens,
             on_tool_call=on_tool_call,
             on_tool_result=on_tool_result,

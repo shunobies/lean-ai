@@ -55,7 +55,7 @@ class Settings(BaseSettings):
 
     # ── Implementation ──
     implementation_max_tokens: int | None = None  # Derived: 25% of context window
-    implementation_max_turns: int = 50
+    implementation_max_turns: int = 0  # 0 = unlimited
     reminder_interval: int = 10  # Re-inject task every N tool-calling turns
 
     # ── Tool execution ──
