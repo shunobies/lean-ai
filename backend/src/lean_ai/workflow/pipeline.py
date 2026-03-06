@@ -1,30 +1,45 @@
-"""Direct agentic workflow: give the LLM the task and tools, let it work.
+"""Plan-driven agentic workflow: plan → approve → execute per step.
 
-No separate planning phase. The model explores the codebase, plans
-naturally via chain-of-thought, and executes — all in one continuous
-conversation with full context.
+The planner does ALL investigatory work (reads files, explores the codebase,
+designs changes).  It produces a structured ExecutionPlan where each step
+maps to one tool call.  After user approval, a constrained LLM executor
+handles each step in 1-3 turns — translating the planner's detailed
+instruction into a single tool invocation.
 """
 
 import json
 import logging
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fastapi import WebSocket
+from fastapi import WebSocket, WebSocketDisconnect
 
 from lean_ai.config import settings
-from lean_ai.llm.prompts import IMPLEMENTATION_SYSTEM_PROMPT
+from lean_ai.llm.plan_schema import ExecutionPlan, PlanStep, plan_to_markdown
+from lean_ai.llm.planner import assess_clarity, create_plan
+from lean_ai.llm.prompts import STEP_EXECUTION_SYSTEM_PROMPT
 from lean_ai.llm.tool_definitions import IMPLEMENTATION_TOOLS
 from lean_ai.tools import file_ops, scratchpad, shell
 from lean_ai.tools.command_safety import CommandRisk, check_command
-from lean_ai.tools.scratchpad import delete_scratchpad, read_scratchpad
+from lean_ai.tools.scratchpad import delete_scratchpad
 from lean_ai.workflow.ws_handler import safe_receive, ws_send
 
 if TYPE_CHECKING:
     from lean_ai.llm.client import LLMClient
 
 logger = logging.getLogger(__name__)
+
+# Max tool-calling turns per step — one step should need at most
+# a read_file + the actual tool call + maybe one retry.
+_MAX_TURNS_PER_STEP = 5
+
+# Max plan revision rounds before giving up
+_MAX_REVISIONS = 5
+
+
+# ── Public API ──────────────────────────────────────────────────────
 
 
 async def run_workflow(
@@ -36,66 +51,193 @@ async def run_workflow(
     branch_name: str = "",
     conversation_logger: Callable | None = None,
 ) -> str:
-    """Run the agentic workflow: task + tools → let the model work.
-
-    Single conversation, single context. The model explores, plans,
-    and executes in one continuous tool-calling loop.
+    """Run the plan-driven workflow: clarify → plan → approve → execute.
 
     Returns a structured commit message summarising the actions taken.
     """
-    await ws_send(ws, "stage_change", {"stage": "implementing"})
     logger.info("Workflow: starting task: %s", task[:100])
-
-    # Clear any stale scratchpad from a previous/crashed session
-    delete_scratchpad(repo_root)
-
-    # Build system prompt with codebase context baked in
-    system_prompt = _build_system_prompt(context)
-
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": task},
-    ]
 
     # Log the initial task
     if conversation_logger:
         await conversation_logger("user", task)
 
-    # Build dynamic task reminder that includes live scratchpad content.
-    # This is a callable so each injection reads the latest scratchpad.
-    max_context_in_reminder = 1500
-    context_summary = context[:max_context_in_reminder] if context else ""
-    if context and len(context) > max_context_in_reminder:
-        context_summary += "\n... (condensed)"
+    # Clear any stale scratchpad from a previous/crashed session
+    delete_scratchpad(repo_root)
 
-    def build_task_reminder() -> str:
-        """Build task reminder with current scratchpad state."""
-        parts = [
-            f"TASK REMINDER — stay focused on this task:\n{task}\n",
-            "TOOL INSTRUCTIONS: You MUST call tools in every response. "
-            "Do not respond with only text. Always read_file before edit_file "
-            "so search blocks match exactly. Keep edit_file search blocks small — "
-            "only the lines being changed plus 1-2 lines of context. "
-            "Continue calling tools until the task is fully complete.",
-        ]
+    # ── Phase 1: Clarify (optional) ──────────────────────────────
+    task_with_answers = await _clarify_task(task, ws, llm_client, context)
 
-        # Inject live scratchpad content
-        pad = read_scratchpad(repo_root)
-        if pad:
-            parts.append(
-                "\n\nSCRATCHPAD (your progress notes — "
-                "DO NOT redo completed items):\n" + pad
+    # ── Phase 2: Plan ────────────────────────────────────────────
+    await ws_send(ws, "stage_change", {"stage": "planning"})
+    plan = await create_plan(
+        task=task_with_answers,
+        repo_root=repo_root,
+        llm_client=llm_client,
+        context=context,
+        ws=ws,
+    )
+
+    # ── Phase 3: Approve ─────────────────────────────────────────
+    approved_plan = await _wait_for_approval(
+        plan=plan,
+        task=task_with_answers,
+        repo_root=repo_root,
+        llm_client=llm_client,
+        context=context,
+        ws=ws,
+    )
+
+    # ── Phase 4: Execute per-step ────────────────────────────────
+    await ws_send(ws, "stage_change", {"stage": "implementing"})
+    return await _execute_plan(
+        plan=approved_plan,
+        task=task_with_answers,
+        repo_root=repo_root,
+        ws=ws,
+        llm_client=llm_client,
+        context=context,
+        branch_name=branch_name,
+        conversation_logger=conversation_logger,
+    )
+
+
+# ── Phase 1: Clarification ─────────────────────────────────────────
+
+
+async def _clarify_task(
+    task: str,
+    ws: WebSocket,
+    llm_client: "LLMClient",
+    context: str,
+) -> str:
+    """Optionally ask clarifying questions before planning.
+
+    Returns the original task augmented with user answers, or the task
+    unchanged if no clarifications were needed.
+    """
+    questions = await assess_clarity(task, llm_client, context)
+    if questions is None:
+        logger.info("Task is clear — skipping clarification")
+        return task
+
+    logger.info("Clarification needed — %d questions", len(questions))
+    await ws_send(ws, "clarification_needed", {"questions": questions})
+
+    # Wait for user to respond
+    while True:
+        msg = await safe_receive(ws)
+        if msg is None:
+            raise WebSocketDisconnect()
+
+        if msg.get("type") == "user_message":
+            answer = msg.get("content", "")
+            augmented = (
+                f"{task}\n\n"
+                f"ADDITIONAL DETAILS (from clarification):\n{answer}"
             )
+            logger.info("Received clarification answer (%d chars)", len(answer))
+            return augmented
 
-        if context_summary:
-            parts.append(
-                f"\n\nKEY PROJECT CONTEXT (condensed):\n{context_summary}"
+        if msg.get("type") == "ping":
+            await ws_send(ws, "pong")
+            continue
+
+
+# ── Phase 3: Approval ──────────────────────────────────────────────
+
+
+async def _wait_for_approval(
+    plan: ExecutionPlan,
+    task: str,
+    repo_root: str,
+    llm_client: "LLMClient",
+    context: str,
+    ws: WebSocket,
+) -> ExecutionPlan:
+    """Send the plan for user approval. Handle feedback/revision loop.
+
+    Returns the approved ExecutionPlan.
+    """
+    plan_md = plan_to_markdown(plan)
+    await ws_send(ws, "approval_required", {"plan": plan_md})
+    revision_count = 0
+
+    while True:
+        msg = await safe_receive(ws)
+        if msg is None:
+            raise WebSocketDisconnect()
+
+        if msg.get("type") == "approve":
+            logger.info("Plan approved by user")
+            return plan
+
+        if msg.get("type") == "user_message":
+            # User sent feedback — revise the plan
+            feedback = msg.get("content", "")
+            revision_count += 1
+
+            if revision_count > _MAX_REVISIONS:
+                logger.warning("Max plan revisions reached (%d)", _MAX_REVISIONS)
+                await ws_send(ws, "error", {
+                    "message": (
+                        f"Maximum revision limit ({_MAX_REVISIONS}) reached. "
+                        "Please start a new session."
+                    ),
+                    "recoverable": False,
+                })
+                raise WebSocketDisconnect()
+
+            await ws_send(ws, "plan_rejected", {
+                "feedback": feedback,
+                "stage": "planning",
+            })
+
+            revision_context = (
+                f"PREVIOUS PLAN:\n{plan.model_dump_json(indent=2)}\n\n"
+                f"USER FEEDBACK:\n{feedback}"
             )
+            plan = await create_plan(
+                task=task,
+                repo_root=repo_root,
+                llm_client=llm_client,
+                context=context,
+                revision_context=revision_context,
+                ws=ws,
+            )
+            plan_md = plan_to_markdown(plan)
+            await ws_send(ws, "plan_revision", {
+                "review_feedback": feedback,
+                "revision_number": revision_count,
+            })
+            await ws_send(ws, "approval_required", {"plan": plan_md})
+            continue
 
-        return "\n".join(parts)
+        if msg.get("type") == "ping":
+            await ws_send(ws, "pong")
+            continue
 
-    # Create tool executor
+
+# ── Phase 4: Per-Step Execution ────────────────────────────────────
+
+
+async def _execute_plan(
+    plan: ExecutionPlan,
+    task: str,
+    repo_root: str,
+    ws: WebSocket,
+    llm_client: "LLMClient",
+    context: str,
+    branch_name: str,
+    conversation_logger: Callable | None,
+) -> str:
+    """Execute each plan step sequentially with a constrained LLM."""
     tool_executor = _make_tool_executor(repo_root, ws)
+    total_steps = len(plan.steps)
+    all_executed = []
+    completed_descriptions: list[str] = []
+
+    # Build the system prompt once (shared across all steps)
+    system_prompt = _build_step_system_prompt(context)
 
     # Callbacks for WebSocket progress + conversation logging
     async def on_tool_call(name: str, args: dict) -> None:
@@ -128,60 +270,176 @@ async def run_workflow(
         if conversation_logger:
             await conversation_logger("assistant", text)
 
-    # Let the LLM work — single conversation, all tools available
-    executed, explanation = await llm_client.chat_with_tools(
-        messages=messages,
-        tools=IMPLEMENTATION_TOOLS,
-        tool_executor_fn=tool_executor,
-        max_turns=settings.implementation_max_turns,
-        max_tokens=settings.implementation_max_tokens,
-        task_reminder=build_task_reminder,
-        reminder_interval=settings.reminder_interval,
-        on_tool_call=on_tool_call,
-        on_tool_result=on_tool_result,
-        on_content=on_content,
-    )
+    # Execute each step
+    for step in plan.steps:
+        logger.info(
+            "Executing step %d/%d: %s %s — %s",
+            step.step_number, total_steps, step.tool,
+            step.file_path, step.instruction[:80],
+        )
 
-    # Done
+        # Send checkpoint: step starting
+        await ws_send(ws, "checkpoint", {
+            "step_index": step.step_number - 1,
+            "step_description": f"Step {step.step_number}: {step.instruction[:100]}",
+            "status": "running",
+            "head_commit_sha": None,
+        })
+
+        # Build step-specific user message
+        user_msg = _build_step_user_message(
+            step, completed_descriptions, total_steps,
+        )
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_msg},
+        ]
+
+        # Execute this step with a constrained turn budget
+        executed, explanation = await llm_client.chat_with_tools(
+            messages=messages,
+            tools=IMPLEMENTATION_TOOLS,
+            tool_executor_fn=tool_executor,
+            max_turns=_MAX_TURNS_PER_STEP,
+            max_tokens=settings.implementation_max_tokens,
+            on_tool_call=on_tool_call,
+            on_tool_result=on_tool_result,
+            on_content=on_content,
+        )
+
+        all_executed.extend(executed)
+        completed_descriptions.append(
+            f"Step {step.step_number}: {step.instruction[:100]}"
+        )
+
+        # Send checkpoint: step completed
+        await ws_send(ws, "checkpoint", {
+            "step_index": step.step_number - 1,
+            "step_description": f"Step {step.step_number}: {step.instruction[:100]}",
+            "status": "completed",
+            "head_commit_sha": None,
+        })
+
+    # ── All steps done ───────────────────────────────────────────
     files_modified = list({
         tc.parameters.get("path", "")
-        for tc in executed
+        for tc in all_executed
         if tc.tool_name in ("create_file", "edit_file") and tc.parameters.get("path")
     })
 
+    # Check for incomplete.md
+    incomplete_path = os.path.join(repo_root, ".lean_ai", "incomplete.md")
+    incomplete_content = ""
+    if os.path.isfile(incomplete_path):
+        try:
+            with open(incomplete_path, encoding="utf-8") as f:
+                incomplete_content = f.read()
+        except Exception:
+            pass
+
     summary = (
-        f"Completed {len(executed)} tool calls. "
+        f"Completed {len(plan.steps)} plan steps, "
+        f"{len(all_executed)} tool calls. "
         f"Files modified: {', '.join(files_modified) if files_modified else 'none'}."
     )
+    if incomplete_content:
+        summary += (
+            "\n\n⚠️ Some steps had issues — see "
+            f".lean_ai/incomplete.md:\n{incomplete_content}"
+        )
 
     complete_data: dict = {"summary": summary, "files_modified": files_modified}
     if branch_name:
         complete_data["plan_branch"] = branch_name
     await ws_send(ws, "complete", complete_data)
-    logger.info("Workflow complete: %d tool calls, %d files", len(executed), len(files_modified))
+    logger.info(
+        "Workflow complete: %d steps, %d tool calls, %d files",
+        len(plan.steps), len(all_executed), len(files_modified),
+    )
 
     # Clean up session-scoped scratchpad
     delete_scratchpad(repo_root)
 
-    # Build commit message: short subject + LLM's summary as body
+    # Build commit message
     task_summary = task[:72].replace("\n", " ")
     commit_msg = f"lean-ai: {task_summary}"
-    if explanation:
-        commit_msg += f"\n\n{explanation}"
     if files_modified:
         commit_msg += f"\n\nFiles modified: {', '.join(files_modified)}"
     return commit_msg
 
 
-def _build_system_prompt(context: str) -> str:
-    """Build the system prompt with optional codebase context."""
+# ── Prompt Builders ────────────────────────────────────────────────
+
+
+def _build_step_system_prompt(context: str) -> str:
+    """Build the system prompt for per-step execution."""
     if not context:
-        return IMPLEMENTATION_SYSTEM_PROMPT
+        return STEP_EXECUTION_SYSTEM_PROMPT
+
+    # Include condensed project context so the executor knows patterns
+    max_context = 3000
+    ctx = context[:max_context]
+    if len(context) > max_context:
+        ctx += "\n... (condensed)"
 
     return (
-        f"{IMPLEMENTATION_SYSTEM_PROMPT}\n"
-        f"## Project Context\n\n{context}"
+        f"{STEP_EXECUTION_SYSTEM_PROMPT}\n"
+        f"## Project Context\n\n{ctx}"
     )
+
+
+def _build_step_user_message(
+    step: PlanStep,
+    completed: list[str],
+    total_steps: int,
+) -> str:
+    """Build the user message for a specific step execution."""
+    parts: list[str] = []
+
+    # Progress header
+    parts.append(
+        f"STEP {step.step_number} OF {total_steps}"
+    )
+
+    if completed:
+        parts.append("\nCompleted so far:")
+        for desc in completed:
+            parts.append(f"  ✓ {desc}")
+        parts.append("")
+
+    # Step details
+    parts.append(f"Tool: {step.tool}")
+    if step.file_path:
+        parts.append(f"File: {step.file_path}")
+    parts.append(f"Instruction: {step.instruction}")
+
+    if step.context:
+        parts.append(
+            "\nContext (file content from planner investigation):"
+            f"\n```\n{step.context}\n```"
+        )
+
+    # Explicit directive
+    if step.tool in ("run_tests", "run_lint", "format_code"):
+        parts.append(
+            f"\nCall {step.tool} with the command specified in the instruction."
+        )
+    elif step.tool == "edit_file":
+        parts.append(
+            f"\nRead {step.file_path} first if the context above seems "
+            "incomplete, then call edit_file with accurate search/replace blocks."
+        )
+    elif step.tool == "create_file":
+        parts.append(
+            f"\nCall create_file to create {step.file_path} with the content "
+            "described in the instruction. Produce complete, working code."
+        )
+
+    return "\n".join(parts)
+
+
+# ── Tool Executor ──────────────────────────────────────────────────
 
 
 def _make_tool_executor(repo_root: str, ws: WebSocket):
@@ -231,7 +489,6 @@ def _make_tool_executor(repo_root: str, ws: WebSocket):
                 await ws_send(ws, "tool_approval_required", {
                     "tool": name, "command": command, "reason": reason,
                 })
-                # Wait for approval (safe_receive returns None on disconnect)
                 approval_msg = await safe_receive(ws)
                 if approval_msg is None:
                     return "ERROR: WebSocket disconnected — command skipped (requires approval)"
@@ -250,8 +507,6 @@ def _make_tool_executor(repo_root: str, ws: WebSocket):
                     "passed": result.success,
                     "output": result.output[:2000],
                 })
-            # Return output to the LLM, capped to avoid flooding context.
-            # Prefix with pass/fail so the model knows the result clearly.
             if result.success:
                 output = result.output or ""
             else:

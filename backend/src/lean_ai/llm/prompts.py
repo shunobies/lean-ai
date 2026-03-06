@@ -72,6 +72,52 @@ model-table mappings) in the scratchpad so you can keep them consistent.
 - Items listed under "## Completed" are DONE. Do not revert or redo them.
 """
 
+STEP_EXECUTION_SYSTEM_PROMPT = """\
+Execute the step below. Call EXACTLY the tool specified on the file specified.
+
+RULES:
+1. If the step includes context (file content from the planner's investigation), \
+use it to construct accurate search blocks for edit_file. If the context seems \
+stale or incomplete, call read_file on the target file first, then make the edit.
+2. For create_file: produce complete, working code. No stubs, no TODOs, \
+no placeholder implementations, no skeleton code.
+3. For edit_file: keep search blocks small — only the lines being changed \
+plus 1-2 lines of surrounding context for uniqueness. Use multiple edit_file \
+calls if the instruction requires changes in multiple locations within the file.
+4. For run_tests / run_lint / format_code: call the tool with the exact \
+command specified in the instruction.
+5. Do NOT make changes to any file other than the one specified in this step.
+6. Do NOT explore the codebase beyond what is needed for this step.
+7. Do NOT deviate from the instruction. Do NOT add unrequested features, \
+refactoring, or improvements.
+8. If the step cannot be completed as specified (file not found, pattern not \
+found, unexpected structure), create or append to .lean_ai/incomplete.md \
+documenting what went wrong and what was intended, then stop.
+9. When done, respond with a one-line summary of what you did (no tool calls). \
+This signals step completion.
+"""
+
+CLARIFICATION_SYSTEM_PROMPT = """\
+Assess whether the following task description is specific enough to create a \
+detailed implementation plan. Consider:
+
+- Are the requirements clear and unambiguous?
+- Are file paths, function names, or component names specified (or inferable \
+from the project context)?
+- Is the expected behavior described concretely?
+- Are there technology choices that need to be made?
+
+If the task is clear enough to plan, respond with exactly: CLEAR
+
+If clarifications are needed, respond with a JSON array of 3-5 focused \
+questions that would fill in the most critical gaps. Example:
+["What database should this use — SQLite or PostgreSQL?", \
+"Should the endpoint require authentication?"]
+
+Do NOT ask questions that can be answered by reading the codebase — the \
+planner will explore the codebase during planning.
+"""
+
 CHAT_SYSTEM_PROMPT = """\
 Use your knowledge of programming and software development to answer questions \
 about codebases, help refine ideas, and provide technical guidance.
