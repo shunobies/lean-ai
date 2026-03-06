@@ -180,7 +180,6 @@ async def _generate_project_context_single_pass(
 
     content = await llm_client.chat_raw(
         messages=messages,
-        temperature=0.1,
         max_tokens=max_out,
     )
 
@@ -223,7 +222,6 @@ async def _generate_project_context_multi_round(
 
     current_doc = await llm_client.chat_raw(
         messages=round1_messages,
-        temperature=0.1,
         max_tokens=max_out,
     )
     current_doc = _truncate_repetition(current_doc)
@@ -283,8 +281,7 @@ async def _generate_project_context_multi_round(
 
         updated_doc = await llm_client.chat_raw(
             messages=expansion_messages,
-            temperature=0.1,
-            max_tokens=max_out,
+                max_tokens=max_out,
         )
         updated_doc = _truncate_repetition(updated_doc)
 

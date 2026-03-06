@@ -27,7 +27,6 @@ class Settings(BaseSettings):
     inline_model: str = ""
     inline_max_tokens: int = 256
     inline_context_window: int | None = None  # Derived: 12.5% of context window
-    inline_temperature: float = 0.0
     inline_ollama_url: str | None = None
 
     # ── Embedding model ──
@@ -58,9 +57,6 @@ class Settings(BaseSettings):
     implementation_max_tokens: int | None = None  # Derived: 25% of context window
     implementation_max_turns: int = 50
     reminder_interval: int = 10  # Re-inject task every N tool-calling turns
-
-    # ── Chat ──
-    chat_temperature: float = 0.3
 
     # ── Tool execution ──
     tool_timeout_seconds: int = 60

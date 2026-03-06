@@ -102,7 +102,6 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_KNOWLEDGE_DIR` | `.lean_ai/knowledge` | Knowledge documents directory |
 | `LEAN_AI_IMPLEMENTATION_MAX_TURNS` | `50` | Max tool-calling turns per session |
 | `LEAN_AI_IMPLEMENTATION_MAX_TOKENS` | *(derived: 25% of context window)* | Max tokens per LLM turn |
-| `LEAN_AI_CHAT_TEMPERATURE` | `0.3` | Temperature for /chat endpoint |
 | `LEAN_AI_PORT` | `8422` | Server port |
 
 ## WebSocket Protocol

@@ -70,7 +70,6 @@ _inline_client: LLMClient = (
         model=settings.inline_model,
         max_tokens=settings.inline_max_tokens,
         context_window=settings.inline_context_window,
-        temperature=settings.inline_temperature,
     )
     if settings.inline_model
     else llm_client
@@ -949,7 +948,6 @@ async def chat(request: ChatRequest):
     try:
         reply = await llm_client.chat_raw(
             messages,
-            temperature=settings.chat_temperature,
             max_tokens=settings.ollama_max_tokens,
         )
         metrics = llm_client.last_chat_metrics or {}
