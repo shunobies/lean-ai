@@ -526,14 +526,22 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                 except Exception:
                                     logger.debug("Failed to log conversation entry", exc_info=True)
 
+                            # Detect /fix prefix → skip planning
+                            mode = "plan"
+                            task = content
+                            if content.startswith("/fix "):
+                                mode = "fix"
+                                task = content[5:]  # strip "/fix " prefix
+
                             commit_msg = await run_workflow(
-                                task=content,
+                                task=task,
                                 repo_root=repo_root,
                                 ws=websocket,
                                 llm_client=llm_client,
                                 context=context,
                                 branch_name=branch_name,
                                 conversation_logger=_log_conversation,
+                                mode=mode,
                             )
 
                             # --- Auto-commit agent changes ---

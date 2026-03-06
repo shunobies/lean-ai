@@ -65,6 +65,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         this.slashCommands.set("/init",     (args) => this.handleInitCommand(args));
         this.slashCommands.set("/scaffold", (args) => this.handleScaffoldCommand(args));
         this.slashCommands.set("/agent",    (args) => this.handleAgentCommand(args));
+        this.slashCommands.set("/fix",      (args) => this.handleFixCommand(args));
         this.slashCommands.set("/reboot",   (args) => this.handleRebootCommand(args));
         this.slashCommands.set("/approve",  (args) => this.handleApproveCommand(args));
         this.slashCommands.set("/reject",   (args) => this.handleRejectCommand(args));
@@ -698,6 +699,34 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         // Echo the prompt so it's visible in the conversation
         this.postMessage({ type: "reply", text: prompt, cls: "msg-user" });
         await this.handleAgentMessage(prompt);
+    }
+
+    // ── Slash command: /fix — skip planning, fix directly ──────────
+
+    private async handleFixCommand(args: string): Promise<void> {
+        const prompt = args.trim();
+        if (!prompt) {
+            this.postMessage({
+                type: "error",
+                text: "Usage: `/fix <description>`\nSkip planning and let the agent explore, diagnose, and fix directly.\n\nExample: `/fix The search index crashes when the repo has no Python files`",
+            });
+            return;
+        }
+
+        // Guard: don't start a second workflow over an active WebSocket
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.postMessage({
+                type: "error",
+                text: "An agent workflow is already running. Wait for it to complete, or start a new chat first.",
+            });
+            return;
+        }
+
+        // Echo the prompt so it's visible in the conversation
+        this.postMessage({ type: "reply", text: `🔧 ${prompt}`, cls: "msg-user" });
+
+        // Send with /fix prefix so the backend skips planning
+        await this.handleAgentMessage(`/fix ${prompt}`);
     }
 
     // ── Slash command: /reboot — restart the backend server ──────────

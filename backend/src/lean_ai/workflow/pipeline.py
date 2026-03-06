@@ -19,7 +19,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from lean_ai.config import settings
 from lean_ai.llm.plan_schema import ExecutionPlan, PlanStep, plan_to_markdown
 from lean_ai.llm.planner import assess_clarity, create_plan
-from lean_ai.llm.prompts import STEP_EXECUTION_SYSTEM_PROMPT
+from lean_ai.llm.prompts import FIX_SYSTEM_PROMPT, STEP_EXECUTION_SYSTEM_PROMPT
 from lean_ai.llm.tool_definitions import IMPLEMENTATION_TOOLS
 from lean_ai.tools import file_ops, scratchpad, shell
 from lean_ai.tools.command_safety import CommandRisk, check_command
@@ -51,12 +51,16 @@ async def run_workflow(
     context: str = "",
     branch_name: str = "",
     conversation_logger: Callable | None = None,
+    mode: str = "plan",
 ) -> str:
-    """Run the plan-driven workflow: clarify → plan → approve → execute.
+    """Run a workflow. Supports two modes:
+
+    - ``"plan"`` (default): clarify → plan → approve → execute
+    - ``"fix"``: skip planning, give the LLM tools and let it work
 
     Returns a structured commit message summarising the actions taken.
     """
-    logger.info("Workflow: starting task: %s", task[:100])
+    logger.info("Workflow (%s): starting task: %s", mode, task[:100])
 
     # Log the initial task
     if conversation_logger:
@@ -64,6 +68,17 @@ async def run_workflow(
 
     # Clear any stale scratchpad from a previous/crashed session
     delete_scratchpad(repo_root)
+
+    if mode == "fix":
+        return await _run_fix(
+            task=task,
+            repo_root=repo_root,
+            ws=ws,
+            llm_client=llm_client,
+            context=context,
+            branch_name=branch_name,
+            conversation_logger=conversation_logger,
+        )
 
     # ── Phase 1: Clarify (optional) ──────────────────────────────
     task_with_answers = await _clarify_task(task, ws, llm_client, context)
@@ -370,7 +385,128 @@ async def _execute_plan(
     return commit_msg
 
 
+# ── Fix Mode (no planning) ─────────────────────────────────────────
+
+
+async def _run_fix(
+    task: str,
+    repo_root: str,
+    ws: WebSocket,
+    llm_client: "LLMClient",
+    context: str,
+    branch_name: str,
+    conversation_logger: Callable | None,
+) -> str:
+    """Execute a fix directly — no planning, no approval.
+
+    The LLM gets the full tool set and runs until it decides it's done.
+    """
+    await ws_send(ws, "stage_change", {"stage": "implementing"})
+
+    tool_executor = _make_tool_executor(repo_root, ws)
+    system_prompt = _build_fix_system_prompt(context)
+
+    # Callbacks for WebSocket progress + conversation logging
+    async def on_tool_call(name: str, args: dict) -> None:
+        await ws_send(ws, "tool_progress", {
+            "tool": name,
+            "status": "running",
+            "description": f"{name} {args.get('path', args.get('command', ''))}",
+        })
+        if conversation_logger:
+            await conversation_logger(
+                "tool_call",
+                f"{name} {args.get('path', args.get('command', ''))}",
+                tool_name=name, tool_args=json.dumps(args),
+            )
+
+    async def on_tool_result(name: str, result: str) -> None:
+        is_error = result.startswith("ERROR:")
+        await ws_send(ws, "tool_progress", {
+            "tool": name,
+            "status": "error" if is_error else "complete",
+            "output": result[:500],
+        })
+        if conversation_logger:
+            await conversation_logger(
+                "tool_result", result[:2000],
+                tool_name=name,
+            )
+
+    async def on_content(text: str) -> None:
+        await ws_send(ws, "assistant_content", {"content": text})
+        if conversation_logger:
+            await conversation_logger("assistant", text)
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": task},
+    ]
+
+    executed, _explanation = await llm_client.chat_with_tools(
+        messages=messages,
+        tools=IMPLEMENTATION_TOOLS,
+        tool_executor_fn=tool_executor,
+        max_turns=settings.implementation_max_turns,
+        max_tokens=settings.implementation_max_tokens,
+        task_reminder=(
+            f"REMINDER — Your task: {task}\n\n"
+            "Have you verified the fix works? Run tests or lint if "
+            "applicable. If done, respond with a summary (no tool calls)."
+        ),
+        reminder_interval=settings.reminder_interval,
+        on_tool_call=on_tool_call,
+        on_tool_result=on_tool_result,
+        on_content=on_content,
+    )
+
+    # ── Completion ────────────────────────────────────────────────
+    files_modified = list({
+        tc.parameters.get("path", "")
+        for tc in executed
+        if tc.tool_name in ("create_file", "edit_file")
+        and tc.parameters.get("path")
+    })
+
+    summary = (
+        f"Fix complete: {len(executed)} tool calls. "
+        f"Files modified: {', '.join(files_modified) if files_modified else 'none'}."
+    )
+    complete_data: dict = {"summary": summary, "files_modified": files_modified}
+    if branch_name:
+        complete_data["plan_branch"] = branch_name
+    await ws_send(ws, "complete", complete_data)
+    logger.info(
+        "Fix complete: %d tool calls, %d files",
+        len(executed), len(files_modified),
+    )
+
+    delete_scratchpad(repo_root)
+
+    task_summary = task[:72].replace("\n", " ")
+    commit_msg = f"lean-ai(fix): {task_summary}"
+    if files_modified:
+        commit_msg += f"\n\nFiles modified: {', '.join(files_modified)}"
+    return commit_msg
+
+
 # ── Prompt Builders ────────────────────────────────────────────────
+
+
+def _build_fix_system_prompt(context: str) -> str:
+    """Build the system prompt for fix mode (no planning)."""
+    if not context:
+        return FIX_SYSTEM_PROMPT
+
+    max_context = 3000
+    ctx = context[:max_context]
+    if len(context) > max_context:
+        ctx += "\n... (condensed)"
+
+    return (
+        f"{FIX_SYSTEM_PROMPT}\n"
+        f"## Project Context\n\n{ctx}"
+    )
 
 
 def _build_step_system_prompt(context: str) -> str:

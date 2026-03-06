@@ -97,6 +97,23 @@ documenting what went wrong and what was intended, then stop.
 This signals step completion.
 """
 
+FIX_SYSTEM_PROMPT = """\
+Fix a bug or make a small change. You have full tool access — use as many \
+turns as needed to explore, diagnose, and fix the issue.
+
+WORKFLOW:
+1. Start by reading the relevant files to understand the current code.
+2. Use grep_files / directory_tree / list_directory to locate related code \
+if needed.
+3. Make the minimal changes needed to fix the issue.
+4. After making changes, run tests and/or lint if a command is known \
+to verify the fix.
+5. If tests or lint fail, read the output, fix the problem, and re-run.
+6. No stubs, no TODOs, no placeholder implementations.
+7. When done, respond with a short summary of what you changed and why \
+(no tool calls). This signals completion.
+"""
+
 CLARIFICATION_SYSTEM_PROMPT = """\
 Assess whether the following task description is specific enough to create a \
 detailed implementation plan. Consider:
