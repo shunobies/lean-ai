@@ -32,15 +32,15 @@ cd extension && npm install && npm run build
 
 ## Architecture (Linear Pipeline)
 
-**No FSM.** The entire workflow is: `plan -> approve -> execute -> done`.
+**No FSM.** Two workflow modes: `plan -> approve -> execute -> done` (default) and `fix -> done` (skip planning).
 
 1. **LLM Client** (`llm/client.py`) — Async Ollama client with `chat_with_tools()` multi-turn loop. Native tool calling via Ollama's `tools=` parameter. Retry with backoff. No conversation trimming — Ollama manages its own context.
 
-2. **Planning** (`llm/planner.py`) — 5-phase decomposed planning: scope -> file identification -> change design -> risk check -> plan assembly. Structured JSON output from Ollama. Plan template with worked examples (`llm/plan_template.md`).
+2. **Planning** (`llm/planner.py`) — 6-phase decomposed planning: scope -> file identification -> exploration compression -> change design -> risk check -> plan assembly. Structured JSON output from Ollama. Plan template with worked examples (`llm/plan_template.md`).
 
-3. **Tools** (`tools/`) — `create_file`, `edit_file`, `read_file`, `run_tests`, `run_lint`, `format_code`, `list_directory`, `directory_tree`. File ops produce diffs. Shell commands pass through a safety gate (`command_safety.py`). Internet search + URL fetching with HTML strip + LLM summary sanitization.
+3. **Tools** (`tools/`) — `create_file`, `edit_file`, `read_file`, `run_tests`, `run_lint`, `format_code`, `list_directory`, `directory_tree`, `grep_files`, `update_scratchpad`. File ops produce diffs. Shell commands pass through a safety gate (`command_safety.py`). Internet search + URL fetching with HTML strip + LLM summary sanitization.
 
-4. **Workflow** (`workflow/pipeline.py`) — Linear pipeline in one function. WebSocket-based progress streaming. No state machine library.
+4. **Workflow** (`workflow/pipeline.py`) — Two modes: `plan` (clarify → plan → approve → execute) and `fix` (skip planning, direct tool execution). WebSocket-based progress streaming. No state machine library. Work branches always created from default branch (master/main).
 
 5. **Persistence** (`db.py`) — Minimal SQLite via `aiosqlite`. Two tables: `sessions` and `tool_logs`. No ORM.
 
@@ -100,7 +100,7 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_INDEX_DIR` | `.lean_ai_index` | Whoosh index directory name |
 | `LEAN_AI_SEARCH_PROVIDER` | `duckduckgo` | Search provider (`duckduckgo` or `searxng`) |
 | `LEAN_AI_KNOWLEDGE_DIR` | `.lean_ai/knowledge` | Knowledge documents directory |
-| `LEAN_AI_IMPLEMENTATION_MAX_TURNS` | `50` | Max tool-calling turns per session |
+| `LEAN_AI_IMPLEMENTATION_MAX_TURNS` | `0` | Max tool-calling turns per session (`0` = unlimited) |
 | `LEAN_AI_IMPLEMENTATION_MAX_TOKENS` | *(derived: 25% of context window)* | Max tokens per LLM turn |
 | `LEAN_AI_PORT` | `8422` | Server port |
 

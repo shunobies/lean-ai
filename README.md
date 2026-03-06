@@ -78,7 +78,10 @@ LEAN_AI_ENABLE_EMBEDDINGS=true
 |---|---|---|
 | `LEAN_AI_OLLAMA_URL` | `http://localhost:11434` | Ollama API endpoint |
 | `LEAN_AI_OLLAMA_MODEL` | `qwen3-coder:30b` | Primary model for planning and implementation |
-| `LEAN_AI_OLLAMA_TEMPERATURE` | `0.0` | Sampling temperature for the primary model |
+| `LEAN_AI_OLLAMA_TEMPERATURE` | `0.7` | Sampling temperature (Qwen3 recommends 0.7) |
+| `LEAN_AI_OLLAMA_TOP_P` | `0.8` | Nucleus sampling threshold |
+| `LEAN_AI_OLLAMA_TOP_K` | `20` | Top-k sampling |
+| `LEAN_AI_OLLAMA_REPEAT_PENALTY` | `1.05` | Repetition penalty |
 | `LEAN_AI_OLLAMA_CONTEXT_WINDOW` | `131072` | Total context window size (single source of truth — other limits derive from this) |
 | `LEAN_AI_OLLAMA_MAX_TOKENS` | *(derived: 25% of context window)* | Max output tokens per LLM call |
 
@@ -90,7 +93,6 @@ LEAN_AI_ENABLE_EMBEDDINGS=true
 | `LEAN_AI_INLINE_OLLAMA_URL` | *(falls back to OLLAMA_URL)* | Ollama instance for the inline model |
 | `LEAN_AI_INLINE_CONTEXT_WINDOW` | *(derived: 12.5% of context window)* | Context window for inline predictions |
 | `LEAN_AI_INLINE_MAX_TOKENS` | `256` | Max tokens for inline completions |
-| `LEAN_AI_INLINE_TEMPERATURE` | `0.0` | Temperature for inline predictions |
 
 #### Embedding Model
 
@@ -135,14 +137,9 @@ LEAN_AI_ENABLE_EMBEDDINGS=true
 
 | Variable | Default | Description |
 |---|---|---|
-| `LEAN_AI_IMPLEMENTATION_MAX_TURNS` | `50` | Max tool-calling turns per agent session |
+| `LEAN_AI_IMPLEMENTATION_MAX_TURNS` | `0` | Max tool-calling turns per agent session (`0` = unlimited) |
 | `LEAN_AI_IMPLEMENTATION_MAX_TOKENS` | *(derived: 25% of context window)* | Max tokens per LLM turn during implementation |
-
-#### Chat
-
-| Variable | Default | Description |
-|---|---|---|
-| `LEAN_AI_CHAT_TEMPERATURE` | `0.3` | Temperature for the `/chat` endpoint |
+| `LEAN_AI_REMINDER_INTERVAL` | `10` | Re-inject task reminder every N tool-calling turns |
 
 #### Tool Execution
 
@@ -177,13 +174,24 @@ LEAN_AI_ENABLE_EMBEDDINGS=true
 
 ## How It Works
 
-### Workflow
+### Workflow (`/agent`)
 
 1. **User submits a task** via the VSCodium sidebar chat or `/agent` command
-2. **Chat mode (optional)** — the chat helps build a detailed, specific prompt through interactive Q&A before handing it to the agent
-3. **Agent execution** — the LLM receives the task, project context, and tools, then works autonomously in one continuous tool-calling loop: exploring the codebase, reading files, making edits, running tests
-4. **Nudge recovery** — if the model stops after gathering context without making changes, the system nudges it to continue
-5. **Done** — summary of changes, files modified, and diffs streamed back to the user
+2. **Git branch** — a `lean-ai/{session_id}` branch is created from the default branch (master/main), uncommitted changes are stashed
+3. **Clarification (optional)** — if the task is ambiguous, the LLM asks follow-up questions before planning
+4. **Planning** — 6-phase decomposed planning: scope analysis, file identification with codebase exploration, exploration compression, change design, risk check, plan assembly
+5. **Approval** — the plan is sent to the user for review; they can approve, reject, or provide feedback for revision
+6. **Execution** — each plan step is executed sequentially with tool calls, diffs and progress streamed back via WebSocket
+7. **Done** — changes are auto-committed on the branch; user can `/approve` (merge) or `/reject` (abandon)
+
+### Fix Mode (`/fix`)
+
+For small bugs that don't need a full plan:
+
+1. **User types `/fix <description>`** — skips clarification, planning, and approval entirely
+2. **Git branch** — same branch-from-default-branch setup as the normal workflow
+3. **Direct execution** — the LLM gets the task, project context, and full tool access, then explores, diagnoses, fixes, and verifies autonomously
+4. **Done** — same auto-commit and merge/abandon flow
 
 ### Agent Tools
 
@@ -199,6 +207,8 @@ During execution, the LLM has access to these tools:
 | `format_code` | Run code formatter (with safety gate) |
 | `list_directory` | List files in a directory |
 | `directory_tree` | Show recursive file tree |
+| `grep_files` | Search file contents across the codebase |
+| `update_scratchpad` | Persist notes/progress across tool-calling turns |
 
 Shell commands (`run_tests`, `run_lint`, `format_code`) pass through a safety gate that blocks dangerous commands and requires user approval for potentially risky ones.
 
@@ -210,7 +220,8 @@ Commands available in the VSCodium sidebar chat:
 |---|---|
 | `/init` | Index the workspace and generate project context. Use `/init --force` to regenerate from scratch |
 | `/scaffold` | Create a new project from a scaffold recipe. `/scaffold list` shows available recipes, `/scaffold <name> <project>` creates one |
-| `/agent` | Send a task directly to the agent (skips chat, goes straight to execution) |
+| `/agent` | Send a task directly to the agent (skips chat, goes straight to planning) |
+| `/fix` | Skip planning — the agent explores, diagnoses, and fixes directly with full tool access |
 | `/approve` | Merge the agent's working branch into the base branch after reviewing changes |
 | `/reject` | Abandon the agent's working branch and discard all changes |
 | `/reboot` | Restart the backend Python server |
@@ -307,7 +318,7 @@ lean_ai/
 │       ├── context/           # Project context generation
 │       ├── knowledge/         # Domain document indexing
 │       ├── workflow/
-│       │   └── pipeline.py    # Direct agentic workflow
+│       │   └── pipeline.py    # Plan + fix workflows
 │       └── scaffolds/         # 19 YAML scaffold recipes
 │
 └── extension/                 # VSCodium extension
