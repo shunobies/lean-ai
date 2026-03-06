@@ -242,7 +242,7 @@ async def create_plan(
         messages=phase2_messages,
         tools=PLANNING_TOOLS,
         tool_executor_fn=_read_only_executor,
-        max_turns=25,
+        max_turns=50,
         max_tokens=phase_max_tokens,
     )
 
