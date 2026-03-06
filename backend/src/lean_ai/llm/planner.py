@@ -129,9 +129,19 @@ async def create_plan(
                     f"CODEBASE CONTEXT:\n{context}\n\n"
                     "Analyze the scope of this task. In 300-500 words, describe:\n"
                     "- What needs to change\n"
+                    "- **Data flow and consumers**: For every model, table, "
+                    "schema, or data structure being modified, trace ALL "
+                    "downstream consumers — controllers that query it, views "
+                    "that display it, API resources/transformers that serialize "
+                    "it, forms that accept input for it, tests that assert on "
+                    "it. These consumers likely need updates too.\n"
                     "- What is out of scope\n"
                     "- Key assumptions\n"
-                    "- Patterns to follow from the existing codebase"
+                    "- Patterns to follow from the existing codebase\n\n"
+                    "IMPORTANT: If the task mentions specific files to modify, "
+                    "treat that list as a STARTING POINT, not an exhaustive "
+                    "list. The codebase may have additional files that depend "
+                    "on the changed data and need corresponding updates."
                 ),
             },
         ],
@@ -149,14 +159,28 @@ async def create_plan(
                 f"TASK: {task}\n\n"
                 f"SCOPE ANALYSIS:\n{scope}\n\n"
                 f"CODEBASE CONTEXT:\n{context}\n\n"
-                "Identify EVERY file that needs to be created or modified. "
-                "IMPORTANT: Use read_file to read the FULL CONTENT of every file "
-                "you plan to modify. The content you read will be included in the "
-                "plan so the executor can make accurate edits without re-reading.\n\n"
-                "Also read files that contain patterns the executor should follow "
-                "when creating new files.\n\n"
-                "Use the read_file, list_directory, and directory_tree tools to "
-                "explore the codebase thoroughly. Then provide:\n\n"
+                "Identify EVERY file that needs to be created or modified.\n\n"
+                "CRITICAL — TRACE ALL CONSUMERS:\n"
+                "Before finalizing the file list, use grep_files to search for "
+                "references to every model, class, table, route, or component "
+                "being modified. For example, if you are modifying a Customer "
+                "model, search for 'Customer' across the codebase to find "
+                "controllers, views, API resources, form requests, and tests "
+                "that reference it. Files that read or display the data you are "
+                "changing almost certainly need updates too.\n\n"
+                "Do NOT treat file lists in the task description as exhaustive. "
+                "The task may only mention the data layer (models, migrations) "
+                "but omit presentation layer files (controllers, views, API "
+                "resources) that also need changes.\n\n"
+                "EXPLORATION STEPS:\n"
+                "1. Use grep_files to find all references to modified entities\n"
+                "2. Use directory_tree / list_directory to understand project structure\n"
+                "3. Use read_file to read the FULL CONTENT of every file you "
+                "plan to modify — the content will be included in the plan so "
+                "the executor can make accurate edits without re-reading\n"
+                "4. Also read files that contain patterns the executor should "
+                "follow when creating new files\n\n"
+                "OUTPUT FORMAT:\n\n"
                 "FILES TO MODIFY (include key content you read):\n"
                 "1. path/to/file — reason — relevant sections read\n\n"
                 "FILES TO CREATE:\n"
@@ -170,7 +194,7 @@ async def create_plan(
     # Let the LLM explore with read-only tools — generous budget
     async def _read_only_executor(name: str, arguments: dict) -> str:
         """Execute read-only tools for planning phase."""
-        from lean_ai.tools.file_ops import read_file
+        from lean_ai.tools.file_ops import grep_files, read_file
 
         if name == "read_file":
             result = await read_file(
@@ -178,6 +202,13 @@ async def create_plan(
                 repo_root=repo_root,
                 start_line=arguments.get("start_line"),
                 end_line=arguments.get("end_line"),
+            )
+            return result.output if result.success else result.error or "Error"
+        elif name == "grep_files":
+            result = await grep_files(
+                pattern=arguments.get("pattern", ""),
+                repo_root=repo_root,
+                file_glob=arguments.get("file_glob"),
             )
             return result.output if result.success else result.error or "Error"
         elif name == "list_directory":
@@ -256,7 +287,14 @@ async def create_plan(
                     "- What could break?\n"
                     "- Security implications?\n"
                     "- Backward compatibility concerns?\n"
-                    "- Rollback strategy?"
+                    "- Rollback strategy?\n"
+                    "- **Missing file coverage**: Are there files that consume "
+                    "or display the modified data that are NOT included in the "
+                    "change design? For example: controllers that query the "
+                    "modified model, views/templates that render the data, API "
+                    "resources that serialize it, form requests that validate "
+                    "it, tests that assert on it. List any files that SHOULD "
+                    "be modified but are currently missing from the plan."
                 ),
             },
         ],
@@ -279,6 +317,11 @@ async def create_plan(
                     f"RISKS:\n{risks}\n\n"
                     "Assemble the final execution plan as structured JSON. "
                     "Each step must represent ONE tool call.\n\n"
+                    "IMPORTANT: If the risk assessment identified missing files "
+                    "(files that consume or display the modified data but were "
+                    "not in the original change design), you MUST include steps "
+                    "to update those files too. The plan must cover the full "
+                    "data flow — not just the data layer.\n\n"
                     "RULES FOR STEPS:\n"
                     "- Use 'create_file' for new files, 'edit_file' for "
                     "modifications to existing files\n"

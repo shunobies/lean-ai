@@ -1,9 +1,11 @@
-"""File operations: create, edit, read."""
+"""File operations: create, edit, read, grep."""
 
 import difflib
+import fnmatch
 import logging
 from pathlib import Path
 
+from lean_ai.indexer.tree import list_repo_tree
 from lean_ai.tools.executor import ToolResult
 
 logger = logging.getLogger(__name__)
@@ -193,3 +195,69 @@ def _generate_diff(original: str, modified: str, file_path: str) -> str:
         fromfile=f"a/{file_path}", tofile=f"b/{file_path}",
     )
     return "".join(diff_lines)
+
+
+async def grep_files(
+    pattern: str,
+    repo_root: str,
+    file_glob: str | None = None,
+    max_results: int = 100,
+    context_lines: int = 1,
+) -> ToolResult:
+    """Search for a text pattern across all repository files.
+
+    Returns matching file paths with line numbers and surrounding context.
+    Uses the gitignore-aware tree walker so results stay relevant.
+    """
+    if not pattern:
+        return ToolResult(success=False, error="Search pattern cannot be empty.")
+
+    pattern_lower = pattern.lower()
+    entries = list_repo_tree(repo_root)
+
+    # Optional glob filter (e.g. "*.php", "*.blade.php")
+    if file_glob:
+        entries = [e for e in entries if fnmatch.fnmatch(e.path, file_glob)]
+
+    matches: list[str] = []
+    files_with_matches = 0
+
+    for entry in entries:
+        file_path = Path(repo_root) / entry.path
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+
+        lines = text.splitlines()
+        file_matches: list[str] = []
+        for i, line in enumerate(lines):
+            if pattern_lower in line.lower():
+                # Gather context window
+                start = max(0, i - context_lines)
+                end = min(len(lines), i + context_lines + 1)
+                for j in range(start, end):
+                    marker = ">" if j == i else " "
+                    file_matches.append(f"  {marker} {j + 1:>4} | {lines[j]}")
+
+        if file_matches:
+            files_with_matches += 1
+            matches.append(f"{entry.path}:")
+            matches.extend(file_matches)
+            matches.append("")
+
+        if files_with_matches >= max_results:
+            matches.append(
+                f"[TRUNCATED — showing first {max_results} files. "
+                f"Use a more specific pattern or file_glob to narrow results.]"
+            )
+            break
+
+    if not matches:
+        return ToolResult(
+            success=True,
+            output=f"No matches found for '{pattern}'.",
+        )
+
+    header = f"Found matches in {files_with_matches} file(s) for '{pattern}':\n\n"
+    return ToolResult(success=True, output=header + "\n".join(matches))

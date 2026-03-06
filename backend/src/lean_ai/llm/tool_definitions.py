@@ -203,6 +203,41 @@ IMPLEMENTATION_TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "grep_files",
+            "description": (
+                "Search for a text pattern across all files in the repository. "
+                "Returns matching file paths with line numbers and matching lines. "
+                "Respects .gitignore. Use this to find all references to a class, "
+                "function, variable, route, or any string across the codebase. "
+                "Essential for tracing where models, components, or data are used."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": (
+                            "Text or pattern to search for (case-insensitive). "
+                            "Examples: 'Customer', 'class Customer', "
+                            "'$customer->', 'customer.index'"
+                        ),
+                    },
+                    "file_glob": {
+                        "type": "string",
+                        "description": (
+                            "Optional glob to filter files. "
+                            "Examples: '*.php', '*.blade.php', '*.py'. "
+                            "Omit to search all files."
+                        ),
+                    },
+                },
+                "required": ["pattern"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "update_scratchpad",
             "description": (
                 "Update the session scratchpad to track your progress. Call this "
@@ -242,5 +277,5 @@ IMPLEMENTATION_TOOLS: list[dict] = [
 PLANNING_TOOLS: list[dict] = [
     tool
     for tool in IMPLEMENTATION_TOOLS
-    if tool["function"]["name"] in ("read_file", "list_directory", "directory_tree")
+    if tool["function"]["name"] in ("read_file", "list_directory", "directory_tree", "grep_files")
 ]
