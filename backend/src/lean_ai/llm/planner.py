@@ -244,7 +244,7 @@ async def create_plan(
         messages=phase2_messages,
         tools=PLANNING_TOOLS,
         tool_executor_fn=_read_only_executor,
-        max_turns=50,
+        max_turns=settings.implementation_max_turns,
         max_tokens=phase_max_tokens,
         task_reminder=(
             f"REMINDER — You are exploring the codebase for this task: {task}\n\n"
