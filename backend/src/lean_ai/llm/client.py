@@ -310,6 +310,19 @@ class LLMClient:
                     continue
                 break
 
+            # If the only tool call is update_scratchpad and the model has
+            # already made write operations, treat this as a completion
+            # signal — the model is posting a final summary.
+            only_scratchpad = (
+                len(tool_calls) == 1
+                and tool_calls[0]["function"]["name"] == "update_scratchpad"
+            )
+            has_written = any(tc.tool_name in write_tools for tc in executed)
+            if only_scratchpad and has_written:
+                scratchpad_exit = True
+            else:
+                scratchpad_exit = False
+
             # Build assistant message with tool_calls for conversation history
             assistant_msg: dict = {
                 "role": "assistant",
@@ -351,6 +364,15 @@ class LLMClient:
                     await on_tool_result(name, result_str)
 
                 messages.append({"role": "tool", "content": result_str})
+
+            # If the model's only action was a scratchpad update after
+            # already making file changes, it's posting a final summary.
+            # Exit the loop instead of prompting for another turn.
+            if scratchpad_exit:
+                logger.info(
+                    "chat_with_tools: exiting — sole scratchpad update after writes"
+                )
+                break
 
             # Inject periodic task reminder to keep the original task in
             # the model's active attention window.  Ollama truncates from the
