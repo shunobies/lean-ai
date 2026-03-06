@@ -43,8 +43,8 @@ from lean_ai.tools.git_ops import (
     git_add_and_commit,
     git_checkout,
     git_create_branch,
-    git_current_branch,
     git_current_sha,
+    git_default_branch,
     git_delete_branch,
     git_is_repo,
     git_merge_branch,
@@ -475,14 +475,16 @@ async def session_stream(websocket: WebSocket, session_id: str):
                             is_git = await git_is_repo(repo_root)
 
                             if is_git:
-                                br = await git_current_branch(repo_root)
-                                base_branch = br.output.strip() if br.success else "main"
+                                # Always branch from the default branch (master/main)
+                                # so leftover lean-ai/* branches never contaminate new work
+                                base_branch = await git_default_branch(repo_root)
                                 branch_name = f"lean-ai/{session_id}"
 
-                                # Stash uncommitted changes
+                                # Stash uncommitted changes before switching
                                 stashed = await git_stash_push(repo_root)
 
-                                # Create and switch to the agent branch
+                                # Switch to the default branch first, then create the work branch
+                                await git_checkout(base_branch, repo_root)
                                 create_result = await git_create_branch(branch_name, repo_root)
                                 if create_result.success:
                                     await update_session(

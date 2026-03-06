@@ -76,9 +76,34 @@ async def git_is_repo(repo_root: str = ".") -> bool:
     return result.success
 
 
-async def git_create_branch(name: str, repo_root: str = ".") -> ToolResult:
-    """Create and checkout a new branch."""
-    return await _run_git(["checkout", "-b", name], cwd=repo_root)
+async def git_create_branch(
+    name: str, repo_root: str = ".", start_point: str | None = None,
+) -> ToolResult:
+    """Create and checkout a new branch, optionally from a specific start point."""
+    args = ["checkout", "-b", name]
+    if start_point:
+        args.append(start_point)
+    return await _run_git(args, cwd=repo_root)
+
+
+async def git_default_branch(repo_root: str = ".") -> str:
+    """Detect the default branch (master, main, or fall back to 'main')."""
+    # Try the remote HEAD symbolic-ref first (most reliable)
+    result = await _run_git(
+        ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"],
+        cwd=repo_root,
+    )
+    if result.success:
+        # Returns e.g. "origin/main" → strip the remote prefix
+        return result.output.strip().removeprefix("origin/")
+
+    # No remote HEAD — check if 'master' or 'main' exists locally
+    for candidate in ("master", "main"):
+        check = await _run_git(["rev-parse", "--verify", candidate], cwd=repo_root)
+        if check.success:
+            return candidate
+
+    return "main"
 
 
 async def git_checkout(name: str, repo_root: str = ".") -> ToolResult:
