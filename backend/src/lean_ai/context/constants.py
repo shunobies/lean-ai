@@ -138,9 +138,10 @@ Output format — group entries under matching ## headings:
 ## Module Map
 ### path/to/new_module/
 - Responsible for X
-- Key files: `file_a.py` (does Y), `file_b.py` (does Z)
-- Key classes: `ClassName` — responsibility
-- Key functions: `function_name()` — responsibility
+- Key files: `file_a.py`, `file_b.py`, `file_c.py`
+- Key classes: `ClassName`, `OtherClass`
+- Key functions: `function_name()`, `other_function()`
+(List names only — detailed descriptions belong in Key Abstractions)
 
 ## Key Abstractions
 ### path/to/file.py
@@ -151,10 +152,12 @@ Output format — group entries under matching ## headings:
 - `new_module/` → `other_module/` — imports client classes for API communication
 
 ## Data Flow
-- (Add numbered steps only if the new files reveal a path not yet described)
+- (Add numbered steps ONLY if the new files reveal a completely new request/data path \
+not covered above. Do NOT restate existing flows in different words.)
 
 ## Conventions
-- (Add patterns only if the new files reveal conventions not yet noted)
+- (Add a pattern ONLY if it is a genuinely new convention not already stated above. \
+Do NOT rephrase or elaborate on existing conventions.)
 
 ## API Surface
 - `POST /new-endpoint` → `handler_function()` in `file.py`
