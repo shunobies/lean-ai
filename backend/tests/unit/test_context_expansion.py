@@ -237,6 +237,30 @@ class TestExtractCoveredNamesHeadings:
         assert "Router" in covered
         assert "src/router.py" in covered
 
+    def test_extracts_route_paths(self):
+        doc = (
+            "## API Surface\n"
+            "- GET /admin/customers - List customers\n"
+            "- POST /admin/customers - Store customer\n"
+            "- GET /health - Health check\n"
+        )
+        covered = _extract_covered_names(doc)
+        assert "/admin/customers" in covered
+        assert "/health" in covered
+
+    def test_route_paths_deduplicated(self):
+        doc = (
+            "- GET /admin/foo - list\n"
+            "- POST /admin/foo - create\n"
+        )
+        covered = _extract_covered_names(doc)
+        assert covered.count("/admin/foo") == 1
+
+    def test_ignores_non_route_slashes(self):
+        doc = "- This is a regular bullet point\n"
+        covered = _extract_covered_names(doc)
+        assert covered == ""
+
 
 # ---------------------------------------------------------------------------
 # _deduplicate_subsections

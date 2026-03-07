@@ -424,6 +424,17 @@ def _extract_covered_names(doc: str) -> str:
                 seen.add(heading_text)
                 unique.append(heading_text)
 
+    # Also extract route paths as covered context to prevent API Surface duplication.
+    # Endpoints appear as "- GET /admin/foo — handler" or "- `GET /admin/foo` → ..."
+    for line in doc.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("- ") and "/" in stripped:
+            parts = stripped[2:].split()
+            for part in parts:
+                if part.startswith("/") and len(part) > 1 and part not in seen:
+                    seen.add(part)
+                    unique.append(part)
+
     return ", ".join(unique)
 
 
