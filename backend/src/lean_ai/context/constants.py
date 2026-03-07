@@ -121,6 +121,54 @@ CRITICAL — accuracy:
 """
 
 
+_ADDITIVE_EXPANSION_PROMPT = """\
+Use your knowledge of software architecture to analyze new source files and \
+produce entries to ADD to an existing project context document.
+
+You are given:
+1. SECTION HEADINGS — the top-level sections already in the document
+2. ALREADY COVERED — class/function names already described (do NOT repeat these)
+3. SOURCE FILES — new files not yet described in the document
+
+Your task: produce ONLY new entries to insert into the existing sections. \
+Do NOT reproduce the existing document — output only the delta.
+
+Output format — group entries under matching ## headings:
+
+## Module Map
+### path/to/new_module/
+- Responsible for X
+- Key files: `file_a.py` (does Y), `file_b.py` (does Z)
+- Key classes: `ClassName` — responsibility
+- Key functions: `function_name()` — responsibility
+
+## Key Abstractions
+### path/to/file.py
+- `ClassName` — responsibility, interacts with X
+- `function_name()` — responsibility
+
+## Integration Points
+- `new_module/file.py` imports `other_module/client.py` via `from other_module.client import Client`
+
+## Data Flow
+- (Add numbered steps only if the new files reveal a path not yet described)
+
+## Conventions
+- (Add patterns only if the new files reveal conventions not yet noted)
+
+## API Surface
+- `POST /new-endpoint` → `handler_function()` in `file.py`
+
+Rules:
+- ONLY include sections where the new files contribute something. Skip empty sections.
+- Use EXACT class names, function names, and file paths from the provided source files.
+- Do NOT invent or generalize. If a name is not in the source files, do not mention it.
+- Do NOT repeat entries already listed in the ALREADY COVERED section.
+- Be concise but thorough — every class, function, and endpoint in the source files \
+should be accounted for.\
+"""
+
+
 _CONTEXT_GENERATION_SYSTEM_PROMPT = """\
 Use your knowledge of software architecture to analyze this codebase and produce \
 a factual project overview document. You are given:

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .constants import (
+    _ADDITIVE_EXPANSION_PROMPT,
     _CONTEXT_GENERATION_SYSTEM_PROMPT,
     _EXPANSION_SYSTEM_PROMPT,
     _MAX_DOC_FILE_CHARS,
@@ -22,6 +23,7 @@ from .content import (
     _build_expansion_prompt,
     _collect_all_ranked_candidates,
     _collect_priority_file_contents,
+    build_additive_expansion_prompt,
     build_generation_prompt,
 )
 from .metadata import extract_metadata_cached
@@ -301,6 +303,177 @@ async def _generate_project_context_multi_round(
     return current_doc
 
 
+def _merge_additions(base_doc: str, additions: str) -> str:
+    """Merge additive expansion output into the base document by section.
+
+    Finds ``## Heading`` markers in *additions* that match headings in
+    *base_doc*, then appends the addition content at the end of the
+    matching section (before the next ``## `` heading).
+
+    Unmatched addition sections are discarded.
+    No regex — uses simple string operations.
+    """
+    if not additions.strip():
+        return base_doc
+
+    # Parse additions into {normalized_heading: content} pairs.
+    add_sections: list[tuple[str, str]] = []
+    current_heading: str | None = None
+    current_lines: list[str] = []
+
+    for line in additions.split("\n"):
+        if line.startswith("## "):
+            if current_heading is not None:
+                add_sections.append((current_heading, "\n".join(current_lines)))
+            current_heading = _normalize_h2(line.rstrip())
+            current_lines = []
+        elif current_heading is not None:
+            current_lines.append(line)
+
+    if current_heading is not None:
+        add_sections.append((current_heading, "\n".join(current_lines)))
+
+    if not add_sections:
+        return base_doc
+
+    # Build a map of normalized heading → list of content blocks to append.
+    additions_by_heading: dict[str, list[str]] = {}
+    for heading, content in add_sections:
+        content = content.strip()
+        if content:
+            additions_by_heading.setdefault(heading, []).append(content)
+
+    if not additions_by_heading:
+        return base_doc
+
+    # Walk through the base document and insert additions at section boundaries.
+    base_lines = base_doc.split("\n")
+    result: list[str] = []
+    active_heading: str | None = None
+
+    for line in base_lines:
+        if line.startswith("## "):
+            # Before switching to a new section, flush any additions for the
+            # section we're leaving.
+            if active_heading and active_heading in additions_by_heading:
+                for block in additions_by_heading.pop(active_heading):
+                    result.append("")
+                    result.append(block)
+            active_heading = _normalize_h2(line.rstrip())
+        result.append(line)
+
+    # Flush additions for the last section.
+    if active_heading and active_heading in additions_by_heading:
+        for block in additions_by_heading.pop(active_heading):
+            result.append("")
+            result.append(block)
+
+    return "\n".join(result)
+
+
+async def _expand_project_context(
+    base_doc: str,
+    repo_root: str,
+    llm_client: "LLMClient",
+    caps: dict[str, int],
+    max_out: int,
+    context_window: int,
+) -> str:
+    """Additive expansion: process remaining source files and merge findings.
+
+    Runs after single-pass generation to cover files that didn't fit in
+    the initial prompt.  Each round produces ONLY new entries (not a full
+    rewrite), which are programmatically merged into the document.
+    """
+    from lean_ai.indexer.tree import list_repo_tree
+
+    try:
+        entries = list_repo_tree(repo_root)
+    except Exception:
+        logger.warning("expansion: could not list repo tree, skipping")
+        return base_doc
+
+    metadata = extract_metadata_cached(repo_root, entries=entries)
+
+    # Identify files already covered in round 1.
+    _priority_content, priority_paths = _collect_priority_file_contents(
+        repo_root,
+        entries=entries,
+        max_file_chars=caps.get("max_file_chars", _MAX_FILE_CHARS),
+        max_doc_file_chars=caps.get("max_doc_file_chars", _MAX_DOC_FILE_CHARS),
+    )
+
+    remaining = _collect_all_ranked_candidates(
+        repo_root,
+        entries=entries,
+        fan_in=metadata.fan_in,
+        exclude_paths=priority_paths,
+        max_file_chars=caps.get("max_file_chars", _MAX_FILE_CHARS),
+    )
+
+    if not remaining:
+        logger.info("expansion: no remaining files, skipping")
+        return base_doc
+
+    # Budget per batch: half of available input chars (leaves room for
+    # section headings + covered names in the prompt).
+    input_budget_chars = (context_window - max_out) * 4
+    batch_budget_chars = max(4000, input_budget_chars // 2)
+
+    batches = _batch_file_contents(remaining, batch_budget_chars)
+    if not batches:
+        return base_doc
+
+    logger.info(
+        "expansion: %d round(s) planned (%d remaining files, batch_budget=%d chars)",
+        len(batches), len(remaining), batch_budget_chars,
+    )
+
+    current_doc = base_doc
+    max_rounds = 20  # Safety cap for enormous repos
+
+    for i, batch_content in enumerate(batches[:max_rounds]):
+        round_num = i + 2  # Round 1 is the single-pass generation
+        logger.info(
+            "expansion: round %d (%d chars of new files)",
+            round_num, len(batch_content),
+        )
+
+        user_msg = build_additive_expansion_prompt(current_doc, batch_content)
+        messages = [
+            {"role": "system", "content": _ADDITIVE_EXPANSION_PROMPT},
+            {"role": "user", "content": user_msg},
+        ]
+
+        try:
+            additions = await llm_client.chat_raw(
+                messages=messages,
+                max_tokens=max_out,
+            )
+            additions = _truncate_repetition(additions)
+
+            if additions.strip():
+                prev_len = len(current_doc)
+                current_doc = _merge_additions(current_doc, additions)
+                added = len(current_doc) - prev_len
+                logger.info(
+                    "expansion: round %d merged (+%d chars, total %d chars)",
+                    round_num, added, len(current_doc),
+                )
+            else:
+                logger.info("expansion: round %d produced empty output, skipping", round_num)
+        except Exception as exc:
+            logger.warning("expansion: round %d failed (non-fatal): %s", round_num, exc)
+
+    if len(batches) > max_rounds:
+        logger.warning(
+            "expansion: capped at %d rounds (%d batches remaining)",
+            max_rounds, len(batches) - max_rounds,
+        )
+
+    return current_doc
+
+
 async def generate_project_context(
     repo_root: str,
     llm_client: "LLMClient",
@@ -341,6 +514,16 @@ async def generate_project_context(
         )
 
     content = _deduplicate_sections(content)
+
+    # ── Additive expansion: process remaining source files ──
+    if settings.enable_multi_round_context:
+        try:
+            content = await _expand_project_context(
+                content, repo_root, llm_client, caps, max_out,
+                context_window=settings.ollama_context_window,
+            )
+        except Exception as exc:
+            logger.warning("Additive expansion failed (non-fatal): %s", exc)
 
     # ── Deprecation lookup (post-generation append step) ──
     if settings.enable_deprecation_lookup:

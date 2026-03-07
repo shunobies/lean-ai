@@ -374,3 +374,75 @@ def _build_expansion_prompt(
         "ONLY reference class names, function names, and file paths visible in "
         "the data you have been given."
     )
+
+
+def _extract_section_headings(doc: str) -> list[str]:
+    """Extract ## heading lines from a context document."""
+    return [
+        line.rstrip()
+        for line in doc.split("\n")
+        if line.startswith("## ")
+    ]
+
+
+def _extract_covered_names(doc: str) -> str:
+    """Extract a compact list of class/function names already mentioned in the doc.
+
+    Scans for backtick-wrapped names (``ClassName``, ``function_name()``).
+    No regex — simple character scanning.
+    """
+    names: list[str] = []
+    i = 0
+    while i < len(doc):
+        if doc[i] == "`" and i + 1 < len(doc) and doc[i + 1] != "`":
+            # Found opening backtick — find closing
+            end = doc.find("`", i + 1)
+            if end > i and end - i < 120:
+                name = doc[i + 1:end].strip()
+                if name and not name.startswith("/") and " " not in name:
+                    names.append(name)
+                i = end + 1
+            else:
+                i += 1
+        else:
+            i += 1
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique: list[str] = []
+    for n in names:
+        if n not in seen:
+            seen.add(n)
+            unique.append(n)
+
+    return ", ".join(unique)
+
+
+def build_additive_expansion_prompt(
+    existing_doc: str,
+    file_batch: str,
+) -> str:
+    """Build the user prompt for an additive expansion round.
+
+    Sends section headings + already-covered names (compact) + full file batch.
+    This keeps the prompt lean, leaving maximum input budget for new source files.
+    """
+    headings = _extract_section_headings(existing_doc)
+    heading_list = "\n".join(headings)
+
+    covered = _extract_covered_names(existing_doc)
+    # Cap the covered names to avoid bloating the prompt
+    if len(covered) > 8000:
+        covered = covered[:8000] + " ..."
+
+    return (
+        "=== SECTION HEADINGS (existing document) ===\n"
+        f"{heading_list}\n\n"
+        "=== ALREADY COVERED (do not repeat these) ===\n"
+        f"{covered}\n\n"
+        "=== SOURCE FILES (not yet in the document) ===\n"
+        f"{file_batch}\n\n"
+        "Produce ONLY new entries to add to the sections listed above. "
+        "Do NOT reproduce the existing document. "
+        "ONLY reference names visible in the source files provided."
+    )
