@@ -22,6 +22,19 @@ SKIP_DIRS = frozenset({
     ".lean_ai_index", ".lean_ai_knowledge_index", ".lean_ai",
     "dist", "build", ".next", ".nuxt", "target",
     ".idea", ".vscode",
+    # Framework cache / generated / vendor directories
+    "storage",       # Laravel (compiled views, cache, logs, sessions)
+    "var",           # Symfony (cache, logs)
+    "tmp",           # General temp / CakePHP
+    "cache",         # Generic cache directories
+    ".cache",        # Generic hidden cache
+    "coverage",      # Test coverage reports
+    ".turbo",        # Turborepo cache
+    ".parcel-cache", # Parcel bundler cache
+    ".angular",      # Angular CLI cache
+    ".svelte-kit",   # SvelteKit generated
+    ".output",       # Nuxt 3 output
+    "vendor",        # PHP Composer / Go vendor / Ruby bundler
 })
 
 BINARY_EXTENSIONS = frozenset({
