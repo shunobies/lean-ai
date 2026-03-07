@@ -162,6 +162,44 @@ def _deduplicate_sections(doc: str) -> str:
     return "\n".join(result)
 
 
+def _deduplicate_subsections(doc: str) -> str:
+    """Remove duplicate ### sub-sections within each ## section.
+
+    If the same ### heading appears multiple times under the same
+    ## parent, only the first occurrence is kept.
+
+    No regex — uses simple string operations.
+    """
+    lines = doc.split("\n")
+    result: list[str] = []
+    # Track seen ### headings per current ## section
+    seen_h3: set[str] = set()
+    skipping_h3 = False
+
+    for line in lines:
+        if line.startswith("## "):
+            # New top-level section — reset h3 tracking
+            seen_h3 = set()
+            skipping_h3 = False
+            result.append(line)
+        elif line.startswith("### "):
+            heading = line.strip()
+            if heading in seen_h3:
+                skipping_h3 = True
+            else:
+                seen_h3.add(heading)
+                skipping_h3 = False
+                result.append(line)
+        elif skipping_h3:
+            # Skip content under a duplicate ### heading.
+            # Stop skipping when we hit a new ### or ## heading (handled above).
+            pass
+        else:
+            result.append(line)
+
+    return "\n".join(result)
+
+
 async def _generate_project_context_single_pass(
     repo_root: str,
     llm_client: "LLMClient",
@@ -455,6 +493,7 @@ async def _expand_project_context(
             if additions.strip():
                 prev_len = len(current_doc)
                 current_doc = _merge_additions(current_doc, additions)
+                current_doc = _deduplicate_subsections(current_doc)
                 added = len(current_doc) - prev_len
                 logger.info(
                     "expansion: round %d merged (+%d chars, total %d chars)",
@@ -514,6 +553,7 @@ async def generate_project_context(
         )
 
     content = _deduplicate_sections(content)
+    content = _deduplicate_subsections(content)
 
     # ── Additive expansion: process remaining source files ──
     if settings.enable_multi_round_context:

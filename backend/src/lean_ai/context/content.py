@@ -415,6 +415,15 @@ def _extract_covered_names(doc: str) -> str:
             seen.add(n)
             unique.append(n)
 
+    # Also extract ### sub-heading paths as covered context.
+    # Expansion rounds often re-describe files already covered under these headings.
+    for line in doc.split("\n"):
+        if line.startswith("### "):
+            heading_text = line[4:].strip()
+            if heading_text and heading_text not in seen:
+                seen.add(heading_text)
+                unique.append(heading_text)
+
     return ", ".join(unique)
 
 

@@ -8,7 +8,7 @@ from lean_ai.context.content import (
     _extract_section_headings,
     build_additive_expansion_prompt,
 )
-from lean_ai.context.generation import _merge_additions
+from lean_ai.context.generation import _deduplicate_subsections, _merge_additions
 
 # ---------------------------------------------------------------------------
 # _merge_additions
@@ -212,3 +212,86 @@ class TestBuildAdditiveExpansionPrompt:
         batch = "--- src/new.py ---\n```\nclass NewClass: pass\n```"
         prompt = build_additive_expansion_prompt(BASE_DOC, batch)
         assert "NewClass" in prompt
+
+
+# ---------------------------------------------------------------------------
+# _extract_covered_names — ### heading extraction
+# ---------------------------------------------------------------------------
+
+
+class TestExtractCoveredNamesHeadings:
+    def test_extracts_h3_headings(self):
+        doc = "## Module Map\n### app/Controllers/\n- Handles requests\n"
+        covered = _extract_covered_names(doc)
+        assert "app/Controllers/" in covered
+
+    def test_h3_deduplicated_with_backtick(self):
+        doc = "### src/models.py\n- `User` model\n### src/models.py\n- duplicate\n"
+        covered = _extract_covered_names(doc)
+        assert covered.count("src/models.py") == 1
+
+    def test_h3_with_backtick_heading(self):
+        doc = "## Key Abstractions\n### src/router.py\n- `Router` class\n"
+        covered = _extract_covered_names(doc)
+        # Both the backtick name and the h3 heading path should be present
+        assert "Router" in covered
+        assert "src/router.py" in covered
+
+
+# ---------------------------------------------------------------------------
+# _deduplicate_subsections
+# ---------------------------------------------------------------------------
+
+
+class TestDeduplicateSubsections:
+    def test_removes_duplicate_h3_within_section(self):
+        doc = (
+            "## Module Map\n"
+            "### app/Controllers/\n"
+            "- Handles requests\n"
+            "\n"
+            "### app/Models/\n"
+            "- Data models\n"
+            "\n"
+            "### app/Controllers/\n"
+            "- Duplicate entry\n"
+        )
+        result = _deduplicate_subsections(doc)
+        assert result.count("### app/Controllers/") == 1
+        assert "Handles requests" in result
+        assert "Duplicate entry" not in result
+        assert "### app/Models/" in result
+
+    def test_allows_same_h3_in_different_sections(self):
+        doc = (
+            "## Module Map\n"
+            "### app/Controllers/\n"
+            "- Overview\n"
+            "\n"
+            "## Key Abstractions\n"
+            "### app/Controllers/\n"
+            "- Detailed description\n"
+        )
+        result = _deduplicate_subsections(doc)
+        assert result.count("### app/Controllers/") == 2
+
+    def test_preserves_doc_without_duplicates(self):
+        doc = (
+            "## Module Map\n"
+            "### src/api/\n"
+            "- API handlers\n"
+            "\n"
+            "### src/models/\n"
+            "- Models\n"
+        )
+        result = _deduplicate_subsections(doc)
+        assert "### src/api/" in result
+        assert "### src/models/" in result
+
+    def test_empty_doc(self):
+        assert _deduplicate_subsections("") == ""
+
+    def test_no_subsections(self):
+        doc = "## Module Map\nSome content without subsections\n"
+        result = _deduplicate_subsections(doc)
+        assert result == doc

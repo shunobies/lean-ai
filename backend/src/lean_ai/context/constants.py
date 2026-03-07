@@ -192,7 +192,8 @@ architecture pattern. Reference the actual entry points and frameworks you see.
 For each major directory/module shown in the file tree:
 - What it is responsible for (based on the files you can see)
 - Key files and their actual roles
-- Important classes/functions defined there (use the CLASS AND FUNCTION INDEX)
+- List class/function names defined there but do NOT describe their internals — \
+save detailed descriptions for the Key Abstractions section
 
 ## Key Abstractions
 List the ACTUAL classes and important functions from the CLASS AND FUNCTION INDEX. \
