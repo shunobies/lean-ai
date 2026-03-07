@@ -541,6 +541,7 @@ def _build_deprecation_summary_prompt(deps: list[DetectedDependency]) -> str:
 async def generate_deprecation_section(
     repo_root: str,
     llm_client: LLMClient,
+    max_tokens: int = 2048,
 ) -> str:
     """Detect versions, search for deprecations, and return a Markdown section.
 
@@ -608,7 +609,7 @@ async def generate_deprecation_section(
                 {"role": "system", "content": _build_deprecation_summary_prompt(deps)},
                 {"role": "user", "content": combined_search[:20000]},
             ],
-            max_tokens=2048,
+            max_tokens=max_tokens,
         )
     except Exception as exc:
         logger.warning("Deprecation lookup: LLM summarization failed: %s", exc)

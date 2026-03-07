@@ -92,6 +92,23 @@ def _truncate_repetition(text: str, *, max_repeats: int = 5) -> str:
     return "\n".join(final_lines)
 
 
+def _appears_truncated(text: str) -> bool:
+    """Check if text appears to be truncated by a token limit.
+
+    Heuristic: if the text does not end with a complete line
+    (newline, period, or Markdown closing), it was likely cut off.
+
+    No regex — checks the last non-whitespace character.
+    """
+    stripped = text.rstrip()
+    if not stripped:
+        return False
+    last_char = stripped[-1]
+    # Normal endings: newline, period, backtick (code block end),
+    # dash (list item end), closing paren/bracket
+    return last_char not in ("\n", ".", "`", "-", ")", "]", "}")
+
+
 # Section headings that expansion rounds sometimes produce
 _EXPANSION_ARTIFACT_HEADINGS: frozenset[str] = frozenset({
     "## Additional Information from Additional Files",
@@ -223,6 +240,14 @@ async def _generate_project_context_single_pass(
         max_tokens=max_out,
     )
 
+    if _appears_truncated(content):
+        logger.warning(
+            "Single-pass context output appears truncated (%d chars). "
+            "Consider increasing LEAN_AI_OLLAMA_CONTEXT_WINDOW or "
+            "LEAN_AI_OLLAMA_MAX_TOKENS.",
+            len(content),
+        )
+
     return _truncate_repetition(content)
 
 
@@ -324,6 +349,12 @@ async def _generate_project_context_multi_round(
                 max_tokens=max_out,
         )
         updated_doc = _truncate_repetition(updated_doc)
+
+        if _appears_truncated(updated_doc):
+            logger.warning(
+                "Multi-round context output appears truncated (round %d, %d chars).",
+                round_num, len(updated_doc),
+            )
 
         if len(updated_doc) >= len(current_doc) // 2:
             current_doc = updated_doc
@@ -490,6 +521,12 @@ async def _expand_project_context(
             )
             additions = _truncate_repetition(additions)
 
+            if _appears_truncated(additions):
+                logger.warning(
+                    "Expansion round %d output appears truncated (%d chars).",
+                    round_num, len(additions),
+                )
+
             if additions.strip():
                 prev_len = len(current_doc)
                 current_doc = _merge_additions(current_doc, additions)
@@ -573,7 +610,10 @@ async def generate_project_context(
             from .deprecations import generate_deprecation_section
 
             deprecation_section = await asyncio.wait_for(
-                generate_deprecation_section(repo_root, llm_client),
+                generate_deprecation_section(
+                    repo_root, llm_client,
+                    max_tokens=min(4096, max_out // 2),
+                ),
                 timeout=120,
             )
             if deprecation_section:
