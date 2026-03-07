@@ -319,10 +319,14 @@ class LLMClient:
             if not tool_calls:
                 # Check if the model has performed any write operations yet
                 has_written = any(tc.tool_name in write_tools for tc in executed)
-                if not has_written and not nudged:
-                    # Model stopped before making changes — nudge it to continue
+                has_done_anything = len(executed) > 0
+                if not has_written and not has_done_anything and not nudged:
+                    # Model stopped on first turn without calling any tools —
+                    # nudge it once.  Skip the nudge if the model has already
+                    # executed tools (e.g. run_tests/run_lint steps that don't
+                    # involve file writes).
                     logger.info(
-                        "chat_with_tools: no writes yet, nudging model to continue"
+                        "chat_with_tools: no tool calls yet, nudging model to continue"
                     )
                     messages.append({"role": "assistant", "content": content})
                     messages.append({"role": "user", "content": nudge_msg})
@@ -418,17 +422,21 @@ class LLMClient:
 
         return executed, "\n".join(explanation_parts)
 
-    async def generate_completion(self, prompt: str, timeout: float = 5.0) -> str:
+    async def generate_completion(
+        self, prompt: str, suffix: str = "", timeout: float = 5.0,
+    ) -> str:
         """Raw text completion for inline predictions.
 
-        Uses /api/generate (not chat). Timeout prevents stale predictions
-        when GPU is busy with the main model.
+        Uses /api/generate (not chat). When *suffix* is provided, Ollama
+        uses Fill-in-the-Middle (FIM) mode for context-aware infilling.
+        Timeout prevents stale predictions when GPU is busy with the main model.
         """
         try:
             response = await asyncio.wait_for(
                 self._client.generate(
                     model=self._model,
                     prompt=prompt,
+                    suffix=suffix,
                     options={
                         "temperature": self._temperature,
                         "top_p": self._top_p,
