@@ -978,7 +978,9 @@ async def chat(request: ChatRequest):
 async def inline_predict(request: InlinePredictRequest):
     """Stateless inline prediction — Copilot-style completions."""
     try:
-        completion = await _inline_client.generate_completion(request.prefix)
+        completion = await _inline_client.generate_completion(
+            request.prefix, suffix=request.suffix,
+        )
         confidence = 0.8 if completion.strip() else 0.0
         return {"completion": completion, "confidence": confidence}
     except Exception as e:
