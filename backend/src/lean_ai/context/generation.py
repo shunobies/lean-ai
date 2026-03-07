@@ -557,3 +557,79 @@ def write_project_context(repo_root: str, content: str) -> str:
 
     logger.info("Project context written to %s", output_path)
     return str(output_path)
+
+
+async def update_project_context(
+    repo_root: str,
+    modified_paths: list[str],
+    llm_client: "LLMClient",
+) -> str | None:
+    """Incrementally update project_context.md with changes from modified files.
+
+    Reads the current document, feeds the modified files through one additive
+    expansion round, merges the result, and writes back.  Returns the output
+    path, or ``None`` if no update was possible.
+
+    Non-fatal — logs warnings on failure and returns ``None``.
+    """
+    from lean_ai.config import settings
+
+    ctx_path = Path(repo_root) / ".lean_ai" / "project_context.md"
+    if not ctx_path.is_file():
+        logger.info("update_project_context: no existing context file, skipping")
+        return None
+
+    existing_doc = ctx_path.read_text(encoding="utf-8")
+    if not existing_doc.strip():
+        return None
+
+    # Read modified files into a batch.
+    max_out = settings.ollama_max_tokens or settings.ollama_context_window // 4
+    caps = _scale_generation_caps(settings.ollama_context_window, max_out)
+    max_file = caps.get("max_file_chars", _MAX_FILE_CHARS)
+
+    root = Path(repo_root)
+    parts: list[str] = []
+    for rel_path in modified_paths:
+        full = root / rel_path
+        if not full.is_file():
+            continue
+        try:
+            content = full.read_text(encoding="utf-8")[:max_file]
+        except (UnicodeDecodeError, OSError):
+            continue
+        parts.append(f"--- {rel_path} ---\n```\n{content}\n```")
+
+    if not parts:
+        logger.info("update_project_context: no readable modified files, skipping")
+        return None
+
+    batch = "\n\n".join(parts)
+    logger.info(
+        "update_project_context: updating with %d modified file(s) (%d chars)",
+        len(parts), len(batch),
+    )
+
+    user_msg = build_additive_expansion_prompt(existing_doc, batch)
+    messages = [
+        {"role": "system", "content": _ADDITIVE_EXPANSION_PROMPT},
+        {"role": "user", "content": user_msg},
+    ]
+
+    additions = await llm_client.chat_raw(
+        messages=messages,
+        max_tokens=max_out,
+    )
+    additions = _truncate_repetition(additions)
+
+    if not additions.strip():
+        logger.info("update_project_context: LLM produced empty output, skipping")
+        return None
+
+    merged = _merge_additions(existing_doc, additions)
+    path = write_project_context(repo_root, merged)
+    logger.info(
+        "update_project_context: done (%d → %d chars)",
+        len(existing_doc), len(merged),
+    )
+    return path

@@ -365,6 +365,23 @@ async def _execute_plan(
             f".lean_ai/incomplete.md:\n{incomplete_content}"
         )
 
+    # ── Incremental project_context.md update ──
+    if files_modified:
+        try:
+            if settings.enable_project_context:
+                from lean_ai.context.generation import update_project_context
+
+                ctx_path = await update_project_context(
+                    repo_root, files_modified, llm_client,
+                )
+                if ctx_path:
+                    logger.info(
+                        "project_context.md updated with %d modified files",
+                        len(files_modified),
+                    )
+        except Exception as exc:
+            logger.warning("Incremental context update failed (non-fatal): %s", exc)
+
     complete_data: dict = {"summary": summary, "files_modified": files_modified}
     if branch_name:
         complete_data["plan_branch"] = branch_name
@@ -472,6 +489,24 @@ async def _run_fix(
         f"Fix complete: {len(executed)} tool calls. "
         f"Files modified: {', '.join(files_modified) if files_modified else 'none'}."
     )
+
+    # ── Incremental project_context.md update ──
+    if files_modified:
+        try:
+            if settings.enable_project_context:
+                from lean_ai.context.generation import update_project_context
+
+                ctx_path = await update_project_context(
+                    repo_root, files_modified, llm_client,
+                )
+                if ctx_path:
+                    logger.info(
+                        "project_context.md updated with %d modified files",
+                        len(files_modified),
+                    )
+        except Exception as exc:
+            logger.warning("Incremental context update failed (non-fatal): %s", exc)
+
     complete_data: dict = {"summary": summary, "files_modified": files_modified}
     if branch_name:
         complete_data["plan_branch"] = branch_name
