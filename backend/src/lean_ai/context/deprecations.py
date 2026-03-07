@@ -508,36 +508,30 @@ def _build_search_queries(deps: list[DetectedDependency]) -> list[str]:
 # LLM summarization prompt
 # ---------------------------------------------------------------------------
 
-_DEPRECATION_SUMMARY_PROMPT = """\
-Analyze the following web search results about software deprecations and produce \
-a concise, actionable deprecation guide.
-
-For each deprecated item, provide:
-1. The SPECIFIC function, method, class, or feature name that is deprecated
-2. What version deprecated it
-3. What to use INSTEAD (the recommended replacement)
-4. Brief migration note if applicable
-
-Format the output as Markdown. Group by framework/library. Use a bullet list for \
-each deprecated item. Example format:
-
-### Django 4.2
-- `django.utils.encoding.force_text()` — deprecated in 4.0, removed in 5.0. \
-Use `force_str()` instead.
-- `default_app_config` in AppConfig — deprecated in 3.2. Remove the line; \
-Django auto-discovers apps.
-
-### Python 3.12
-- `datetime.datetime.utcnow()` — deprecated. \
-Use `datetime.datetime.now(datetime.UTC)` instead.
-
-RULES:
-- Only list items that are actually deprecated — do not speculate
-- Be SPECIFIC: give exact function/class names, not vague descriptions
-- If the search results contain no deprecation information, say "No deprecations found"
-- Keep it concise — this will be injected into every LLM prompt as steering context
-- Maximum 1500 words total\
-"""
+def _build_deprecation_summary_prompt(deps: list[DetectedDependency]) -> str:
+    """Build the LLM summary prompt, scoped to the project's actual dependencies."""
+    dep_names = ", ".join(sorted({d.name for d in deps}))
+    return (
+        "Analyze the following web search results about software deprecations and "
+        "produce a concise, actionable deprecation guide.\n\n"
+        f"This project uses ONLY these technologies: {dep_names}\n"
+        "ONLY include deprecation warnings for the technologies listed above. "
+        "Ignore any information about frameworks or libraries NOT in that list.\n\n"
+        "For each deprecated item, provide:\n"
+        "1. The SPECIFIC function, method, class, or feature name that is deprecated\n"
+        "2. What version deprecated it\n"
+        "3. What to use INSTEAD (the recommended replacement)\n"
+        "4. Brief migration note if applicable\n\n"
+        "Format the output as Markdown. Group by framework/library. "
+        "Use a bullet list for each deprecated item.\n\n"
+        "RULES:\n"
+        f"- ONLY list deprecations for: {dep_names}\n"
+        "- Only list items that are actually deprecated — do not speculate\n"
+        "- Be SPECIFIC: give exact function/class names, not vague descriptions\n"
+        "- If the search results contain no deprecation information for the listed "
+        "technologies, say \"No deprecations found\"\n"
+        "- Keep it concise — maximum 1500 words total"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -611,7 +605,7 @@ async def generate_deprecation_section(
     try:
         summary = await llm_client.chat_raw(
             messages=[
-                {"role": "system", "content": _DEPRECATION_SUMMARY_PROMPT},
+                {"role": "system", "content": _build_deprecation_summary_prompt(deps)},
                 {"role": "user", "content": combined_search[:20000]},
             ],
             max_tokens=2048,
