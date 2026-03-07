@@ -342,6 +342,24 @@ async def generate_project_context(
 
     content = _deduplicate_sections(content)
 
+    # ── Deprecation lookup (post-generation append step) ──
+    if settings.enable_deprecation_lookup:
+        try:
+            import asyncio
+
+            from .deprecations import generate_deprecation_section
+
+            deprecation_section = await asyncio.wait_for(
+                generate_deprecation_section(repo_root, llm_client),
+                timeout=120,
+            )
+            if deprecation_section:
+                content += deprecation_section
+        except asyncio.TimeoutError:
+            logger.warning("Deprecation lookup timed out after 120s (non-fatal)")
+        except Exception as exc:
+            logger.warning("Deprecation lookup failed (non-fatal): %s", exc)
+
     logger.info("Project context generated: %d chars", len(content))
     return content
 

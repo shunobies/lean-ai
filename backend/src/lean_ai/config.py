@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     ollama_top_p: float = 0.8
     ollama_top_k: int = 20
     ollama_repeat_penalty: float = 1.05
-    ollama_context_window: int = 131072  # Single source of truth
+    ollama_context_window: int = 131072  # Single source of truth; 262144 for qwen3-coder-next
     ollama_max_tokens: int | None = None  # Derived: 25% of context window
 
     # ── Ollama — inline prediction model ──
@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     # ── Project context ──
     enable_project_context: bool = True
     enable_multi_round_context: bool = True
+    enable_deprecation_lookup: bool = True  # Web-search for deprecations after context gen
+    deprecation_max_searches: int = 5  # Max concurrent deprecation web searches
 
     # ── Knowledge base ──
     knowledge_dir: str = ".lean_ai/knowledge"
