@@ -148,7 +148,7 @@ Output format — group entries under matching ## headings:
 - `function_name()` — responsibility
 
 ## Integration Points
-- `new_module/file.py` imports `other_module/client.py` via `from other_module.client import Client`
+- `new_module/` → `other_module/` — imports client classes for API communication
 
 ## Data Flow
 - (Add numbered steps only if the new files reveal a path not yet described)
@@ -221,11 +221,14 @@ Based on patterns you observe in the provided code:
 - Configuration approach
 
 ## Integration Points
-Use the IMPORT GRAPH to list how modules connect. \
-For each connection, state:
-- The source module/file
-- The target module/file
-- The mechanism (import, HTTP call, subprocess, etc.)
+Use the IMPORT GRAPH to describe how modules connect at the DIRECTORY level. \
+Group imports by source directory → target directory. Do NOT list every individual \
+import statement — summarize by module/directory relationship. Example:
+- `app/Http/Controllers/` → `app/Models/` — controllers import model classes
+- `app/Services/` → `app/Repositories/` — services use repository interfaces
+
+Only list cross-module connections (different directories). Skip framework/stdlib \
+imports — only list project-internal connections.
 
 DO NOT invent integration points that are not visible in the IMPORT GRAPH.
 
