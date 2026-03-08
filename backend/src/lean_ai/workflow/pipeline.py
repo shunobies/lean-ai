@@ -23,7 +23,6 @@ from lean_ai.llm.prompts import FIX_SYSTEM_PROMPT, STEP_EXECUTION_SYSTEM_PROMPT
 from lean_ai.llm.tool_definitions import IMPLEMENTATION_TOOLS
 from lean_ai.tools import file_ops, scratchpad, shell
 from lean_ai.tools.command_safety import CommandRisk, check_command
-from lean_ai.tools.scratchpad import delete_scratchpad
 from lean_ai.workflow.ws_handler import safe_receive, ws_send
 
 if TYPE_CHECKING:
@@ -52,6 +51,7 @@ async def run_workflow(
     branch_name: str = "",
     conversation_logger: Callable | None = None,
     mode: str = "plan",
+    session_id: str = "",
 ) -> str:
     """Run a workflow. Supports two modes:
 
@@ -66,9 +66,6 @@ async def run_workflow(
     if conversation_logger:
         await conversation_logger("user", task)
 
-    # Clear any stale scratchpad from a previous/crashed session
-    delete_scratchpad(repo_root)
-
     if mode == "fix":
         return await _run_fix(
             task=task,
@@ -78,6 +75,7 @@ async def run_workflow(
             context=context,
             branch_name=branch_name,
             conversation_logger=conversation_logger,
+            session_id=session_id,
         )
 
     # ── Phase 1: Clarify (optional) ──────────────────────────────
@@ -114,6 +112,7 @@ async def run_workflow(
         context=context,
         branch_name=branch_name,
         conversation_logger=conversation_logger,
+        session_id=session_id,
     )
 
 
@@ -245,9 +244,10 @@ async def _execute_plan(
     context: str,
     branch_name: str,
     conversation_logger: Callable | None,
+    session_id: str = "",
 ) -> str:
     """Execute each plan step sequentially with a constrained LLM."""
-    tool_executor = _make_tool_executor(repo_root, ws)
+    tool_executor = _make_tool_executor(repo_root, ws, session_id)
     total_steps = len(plan.steps)
     all_executed = []
     completed_descriptions: list[str] = []
@@ -391,9 +391,6 @@ async def _execute_plan(
         len(plan.steps), len(all_executed), len(files_modified),
     )
 
-    # Clean up session-scoped scratchpad
-    delete_scratchpad(repo_root)
-
     # Build commit message
     task_summary = task[:72].replace("\n", " ")
     commit_msg = f"lean-ai: {task_summary}"
@@ -413,6 +410,7 @@ async def _run_fix(
     context: str,
     branch_name: str,
     conversation_logger: Callable | None,
+    session_id: str = "",
 ) -> str:
     """Execute a fix directly — no planning, no approval.
 
@@ -420,7 +418,7 @@ async def _run_fix(
     """
     await ws_send(ws, "stage_change", {"stage": "implementing"})
 
-    tool_executor = _make_tool_executor(repo_root, ws)
+    tool_executor = _make_tool_executor(repo_root, ws, session_id)
     system_prompt = _build_fix_system_prompt(context)
 
     # Callbacks for WebSocket progress + conversation logging
@@ -459,6 +457,18 @@ async def _run_fix(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": task},
     ]
+
+    # Inject existing scratchpad for session recovery (resume after crash)
+    if session_id:
+        existing_pad = scratchpad.read_scratchpad(repo_root, session_id)
+        if existing_pad:
+            messages.append({
+                "role": "user",
+                "content": (
+                    "[SCRATCHPAD FROM PREVIOUS EXECUTION — resume from here]\n"
+                    f"{existing_pad}"
+                ),
+            })
 
     executed, _explanation = await llm_client.chat_with_tools(
         messages=messages,
@@ -515,8 +525,6 @@ async def _run_fix(
         "Fix complete: %d tool calls, %d files",
         len(executed), len(files_modified),
     )
-
-    delete_scratchpad(repo_root)
 
     task_summary = task[:72].replace("\n", " ")
     commit_msg = f"lean-ai(fix): {task_summary}"
@@ -614,7 +622,7 @@ def _build_step_user_message(
 # ── Tool Executor ──────────────────────────────────────────────────
 
 
-def _make_tool_executor(repo_root: str, ws: WebSocket):
+def _make_tool_executor(repo_root: str, ws: WebSocket, session_id: str = ""):
     """Create a tool executor closure for the workflow."""
 
     async def execute(name: str, arguments: dict) -> str:
@@ -722,6 +730,7 @@ def _make_tool_executor(repo_root: str, ws: WebSocket):
             result = await scratchpad.update_scratchpad(
                 content=arguments["content"],
                 repo_root=repo_root,
+                session_id=session_id,
             )
             return result.output if result.success else f"ERROR: {result.error}"
 

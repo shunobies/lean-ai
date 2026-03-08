@@ -47,6 +47,14 @@ CREATE TABLE IF NOT EXISTS conversation_logs (
     tool_args TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS session_commits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    commit_sha TEXT NOT NULL,
+    message TEXT,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -72,6 +80,7 @@ async def _ensure_columns(db: aiosqlite.Connection) -> None:
         ("sessions", "branch_name", "TEXT"),
         ("sessions", "base_branch", "TEXT"),
         ("sessions", "stashed", "INTEGER NOT NULL DEFAULT 0"),
+        ("sessions", "merge_commit_sha", "TEXT"),
     ]
     for table, col, col_type in new_columns:
         try:
@@ -106,6 +115,7 @@ async def update_session(
     branch_name: str | None = None,
     base_branch: str | None = None,
     stashed: bool | None = None,
+    merge_commit_sha: str | None = None,
 ) -> None:
     """Update session fields."""
     parts: list[str] = []
@@ -116,7 +126,7 @@ async def update_session(
     if status is not None:
         parts.append("status = ?")
         values.append(status)
-        if status in ("completed", "failed"):
+        if status in ("merged", "abandoned"):
             parts.append("completed_at = ?")
             values.append(datetime.now(timezone.utc).isoformat())
     if branch_name is not None:
@@ -128,6 +138,9 @@ async def update_session(
     if stashed is not None:
         parts.append("stashed = ?")
         values.append(int(stashed))
+    if merge_commit_sha is not None:
+        parts.append("merge_commit_sha = ?")
+        values.append(merge_commit_sha)
     if not parts:
         return
     values.append(session_id)
@@ -146,7 +159,7 @@ def _format_session(row: dict) -> dict:
         "task_track": None,
         "base_branch": row.get("base_branch"),
         "plan_branch": row.get("branch_name"),
-        "merge_commit_sha": None,
+        "merge_commit_sha": row.get("merge_commit_sha"),
         "created_at": row.get("created_at", ""),
         "updated_at": row.get("completed_at") or row.get("created_at", ""),
     }
@@ -243,6 +256,116 @@ async def get_conversation_log(
     ]
 
 
+# ── Commit tracking ──
+
+
+async def log_commit(
+    db: aiosqlite.Connection,
+    session_id: str,
+    commit_sha: str,
+    message: str = "",
+) -> None:
+    """Record a commit SHA associated with a session."""
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO session_commits (session_id, commit_sha, message, created_at) "
+        "VALUES (?, ?, ?, ?)",
+        (session_id, commit_sha, message, now),
+    )
+    await db.commit()
+
+
+async def get_commits_for_session(
+    db: aiosqlite.Connection,
+    session_id: str,
+) -> list[dict]:
+    """List all commits associated with a session."""
+    cursor = await db.execute(
+        "SELECT commit_sha, message, created_at FROM session_commits "
+        "WHERE session_id = ? ORDER BY id ASC",
+        (session_id,),
+    )
+    rows = await cursor.fetchall()
+    return [
+        {"commit_sha": row[0], "message": row[1], "created_at": row[2]}
+        for row in rows
+    ]
+
+
+async def find_session_by_commit(
+    db: aiosqlite.Connection,
+    sha_prefix: str,
+) -> dict | None:
+    """Find the session that produced a commit (prefix match)."""
+    cursor = await db.execute(
+        "SELECT s.* FROM sessions s "
+        "JOIN session_commits sc ON s.id = sc.session_id "
+        "WHERE sc.commit_sha LIKE ? LIMIT 1",
+        (f"{sha_prefix}%",),
+    )
+    row = await cursor.fetchone()
+    return _format_session(dict(row)) if row else None
+
+
+# ── Session search ──
+
+
+async def search_sessions(
+    db: aiosqlite.Connection,
+    query: str = "",
+    commit_sha: str = "",
+) -> list[dict]:
+    """Search sessions by task text, plan content, conversation, or commit SHA."""
+    seen: set[str] = set()
+    results: list[dict] = []
+
+    if commit_sha:
+        cursor = await db.execute(
+            "SELECT s.* FROM sessions s "
+            "JOIN session_commits sc ON s.id = sc.session_id "
+            "WHERE sc.commit_sha LIKE ? ORDER BY s.created_at DESC LIMIT 10",
+            (f"{commit_sha}%",),
+        )
+        for row in await cursor.fetchall():
+            d = dict(row)
+            if d["id"] not in seen:
+                seen.add(d["id"])
+                results.append(_format_session(d))
+
+    if query:
+        q = f"%{query}%"
+        # Search task and plan fields
+        cursor = await db.execute(
+            "SELECT * FROM sessions WHERE task LIKE ? OR plan LIKE ? "
+            "ORDER BY created_at DESC LIMIT 20",
+            (q, q),
+        )
+        for row in await cursor.fetchall():
+            d = dict(row)
+            if d["id"] not in seen:
+                seen.add(d["id"])
+                results.append(_format_session(d))
+
+        # Search conversation logs
+        cursor = await db.execute(
+            "SELECT DISTINCT session_id FROM conversation_logs "
+            "WHERE content LIKE ? LIMIT 20",
+            (q,),
+        )
+        conv_session_ids = [row[0] for row in await cursor.fetchall()]
+        for sid in conv_session_ids:
+            if sid not in seen:
+                cursor2 = await db.execute(
+                    "SELECT * FROM sessions WHERE id = ?", (sid,),
+                )
+                row = await cursor2.fetchone()
+                if row:
+                    seen.add(sid)
+                    results.append(_format_session(dict(row)))
+
+    return results
+
+
 # ── Session deletion ──
 
 
@@ -251,6 +374,7 @@ async def delete_session(db: aiosqlite.Connection, session_id: str) -> bool:
     cursor = await db.execute("SELECT id FROM sessions WHERE id = ?", (session_id,))
     if not await cursor.fetchone():
         return False
+    await db.execute("DELETE FROM session_commits WHERE session_id = ?", (session_id,))
     await db.execute("DELETE FROM conversation_logs WHERE session_id = ?", (session_id,))
     await db.execute("DELETE FROM tool_logs WHERE session_id = ?", (session_id,))
     await db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))

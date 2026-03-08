@@ -355,6 +355,45 @@ export function getWebviewHtml(chatFontSize: number): string {
         margin-right: 4px;
     }
 
+    .tab-bar {
+        display: flex;
+        overflow-x: auto;
+        border-bottom: 1px solid var(--vscode-panel-border);
+        flex-shrink: 0;
+        gap: 0;
+        scrollbar-width: thin;
+        min-height: 0;
+    }
+    .tab-bar:empty { display: none; }
+    .tab-bar::-webkit-scrollbar { height: 3px; }
+    .tab {
+        padding: 5px 10px;
+        font-size: 11px;
+        cursor: pointer;
+        white-space: nowrap;
+        border-bottom: 2px solid transparent;
+        opacity: 0.6;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+        user-select: none;
+    }
+    .tab:hover { opacity: 0.85; }
+    .tab.active {
+        opacity: 1;
+        border-bottom-color: var(--vscode-focusBorder);
+    }
+    .tab .tab-close {
+        font-size: 12px;
+        opacity: 0.4;
+        cursor: pointer;
+        padding: 0 2px;
+        line-height: 1;
+    }
+    .tab .tab-close:hover { opacity: 1; }
+    .tab.read-only .tab-label { font-style: italic; }
+
     .input-area {
         padding: 8px 12px;
         border-top: 1px solid var(--vscode-panel-border);
@@ -417,6 +456,8 @@ export function getWebviewHtml(chatFontSize: number): string {
     </div>
 </div>
 
+<div class="tab-bar" id="tabBar"></div>
+
 <div class="search-bar" id="searchBar" style="display:none;">
     <input type="text" id="searchInput" placeholder="Search past conversations..." />
     <button class="search-clear-btn" id="searchClearBtn" title="Close search">&times;</button>
@@ -452,12 +493,117 @@ export function getWebviewHtml(chatFontSize: number): string {
     const searchBar = document.getElementById('searchBar');
     const searchInput = document.getElementById('searchInput');
     const searchClearBtn = document.getElementById('searchClearBtn');
+    const tabBar = document.getElementById('tabBar');
 
     let sending = false;
     let lastTimestamp = null;
     let searchMode = false;
     let savedMessagesHtml = null;
     let searchDebounceTimer = null;
+
+    // ── Tab management ──
+
+    const tabs = new Map(); // id -> { id, label, messagesHtml, readOnly }
+    let activeTabId = 'current';
+
+    // Initialize the default "Chat" tab (always present, not closeable)
+    tabs.set('current', { id: 'current', label: 'Chat', messagesHtml: null, readOnly: false });
+
+    function renderTabs() {
+        // Only show tab bar when there are session tabs (more than just "current")
+        if (tabs.size <= 1) {
+            tabBar.innerHTML = '';
+            return;
+        }
+        tabBar.innerHTML = '';
+        for (const [id, tab] of tabs) {
+            const el = document.createElement('div');
+            el.className = 'tab' + (id === activeTabId ? ' active' : '') + (tab.readOnly ? ' read-only' : '');
+            el.dataset.tabId = id;
+
+            const label = document.createElement('span');
+            label.className = 'tab-label';
+            label.textContent = tab.label;
+            el.appendChild(label);
+
+            if (id !== 'current') {
+                const closeBtn = document.createElement('span');
+                closeBtn.className = 'tab-close';
+                closeBtn.textContent = '\\u00d7';
+                closeBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    closeTab(id);
+                });
+                el.appendChild(closeBtn);
+            }
+
+            el.addEventListener('click', () => switchTab(id));
+            tabBar.appendChild(el);
+        }
+    }
+
+    function switchTab(tabId) {
+        if (tabId === activeTabId) return;
+        const currentTab = tabs.get(activeTabId);
+        if (currentTab) {
+            currentTab.messagesHtml = messagesEl.innerHTML;
+        }
+
+        activeTabId = tabId;
+        const targetTab = tabs.get(tabId);
+        if (targetTab && targetTab.messagesHtml !== null) {
+            messagesEl.innerHTML = targetTab.messagesHtml;
+        }
+
+        // Toggle input area based on readOnly
+        if (targetTab && targetTab.readOnly) {
+            inputEl.disabled = true;
+            sendBtn.disabled = true;
+            inputEl.placeholder = 'Session history (read-only)';
+        } else {
+            inputEl.disabled = false;
+            sendBtn.disabled = sending;
+            inputEl.placeholder = 'Ask a question or describe a task...';
+        }
+
+        renderTabs();
+    }
+
+    function openSessionTab(id, title, messagesHtml) {
+        if (tabs.has(id)) {
+            // Tab already open — just switch to it
+            switchTab(id);
+            return;
+        }
+        // Save current tab state
+        const currentTab = tabs.get(activeTabId);
+        if (currentTab) {
+            currentTab.messagesHtml = messagesEl.innerHTML;
+        }
+
+        // Create new read-only tab
+        const shortTitle = title.length > 20 ? title.slice(0, 20) + '...' : title;
+        tabs.set(id, { id, label: shortTitle, messagesHtml: messagesHtml, readOnly: true });
+        activeTabId = id;
+        messagesEl.innerHTML = messagesHtml;
+
+        // Disable input
+        inputEl.disabled = true;
+        sendBtn.disabled = true;
+        inputEl.placeholder = 'Session history (read-only)';
+
+        renderTabs();
+        messagesEl.scrollTop = 0;
+    }
+
+    function closeTab(tabId) {
+        tabs.delete(tabId);
+        if (activeTabId === tabId) {
+            switchTab('current');
+        }
+        renderTabs();
+        vscode.postMessage({ type: 'closeTab', tabId });
+    }
 
     // ── Timestamp helpers ──
 
@@ -829,6 +975,29 @@ export function getWebviewHtml(chatFontSize: number): string {
                     messagesEl.appendChild(div);
                 }
                 messagesEl.scrollTop = 0;
+                break;
+            }
+
+            case 'openSessionTab': {
+                // Build HTML from messages array
+                let tabHtml = '';
+                const tabTitle = msg.title || 'Session';
+                tabHtml += '<div class="msg msg-system">Session: ' + escapeHtml(tabTitle) + '</div>';
+                const tabMessages = msg.messages || [];
+                for (const m of tabMessages) {
+                    if (m.timestamp) {
+                        addTimestampDivider(new Date(m.timestamp));
+                    }
+                    const cls = m.role === 'user' ? 'msg-user' :
+                                m.role === 'assistant' ? 'msg-ai' :
+                                m.role === 'tool_call' ? 'msg-system' :
+                                m.role === 'tool_result' ? 'msg-system' : 'msg-system';
+                    const div = document.createElement('div');
+                    div.className = 'msg ' + cls;
+                    div.innerHTML = m.role === 'user' ? escapeHtml(m.content) : formatMarkdown(m.content);
+                    tabHtml += div.outerHTML;
+                }
+                openSessionTab(msg.tabId || ('session-' + msg.sessionId), tabTitle, tabHtml);
                 break;
             }
 

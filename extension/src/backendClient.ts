@@ -287,16 +287,36 @@ export class BackendClient {
         return resp.json() as Promise<FileTouchSummary[]>;
     }
 
-    async resumeSession(sessionId: string, checkpointId: string): Promise<Record<string, unknown>> {
+    async resumeSession(sessionId: string, repoRoot: string): Promise<{
+        status: string;
+        session_id: string;
+        branch_name: string;
+        scratchpad_exists: boolean;
+    }> {
         const resp = await fetch(`${this.baseUrl}/api/sessions/${sessionId}/resume`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ checkpoint_id: checkpointId }),
+            body: JSON.stringify({ repo_root: repoRoot }),
         });
         if (!resp.ok) {
-            throw new Error(`Failed to resume session: ${resp.statusText}`);
+            const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
+            throw new Error(err.detail ?? resp.statusText);
         }
-        return resp.json() as Promise<Record<string, unknown>>;
+        return resp.json() as Promise<{
+            status: string;
+            session_id: string;
+            branch_name: string;
+            scratchpad_exists: boolean;
+        }>;
+    }
+
+    async searchSessions(repoRoot: string, query: string): Promise<SessionSummary[]> {
+        const params = new URLSearchParams({ repo_root: repoRoot, q: query });
+        const resp = await fetch(`${this.baseUrl}/api/sessions/search?${params}`);
+        if (!resp.ok) {
+            throw new Error(`Failed to search sessions: ${resp.statusText}`);
+        }
+        return resp.json() as Promise<SessionSummary[]>;
     }
 
     async mergeSession(sessionId: string, repoRoot: string): Promise<Record<string, unknown>> {

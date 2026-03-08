@@ -266,7 +266,8 @@ function formatSessionTooltip(session: SessionSummary): string {
 function getSessionIcon(status: string): vscode.ThemeIcon {
     switch (status) {
         case "active": return new vscode.ThemeIcon("play-circle", new vscode.ThemeColor("charts.green"));
-        case "completed": return new vscode.ThemeIcon("pass-filled", new vscode.ThemeColor("testing.iconPassed"));
+        case "completed": return new vscode.ThemeIcon("question", new vscode.ThemeColor("charts.yellow"));
+        case "failed": return new vscode.ThemeIcon("error", new vscode.ThemeColor("testing.iconFailed"));
         case "abandoned": return new vscode.ThemeIcon("circle-slash", new vscode.ThemeColor("charts.red"));
         case "merged": return new vscode.ThemeIcon("git-merge", new vscode.ThemeColor("charts.blue"));
         default: return new vscode.ThemeIcon("circle-outline");

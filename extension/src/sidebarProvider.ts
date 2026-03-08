@@ -69,6 +69,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         this.slashCommands.set("/reboot",   (args) => this.handleRebootCommand(args));
         this.slashCommands.set("/approve",  (args) => this.handleApproveCommand(args));
         this.slashCommands.set("/reject",   (args) => this.handleRejectCommand(args));
+        this.slashCommands.set("/resume",   (args) => this.handleResumeCommand(args));
     }
 
     resolveWebviewView(
@@ -816,6 +817,68 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    // ── Slash command: /resume — resume a previous session ────────────
+
+    private async handleResumeCommand(args: string): Promise<void> {
+        // Determine which session to resume
+        const sessionId = args.trim() || this.lastCompletedSessionId;
+        if (!sessionId) {
+            this.postMessage({
+                type: "error",
+                text: "Usage: `/resume [session_id]`\nResumes a previous session from where it left off.\n\nOmit session_id to resume the last completed session.",
+            });
+            return;
+        }
+
+        // Guard: don't start a second workflow over an active WebSocket
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.postMessage({
+                type: "error",
+                text: "An agent workflow is already running. Wait for it to complete, or start a new chat first.",
+            });
+            return;
+        }
+
+        this.postMessage({ type: "thinking", show: true, text: "Preparing session resume..." });
+
+        try {
+            const repoRoot = this.getRepoRoot();
+
+            // Call the resume REST endpoint (validates state, switches git branch)
+            const result = await this.client.resumeSession(sessionId, repoRoot);
+
+            this.postMessage({ type: "thinking", show: false });
+            this.postMessage({
+                type: "reply",
+                text: `Resuming session \`${sessionId}\` on branch \`${result.branch_name || "unknown"}\`${result.scratchpad_exists ? " (scratchpad found)" : ""}...`,
+                cls: "msg-system",
+            });
+
+            // Set this as the active session
+            this.sessionId = sessionId;
+            this.lastCompletedSessionId = sessionId;
+            this.context.globalState.update("lean-ai.lastCompletedSessionId", sessionId);
+
+            // Open WebSocket and send resume message
+            const ws = this.ensureWebSocket(sessionId);
+
+            if (ws.readyState === WebSocket.CONNECTING) {
+                await new Promise<void>((resolve, reject) => {
+                    const onOpen = () => { ws.removeListener("error", onError); resolve(); };
+                    const onError = (err: Error) => { ws.removeListener("open", onOpen); reject(err); };
+                    ws.once("open", onOpen);
+                    ws.once("error", onError);
+                });
+            }
+
+            ws.send(JSON.stringify({ type: "resume", repo_root: repoRoot }));
+        } catch (e) {
+            this.postMessage({ type: "thinking", show: false });
+            const error = e instanceof Error ? e.message : String(e);
+            this.postMessage({ type: "error", text: `Resume failed: ${error}` });
+        }
+    }
+
     // ── Agent mode: full WebSocket FSM workflow ──────────────────────
 
     private async handleAgentMessage(text: string): Promise<void> {
@@ -913,13 +976,14 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
 
     // ── Search handlers ─────────────────────────────────────────────
 
-    private handleSearchConversations(query: string): void {
+    private async handleSearchConversations(query: string): Promise<void> {
         const q = (query || "").toLowerCase().trim();
         if (!q) {
             this.postMessage({ type: "searchResults", results: [] });
             return;
         }
 
+        // Search local chat conversations
         const conversations = this.loadConversations();
         const results: Array<{
             id: string;
@@ -927,6 +991,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             createdAt: string;
             matchSnippet: string;
             matchRole: string;
+            source: string;
         }> = [];
 
         for (const conv of conversations) {
@@ -949,10 +1014,32 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                         createdAt: conv.createdAt,
                         matchSnippet: snippet,
                         matchRole: m.role,
+                        source: "chat",
                     });
                     break; // One result per conversation
                 }
             }
+        }
+
+        // Search backend sessions (task text, plan, conversation logs, commits)
+        try {
+            const repoRoot = this.getRepoRoot();
+            const sessionResults = await this.client.searchSessions(repoRoot, query);
+            for (const s of sessionResults) {
+                // Avoid duplicates if already in chat results
+                if (!results.some(r => r.id === `session-${s.session_id}`)) {
+                    results.push({
+                        id: `session-${s.session_id}`,
+                        title: s.title || `Session ${s.session_id.slice(0, 8)}`,
+                        createdAt: s.created_at,
+                        matchSnippet: `[${s.session_status}] ${s.title || ""}`,
+                        matchRole: "session",
+                        source: "session",
+                    });
+                }
+            }
+        } catch {
+            // Backend search failure is non-fatal — local results still shown
         }
 
         results.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -960,11 +1047,24 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     }
 
     private handleLoadConversation(convId: string): void {
+        // Handle session search results (id starts with "session-")
+        if (convId.startsWith("session-")) {
+            const sessionId = convId.replace("session-", "");
+            this.loadSessionConversation(sessionId);
+            return;
+        }
+
         const conversations = this.loadConversations();
         const conv = conversations.find((c) => c.id === convId);
         if (conv) {
-            this.viewingHistoricConversation = true;
-            this.postMessage({ type: "showConversation", conversation: conv });
+            // Open chat conversations as read-only tabs too
+            this.postMessage({
+                type: "openSessionTab",
+                sessionId: convId,
+                tabId: `chat-${convId}`,
+                title: conv.title,
+                messages: conv.messages,
+            });
         }
     }
 
@@ -990,77 +1090,57 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             const title = sessionInfo?.title
                 || `Session ${sessionId.slice(0, 8)}`;
 
-            // Handle empty conversation logs (sessions created before logging was added)
+            // Map conversation log entries to message format for the tab
+            let messages: Array<{ role: string; content: string; timestamp: string }>;
+
             if (!convLog.entries || convLog.entries.length === 0) {
                 const taskDesc = sessionInfo?.task_track || null;
-                const fallbackMessages = [{
-                    role: "system" as const,
+                messages = [{
+                    role: "system",
                     content: taskDesc
                         ? `**Task:** ${taskDesc}\n\nNo conversation log available — this session was created before conversation logging was enabled.`
                         : "No conversation log available for this session.\n\nConversation logging was added after this session was created. New sessions will have full chain-of-thought logs.",
                     timestamp: sessionInfo?.created_at || new Date().toISOString(),
                 }];
+            } else {
+                messages = convLog.entries.map((entry) => {
+                    let role: string;
+                    let content: string;
 
-                const conversation: StoredConversation = {
-                    id: `session-${sessionId}`,
-                    title,
-                    messages: fallbackMessages,
-                    createdAt: sessionInfo?.created_at || new Date().toISOString(),
-                    updatedAt: sessionInfo?.updated_at || new Date().toISOString(),
-                    repoRoot,
-                };
+                    switch (entry.role) {
+                        case "user":
+                            role = "user";
+                            content = entry.content;
+                            break;
+                        case "assistant":
+                            role = "assistant";
+                            content = entry.content;
+                            break;
+                        case "tool_call":
+                            role = "system";
+                            content = `**${entry.tool_name || "tool"}**\n${entry.content}`;
+                            break;
+                        case "tool_result":
+                            role = "system";
+                            content = `**${entry.tool_name || "tool"} result**\n${entry.content.slice(0, 2000)}`;
+                            break;
+                        default:
+                            role = "system";
+                            content = entry.content;
+                    }
 
-                this.viewingHistoricConversation = true;
-                this.postMessage({ type: "showConversation", conversation });
-                vscode.commands.executeCommand("lean-ai.chatView.focus");
-                return;
+                    return { role, content, timestamp: entry.created_at };
+                });
             }
 
-            // Map conversation log entries to StoredConversation format
-            const messages = convLog.entries.map((entry) => {
-                let role: string;
-                let content: string;
-
-                switch (entry.role) {
-                    case "user":
-                        role = "user";
-                        content = entry.content;
-                        break;
-                    case "assistant":
-                        role = "assistant";
-                        content = entry.content;
-                        break;
-                    case "tool_call":
-                        role = "system";
-                        content = `🔧 **${entry.tool_name || "tool"}**\n${entry.content}`;
-                        break;
-                    case "tool_result":
-                        role = "system";
-                        content = `📋 **${entry.tool_name || "tool"} result**\n${entry.content.slice(0, 2000)}`;
-                        break;
-                    default:
-                        role = "system";
-                        content = entry.content;
-                }
-
-                return {
-                    role,
-                    content,
-                    timestamp: entry.created_at,
-                };
-            });
-
-            const conversation: StoredConversation = {
-                id: `session-${sessionId}`,
+            // Open as a read-only tab
+            this.postMessage({
+                type: "openSessionTab",
+                sessionId,
+                tabId: `session-${sessionId}`,
                 title,
                 messages,
-                createdAt: messages[0]?.timestamp || new Date().toISOString(),
-                updatedAt: messages[messages.length - 1]?.timestamp || new Date().toISOString(),
-                repoRoot,
-            };
-
-            this.viewingHistoricConversation = true;
-            this.postMessage({ type: "showConversation", conversation });
+            });
 
             // Focus the chat panel
             vscode.commands.executeCommand("lean-ai.chatView.focus");

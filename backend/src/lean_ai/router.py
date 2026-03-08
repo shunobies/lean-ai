@@ -23,7 +23,9 @@ from lean_ai.db import (
     get_session,
     get_session_raw,
     list_sessions,
+    log_commit,
     log_conversation_entry,
+    search_sessions as db_search_sessions,
     update_session,
 )
 from lean_ai.indexer.indexer import (
@@ -421,6 +423,76 @@ async def list_git_events(session_id: str):
     return []
 
 
+# ── Session Search ──
+
+
+@router.get("/sessions/search")
+async def search_sessions_endpoint(repo_root: str, q: str = "", commit: str = ""):
+    """Search sessions by task text, plan content, conversation, or commit SHA."""
+    if not q and not commit:
+        return []
+    db = await get_db(repo_root)
+    try:
+        return await db_search_sessions(db, query=q, commit_sha=commit)
+    finally:
+        await db.close()
+
+
+# ── Session Resume ──
+
+
+class ResumeSessionRequest(BaseModel):
+    repo_root: str
+
+
+@router.post("/sessions/{session_id}/resume")
+async def resume_session(session_id: str, request: ResumeSessionRequest):
+    """Prepare a session for resumption. Validates state and switches git branch."""
+    repo_root = request.repo_root
+    db = await get_db(repo_root)
+    try:
+        session = await get_session_raw(db, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        status = session.get("status")
+        if status not in ("active", "completed", "failed"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Session in status '{status}' cannot be resumed",
+            )
+
+        branch_name = session.get("branch_name")
+        if branch_name:
+            # Stash current changes, switch to the session's branch
+            stashed = await git_stash_push(repo_root)
+            co_result = await git_checkout(branch_name, repo_root)
+            if not co_result.success:
+                if stashed:
+                    await git_stash_pop(repo_root)
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to checkout {branch_name}: {co_result.error}",
+                )
+            if stashed:
+                await update_session(db, session_id, stashed=True)
+
+        # Reset status to active for resumption
+        await update_session(db, session_id, status="active")
+
+        from lean_ai.tools.scratchpad import scratchpad_path
+        pad_exists = scratchpad_path(repo_root, session_id).is_file()
+
+        return {
+            "status": "ready",
+            "session_id": session_id,
+            "branch_name": branch_name,
+            "scratchpad_exists": pad_exists,
+        }
+    finally:
+        await db.close()
+
+
 # ── WebSocket Workflow ──
 
 
@@ -542,6 +614,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                 branch_name=branch_name,
                                 conversation_logger=_log_conversation,
                                 mode=mode,
+                                session_id=session_id,
                             )
 
                             # --- Auto-commit agent changes ---
@@ -554,6 +627,13 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                         "Auto-committed agent changes on %s",
                                         branch_name,
                                     )
+                                    # Log the commit SHA for session correlation
+                                    sha_result = await git_current_sha(repo_root)
+                                    if sha_result.success:
+                                        sha = sha_result.output.strip()
+                                        await log_commit(
+                                            db, session_id, sha, commit_msg,
+                                        )
 
                             await update_session(db, session_id, status="completed")
                         else:
@@ -568,6 +648,108 @@ async def session_stream(websocket: WebSocket, session_id: str):
                     raise
                 except Exception as e:
                     logger.exception("Workflow error for session %s", session_id)
+                    try:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e),
+                            "recoverable": True,
+                        })
+                    except Exception:
+                        pass
+
+            elif msg_type == "resume":
+                repo_root = data.get("repo_root", "")
+                if not repo_root:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "repo_root is required",
+                        "recoverable": True,
+                    })
+                    continue
+
+                try:
+                    db = await get_db(repo_root)
+                    try:
+                        session = await get_session_raw(db, session_id)
+                        if not session:
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": f"Session {session_id} not found",
+                                "recoverable": False,
+                            })
+                            continue
+
+                        # Branch already checked out by POST /resume endpoint
+                        branch_name = session.get("branch_name", "")
+
+                        # Load project context
+                        context_path = Path(repo_root) / ".lean_ai" / "project_context.md"
+                        context = ""
+                        if context_path.is_file():
+                            context = context_path.read_text(encoding="utf-8", errors="replace")
+
+                        # Conversation logger
+                        async def _log_conversation_resume(
+                            role: str,
+                            log_content: str,
+                            tool_name: str | None = None,
+                            tool_args: str | None = None,
+                        ) -> None:
+                            try:
+                                await log_conversation_entry(
+                                    db, session_id, role, log_content,
+                                    tool_name=tool_name, tool_args=tool_args,
+                                )
+                            except Exception:
+                                logger.debug("Failed to log conversation entry", exc_info=True)
+
+                        # Build resume task from original task + scratchpad
+                        from lean_ai.tools.scratchpad import read_scratchpad
+                        original_task = session.get("task", "")
+                        pad_content = read_scratchpad(repo_root, session_id)
+
+                        if pad_content:
+                            resume_task = (
+                                f"ORIGINAL TASK:\n{original_task}\n\n"
+                                f"SESSION SCRATCHPAD (resume from here):\n{pad_content}\n\n"
+                                "Continue where you left off. Do NOT redo completed work."
+                            )
+                        else:
+                            resume_task = original_task
+
+                        # Resume in fix mode (direct tool calling, no re-planning)
+                        commit_msg = await run_workflow(
+                            task=resume_task,
+                            repo_root=repo_root,
+                            ws=websocket,
+                            llm_client=llm_client,
+                            context=context,
+                            branch_name=branch_name,
+                            conversation_logger=_log_conversation_resume,
+                            mode="fix",
+                            session_id=session_id,
+                        )
+
+                        # Auto-commit
+                        if branch_name:
+                            commit_result = await git_add_and_commit(
+                                commit_msg, repo_root,
+                            )
+                            if commit_result.success:
+                                sha_result = await git_current_sha(repo_root)
+                                if sha_result.success:
+                                    sha = sha_result.output.strip()
+                                    await log_commit(
+                                        db, session_id, sha, commit_msg,
+                                    )
+
+                        await update_session(db, session_id, status="completed")
+                    finally:
+                        await db.close()
+                except WebSocketDisconnect:
+                    raise
+                except Exception as e:
+                    logger.exception("Resume error for session %s", session_id)
                     try:
                         await websocket.send_json({
                             "type": "error",
@@ -600,6 +782,13 @@ async def merge_session(session_id: str, repo_root: str):
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
 
+        status = session.get("status")
+        if status not in ("completed",):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Session in status '{status}' cannot be merged (must be 'completed')",
+            )
+
         branch_name = session.get("branch_name")
         base_branch = session.get("base_branch")
         stashed = bool(session.get("stashed", 0))
@@ -631,7 +820,17 @@ async def merge_session(session_id: str, repo_root: str):
         sha_result = await git_current_sha(repo_root)
         merge_sha = sha_result.output.strip() if sha_result.success else ""
 
-        await update_session(db, session_id, status="merged")
+        # Log the merge commit for session correlation
+        if merge_sha:
+            await log_commit(db, session_id, merge_sha, f"merge: {branch_name}")
+
+        # Clean up per-session scratchpad
+        from lean_ai.tools.scratchpad import delete_scratchpad
+        delete_scratchpad(repo_root, session_id)
+
+        await update_session(
+            db, session_id, status="merged", merge_commit_sha=merge_sha,
+        )
 
         return {
             "status": "merged",
@@ -650,6 +849,13 @@ async def abandon_session(session_id: str, repo_root: str):
         session = await get_session_raw(db, session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
+
+        status = session.get("status")
+        if status in ("merged", "abandoned"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Session already closed (status: '{status}')",
+            )
 
         branch_name = session.get("branch_name")
         base_branch = session.get("base_branch")
@@ -673,6 +879,10 @@ async def abandon_session(session_id: str, repo_root: str):
         if stashed:
             await git_stash_pop(repo_root)
 
+        # Clean up per-session scratchpad
+        from lean_ai.tools.scratchpad import delete_scratchpad
+        delete_scratchpad(repo_root, session_id)
+
         await update_session(db, session_id, status="abandoned")
 
         return {"status": "abandoned", "branch_deleted": True}
@@ -692,6 +902,7 @@ async def init_workspace(request: InitWorkspaceRequest):
     """
     _gitignore_entries = [
         ".lean_ai/",
+        ".lean_ai/scratchpads/",
         f"{settings.index_dir}/",
         f"{settings.knowledge_index_dir}/",
     ]
