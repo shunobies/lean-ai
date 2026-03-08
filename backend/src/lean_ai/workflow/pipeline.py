@@ -250,6 +250,7 @@ async def _execute_plan(
     tool_executor = _make_tool_executor(repo_root, ws, session_id)
     total_steps = len(plan.steps)
     all_executed = []
+    step_explanations: list[str] = []
     completed_descriptions: list[str] = []
 
     # Build the system prompt once (shared across all steps)
@@ -325,6 +326,10 @@ async def _execute_plan(
         )
 
         all_executed.extend(executed)
+        if explanation.strip():
+            step_explanations.append(
+                f"Step {step.step_number}: {explanation.strip()}"
+            )
         completed_descriptions.append(
             f"Step {step.step_number}: {step.instruction[:100]}"
         )
@@ -359,6 +364,8 @@ async def _execute_plan(
         f"{len(all_executed)} tool calls. "
         f"Files modified: {', '.join(files_modified) if files_modified else 'none'}."
     )
+    if step_explanations:
+        summary += "\n\n" + "\n".join(step_explanations)
     if incomplete_content:
         summary += (
             "\n\n⚠️ Some steps had issues — see "
@@ -470,7 +477,7 @@ async def _run_fix(
                 ),
             })
 
-    executed, _explanation = await llm_client.chat_with_tools(
+    executed, explanation = await llm_client.chat_with_tools(
         messages=messages,
         tools=IMPLEMENTATION_TOOLS,
         tool_executor_fn=tool_executor,
@@ -499,6 +506,8 @@ async def _run_fix(
         f"Fix complete: {len(executed)} tool calls. "
         f"Files modified: {', '.join(files_modified) if files_modified else 'none'}."
     )
+    if explanation.strip():
+        summary += f"\n\n{explanation.strip()}"
 
     # ── Incremental project_context.md update ──
     if files_modified:
