@@ -127,6 +127,7 @@ LEAN_AI_ENABLE_EMBEDDINGS=true
 | `LEAN_AI_ENABLE_MULTI_ROUND_CONTEXT` | `true` | Use multi-round LLM calls for richer context generation |
 | `LEAN_AI_ENABLE_DEPRECATION_LOOKUP` | `true` | Web-search for deprecations after context generation |
 | `LEAN_AI_DEPRECATION_MAX_SEARCHES` | `5` | Max concurrent deprecation web searches |
+| `LEAN_AI_ENABLE_FRAMEWORK_GUIDE` | `true` | Auto-generate `.lean_ai/framework_guide.md` for detected frameworks (Laravel, Django, Rails, etc.) |
 
 #### Knowledge Base
 
@@ -273,6 +274,7 @@ All under the `/api` prefix.
 |---|---|---|
 | `POST` | `/init-workspace` | Index workspace, generate embeddings, index knowledge base |
 | `POST` | `/generate-project-context` | Regenerate `.lean_ai/project_context.md` |
+| `POST` | `/generate-framework-guide` | Regenerate `.lean_ai/framework_guide.md` for the detected framework |
 | `POST` | `/index-knowledge` | Index knowledge documents |
 
 ### Chat & Predictions
@@ -327,7 +329,7 @@ lean_ai/
 │       │   └── internet.py    # Web search + URL fetching
 │       ├── languages/         # 13 tree-sitter language definitions (YAML)
 │       ├── indexer/           # Whoosh BM25F search + embedding store
-│       ├── context/           # Project context generation
+│       ├── context/           # Project context + framework guide generation
 │       ├── knowledge/         # Domain document indexing
 │       ├── workflow/
 │       │   ├── pipeline.py    # Plan + fix workflows

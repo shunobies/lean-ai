@@ -46,7 +46,7 @@ cd extension && npm install && npm run build
 
 6. **Indexer** (`indexer/`) — Gitignore-aware tree listing. Tree-sitter AST-aware code chunking. Whoosh BM25F search. Embedding store with RRF re-ranking. SHA-256 manifest for incremental updates.
 
-7. **Context Generation** (`context/`) — Generates `.lean_ai/project_context.md` via single-pass or multi-round LLM calls. Tree-sitter metadata extraction with disk cache. Auto-scaling size caps proportional to context window.
+7. **Context Generation** (`context/`) — Generates `.lean_ai/project_context.md` via single-pass or multi-round LLM calls. Tree-sitter metadata extraction with disk cache. Auto-scaling size caps proportional to context window. Optional framework guide generation (`.lean_ai/framework_guide.md`) — detects frameworks from dependency files, web-searches for best practices, and LLM-generates an architecture/conventions guide covering component relationships, CLI commands, and patterns.
 
 8. **Language Registry** (`languages/`) — 13 language definitions in YAML. Tree-sitter AST parsing (no regex patterns). Generic extraction engine for classes, functions, imports.
 
@@ -102,6 +102,7 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_KNOWLEDGE_DIR` | `.lean_ai/knowledge` | Knowledge documents directory |
 | `LEAN_AI_ENABLE_DEPRECATION_LOOKUP` | `true` | Web-search for deprecations after context generation |
 | `LEAN_AI_DEPRECATION_MAX_SEARCHES` | `5` | Max concurrent deprecation web searches |
+| `LEAN_AI_ENABLE_FRAMEWORK_GUIDE` | `true` | Generate `.lean_ai/framework_guide.md` for detected frameworks |
 | `LEAN_AI_IMPLEMENTATION_MAX_TURNS` | `0` | Max tool-calling turns per session (`0` = unlimited) |
 | `LEAN_AI_IMPLEMENTATION_MAX_TOKENS` | *(derived: 25% of context window)* | Max tokens per LLM turn |
 | `LEAN_AI_PORT` | `8422` | Server port |
@@ -120,6 +121,7 @@ All under `/api` prefix:
 - `GET /sessions/{id}` — session detail
 - `POST /init-workspace` — index workspace + generate project context
 - `POST /generate-project-context` — regenerate context
+- `POST /generate-framework-guide` — regenerate framework guide
 - `POST /index-knowledge` — index knowledge docs
 - `POST /chat` — lightweight conversational endpoint (no tools, read-only)
 - `POST /predict` — inline predictions
