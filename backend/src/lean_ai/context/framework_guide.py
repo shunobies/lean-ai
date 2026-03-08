@@ -64,33 +64,227 @@ def _get_project_paths(repo_root: str) -> set[str]:
     return {e.path for e in list_repo_tree(repo_root)}
 
 
+def _check_invalid_paths(
+    text: str,
+    project_paths: set[str],
+    project_top_dirs: set[str],
+) -> set[str]:
+    """Return referenced file paths that don't exist in the project."""
+    referenced = _extract_file_paths(text)
+    invalid: set[str] = set()
+    for path in referenced:
+        top_dir = path.split("/")[0]
+        if top_dir in project_top_dirs and path not in project_paths:
+            invalid.add(path)
+    return invalid
+
+
+def _find_block_boundaries(
+    lines: list[str],
+    path: str,
+) -> list[tuple[int, int]]:
+    """Find line ranges of Markdown blocks that reference *path*.
+
+    Returns ``(start_inclusive, end_exclusive)`` tuples.  A "block" is
+    a fenced code block, a list item, or a contiguous paragraph.
+    """
+    blocks: list[tuple[int, int]] = []
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].lstrip()
+        # ── Fenced code block ──
+        if stripped.startswith("```"):
+            fence_start = i
+            fence_has_path = path in lines[i]
+            i += 1
+            while i < len(lines):
+                if path in lines[i]:
+                    fence_has_path = True
+                if lines[i].lstrip().startswith("```"):
+                    i += 1
+                    break
+                i += 1
+            if fence_has_path:
+                blocks.append((fence_start, i))
+            continue
+        # ── Check if this line references the path ──
+        if path not in lines[i]:
+            i += 1
+            continue
+        # ── List item ──
+        if stripped.startswith(("- ", "* ")) or (
+            stripped[:1].isdigit() and ". " in stripped[:4]
+        ):
+            block_start = i
+            i += 1
+            while i < len(lines):
+                s = lines[i].lstrip()
+                if not lines[i].strip():
+                    break
+                if s.startswith(("- ", "* ")) or (
+                    s[:1].isdigit() and ". " in s[:4]
+                ):
+                    break
+                i += 1
+            blocks.append((block_start, i))
+            continue
+        # ── Paragraph ──
+        block_start = i
+        while block_start > 0 and lines[block_start - 1].strip():
+            if lines[block_start - 1].lstrip().startswith("#"):
+                break
+            block_start -= 1
+        i += 1
+        while i < len(lines) and lines[i].strip():
+            if lines[i].lstrip().startswith("#"):
+                break
+            i += 1
+        blocks.append((block_start, i))
+    return blocks
+
+
+def _remove_blocks(text: str, invalid_paths: set[str]) -> str:
+    """Remove Markdown blocks referencing any *invalid_paths*.
+
+    Uses line-level operations only — no LLM.
+    """
+    lines = text.split("\n")
+
+    remove_ranges: list[tuple[int, int]] = []
+    for path in invalid_paths:
+        remove_ranges.extend(_find_block_boundaries(lines, path))
+
+    if not remove_ranges:
+        return text
+
+    # Merge overlapping ranges
+    remove_ranges.sort()
+    merged: list[tuple[int, int]] = [remove_ranges[0]]
+    for start, end in remove_ranges[1:]:
+        if start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+
+    remove_lines: set[int] = set()
+    for start, end in merged:
+        remove_lines.update(range(start, end))
+
+    kept = [line for i, line in enumerate(lines) if i not in remove_lines]
+
+    # Collapse triple+ blank lines to double
+    cleaned: list[str] = []
+    blank_count = 0
+    for line in kept:
+        if not line.strip():
+            blank_count += 1
+            if blank_count <= 2:
+                cleaned.append(line)
+        else:
+            blank_count = 0
+            cleaned.append(line)
+
+    return "\n".join(cleaned)
+
+
+async def _surgical_llm_fix(
+    guide: str,
+    invalid_paths: set[str],
+    llm_client: LLMClient,
+    system_prompt: str,
+    max_llm_calls: int = 5,
+) -> str:
+    """Fix invalid path references by correcting individual blocks."""
+    lines = guide.split("\n")
+
+    # Collect all blocks referencing any invalid path
+    all_ranges: list[tuple[int, int]] = []
+    for path in invalid_paths:
+        all_ranges.extend(_find_block_boundaries(lines, path))
+
+    if not all_ranges:
+        return guide
+
+    # Merge overlapping ranges
+    all_ranges.sort()
+    merged: list[tuple[int, int]] = [all_ranges[0]]
+    for start, end in all_ranges[1:]:
+        if start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+
+    # Cap at max_llm_calls by merging closest blocks
+    while len(merged) > max_llm_calls and len(merged) > 1:
+        min_gap = float("inf")
+        min_idx = 0
+        for idx in range(len(merged) - 1):
+            gap = merged[idx + 1][0] - merged[idx][1]
+            if gap < min_gap:
+                min_gap = gap
+                min_idx = idx
+        merged[min_idx] = (merged[min_idx][0], merged[min_idx + 1][1])
+        del merged[min_idx + 1]
+
+    # Process in reverse order to preserve line indices
+    result_lines = list(lines)
+    for start, end in reversed(merged):
+        block_text = "\n".join(lines[start:end])
+        block_invalid = {p for p in invalid_paths if p in block_text}
+
+        prompt = (
+            "The following file paths do NOT exist in this project:\n"
+            + "\n".join(f"- `{p}`" for p in sorted(block_invalid))
+            + "\n\n"
+            "Rewrite ONLY the following Markdown excerpt, correcting "
+            "or removing references to the non-existent paths. "
+            "If a code block references a non-existent file and you "
+            "cannot determine the correct replacement, remove the "
+            "entire code block. Output ONLY the corrected excerpt, "
+            "nothing else.\n\n"
+            "EXCERPT:\n" + block_text
+        )
+
+        try:
+            fixed = await llm_client.chat_raw(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt[:8000]},
+                ],
+                max_tokens=1024,
+            )
+            fixed = fixed.strip()
+            if fixed:
+                result_lines[start:end] = fixed.split("\n")
+        except Exception as exc:
+            logger.info(
+                "Framework guide: surgical fix lines %d-%d failed: %s",
+                start, end, exc,
+            )
+
+    return "\n".join(result_lines)
+
+
 async def _validate_guide(
     guide: str,
     repo_root: str,
     llm_client: LLMClient,
     system_prompt: str,
 ) -> str:
-    """Check file paths in the guide against the project tree.
+    """Validate file paths against the project tree.
 
-    If invalid paths are found, makes a focused correction LLM call.
-    Returns the corrected guide, or the original if no issues or on error.
+    Three-phase approach:
+    1. Detect invalid paths.
+    2. Surgical LLM correction on affected blocks only.
+    3. Mechanical strip of any remaining invalid paths.
     """
-    referenced = _extract_file_paths(guide)
-    if not referenced:
-        return guide
-
+    # Phase 1: Detect
     project_paths = _get_project_paths(repo_root)
-
-    # Only validate paths that look like they belong in THIS project
-    # (start with a directory that exists in the tree's top level)
     project_top_dirs = {p.split("/")[0] for p in project_paths}
-    invalid: set[str] = set()
-    for path in referenced:
-        top_dir = path.split("/")[0]
-        if top_dir in project_top_dirs and path not in project_paths:
-            invalid.add(path)
 
+    invalid = _check_invalid_paths(guide, project_paths, project_top_dirs)
     if not invalid:
+        referenced = _extract_file_paths(guide)
         logger.info(
             "Framework guide: all %d file references valid",
             len(referenced),
@@ -98,40 +292,45 @@ async def _validate_guide(
         return guide
 
     logger.info(
-        "Framework guide: %d/%d file references invalid: %s",
+        "Framework guide: %d file references invalid: %s",
         len(invalid),
-        len(referenced),
         ", ".join(sorted(invalid)),
     )
 
-    # Correction pass — ask LLM to fix only the invalid references
-    correction_prompt = (
-        "The following file paths referenced in the guide below do NOT "
-        "exist in this project:\n\n"
-        + "\n".join(f"- `{p}`" for p in sorted(invalid))
-        + "\n\n"
-        "Rewrite the COMPLETE guide, correcting or removing all "
-        "references to these non-existent files. Use the project file "
-        "tree to determine the correct file locations for this version. "
-        "Keep all other content unchanged.\n\n"
-        "GUIDE TO CORRECT:\n\n" + guide
+    # Phase 2: Surgical LLM correction
+    corrected = await _surgical_llm_fix(
+        guide, invalid, llm_client, system_prompt,
     )
 
-    corrected = await llm_client.chat_raw(
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": correction_prompt[:40000]},
-        ],
-        max_tokens=4096,
+    still_invalid = _check_invalid_paths(
+        corrected, project_paths, project_top_dirs,
     )
-
-    if corrected.strip():
-        logger.info(
-            "Framework guide: correction pass produced %d chars",
-            len(corrected),
-        )
+    if not still_invalid:
+        logger.info("Framework guide: surgical LLM pass fixed all paths")
         return corrected
-    return guide
+
+    logger.info(
+        "Framework guide: %d invalid paths remain after LLM pass, "
+        "applying mechanical removal: %s",
+        len(still_invalid),
+        ", ".join(sorted(still_invalid)),
+    )
+
+    # Phase 3: Mechanical strip
+    stripped = _remove_blocks(corrected, still_invalid)
+
+    final_invalid = _check_invalid_paths(
+        stripped, project_paths, project_top_dirs,
+    )
+    if final_invalid:
+        logger.warning(
+            "Framework guide: %d invalid paths remain after "
+            "mechanical removal: %s",
+            len(final_invalid),
+            ", ".join(sorted(final_invalid)),
+        )
+
+    return stripped
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +455,16 @@ def _build_guide_search_queries(
         queries.append(
             f"{label} project structure directory conventions",
         )
+        queries.append(
+            f"{label} upgrade guide migration from previous version",
+        )
+        queries.append(f"{label} middleware configuration setup")
+        queries.append(
+            f"{label} testing patterns setup best practices",
+        )
+        queries.append(
+            f"{label} common pitfalls gotchas version specific",
+        )
         # When we know the LLM's training cutoff, add a query that
         # specifically targets post-cutoff changes.
         if cutoff:
@@ -263,7 +472,7 @@ def _build_guide_search_queries(
                 f"{label} changelog breaking changes new features",
             )
 
-    return queries[:8]
+    return queries[:16]
 
 
 # ---------------------------------------------------------------------------
@@ -540,10 +749,10 @@ async def generate_framework_guide(
         if url not in seen_urls:
             seen_urls.add(url)
             unique_urls.append(url)
-    fetch_urls = unique_urls[:4]  # Top 4 unique URLs
+    fetch_urls = unique_urls[:6]  # Top 6 unique URLs
 
     page_parts: list[str] = []
-    page_chars_budget = 16000  # Total budget for fetched pages
+    page_chars_budget = 24000  # Total budget for fetched pages
     page_chars_used = 0
     per_page_cap = 5000
 

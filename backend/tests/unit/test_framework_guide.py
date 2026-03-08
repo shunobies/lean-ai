@@ -7,9 +7,12 @@ import json
 
 from lean_ai.context.framework_guide import (
     _build_guide_search_queries,
+    _check_invalid_paths,
     _extract_file_paths,
     _extract_urls_from_search,
+    _find_block_boundaries,
     _get_primary_frameworks,
+    _remove_blocks,
 )
 
 # ---------------------------------------------------------------------------
@@ -107,12 +110,12 @@ class TestBuildGuideSearchQueries:
         assert len(queries) >= 2
         assert any("django" in q.lower() for q in queries)
 
-    def test_caps_at_eight(self):
+    def test_caps_at_sixteen(self):
         frameworks = [
             (f"framework{i}", f">={i}.0") for i in range(10)
         ]
         queries = _build_guide_search_queries(frameworks, [])
-        assert len(queries) <= 8
+        assert len(queries) <= 16
 
     def test_empty_frameworks(self):
         queries = _build_guide_search_queries([], [])
@@ -142,6 +145,26 @@ class TestBuildGuideSearchQueries:
         joined = " ".join(queries).lower()
         assert "artisan" not in joined
         assert "make:model" not in joined
+
+    def test_upgrade_query_generated(self):
+        frameworks = [("laravel/framework", "^12.0")]
+        queries = _build_guide_search_queries(frameworks, [])
+        assert any("upgrade" in q.lower() for q in queries)
+
+    def test_middleware_query_generated(self):
+        frameworks = [("laravel/framework", "^12.0")]
+        queries = _build_guide_search_queries(frameworks, [])
+        assert any("middleware" in q.lower() for q in queries)
+
+    def test_testing_query_generated(self):
+        frameworks = [("laravel/framework", "^12.0")]
+        queries = _build_guide_search_queries(frameworks, [])
+        assert any("testing" in q.lower() for q in queries)
+
+    def test_pitfalls_query_generated(self):
+        frameworks = [("laravel/framework", "^12.0")]
+        queries = _build_guide_search_queries(frameworks, [])
+        assert any("pitfalls" in q.lower() for q in queries)
 
 
 # ---------------------------------------------------------------------------
@@ -230,3 +253,203 @@ class TestExtractFilePaths:
         text = '("app/Http/Controllers/UserController.php")'
         paths = _extract_file_paths(text)
         assert "app/Http/Controllers/UserController.php" in paths
+
+
+# ---------------------------------------------------------------------------
+# _check_invalid_paths
+# ---------------------------------------------------------------------------
+
+
+class TestCheckInvalidPaths:
+    def test_detects_invalid(self):
+        text = "Edit `app/Http/Kernel.php` and `app/Models/User.php`"
+        project_paths = {"app/Models/User.php", "app/Http/Controllers/HomeController.php"}
+        top_dirs = {"app"}
+        invalid = _check_invalid_paths(text, project_paths, top_dirs)
+        assert "app/Http/Kernel.php" in invalid
+        assert "app/Models/User.php" not in invalid
+
+    def test_ignores_non_project_paths(self):
+        text = "See `vendor/laravel/framework/src/Kernel.php`"
+        project_paths = {"app/Models/User.php"}
+        top_dirs = {"app"}
+        invalid = _check_invalid_paths(text, project_paths, top_dirs)
+        assert len(invalid) == 0
+
+    def test_all_valid_returns_empty(self):
+        text = "Edit `app/Models/User.php`"
+        project_paths = {"app/Models/User.php"}
+        top_dirs = {"app"}
+        invalid = _check_invalid_paths(text, project_paths, top_dirs)
+        assert invalid == set()
+
+
+# ---------------------------------------------------------------------------
+# _find_block_boundaries
+# ---------------------------------------------------------------------------
+
+
+class TestFindBlockBoundaries:
+    def test_finds_fenced_code_block(self):
+        lines = [
+            "Some text",
+            "```php",
+            "// app/Http/Kernel.php",
+            "class Kernel {}",
+            "```",
+            "More text",
+        ]
+        blocks = _find_block_boundaries(lines, "app/Http/Kernel.php")
+        assert len(blocks) == 1
+        start, end = blocks[0]
+        assert start == 1  # ```php
+        assert end == 5  # after closing ```
+
+    def test_finds_list_item(self):
+        lines = [
+            "## Files",
+            "- `app/Http/Kernel.php` — the kernel",
+            "- `app/Models/User.php` — the user model",
+            "",
+        ]
+        blocks = _find_block_boundaries(lines, "app/Http/Kernel.php")
+        assert len(blocks) == 1
+        start, end = blocks[0]
+        assert start == 1
+        assert end == 2  # just the one list item
+
+    def test_finds_paragraph(self):
+        lines = [
+            "## Architecture",
+            "The Kernel processes requests via app/Http/Kernel.php",
+            "which dispatches to the router.",
+            "",
+            "Next section.",
+        ]
+        blocks = _find_block_boundaries(lines, "app/Http/Kernel.php")
+        assert len(blocks) == 1
+        start, end = blocks[0]
+        # Paragraph includes the heading? No — heading stops expansion
+        assert start == 1
+        assert end == 3
+
+    def test_multiple_blocks(self):
+        lines = [
+            "See `app/Http/Kernel.php` for middleware.",
+            "",
+            "```php",
+            "// app/Http/Kernel.php",
+            "```",
+        ]
+        blocks = _find_block_boundaries(lines, "app/Http/Kernel.php")
+        assert len(blocks) == 2
+
+    def test_heading_boundary(self):
+        lines = [
+            "## Section A",
+            "References app/Http/Kernel.php here.",
+            "## Section B",
+            "No reference here.",
+        ]
+        blocks = _find_block_boundaries(lines, "app/Http/Kernel.php")
+        assert len(blocks) == 1
+        _start, end = blocks[0]
+        assert end == 2  # stops before ## Section B
+
+    def test_path_on_fence_line(self):
+        lines = [
+            "```php // app/Http/Kernel.php",
+            "class Kernel {}",
+            "```",
+        ]
+        blocks = _find_block_boundaries(lines, "app/Http/Kernel.php")
+        assert len(blocks) == 1
+        assert blocks[0] == (0, 3)
+
+
+# ---------------------------------------------------------------------------
+# _remove_blocks
+# ---------------------------------------------------------------------------
+
+
+class TestRemoveBlocks:
+    def test_removes_code_block(self):
+        text = (
+            "## Middleware\n"
+            "```php\n"
+            "// app/Http/Kernel.php\n"
+            "class Kernel {}\n"
+            "```\n"
+            "## Routes"
+        )
+        result = _remove_blocks(text, {"app/Http/Kernel.php"})
+        assert "Kernel" not in result
+        assert "## Middleware" in result
+        assert "## Routes" in result
+
+    def test_removes_list_item(self):
+        text = (
+            "- `app/Http/Kernel.php` — the kernel\n"
+            "- `app/Models/User.php` — the user model"
+        )
+        result = _remove_blocks(text, {"app/Http/Kernel.php"})
+        assert "Kernel" not in result
+        assert "User.php" in result
+
+    def test_removes_paragraph(self):
+        text = (
+            "## Architecture\n"
+            "The Kernel in app/Http/Kernel.php handles requests.\n"
+            "\n"
+            "## Routes\n"
+            "Routes are defined in routes/web.php."
+        )
+        result = _remove_blocks(text, {"app/Http/Kernel.php"})
+        assert "Kernel" not in result
+        assert "## Routes" in result
+        assert "routes/web.php" in result
+
+    def test_multiple_paths_single_block(self):
+        text = (
+            "```php\n"
+            "// app/Http/Kernel.php\n"
+            "// app/Http/OtherFile.php\n"
+            "```\n"
+            "Remaining content"
+        )
+        result = _remove_blocks(
+            text, {"app/Http/Kernel.php", "app/Http/OtherFile.php"},
+        )
+        assert "Kernel" not in result
+        assert "OtherFile" not in result
+        assert "Remaining content" in result
+
+    def test_collapses_blank_lines(self):
+        text_with_path = (
+            "Before\n\n\n\n"
+            "- `app/Http/Kernel.php` — bad\n\n\n\n\n"
+            "After"
+        )
+        result = _remove_blocks(text_with_path, {"app/Http/Kernel.php"})
+        assert "Kernel" not in result
+        # No runs of more than 2 consecutive blank lines
+        assert "\n\n\n\n" not in result
+        assert "Before" in result
+        assert "After" in result
+
+    def test_preserves_unaffected_content(self):
+        text = (
+            "## Good Section\n"
+            "Content about routes/web.php is fine.\n"
+            "\n"
+            "## Bad Section\n"
+            "Content about app/Http/Kernel.php is wrong."
+        )
+        result = _remove_blocks(text, {"app/Http/Kernel.php"})
+        assert "Good Section" in result
+        assert "routes/web.php" in result
+
+    def test_no_blocks_found_returns_unchanged(self):
+        text = "No file paths here at all"
+        result = _remove_blocks(text, {"app/Http/Kernel.php"})
+        assert result == text
