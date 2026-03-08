@@ -303,17 +303,26 @@ class LLMClient:
                 yield token
 
     async def _maybe_compress(
-        self, messages: list[dict], threshold: float, preserve: float,
+        self,
+        messages: list[dict],
+        threshold: float,
+        preserve: float,
+        prompt_tokens: int | None = None,
     ) -> None:
         """Compress older conversation history in-place when nearing context limits.
 
-        Estimates token usage from message content length.  When estimated
-        tokens exceed *threshold* fraction of the context window, older
+        When *prompt_tokens* (from Ollama's ``prompt_eval_count``) is
+        provided, it is used directly.  Otherwise a rough char-based
+        estimate (chars // 4) is used as a fallback.  When the token
+        count exceeds *threshold* fraction of the context window, older
         messages (after the system prompt) are summarised by an LLM call
         and replaced with a single summary message.  The most recent
         *preserve* fraction of the conversation is kept intact.
         """
-        est_tokens = sum(len(m.get("content") or "") for m in messages) // 4
+        if prompt_tokens is not None:
+            est_tokens = prompt_tokens
+        else:
+            est_tokens = sum(len(m.get("content") or "") for m in messages) // 4
         limit = int(threshold * self._context_window)
 
         if est_tokens < limit:
@@ -470,6 +479,7 @@ class LLMClient:
             msg = response["message"]
             content = msg.get("content") or ""
             tool_calls = msg.get("tool_calls") or []
+            last_prompt_tokens = response.get("prompt_eval_count") or 0
 
             if content.strip():
                 explanation_parts.append(content.strip())
@@ -586,11 +596,13 @@ class LLMClient:
                 )
                 break
 
-            # Compress conversation history if approaching context limits
+            # Compress conversation history if approaching context limits.
+            # Use actual prompt token count from Ollama when available.
             await self._maybe_compress(
                 messages,
                 threshold=settings.compression_threshold,
                 preserve=settings.compression_preserve,
+                prompt_tokens=last_prompt_tokens or None,
             )
 
             # Inject periodic task reminder to keep the original task in
