@@ -270,6 +270,28 @@ IMPLEMENTATION_TOOLS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "task_complete",
+            "description": (
+                "Signal that you have finished all work for this task. "
+                "Call this tool ONLY when all changes have been made, "
+                "verified, and no further tool calls are needed. "
+                "Provide a brief summary of what was accomplished."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "description": "Brief summary of what was accomplished.",
+                    },
+                },
+                "required": ["summary"],
+            },
+        },
+    },
 ]
 
 
@@ -277,5 +299,7 @@ IMPLEMENTATION_TOOLS: list[dict] = [
 PLANNING_TOOLS: list[dict] = [
     tool
     for tool in IMPLEMENTATION_TOOLS
-    if tool["function"]["name"] in ("read_file", "list_directory", "directory_tree", "grep_files")
+    if tool["function"]["name"] in (
+        "read_file", "list_directory", "directory_tree", "grep_files", "task_complete",
+    )
 ]

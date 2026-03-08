@@ -45,8 +45,9 @@ Do not describe what you plan to do — do it by calling the appropriate tools. 
 If you have finished reading and understanding the code, immediately proceed \
 to make changes using edit_file or create_file.
 
-When ALL changes have been made and verified, respond with a brief text summary \
-of what you did (no tool calls). This signals that you are done.
+When ALL changes have been made and verified, call the task_complete tool with \
+a brief summary of what you accomplished. This is the ONLY way to signal that \
+you are done. Do NOT stop calling tools without calling task_complete first.
 
 Working approach:
 1. Start by exploring — use directory_tree and list_directory to understand \
@@ -93,8 +94,8 @@ refactoring, or improvements.
 8. If the step cannot be completed as specified (file not found, pattern not \
 found, unexpected structure), create or append to .lean_ai/incomplete.md \
 documenting what went wrong and what was intended, then stop.
-9. When done, respond with a one-line summary of what you did (no tool calls). \
-This signals step completion.
+9. When done, call task_complete with a one-line summary of what you did. \
+This is the only way to signal step completion.
 """
 
 FIX_SYSTEM_PROMPT = """\
@@ -110,8 +111,8 @@ if needed.
 to verify the fix.
 5. If tests or lint fail, read the output, fix the problem, and re-run.
 6. No stubs, no TODOs, no placeholder implementations.
-7. When done, respond with a short summary of what you changed and why \
-(no tool calls). This signals completion.
+7. When done, call task_complete with a short summary of what you changed \
+and why. This is the only way to signal completion.
 """
 
 CLARIFICATION_SYSTEM_PROMPT = """\

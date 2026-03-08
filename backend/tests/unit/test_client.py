@@ -18,8 +18,8 @@ class FakeOllamaClient:
         if self.call_count < len(self.responses):
             resp = self.responses[self.call_count]
         else:
-            # Default: stop (no tool calls)
-            resp = {"message": {"content": "Done.", "tool_calls": []}}
+            # Default: signal completion via task_complete
+            resp = _make_task_complete_response("Default done.")
         self.call_count += 1
         return resp
 
@@ -39,6 +39,18 @@ def _make_tool_call_response(name: str, args: dict, content: str = "") -> dict:
 def _make_text_response(content: str = "Done.") -> dict:
     """Build a fake Ollama response with text only (no tool calls)."""
     return {"message": {"content": content, "tool_calls": []}}
+
+
+def _make_task_complete_response(summary: str = "Done.") -> dict:
+    """Build a fake Ollama response with a task_complete tool call."""
+    return {
+        "message": {
+            "content": "",
+            "tool_calls": [
+                {"function": {"name": "task_complete", "arguments": {"summary": summary}}}
+            ],
+        }
+    }
 
 
 def _build_client(responses: list[dict]) -> tuple[LLMClient, FakeOllamaClient]:
@@ -63,11 +75,11 @@ async def _noop_executor(name: str, args: dict) -> str:
 @pytest.mark.asyncio
 async def test_reminder_injected_at_interval():
     """Reminder should be injected after every reminder_interval turns."""
-    # 12 turns of tool calls, then stop
+    # 12 turns of tool calls, then task_complete
     responses = [
         _make_tool_call_response("edit_file", {"path": "f.py", "search": "a", "replace": "b"})
         for _ in range(12)
-    ] + [_make_text_response()]
+    ] + [_make_task_complete_response()]
 
     client, fake = _build_client(responses)
     messages = [
@@ -124,7 +136,7 @@ async def test_no_reminder_when_none():
     responses = [
         _make_tool_call_response("edit_file", {"path": "f.py", "search": "a", "replace": "b"})
         for _ in range(15)
-    ] + [_make_text_response()]
+    ] + [_make_task_complete_response()]
 
     client, fake = _build_client(responses)
     messages = [
@@ -153,7 +165,7 @@ async def test_reminder_interval_zero_disables():
     responses = [
         _make_tool_call_response("edit_file", {"path": "f.py", "search": "a", "replace": "b"})
         for _ in range(15)
-    ] + [_make_text_response()]
+    ] + [_make_task_complete_response()]
 
     client, fake = _build_client(responses)
     messages = [
@@ -180,7 +192,7 @@ async def test_reminder_is_user_role():
     responses = [
         _make_tool_call_response("edit_file", {"path": "f.py", "search": "a", "replace": "b"})
         for _ in range(6)
-    ] + [_make_text_response()]
+    ] + [_make_task_complete_response()]
 
     client, fake = _build_client(responses)
     messages = [
@@ -218,7 +230,7 @@ async def test_callable_reminder_invoked_at_interval():
             "edit_file", {"path": "f.py", "search": "a", "replace": "b"},
         )
         for _ in range(12)
-    ] + [_make_text_response()]
+    ] + [_make_task_complete_response()]
 
     client, _fake = _build_client(responses)
     messages = [
@@ -257,7 +269,7 @@ async def test_loop_detection_triggers_at_threshold():
     responses = [
         _make_tool_call_response("edit_file", {"path": "f.py", "search": "a", "replace": "b"})
         for _ in range(5)
-    ] + [_make_text_response()]
+    ] + [_make_task_complete_response()]
 
     client, _fake = _build_client(responses)
     messages = [
@@ -293,7 +305,7 @@ async def test_loop_detection_resets_on_different_call():
         # 2 identical (same as first)
         _make_tool_call_response("edit_file", {"path": "a.py", "search": "x", "replace": "y"}),
         _make_tool_call_response("edit_file", {"path": "a.py", "search": "x", "replace": "y"}),
-        _make_text_response(),
+        _make_task_complete_response(),
     ]
 
     client, _fake = _build_client(responses)
@@ -324,7 +336,7 @@ async def test_loop_detection_threshold_zero_disables():
     responses = [
         _make_tool_call_response("edit_file", {"path": "f.py", "search": "a", "replace": "b"})
         for _ in range(10)
-    ] + [_make_text_response()]
+    ] + [_make_task_complete_response()]
 
     client, _fake = _build_client(responses)
     messages = [
@@ -345,6 +357,182 @@ async def test_loop_detection_threshold_zero_disables():
         if m["role"] == "user" and "identical arguments" in m.get("content", "")
     ]
     assert len(warnings) == 0
+
+
+# ── task_complete tests ──
+
+
+@pytest.mark.asyncio
+async def test_task_complete_exits_loop():
+    """Model calling task_complete should exit the loop and capture the summary."""
+    responses = [
+        _make_tool_call_response("read_file", {"path": "f.py"}),
+        _make_tool_call_response("edit_file", {"path": "f.py", "search": "a", "replace": "b"}),
+        _make_task_complete_response("Edited f.py: replaced a with b."),
+    ]
+
+    client, fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    executed, explanation = await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=10,
+    )
+
+    # Should have executed 2 real tools (not task_complete)
+    assert len(executed) == 2
+    assert executed[0].tool_name == "read_file"
+    assert executed[1].tool_name == "edit_file"
+    # Summary should be captured in the explanation
+    assert "Edited f.py: replaced a with b." in explanation
+    # Loop should have exited on turn 3
+    assert fake.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_task_complete_with_other_tools():
+    """task_complete mixed with other tools: execute others, then exit."""
+    # Response with edit_file AND task_complete in the same turn
+    responses = [
+        _make_tool_call_response("read_file", {"path": "f.py"}),
+        {
+            "message": {
+                "content": "",
+                "tool_calls": [
+                    {"function": {"name": "edit_file", "arguments": {
+                        "path": "f.py", "search": "a", "replace": "b",
+                    }}},
+                    {"function": {"name": "task_complete", "arguments": {
+                        "summary": "All done.",
+                    }}},
+                ],
+            }
+        },
+    ]
+
+    client, fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    executed, explanation = await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=10,
+    )
+
+    # Should have executed read_file and edit_file (not task_complete)
+    assert len(executed) == 2
+    assert executed[0].tool_name == "read_file"
+    assert executed[1].tool_name == "edit_file"
+    # Summary captured
+    assert "All done." in explanation
+    # Loop exited after turn 2
+    assert fake.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_text_only_continues_loop():
+    """Text-only responses should not exit the loop — model must call task_complete."""
+    responses = [
+        _make_tool_call_response("read_file", {"path": "f.py"}),
+        _make_text_response("Let me think about this..."),
+        _make_text_response("I'll make the change now."),
+        _make_task_complete_response("Done thinking and working."),
+    ]
+
+    client, fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    executed, explanation = await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=10,
+    )
+
+    # Loop should NOT have exited on the text-only turns
+    assert fake.call_count == 4
+    # Only read_file should have been executed (text-only turns have no tools)
+    assert len(executed) == 1
+    assert executed[0].tool_name == "read_file"
+    # All text content should be in explanation
+    assert "Let me think about this..." in explanation
+    assert "I'll make the change now." in explanation
+    assert "Done thinking and working." in explanation
+
+
+@pytest.mark.asyncio
+async def test_consecutive_text_only_safety_exit():
+    """3+ consecutive text-only responses should trigger safety exit."""
+    responses = [
+        _make_tool_call_response("read_file", {"path": "f.py"}),
+        _make_text_response("Thinking..."),
+        _make_text_response("Still thinking..."),
+        _make_text_response("Almost done thinking..."),
+        # This should never be reached — loop exits after 3 text-only
+        _make_tool_call_response("edit_file", {"path": "f.py", "search": "a", "replace": "b"}),
+    ]
+
+    client, fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    executed, explanation = await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=10,
+    )
+
+    # Should have called LLM 4 times: 1 tool + 3 text-only
+    assert fake.call_count == 4
+    # Only read_file executed
+    assert len(executed) == 1
+    assert executed[0].tool_name == "read_file"
+
+
+@pytest.mark.asyncio
+async def test_nudge_removed():
+    """Text-only on first turn should NOT inject a nudge — just continue."""
+    responses = [
+        _make_text_response("Let me explain what I'll do..."),
+        _make_task_complete_response("Explained and done."),
+    ]
+
+    client, fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=10,
+    )
+
+    # No nudge message should exist in messages
+    nudge_msgs = [
+        m for m in messages
+        if m["role"] == "user" and "not complete" in m.get("content", "").lower()
+    ]
+    assert len(nudge_msgs) == 0
+    # Loop continued past text-only turn and exited on task_complete
+    assert fake.call_count == 2
 
 
 # ── Sanitize messages tests ──
@@ -458,7 +646,10 @@ async def test_compression_triggers_at_threshold():
     # Should have been compressed — fewer messages now
     assert len(messages) < original_len
     # Should contain the summary
-    summary_msgs = [m for m in messages if "[Previous conversation summary]" in m.get("content", "")]
+    summary_msgs = [
+        m for m in messages
+        if "[Previous conversation summary]" in m.get("content", "")
+    ]
     assert len(summary_msgs) == 1
 
 

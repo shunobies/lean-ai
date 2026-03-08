@@ -479,7 +479,7 @@ async def _run_fix(
         task_reminder=(
             f"REMINDER — Your task: {task}\n\n"
             "Have you verified the fix works? Run tests or lint if "
-            "applicable. If done, respond with a summary (no tool calls)."
+            "applicable. If done, call task_complete with a summary."
         ),
         reminder_interval=settings.reminder_interval,
         on_tool_call=on_tool_call,
@@ -756,6 +756,9 @@ def _make_tool_executor(repo_root: str, ws: WebSocket, session_id: str = ""):
                     f" focus on a subtree, or increase max_depth.]"
                 )
             return output
+
+        elif name == "task_complete":
+            return "Task marked complete."
 
         return f"ERROR: Unknown tool: {name}"
 

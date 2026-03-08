@@ -238,6 +238,8 @@ async def create_plan(
                     indent = "  " * depth
                     lines.append(f"{indent}{e.path.split('/')[-1]}")
             return "\n".join(lines) or "(empty)"
+        elif name == "task_complete":
+            return "Exploration marked complete."
         return f"Unknown tool: {name}"
 
     tool_calls, file_identification = await llm_client.chat_with_tools(

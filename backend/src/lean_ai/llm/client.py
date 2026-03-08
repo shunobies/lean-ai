@@ -416,26 +416,18 @@ class LLMClient:
 
         Sends messages with tool definitions to the LLM. When the response
         contains tool_calls, executes each one via tool_executor_fn, appends
-        results, and calls the LLM again. Repeats until the LLM responds
-        with text-only (no tool_calls) or max_turns is reached.
-
-        If the model produces a text-only response but has not yet made any
-        write operations (edit_file, create_file), it gets one nudge asking
-        it to continue with tool calls before the loop exits.
+        results, and calls the LLM again. Repeats until the LLM calls the
+        task_complete tool, produces too many consecutive text-only responses,
+        or max_turns is reached.
 
         Returns (executed_tool_calls, final_explanation).
         """
-        write_tools = {"edit_file", "create_file"}
-        nudge_msg = (
-            "You responded with text but have not made any file changes yet. "
-            "The task is not complete. Continue by calling the appropriate "
-            "tools (edit_file, create_file, etc.) to implement the changes."
-        )
+        max_text_only = 3  # exit after N consecutive text-only responses
 
         tokens = max_tokens or self._max_tokens
         executed: list[ToolCall] = []
         explanation_parts: list[str] = []
-        nudged = False
+        consecutive_text_only: int = 0
 
         # Loop detection state
         ld_threshold = (
@@ -487,35 +479,30 @@ class LLMClient:
                     await on_content(content.strip())
 
             if not tool_calls:
-                # Check if the model has performed any write operations yet
-                has_written = any(tc.tool_name in write_tools for tc in executed)
-                has_done_anything = len(executed) > 0
-                if not has_written and not has_done_anything and not nudged:
-                    # Model stopped on first turn without calling any tools —
-                    # nudge it once.  Skip the nudge if the model has already
-                    # executed tools (e.g. run_tests/run_lint steps that don't
-                    # involve file writes).
-                    logger.info(
-                        "chat_with_tools: no tool calls yet, nudging model to continue"
+                # Text-only response — the model must call task_complete to
+                # signal completion.  Append the text and continue the loop
+                # so the model gets another chance.  After _MAX_TEXT_ONLY
+                # consecutive text-only responses, exit as a safety valve.
+                messages.append({"role": "assistant", "content": content})
+                consecutive_text_only += 1
+                if consecutive_text_only >= max_text_only:
+                    logger.warning(
+                        "chat_with_tools: %d consecutive text-only responses "
+                        "without task_complete — exiting",
+                        consecutive_text_only,
                     )
-                    messages.append({"role": "assistant", "content": content})
-                    messages.append({"role": "user", "content": nudge_msg})
-                    nudged = True
-                    continue
-                break
+                    break
+                continue
 
-            # If the only tool call is update_scratchpad and the model has
-            # already made write operations, treat this as a completion
-            # signal — the model is posting a final summary.
-            only_scratchpad = (
-                len(tool_calls) == 1
-                and tool_calls[0]["function"]["name"] == "update_scratchpad"
-            )
-            has_written = any(tc.tool_name in write_tools for tc in executed)
-            if only_scratchpad and has_written:
-                scratchpad_exit = True
-            else:
-                scratchpad_exit = False
+            # Reset text-only counter when tools are called
+            consecutive_text_only = 0
+
+            # Check for task_complete signal among tool calls
+            completion_call = None
+            for tc in tool_calls:
+                if tc["function"]["name"] == "task_complete":
+                    completion_call = tc
+                    break
 
             # Build assistant message with tool_calls for conversation history
             assistant_msg: dict = {
@@ -538,6 +525,15 @@ class LLMClient:
                 fn = tc["function"]
                 name = fn["name"]
                 arguments = dict(fn.get("arguments") or {})
+
+                if name == "task_complete":
+                    # Control flow signal — append a synthetic result for
+                    # message history balance but don't execute as a real tool.
+                    messages.append({
+                        "role": "tool",
+                        "content": "Task marked complete.",
+                    })
+                    continue
 
                 if on_tool_call:
                     await on_tool_call(name, arguments)
@@ -587,13 +583,16 @@ class LLMClient:
                         })
                         consecutive_count = 0
 
-            # If the model's only action was a scratchpad update after
-            # already making file changes, it's posting a final summary.
-            # Exit the loop instead of prompting for another turn.
-            if scratchpad_exit:
-                logger.info(
-                    "chat_with_tools: exiting — sole scratchpad update after writes"
+            # Exit the loop if the model called task_complete
+            if completion_call:
+                summary = (
+                    completion_call["function"]
+                    .get("arguments", {})
+                    .get("summary", "")
                 )
+                if summary:
+                    explanation_parts.append(summary)
+                logger.info("chat_with_tools: task_complete called — exiting loop")
                 break
 
             # Compress conversation history if approaching context limits.
