@@ -13,6 +13,7 @@ from lean_ai.context.framework_guide import (
     _canonicalize_name,
     _check_invalid_paths,
     _deduplicate_sections,
+    _deduplicate_sections_mechanical,
     _extract_file_paths,
     _extract_php_class_refs,
     _extract_search_results,
@@ -648,11 +649,11 @@ class TestRankUrlsWithLlm:
 
 
 # ---------------------------------------------------------------------------
-# _deduplicate_sections
+# _deduplicate_sections_mechanical
 # ---------------------------------------------------------------------------
 
 
-class TestDeduplicateSections:
+class TestDeduplicateSectionsMechanical:
     def test_no_duplicates_unchanged(self):
         text = (
             "## Framework Architecture\n"
@@ -662,7 +663,7 @@ class TestDeduplicateSections:
             "## File Organization Conventions\n"
             "Content C"
         )
-        result = _deduplicate_sections(text)
+        result = _deduplicate_sections_mechanical(text)
         assert result == text
 
     def test_removes_second_occurrence(self):
@@ -672,7 +673,7 @@ class TestDeduplicateSections:
             "## Framework Architecture\n"
             "Second version\n"
         )
-        result = _deduplicate_sections(text)
+        result = _deduplicate_sections_mechanical(text)
         assert result.count("## Framework Architecture") == 1
         assert "First version" in result
         assert "Second version" not in result
@@ -686,7 +687,7 @@ class TestDeduplicateSections:
             "## Section One\n"
             "Duplicate"
         )
-        result = _deduplicate_sections(text)
+        result = _deduplicate_sections_mechanical(text)
         assert "# Framework Guide" in result
         assert "Some intro text." in result
         assert result.count("## Section One") == 1
@@ -700,7 +701,7 @@ class TestDeduplicateSections:
             "## Architecture\n"
             "Third"
         )
-        result = _deduplicate_sections(text)
+        result = _deduplicate_sections_mechanical(text)
         assert result.count("## Architecture") == 1
         assert "First" in result
         assert "Second" not in result
@@ -715,15 +716,98 @@ class TestDeduplicateSections:
             "## Section B\n"
             "Content B"
         )
-        result = _deduplicate_sections(text)
+        result = _deduplicate_sections_mechanical(text)
         # Max 2 blank lines (3 newlines) — no runs of 4+ newlines
         assert "\n\n\n\n" not in result
         assert "## Section B" in result
 
     def test_no_headings_unchanged(self):
         text = "Just plain text with no headings."
-        result = _deduplicate_sections(text)
+        result = _deduplicate_sections_mechanical(text)
         assert result == text
+
+
+# ---------------------------------------------------------------------------
+# _deduplicate_sections (LLM-based)
+# ---------------------------------------------------------------------------
+
+
+class TestDeduplicateSections:
+    @pytest.mark.asyncio
+    async def test_llm_identifies_duplicates(self):
+        text = (
+            "## Framework Architecture\n"
+            "Laravel follows MVC with controllers and models.\n\n"
+            "## Component Relationships\n"
+            "Routes map to controllers via web.php.\n\n"
+            "## Framework Architecture\n"
+            "The architecture is based on MVC pattern."
+        )
+        mock_llm = AsyncMock()
+        mock_llm.chat_raw = AsyncMock(return_value="3")
+
+        result = await _deduplicate_sections(text, mock_llm)
+        assert result.count("## Framework Architecture") == 1
+        assert "Laravel follows MVC" in result
+        assert "## Component Relationships" in result
+        assert "The architecture is based on" not in result
+
+    @pytest.mark.asyncio
+    async def test_llm_returns_none(self):
+        text = (
+            "## Framework Architecture\n"
+            "Content A\n\n"
+            "## Component Relationships\n"
+            "Content B"
+        )
+        mock_llm = AsyncMock()
+        mock_llm.chat_raw = AsyncMock(return_value="NONE")
+
+        result = await _deduplicate_sections(text, mock_llm)
+        assert result == text
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_falls_back_to_mechanical(self):
+        text = (
+            "## Architecture\n"
+            "First version\n\n"
+            "## Architecture\n"
+            "Second version"
+        )
+        mock_llm = AsyncMock()
+        mock_llm.chat_raw = AsyncMock(side_effect=Exception("LLM down"))
+
+        result = await _deduplicate_sections(text, mock_llm)
+        # Mechanical fallback catches exact heading match
+        assert result.count("## Architecture") == 1
+        assert "First version" in result
+        assert "Second version" not in result
+
+    @pytest.mark.asyncio
+    async def test_llm_unparseable_falls_back(self):
+        text = (
+            "## Section A\n"
+            "Content A\n\n"
+            "## Section A\n"
+            "Content A again"
+        )
+        mock_llm = AsyncMock()
+        mock_llm.chat_raw = AsyncMock(
+            return_value="I think sections look fine",
+        )
+
+        result = await _deduplicate_sections(text, mock_llm)
+        # Unparseable → mechanical fallback catches exact match
+        assert result.count("## Section A") == 1
+
+    @pytest.mark.asyncio
+    async def test_fewer_than_two_sections_skips_llm(self):
+        text = "## Only One Section\nSome content here."
+        mock_llm = AsyncMock()
+
+        result = await _deduplicate_sections(text, mock_llm)
+        assert result == text
+        mock_llm.chat_raw.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
