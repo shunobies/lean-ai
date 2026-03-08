@@ -100,8 +100,6 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_INDEX_DIR` | `.lean_ai_index` | Whoosh index directory name |
 | `LEAN_AI_SEARCH_PROVIDER` | `duckduckgo` | Search provider (`duckduckgo` or `searxng`) |
 | `LEAN_AI_KNOWLEDGE_DIR` | `.lean_ai/knowledge` | Knowledge documents directory |
-| `LEAN_AI_ENABLE_DEPRECATION_LOOKUP` | `true` | Web-search for deprecations after context generation |
-| `LEAN_AI_DEPRECATION_MAX_SEARCHES` | `5` | Max concurrent deprecation web searches |
 | `LEAN_AI_ENABLE_FRAMEWORK_GUIDE` | `true` | Generate `.lean_ai/framework_guide.md` for detected frameworks |
 | `LEAN_AI_IMPLEMENTATION_MAX_TURNS` | `0` | Max tool-calling turns per session (`0` = unlimited) |
 | `LEAN_AI_IMPLEMENTATION_MAX_TOKENS` | *(derived: 25% of context window)* | Max tokens per LLM turn |

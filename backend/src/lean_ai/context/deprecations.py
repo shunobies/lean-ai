@@ -1,25 +1,20 @@
-"""Deprecation lookup — detect framework versions, search for deprecations,
-and produce a ``## Deprecation Warnings`` section for project_context.md.
+"""Version detection — detect framework and library versions from dependency
+files (``package.json``, ``composer.json``, ``pyproject.toml``, etc.).
 
-Runs as a post-generation append step.  Gracefully returns ``""`` on any
-failure so it never blocks context generation.
+Provides ``_detect_versions()`` and ``_extract_major_minor()`` used by
+the framework guide generator.
 
 No regex — version parsing uses simple string operations, json, and tomllib.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import tomllib
-
-if TYPE_CHECKING:
-    from lean_ai.llm.client import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -468,163 +463,3 @@ def _detect_versions(repo_root: str) -> list[DetectedDependency]:
             logger.debug("Version detector %s failed: %s", detector.__name__, exc)
 
     return deps
-
-
-# ---------------------------------------------------------------------------
-# Search query generation
-# ---------------------------------------------------------------------------
-
-def _build_search_queries(deps: list[DetectedDependency]) -> list[str]:
-    """Generate web search queries for deprecation information.
-
-    Prioritizes runtimes and frameworks over individual libraries.
-    """
-    from lean_ai.config import settings
-
-    queries: list[str] = []
-
-    # First pass: runtimes and frameworks (highest value)
-    for dep in deps:
-        if dep.category in ("runtime", "framework"):
-            version_clean = _extract_major_minor(dep.version)
-            if version_clean:
-                queries.append(
-                    f"{dep.name} {version_clean} deprecated functions breaking changes"
-                )
-
-    # Second pass: top libraries (if budget remains)
-    for dep in deps:
-        if dep.category == "library" and len(queries) < settings.deprecation_max_searches:
-            version_clean = _extract_major_minor(dep.version)
-            if version_clean:
-                queries.append(
-                    f"{dep.name} {version_clean} deprecations migration guide"
-                )
-
-    return queries[:settings.deprecation_max_searches]
-
-
-# ---------------------------------------------------------------------------
-# LLM summarization prompt
-# ---------------------------------------------------------------------------
-
-def _build_deprecation_summary_prompt(deps: list[DetectedDependency]) -> str:
-    """Build the LLM summary prompt, scoped to the project's actual dependencies."""
-    dep_names = ", ".join(sorted({d.name for d in deps}))
-    return (
-        "Analyze the following web search results about software deprecations and "
-        "produce a concise, actionable deprecation guide.\n\n"
-        f"This project uses ONLY these technologies: {dep_names}\n"
-        "ONLY include deprecation warnings for the technologies listed above. "
-        "Ignore any information about frameworks or libraries NOT in that list.\n\n"
-        "For each deprecated item, provide:\n"
-        "1. The SPECIFIC function, method, class, or feature name that is deprecated\n"
-        "2. What version deprecated it\n"
-        "3. What to use INSTEAD (the recommended replacement)\n"
-        "4. Brief migration note if applicable\n\n"
-        "Format the output as Markdown. Group by framework/library. "
-        "Use a bullet list for each deprecated item.\n\n"
-        "RULES:\n"
-        f"- ONLY list deprecations for: {dep_names}\n"
-        "- Only list items that are actually deprecated — do not speculate\n"
-        "- Be SPECIFIC: give exact function/class names, not vague descriptions\n"
-        "- If the search results contain no deprecation information for the listed "
-        "technologies, say \"No deprecations found\"\n"
-        "- Keep it concise — maximum 1500 words total"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Orchestrator
-# ---------------------------------------------------------------------------
-
-async def generate_deprecation_section(
-    repo_root: str,
-    llm_client: LLMClient,
-    max_tokens: int = 2048,
-) -> str:
-    """Detect versions, search for deprecations, and return a Markdown section.
-
-    Returns ``""`` if no deprecations are found or if any step fails.
-    Designed to be called AFTER the main context generation completes.
-    """
-    from lean_ai.config import settings
-    from lean_ai.tools.internet import search_internet
-
-    if not settings.enable_deprecation_lookup:
-        return ""
-
-    # Step 1: Detect versions
-    try:
-        deps = _detect_versions(repo_root)
-    except Exception as exc:
-        logger.warning("Deprecation lookup: version detection failed: %s", exc)
-        return ""
-
-    if not deps:
-        logger.info("Deprecation lookup: no versions detected, skipping")
-        return ""
-
-    logger.info(
-        "Deprecation lookup: detected %d dependencies: %s",
-        len(deps),
-        ", ".join(f"{d.name} {d.version}" for d in deps[:10]),
-    )
-
-    # Step 2: Generate search queries
-    queries = _build_search_queries(deps)
-    if not queries:
-        logger.info("Deprecation lookup: no search queries generated, skipping")
-        return ""
-
-    logger.info("Deprecation lookup: running %d web searches", len(queries))
-
-    # Step 3: Search sequentially (primp/lxml are not thread-safe for
-    # concurrent use — parallel asyncio.to_thread calls cause segfaults
-    # that crash the uvicorn subprocess).
-    search_parts: list[str] = []
-    for query in queries:
-        try:
-            result = await asyncio.wait_for(
-                search_internet(query, llm_client=None),
-                timeout=15,
-            )
-            if result.success and result.output:
-                search_parts.append(f"=== Search: {query} ===\n{result.output}")
-        except asyncio.TimeoutError:
-            logger.debug("Deprecation search timed out for '%s'", query)
-        except Exception as exc:
-            logger.debug("Deprecation search failed for '%s': %s", query, exc)
-
-    if not search_parts:
-        logger.info("Deprecation lookup: all searches returned empty, skipping")
-        return ""
-
-    combined_search = "\n\n".join(search_parts)
-
-    # Step 4: LLM summarization
-    try:
-        summary = await llm_client.chat_raw(
-            messages=[
-                {"role": "system", "content": _build_deprecation_summary_prompt(deps)},
-                {"role": "user", "content": combined_search[:20000]},
-            ],
-            max_tokens=max_tokens,
-        )
-    except Exception as exc:
-        logger.warning("Deprecation lookup: LLM summarization failed: %s", exc)
-        return ""
-
-    if not summary.strip() or "no deprecations found" in summary.lower():
-        logger.info("Deprecation lookup: LLM found no actionable deprecations")
-        return ""
-
-    # Step 5: Assemble section
-    section = (
-        "\n\n## Deprecation Warnings\n\n"
-        "_Auto-generated from web search. Verify before acting on these._\n\n"
-        f"{summary.strip()}\n"
-    )
-
-    logger.info("Deprecation lookup: generated %d-char section", len(section))
-    return section

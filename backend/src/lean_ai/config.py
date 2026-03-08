@@ -48,8 +48,6 @@ class Settings(BaseSettings):
     # ── Project context ──
     enable_project_context: bool = True
     enable_multi_round_context: bool = True
-    enable_deprecation_lookup: bool = True  # Web-search for deprecations after context gen
-    deprecation_max_searches: int = 5  # Max concurrent deprecation web searches
     enable_framework_guide: bool = True  # Generate .lean_ai/framework_guide.md
 
     # ── Knowledge base ──

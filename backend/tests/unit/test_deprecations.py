@@ -1,4 +1,4 @@
-"""Tests for deprecation version detection and query generation.
+"""Tests for version detection utilities.
 
 Pure unit tests — no LLM, no network calls required.
 """
@@ -6,8 +6,6 @@ Pure unit tests — no LLM, no network calls required.
 import json
 
 from lean_ai.context.deprecations import (
-    DetectedDependency,
-    _build_search_queries,
     _detect_versions,
     _extract_major_minor,
     _parse_pep508,
@@ -187,46 +185,3 @@ class TestDetectVersions:
         assert deps == []
 
 
-# ---------------------------------------------------------------------------
-# _build_search_queries
-# ---------------------------------------------------------------------------
-
-
-class TestBuildSearchQueries:
-    def test_prioritizes_runtimes_and_frameworks(self):
-        deps = [
-            DetectedDependency("Python", ">=3.12", "runtime"),
-            DetectedDependency("django", ">=4.2", "framework"),
-            DetectedDependency("requests", ">=2.31", "library"),
-        ]
-        queries = _build_search_queries(deps)
-        assert len(queries) >= 2
-        assert any("Python 3.12" in q for q in queries)
-        assert any("django 4.2" in q for q in queries)
-
-    def test_libraries_fill_remaining_budget(self):
-        deps = [
-            DetectedDependency("Python", ">=3.12", "runtime"),
-            DetectedDependency("requests", ">=2.31", "library"),
-        ]
-        queries = _build_search_queries(deps)
-        assert any("requests" in q for q in queries)
-
-    def test_respects_max_cap(self):
-        deps = [
-            DetectedDependency(f"framework{i}", f">={i}.0", "framework")
-            for i in range(20)
-        ]
-        queries = _build_search_queries(deps)
-        assert len(queries) <= 5  # default cap
-
-    def test_skips_empty_versions(self):
-        deps = [
-            DetectedDependency("mystery", "", "framework"),
-        ]
-        queries = _build_search_queries(deps)
-        assert len(queries) == 0
-
-    def test_empty_deps(self):
-        queries = _build_search_queries([])
-        assert queries == []
