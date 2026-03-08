@@ -21,6 +21,118 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Post-generation validation — file-path extraction
+# ---------------------------------------------------------------------------
+
+_FILE_EXTENSIONS = frozenset({
+    ".php", ".js", ".ts", ".tsx", ".jsx", ".py", ".rb",
+    ".java", ".go", ".rs", ".c", ".h", ".cpp", ".cs",
+    ".vue", ".svelte", ".blade.php", ".erb", ".html",
+    ".css", ".scss", ".json", ".yaml", ".yml", ".toml",
+    ".xml", ".sql", ".sh", ".env",
+})
+
+
+def _extract_file_paths(text: str) -> set[str]:
+    """Extract potential file paths from markdown text.
+
+    Looks for substrings containing ``/`` that end with a known
+    file extension.  Strips surrounding punctuation (backticks,
+    parens, quotes).  Ignores URLs.
+    """
+    paths: set[str] = set()
+    for word in text.split():
+        clean = word.strip("`()[]{}\"',:;")
+        if "/" not in clean or clean.startswith(("http://", "https://")):
+            continue
+        # Handle .blade.php (compound extension)
+        if clean.endswith(".blade.php"):
+            paths.add(clean)
+            continue
+        # Check single extensions
+        dot = clean.rfind(".")
+        if dot != -1 and clean[dot:] in _FILE_EXTENSIONS:
+            paths.add(clean)
+    return paths
+
+
+def _get_project_paths(repo_root: str) -> set[str]:
+    """Return a set of all file paths in the project (relative to root)."""
+    from lean_ai.indexer.tree import list_repo_tree
+
+    return {e.path for e in list_repo_tree(repo_root)}
+
+
+async def _validate_guide(
+    guide: str,
+    repo_root: str,
+    llm_client: LLMClient,
+    system_prompt: str,
+) -> str:
+    """Check file paths in the guide against the project tree.
+
+    If invalid paths are found, makes a focused correction LLM call.
+    Returns the corrected guide, or the original if no issues or on error.
+    """
+    referenced = _extract_file_paths(guide)
+    if not referenced:
+        return guide
+
+    project_paths = _get_project_paths(repo_root)
+
+    # Only validate paths that look like they belong in THIS project
+    # (start with a directory that exists in the tree's top level)
+    project_top_dirs = {p.split("/")[0] for p in project_paths}
+    invalid: set[str] = set()
+    for path in referenced:
+        top_dir = path.split("/")[0]
+        if top_dir in project_top_dirs and path not in project_paths:
+            invalid.add(path)
+
+    if not invalid:
+        logger.info(
+            "Framework guide: all %d file references valid",
+            len(referenced),
+        )
+        return guide
+
+    logger.info(
+        "Framework guide: %d/%d file references invalid: %s",
+        len(invalid),
+        len(referenced),
+        ", ".join(sorted(invalid)),
+    )
+
+    # Correction pass — ask LLM to fix only the invalid references
+    correction_prompt = (
+        "The following file paths referenced in the guide below do NOT "
+        "exist in this project:\n\n"
+        + "\n".join(f"- `{p}`" for p in sorted(invalid))
+        + "\n\n"
+        "Rewrite the COMPLETE guide, correcting or removing all "
+        "references to these non-existent files. Use the project file "
+        "tree to determine the correct file locations for this version. "
+        "Keep all other content unchanged.\n\n"
+        "GUIDE TO CORRECT:\n\n" + guide
+    )
+
+    corrected = await llm_client.chat_raw(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": correction_prompt[:40000]},
+        ],
+        max_tokens=4096,
+    )
+
+    if corrected.strip():
+        logger.info(
+            "Framework guide: correction pass produced %d chars",
+            len(corrected),
+        )
+        return corrected
+    return guide
+
 
 # ---------------------------------------------------------------------------
 # Framework detection (reuses deprecations._detect_versions)
@@ -523,6 +635,20 @@ async def generate_framework_guide(
     if not guide.strip():
         logger.info("Framework guide: LLM returned empty output")
         return ""
+
+    # Step 5b: Validate file references against project tree
+    try:
+        guide = await _validate_guide(
+            guide,
+            repo_root,
+            llm_client,
+            _build_guide_system_prompt(frameworks, runtimes, cutoff=cutoff),
+        )
+    except Exception as exc:
+        logger.warning(
+            "Framework guide: validation pass failed (non-blocking): %s",
+            exc,
+        )
 
     # Step 6: Add header
     fw_label = ", ".join(name for name, _ver in frameworks)

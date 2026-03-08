@@ -7,6 +7,7 @@ import json
 
 from lean_ai.context.framework_guide import (
     _build_guide_search_queries,
+    _extract_file_paths,
     _extract_urls_from_search,
     _get_primary_frameworks,
 )
@@ -182,3 +183,50 @@ class TestExtractUrlsFromSearch:
     def test_empty_input(self):
         assert _extract_urls_from_search("") == []
         assert _extract_urls_from_search("no urls here") == []
+
+
+# ---------------------------------------------------------------------------
+# _extract_file_paths
+# ---------------------------------------------------------------------------
+
+
+class TestExtractFilePaths:
+    def test_extracts_backtick_paths(self):
+        text = "Edit `app/Http/Kernel.php` to add middleware"
+        assert "app/Http/Kernel.php" in _extract_file_paths(text)
+
+    def test_extracts_comment_paths(self):
+        text = "// app/Models/Customer.php\nclass Customer {}"
+        assert "app/Models/Customer.php" in _extract_file_paths(text)
+
+    def test_ignores_urls(self):
+        text = "See https://laravel.com/docs/routing.php"
+        assert len(_extract_file_paths(text)) == 0
+
+    def test_handles_blade_php(self):
+        text = "Create `resources/views/index.blade.php`"
+        assert "resources/views/index.blade.php" in _extract_file_paths(text)
+
+    def test_deduplicates(self):
+        text = "`app/Models/User.php` and `app/Models/User.php` again"
+        paths = _extract_file_paths(text)
+        assert len([p for p in paths if p == "app/Models/User.php"]) == 1
+
+    def test_empty_input(self):
+        assert _extract_file_paths("") == set()
+        assert _extract_file_paths("no paths here") == set()
+
+    def test_multiple_extensions(self):
+        text = (
+            "Check `config/app.php` and `resources/js/app.js` "
+            "and `routes/web.php` for changes"
+        )
+        paths = _extract_file_paths(text)
+        assert "config/app.php" in paths
+        assert "resources/js/app.js" in paths
+        assert "routes/web.php" in paths
+
+    def test_strips_surrounding_punctuation(self):
+        text = '("app/Http/Controllers/UserController.php")'
+        paths = _extract_file_paths(text)
+        assert "app/Http/Controllers/UserController.php" in paths
