@@ -4,14 +4,20 @@ Pure unit tests — no LLM, no network calls required.
 """
 
 import json
+from unittest.mock import AsyncMock
+
+import pytest
 
 from lean_ai.context.framework_guide import (
     _build_guide_search_queries,
+    _canonicalize_name,
     _check_invalid_paths,
     _extract_file_paths,
+    _extract_search_results,
     _extract_urls_from_search,
     _find_block_boundaries,
     _get_primary_frameworks,
+    _rank_urls_with_llm,
     _remove_blocks,
 )
 
@@ -453,3 +459,187 @@ class TestRemoveBlocks:
         text = "No file paths here at all"
         result = _remove_blocks(text, {"app/Http/Kernel.php"})
         assert result == text
+
+
+# ---------------------------------------------------------------------------
+# _canonicalize_name
+# ---------------------------------------------------------------------------
+
+
+class TestCanonicalizeName:
+    def test_known_mapping(self):
+        assert _canonicalize_name("laravel/framework") == "Laravel"
+
+    def test_known_mapping_symfony(self):
+        assert _canonicalize_name("symfony/framework-bundle") == "Symfony"
+
+    def test_composer_heuristic(self):
+        assert _canonicalize_name("vendor/some-pkg") == "Some Pkg"
+
+    def test_go_module_heuristic(self):
+        assert _canonicalize_name("github.com/user/gin") == "Gin"
+
+    def test_npm_scoped_heuristic(self):
+        assert _canonicalize_name("@scope/thing") == "Thing"
+
+    def test_plain_name_unchanged(self):
+        assert _canonicalize_name("django") == "django"
+
+    def test_dotnet_mapping(self):
+        assert _canonicalize_name("microsoft.aspnetcore") == "ASP.NET Core"
+
+
+# ---------------------------------------------------------------------------
+# _extract_search_results
+# ---------------------------------------------------------------------------
+
+
+class TestExtractSearchResults:
+    def test_parses_standard_format(self):
+        text = (
+            "Title: Laravel 12 Docs\n"
+            "URL: https://laravel.com/docs/12.x\n"
+            "Laravel is a PHP framework\n\n"
+            "---\n\n"
+            "Title: Upgrade Guide\n"
+            "URL: https://laravel.com/docs/12.x/upgrade\n"
+            "How to upgrade from 11 to 12"
+        )
+        results = _extract_search_results(text)
+        assert len(results) == 2
+        assert results[0][0] == "Laravel 12 Docs"
+        assert results[0][1] == "https://laravel.com/docs/12.x"
+        assert "PHP framework" in results[0][2]
+        assert results[1][1] == "https://laravel.com/docs/12.x/upgrade"
+
+    def test_handles_missing_title(self):
+        text = (
+            "URL: https://example.com/page\n"
+            "Some snippet"
+        )
+        results = _extract_search_results(text)
+        assert len(results) == 1
+        assert results[0][0] == ""
+        assert results[0][1] == "https://example.com/page"
+
+    def test_skips_blocks_without_url(self):
+        text = (
+            "Title: No URL block\n"
+            "Just some text\n\n"
+            "---\n\n"
+            "Title: Has URL\n"
+            "URL: https://example.com\n"
+            "Snippet"
+        )
+        results = _extract_search_results(text)
+        assert len(results) == 1
+        assert results[0][1] == "https://example.com"
+
+    def test_empty_input(self):
+        assert _extract_search_results("") == []
+
+    def test_multiple_results(self):
+        parts = []
+        for i in range(5):
+            parts.append(
+                f"Title: Result {i}\nURL: https://example.com/{i}\nSnippet {i}"
+            )
+        text = "\n\n---\n\n".join(parts)
+        results = _extract_search_results(text)
+        assert len(results) == 5
+
+
+# ---------------------------------------------------------------------------
+# _rank_urls_with_llm
+# ---------------------------------------------------------------------------
+
+
+class TestRankUrlsWithLlm:
+    @pytest.mark.asyncio
+    async def test_returns_selected_urls(self):
+        results = [
+            ("Docker Hub", "https://hub.docker.com/laravel", "Docker image"),
+            ("Laravel Docs", "https://laravel.com/docs", "Official docs"),
+            ("Packagist", "https://packagist.org/laravel", "Package"),
+            ("Upgrade Guide", "https://laravel.com/docs/upgrade", "Upgrade"),
+            ("GitHub", "https://github.com/laravel", "Repository"),
+            ("Tutorial", "https://laracasts.com/series", "Video tutorial"),
+            ("Blog Post", "https://blog.example.com", "Blog about Laravel"),
+        ]
+        mock_llm = AsyncMock()
+        mock_llm.chat_raw = AsyncMock(return_value="2\n4\n6")
+
+        urls = await _rank_urls_with_llm(
+            results,
+            [("laravel/framework", "^12.0")],
+            mock_llm,
+            pick=3,
+        )
+        assert urls == [
+            "https://laravel.com/docs",
+            "https://laravel.com/docs/upgrade",
+            "https://laracasts.com/series",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_fallback_on_llm_failure(self):
+        results = [
+            ("Docs", "https://laravel.com/docs", "Official"),
+            ("Hub", "https://hub.docker.com", "Docker"),
+            ("Guide", "https://example.com/guide", "Guide"),
+        ]
+        mock_llm = AsyncMock()
+        mock_llm.chat_raw = AsyncMock(side_effect=Exception("LLM down"))
+
+        urls = await _rank_urls_with_llm(
+            results,
+            [("laravel/framework", "^12.0")],
+            mock_llm,
+            pick=2,
+        )
+        # Falls back to first N
+        assert urls == [
+            "https://laravel.com/docs",
+            "https://hub.docker.com",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_returns_all_when_fewer_than_pick(self):
+        results = [
+            ("Docs", "https://laravel.com/docs", "Official"),
+            ("Guide", "https://example.com/guide", "Guide"),
+        ]
+        mock_llm = AsyncMock()
+        # Should not even call LLM
+        urls = await _rank_urls_with_llm(
+            results,
+            [("laravel/framework", "^12.0")],
+            mock_llm,
+            pick=6,
+        )
+        assert urls == [
+            "https://laravel.com/docs",
+            "https://example.com/guide",
+        ]
+        mock_llm.chat_raw.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_fallback_on_unparseable_response(self):
+        results = [
+            ("A", "https://a.com", "A"),
+            ("B", "https://b.com", "B"),
+            ("C", "https://c.com", "C"),
+        ]
+        mock_llm = AsyncMock()
+        mock_llm.chat_raw = AsyncMock(
+            return_value="I think the best ones are the docs",
+        )
+
+        urls = await _rank_urls_with_llm(
+            results,
+            [("django", ">=5.0")],
+            mock_llm,
+            pick=2,
+        )
+        # No valid numbers parsed → fallback
+        assert urls == ["https://a.com", "https://b.com"]

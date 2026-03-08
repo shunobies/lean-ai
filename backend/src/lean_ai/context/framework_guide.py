@@ -22,6 +22,69 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Name canonicalization — package manager names → search-friendly names
+# ---------------------------------------------------------------------------
+
+_CANONICAL_NAMES: dict[str, str] = {
+    # PHP / Composer
+    "laravel/framework": "Laravel",
+    "laravel/tinker": "Laravel Tinker",
+    "laravel/sanctum": "Laravel Sanctum",
+    "laravel/cashier": "Laravel Cashier",
+    "laravel/scout": "Laravel Scout",
+    "laravel/horizon": "Laravel Horizon",
+    "laravel/breeze": "Laravel Breeze",
+    "laravel/jetstream": "Laravel Jetstream",
+    "symfony/framework-bundle": "Symfony",
+    "symfony/symfony": "Symfony",
+    "symfony/console": "Symfony Console",
+    "cakephp/cakephp": "CakePHP",
+    # Go modules
+    "github.com/gin-gonic/gin": "Gin",
+    "github.com/labstack/echo": "Echo",
+    "github.com/gofiber/fiber": "Fiber",
+    # npm scoped
+    "@angular/core": "Angular",
+    "@nestjs/core": "NestJS",
+    "@vue/core": "Vue",
+    # .NET
+    "microsoft.aspnetcore": "ASP.NET Core",
+}
+
+
+def _canonicalize_name(raw_name: str) -> str:
+    """Convert a package manager name to a human-friendly search term.
+
+    Checks an explicit mapping first, then applies heuristics for
+    Composer ``vendor/package``, Go ``github.com/user/repo``, and npm
+    scoped ``@scope/package`` formats.  Plain names (``django``,
+    ``react``) pass through unchanged.
+    """
+    # Exact match in mapping
+    if raw_name in _CANONICAL_NAMES:
+        return _CANONICAL_NAMES[raw_name]
+    lower = raw_name.lower()
+    if lower in _CANONICAL_NAMES:
+        return _CANONICAL_NAMES[lower]
+
+    # npm scoped: @scope/package → package part, title-cased
+    if raw_name.startswith("@") and "/" in raw_name:
+        return raw_name.split("/")[-1].replace("-", " ").title()
+
+    # Composer vendor/package or Go github.com/user/repo
+    if "/" in raw_name:
+        parts = raw_name.split("/")
+        # Go modules: github.com/user/repo → last segment
+        if "." in parts[0]:
+            return parts[-1].replace("-", " ").title()
+        # Composer: vendor/package → package, title-cased
+        return parts[-1].replace("-", " ").title()
+
+    # Already fine (django, flask, react, rails, axum, etc.)
+    return raw_name
+
+
+# ---------------------------------------------------------------------------
 # Post-generation validation — file-path extraction
 # ---------------------------------------------------------------------------
 
@@ -449,7 +512,8 @@ def _build_guide_search_queries(
     queries: list[str] = []
     for name, version in frameworks:
         v = _extract_major_minor(version)
-        label = f"{name} {v}" if v else name
+        canonical = _canonicalize_name(name)
+        label = f"{canonical} {v}" if v else canonical
         queries.append(f"{label} architecture guide request lifecycle")
         queries.append(f"{label} CLI commands scaffolding generators")
         queries.append(
@@ -504,11 +568,13 @@ def _build_guide_system_prompt(
     from lean_ai.context.deprecations import _extract_major_minor
 
     fw_list = ", ".join(
-        f"{name} {_extract_major_minor(ver)}" if ver else name
+        f"{_canonicalize_name(name)} {_extract_major_minor(ver)}"
+        if ver else _canonicalize_name(name)
         for name, ver in frameworks
     )
     rt_list = ", ".join(
-        f"{name} {_extract_major_minor(ver)}" if ver else name
+        f"{_canonicalize_name(name)} {_extract_major_minor(ver)}"
+        if ver else _canonicalize_name(name)
         for name, ver in runtimes
     ) or "not detected"
 
@@ -661,6 +727,123 @@ def _extract_urls_from_search(search_text: str, max_urls: int = 5) -> list[str]:
     return urls
 
 
+def _extract_search_results(
+    search_text: str,
+) -> list[tuple[str, str, str]]:
+    """Extract ``(title, url, snippet)`` tuples from formatted search output.
+
+    Both DuckDuckGo and SearXNG providers format results as::
+
+        Title: <title>
+        URL: <url>
+        <snippet body>
+
+        ---
+
+    Returns a list of tuples preserving order.
+    """
+    results: list[tuple[str, str, str]] = []
+    blocks = search_text.split("---")
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+        title = ""
+        url = ""
+        snippet_lines: list[str] = []
+        for line in block.splitlines():
+            if line.startswith("Title: "):
+                title = line[7:].strip()
+            elif line.startswith("URL: "):
+                url = line[5:].strip()
+            else:
+                snippet_lines.append(line)
+        if url:
+            snippet = " ".join(
+                ln.strip() for ln in snippet_lines if ln.strip()
+            )
+            results.append((title, url, snippet[:300]))
+    return results
+
+
+async def _rank_urls_with_llm(
+    results: list[tuple[str, str, str]],
+    frameworks: list[tuple[str, str]],
+    llm_client: LLMClient,
+    pick: int = 6,
+) -> list[str]:
+    """Ask the LLM to pick the most relevant URLs for the framework guide.
+
+    Presents a numbered list of ``(title, url, snippet)`` search results
+    and asks the LLM to choose the best *pick* URLs.  Falls back to
+    the first *pick* URLs if the LLM call fails.
+    """
+    if len(results) <= pick:
+        return [url for _, url, _ in results]
+
+    fw_names = ", ".join(
+        _canonicalize_name(name) for name, _ in frameworks
+    )
+
+    numbered: list[str] = []
+    for i, (title, url, snippet) in enumerate(results, 1):
+        entry = f"{i}. {title} — {url}"
+        if snippet:
+            entry += f"\n   {snippet[:200]}"
+        numbered.append(entry)
+
+    prompt = (
+        f"Pick the {pick} most useful URLs for generating a "
+        f"framework architecture guide about {fw_names}.\n\n"
+        "Prefer: official documentation, upgrade guides, architecture "
+        "overviews, tutorials, changelog pages.\n"
+        "Avoid: package registries (Packagist, npm, PyPI, Docker Hub), "
+        "GitHub repository pages, issue trackers, Stack Overflow.\n\n"
+        "SEARCH RESULTS:\n"
+        + "\n".join(numbered)
+        + f"\n\nReturn ONLY the {pick} numbers, one per line. "
+        "Nothing else."
+    )
+
+    fallback_urls = [url for _, url, _ in results[:pick]]
+
+    try:
+        response = await llm_client.chat_raw(
+            messages=[{"role": "user", "content": prompt[:8000]}],
+            max_tokens=64,
+        )
+        # Parse numbers from response
+        selected_indices: list[int] = []
+        for token in response.split():
+            clean = token.strip(".,;:()[]")
+            if clean.isdigit():
+                idx = int(clean)
+                if 1 <= idx <= len(results) and idx not in selected_indices:
+                    selected_indices.append(idx)
+                    if len(selected_indices) >= pick:
+                        break
+
+        if not selected_indices:
+            logger.info(
+                "Framework guide: URL ranking returned no valid indices, "
+                "using fallback order",
+            )
+            return fallback_urls
+
+        ranked_urls = [results[i - 1][1] for i in selected_indices]
+        logger.info(
+            "Framework guide: LLM ranked %d/%d URLs for fetching",
+            len(ranked_urls), len(results),
+        )
+        return ranked_urls
+    except Exception as exc:
+        logger.info(
+            "Framework guide: URL ranking failed (%s), using fallback",
+            exc,
+        )
+        return fallback_urls
+
+
 async def generate_framework_guide(
     repo_root: str,
     llm_client: LLMClient,
@@ -706,7 +889,7 @@ async def generate_framework_guide(
         frameworks, runtimes, cutoff=cutoff,
     )
     search_parts: list[str] = []
-    all_urls: list[str] = []
+    all_results: list[tuple[str, str, str]] = []  # (title, url, snippet)
 
     logger.info("Framework guide: running %d web searches", len(queries))
     for i, query in enumerate(queries, 1):
@@ -719,7 +902,9 @@ async def generate_framework_guide(
                 search_parts.append(
                     f"=== Search: {query} ===\n{result.output}"
                 )
-                all_urls.extend(_extract_urls_from_search(result.output))
+                all_results.extend(
+                    _extract_search_results(result.output),
+                )
                 logger.info(
                     "Framework guide: search %d/%d OK (%d chars)",
                     i, len(queries), len(result.output),
@@ -739,17 +924,25 @@ async def generate_framework_guide(
                 i, len(queries), exc,
             )
 
-    # Step 3b: Fetch full page content from top search result URLs.
-    # DuckDuckGo only returns ~100-200 char snippets per result.
-    # Fetching the actual pages gives the LLM real documentation to
-    # work from, which dramatically improves version accuracy.
+    # Step 3b: LLM-ranked page fetching.
+    # Deduplicate by URL, keep top 20, then let the LLM pick the
+    # most relevant pages to fetch instead of blindly taking the first N.
     seen_urls: set[str] = set()
-    unique_urls = []
-    for url in all_urls:
+    unique_results: list[tuple[str, str, str]] = []
+    for title, url, snippet in all_results:
         if url not in seen_urls:
             seen_urls.add(url)
-            unique_urls.append(url)
-    fetch_urls = unique_urls[:6]  # Top 6 unique URLs
+            unique_results.append((title, url, snippet))
+    unique_results = unique_results[:20]
+
+    logger.info(
+        "Framework guide: %d unique URLs from searches, "
+        "ranking top 20 for fetch",
+        len(unique_results),
+    )
+    fetch_urls = await _rank_urls_with_llm(
+        unique_results, frameworks, llm_client, pick=6,
+    )
 
     page_parts: list[str] = []
     page_chars_budget = 24000  # Total budget for fetched pages
@@ -860,7 +1053,9 @@ async def generate_framework_guide(
         )
 
     # Step 6: Add header
-    fw_label = ", ".join(name for name, _ver in frameworks)
+    fw_label = ", ".join(
+        _canonicalize_name(name) for name, _ver in frameworks
+    )
     content = (
         f"# Framework Guide: {fw_label}\n\n"
         "_Auto-generated. Edit freely — this file is yours to curate._\n\n"
