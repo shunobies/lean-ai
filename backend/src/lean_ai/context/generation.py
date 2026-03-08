@@ -623,6 +623,25 @@ async def generate_project_context(
         except Exception as exc:
             logger.warning("Deprecation lookup failed (non-fatal): %s", exc)
 
+    # ── Framework guide (separate file, not appended to content) ──
+    if settings.enable_framework_guide:
+        try:
+            from .framework_guide import generate_framework_guide, write_framework_guide
+
+            guide_content = await asyncio.wait_for(
+                generate_framework_guide(
+                    repo_root, llm_client,
+                    max_tokens=min(4096, max_out),
+                ),
+                timeout=180,
+            )
+            if guide_content:
+                write_framework_guide(repo_root, guide_content)
+        except asyncio.TimeoutError:
+            logger.warning("Framework guide timed out after 180s (non-fatal)")
+        except Exception as exc:
+            logger.warning("Framework guide failed (non-fatal): %s", exc)
+
     logger.info("Project context generated: %d chars", len(content))
     return content
 

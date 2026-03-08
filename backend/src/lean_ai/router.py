@@ -25,8 +25,10 @@ from lean_ai.db import (
     list_sessions,
     log_commit,
     log_conversation_entry,
-    search_sessions as db_search_sessions,
     update_session,
+)
+from lean_ai.db import (
+    search_sessions as db_search_sessions,
 )
 from lean_ai.indexer.indexer import (
     generate_embeddings as _generate_embeddings,
@@ -235,18 +237,37 @@ def _read_active_file(workspace_root: str, relative_path: str, max_chars: int = 
 
 
 def _read_project_context(workspace_root: str, max_chars: int = 20_000) -> str | None:
-    """Read .lean_ai/project_context.md if it exists."""
-    context_path = os.path.join(workspace_root, ".lean_ai", "project_context.md")
-    if not os.path.isfile(context_path):
-        return None
-    try:
-        with open(context_path, encoding="utf-8", errors="replace") as f:
-            content = f.read(max_chars)
-        if len(content) >= max_chars:
-            content += "\n... (truncated)"
-        return content
-    except Exception:
-        return None
+    """Read .lean_ai/project_context.md and framework_guide.md if they exist."""
+    parts: list[str] = []
+    for filename in ("project_context.md", "framework_guide.md"):
+        filepath = os.path.join(workspace_root, ".lean_ai", filename)
+        if not os.path.isfile(filepath):
+            continue
+        remaining = max(0, max_chars - sum(len(p) for p in parts))
+        if remaining < 500:
+            break
+        try:
+            with open(filepath, encoding="utf-8", errors="replace") as f:
+                content = f.read(remaining)
+            if content.strip():
+                if len(content) >= remaining:
+                    content += "\n... (truncated)"
+                parts.append(content)
+        except Exception:
+            pass
+    return "\n\n".join(parts) if parts else None
+
+
+def _load_full_context(repo_root: str) -> str:
+    """Load project_context.md + framework_guide.md for workflow injection."""
+    context = ""
+    for filename in ("project_context.md", "framework_guide.md"):
+        path = Path(repo_root) / ".lean_ai" / filename
+        if path.is_file():
+            chunk = path.read_text(encoding="utf-8", errors="replace")
+            if chunk.strip():
+                context += ("\n\n" if context else "") + chunk
+    return context
 
 
 def _search_workspace(workspace_root: str, query: str, limit: int = 8) -> list[dict]:
@@ -578,10 +599,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                     branch_name = ""
 
                             # --- Load context and run workflow ---
-                            context_path = Path(repo_root) / ".lean_ai" / "project_context.md"
-                            context = ""
-                            if context_path.is_file():
-                                context = context_path.read_text(encoding="utf-8", errors="replace")
+                            context = _load_full_context(repo_root)
 
                             # Conversation logger — writes chain-of-thought to DB
                             async def _log_conversation(
@@ -683,10 +701,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
                         branch_name = session.get("branch_name", "")
 
                         # Load project context
-                        context_path = Path(repo_root) / ".lean_ai" / "project_context.md"
-                        context = ""
-                        if context_path.is_file():
-                            context = context_path.read_text(encoding="utf-8", errors="replace")
+                        context = _load_full_context(repo_root)
 
                         # Conversation logger
                         async def _log_conversation_resume(
@@ -973,6 +988,49 @@ async def generate_project_context_endpoint(request: GenerateProjectContextReque
             status_code=501,
             detail="Context generation module not yet available",
         )
+
+
+# ── Framework Guide ──
+
+
+class GenerateFrameworkGuideRequest(BaseModel):
+    repo_root: str
+    skip_if_exists: bool = False
+
+
+class GenerateFrameworkGuideResponse(BaseModel):
+    path: str
+    chars: int
+    skipped: bool = False
+
+
+@router.post("/generate-framework-guide", response_model=GenerateFrameworkGuideResponse)
+async def generate_framework_guide_endpoint(request: GenerateFrameworkGuideRequest):
+    """Generate .lean_ai/framework_guide.md for the workspace."""
+    guide_path = Path(request.repo_root) / ".lean_ai" / "framework_guide.md"
+    if request.skip_if_exists and guide_path.is_file():
+        return GenerateFrameworkGuideResponse(
+            path=str(guide_path), chars=guide_path.stat().st_size, skipped=True,
+        )
+
+    try:
+        from lean_ai.context.framework_guide import (
+            generate_framework_guide,
+            write_framework_guide,
+        )
+
+        content = await generate_framework_guide(request.repo_root, llm_client)
+        if not content:
+            raise HTTPException(
+                status_code=404,
+                detail="No frameworks detected in the project",
+            )
+        path = write_framework_guide(request.repo_root, content)
+        return GenerateFrameworkGuideResponse(path=path, chars=len(content))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ── Scaffold ──
