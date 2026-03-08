@@ -428,6 +428,18 @@ export class BackendClient {
         )) as { path: string; chars: number; skipped?: boolean };
     }
 
+    async generateFrameworkGuide(
+        repoRoot: string,
+        force: boolean = false,
+    ): Promise<{ path: string; chars: number; skipped?: boolean }> {
+        // Generates .lean_ai/framework_guide.md for detected frameworks.
+        // Returns 404 if no frameworks detected — caller should treat as non-fatal.
+        return (await this._postJsonNoTimeout(
+            "/api/generate-framework-guide",
+            { repo_root: repoRoot, skip_if_exists: !force },
+        )) as { path: string; chars: number; skipped?: boolean };
+    }
+
     async listScaffolds(): Promise<{
         scaffolds: Array<{
             name: string;

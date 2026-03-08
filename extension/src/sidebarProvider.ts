@@ -516,6 +516,63 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             });
         }
 
+        // ── Step 3: Generate framework guide (non-fatal) ──
+        const guideStart = Date.now();
+        const guideTicker = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - guideStart) / 1000);
+            const mins = Math.floor(elapsed / 60);
+            const secs = elapsed % 60;
+            const timeStr = mins > 0
+                ? `${mins}m ${secs.toString().padStart(2, "0")}s`
+                : `${secs}s`;
+            this.postMessage({
+                type: "thinking",
+                show: true,
+                text: `Generating framework guide... (${timeStr})`,
+            });
+        }, 5_000);
+
+        this.postMessage({
+            type: "thinking",
+            show: true,
+            text: "Generating framework guide...",
+        });
+
+        try {
+            const guideResult = await this.client.generateFrameworkGuide(repoRoot, force);
+            clearInterval(guideTicker);
+            if (guideResult.skipped) {
+                this.postMessage({
+                    type: "reply",
+                    text: `Framework guide already exists (${guideResult.chars.toLocaleString()} bytes). Use \`/init --force\` to regenerate.`,
+                    cls: "msg-system",
+                });
+            } else {
+                this.postMessage({
+                    type: "reply",
+                    text: `Framework guide generated (${guideResult.chars.toLocaleString()} chars).`,
+                    cls: "msg-system",
+                });
+            }
+        } catch (e) {
+            clearInterval(guideTicker);
+            // Non-fatal — 404 means no frameworks detected, anything else is an error
+            const error = e instanceof Error ? e.message : String(e);
+            if (error.includes("404")) {
+                this.postMessage({
+                    type: "reply",
+                    text: "No frameworks detected — framework guide skipped.",
+                    cls: "msg-system",
+                });
+            } else {
+                this.postMessage({
+                    type: "reply",
+                    text: `Framework guide generation failed: ${error}`,
+                    cls: "msg-system",
+                });
+            }
+        }
+
         // ── Done ──
         this.postMessage({ type: "thinking", show: false });
         this.postMessage({

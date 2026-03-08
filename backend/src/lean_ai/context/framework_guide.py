@@ -203,7 +203,8 @@ async def generate_framework_guide(
     queries = _build_guide_search_queries(frameworks, runtimes)
     search_parts: list[str] = []
 
-    for query in queries:
+    logger.info("Framework guide: running %d web searches", len(queries))
+    for i, query in enumerate(queries, 1):
         try:
             result = await asyncio.wait_for(
                 search_internet(query, llm_client=None),
@@ -211,10 +212,16 @@ async def generate_framework_guide(
             )
             if result.success and result.output:
                 search_parts.append(f"=== Search: {query} ===\n{result.output}")
+                logger.info(
+                    "Framework guide: search %d/%d OK (%d chars)",
+                    i, len(queries), len(result.output),
+                )
+            else:
+                logger.info("Framework guide: search %d/%d returned no results", i, len(queries))
         except asyncio.TimeoutError:
-            logger.debug("Framework guide search timed out for '%s'", query)
+            logger.info("Framework guide: search %d/%d timed out", i, len(queries))
         except Exception as exc:
-            logger.debug("Framework guide search failed for '%s': %s", query, exc)
+            logger.info("Framework guide: search %d/%d failed: %s", i, len(queries), exc)
 
     # Step 4: Build user message with search results + project tree
     user_parts: list[str] = []
@@ -230,6 +237,10 @@ async def generate_framework_guide(
     )
 
     # Step 5: LLM generates the guide
+    logger.info(
+        "Framework guide: generating via LLM (%d search results, %d-char prompt)",
+        len(search_parts), min(len(user_content), 20000),
+    )
     try:
         guide = await llm_client.chat_raw(
             messages=[
