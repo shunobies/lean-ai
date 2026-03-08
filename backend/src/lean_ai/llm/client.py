@@ -1,6 +1,8 @@
 """Async Ollama client wrapper with tool calling and streaming."""
 
 import asyncio
+import hashlib
+import json
 import logging
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
@@ -13,6 +15,68 @@ from lean_ai.config import settings
 logger = logging.getLogger(__name__)
 
 _TRANSIENT_ERRORS = (ConnectionError, TimeoutError, OSError)
+
+
+def _sanitize_messages(messages: list[dict]) -> list[dict]:
+    """Return a cleaned copy of messages with orphaned tool calls removed.
+
+    Fixes two issues that can confuse the LLM:
+    1. Assistant messages with tool_calls that lack corresponding tool results
+       (e.g. from interrupted execution) — excess tool_calls are trimmed.
+    2. Consecutive assistant messages — merged into one.
+    """
+    cleaned: list[dict] = []
+    for msg in messages:
+        role = msg.get("role")
+        tool_calls = msg.get("tool_calls")
+
+        # Merge consecutive assistant messages
+        if role == "assistant" and cleaned and cleaned[-1].get("role") == "assistant":
+            prev = cleaned[-1]
+            prev_content = prev.get("content") or ""
+            new_content = msg.get("content") or ""
+            merged = "\n\n".join(p for p in [prev_content, new_content] if p)
+            prev["content"] = merged
+            # If the new message also has tool_calls, adopt them
+            if tool_calls:
+                prev["tool_calls"] = list(tool_calls)
+            continue
+
+        cleaned.append(dict(msg))
+
+    # Fix orphaned tool_calls: for each assistant with tool_calls, ensure
+    # enough role="tool" messages follow before the next non-tool message.
+    result: list[dict] = []
+    i = 0
+    while i < len(cleaned):
+        msg = cleaned[i]
+        tool_calls = msg.get("tool_calls")
+
+        if msg.get("role") == "assistant" and tool_calls:
+            # Count following tool-result messages
+            following_tools = 0
+            j = i + 1
+            while j < len(cleaned) and cleaned[j].get("role") == "tool":
+                following_tools += 1
+                j += 1
+
+            if following_tools == 0:
+                # No tool results at all — drop the entire assistant message
+                i += 1
+                continue
+
+            if following_tools < len(tool_calls):
+                # Fewer results than calls — trim tool_calls to match
+                trimmed = dict(msg)
+                trimmed["tool_calls"] = list(tool_calls[:following_tools])
+                result.append(trimmed)
+            else:
+                result.append(msg)
+        else:
+            result.append(msg)
+        i += 1
+
+    return result
 
 
 @dataclass
@@ -238,6 +302,92 @@ class LLMClient:
             if token:
                 yield token
 
+    async def _maybe_compress(
+        self, messages: list[dict], threshold: float, preserve: float,
+    ) -> None:
+        """Compress older conversation history in-place when nearing context limits.
+
+        Estimates token usage from message content length.  When estimated
+        tokens exceed *threshold* fraction of the context window, older
+        messages (after the system prompt) are summarised by an LLM call
+        and replaced with a single summary message.  The most recent
+        *preserve* fraction of the conversation is kept intact.
+        """
+        est_tokens = sum(len(m.get("content") or "") for m in messages) // 4
+        limit = int(threshold * self._context_window)
+
+        if est_tokens < limit:
+            return
+        if len(messages) < 4:
+            return
+
+        # Walk backward to find split point — keep `preserve` fraction.
+        # If total content is small enough that preserve covers everything,
+        # split at the midpoint to still compress the older half.
+        preserve_tokens = int(preserve * self._context_window)
+        accum = 0
+        split = 2  # Default: compress everything except system + first message
+        for idx in range(len(messages) - 1, 0, -1):
+            accum += len(messages[idx].get("content") or "") // 4
+            if accum >= preserve_tokens:
+                split = idx
+                break
+
+        # Ensure split lands on a valid boundary (not mid-tool-exchange).
+        # Walk backward to find a user message or a non-tool message.
+        while split > 1 and messages[split].get("role") == "tool":
+            split -= 1
+        # Also skip the assistant message with tool_calls that precedes tools
+        if (
+            split > 1
+            and messages[split].get("role") == "assistant"
+            and messages[split].get("tool_calls")
+        ):
+            split -= 1
+
+        if split <= 1:
+            return  # Nothing to compress
+
+        old_messages = messages[1:split]
+        if not old_messages:
+            return
+
+        # Build summary from old messages
+        history_text = "\n".join(
+            f"[{m.get('role', '?')}] {(m.get('content') or '')[:500]}"
+            for m in old_messages
+        )
+
+        compress_prompt = (
+            "Summarize the following conversation history into a concise state snapshot.\n"
+            "Include: what was accomplished, what files were modified, current errors "
+            "or blockers, and what remains to be done.\n"
+            "Be factual and specific. Preserve file paths, function names, and error "
+            "messages exactly.\n\n"
+            f"{history_text}"
+        )
+
+        try:
+            summary = await self.chat_raw(
+                messages=[{"role": "user", "content": compress_prompt}],
+                max_tokens=2048,
+            )
+            if not summary.strip():
+                return
+        except Exception:
+            logger.warning("chat_with_tools: compression LLM call failed, skipping")
+            return
+
+        logger.info(
+            "chat_with_tools: compressed %d messages (%d→%d est. tokens)",
+            len(old_messages), est_tokens,
+            sum(len(m.get("content") or "") for m in messages[split:]) // 4
+            + len(summary) // 4,
+        )
+        messages[1:split] = [
+            {"role": "user", "content": f"[Previous conversation summary]\n{summary}"},
+        ]
+
     async def chat_with_tools(
         self,
         messages: list[dict],
@@ -248,6 +398,7 @@ class LLMClient:
         max_tokens: int | None = None,
         task_reminder: str | Callable[[], str] | None = None,
         reminder_interval: int = 10,
+        loop_detection_threshold: int | None = None,
         on_tool_call: Callable | None = None,
         on_tool_result: Callable | None = None,
         on_content: Callable | None = None,
@@ -277,6 +428,15 @@ class LLMClient:
         explanation_parts: list[str] = []
         nudged = False
 
+        # Loop detection state
+        ld_threshold = (
+            loop_detection_threshold
+            if loop_detection_threshold is not None
+            else settings.loop_detection_threshold
+        )
+        prev_tool_hash: str | None = None
+        consecutive_count: int = 0
+
         # 0 means unlimited — use a practically infinite ceiling
         effective_max = max_turns if max_turns > 0 else 2**31
 
@@ -291,7 +451,7 @@ class LLMClient:
             async def _chat():
                 return await self._client.chat(
                     model=self._model,
-                    messages=messages,
+                    messages=_sanitize_messages(messages),
                     tools=tools,
                     options={
                         "temperature": self._temperature,
@@ -389,6 +549,34 @@ class LLMClient:
 
                 messages.append({"role": "tool", "content": result_str})
 
+                # Loop detection: hash tool name + args, track consecutive
+                if ld_threshold > 0:
+                    call_sig = f"{name}:{json.dumps(arguments, sort_keys=True)}"
+                    call_hash = hashlib.sha256(call_sig.encode()).hexdigest()
+                    if call_hash == prev_tool_hash:
+                        consecutive_count += 1
+                    else:
+                        consecutive_count = 1
+                        prev_tool_hash = call_hash
+
+                    if consecutive_count >= ld_threshold:
+                        logger.warning(
+                            "chat_with_tools: loop detected — %s called %d times "
+                            "with identical arguments",
+                            name, consecutive_count,
+                        )
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                f"You have called {name} with identical arguments "
+                                f"{consecutive_count} times consecutively and it "
+                                f"keeps failing. Try a different approach — read "
+                                f"the file first, check the error, or use different "
+                                f"arguments."
+                            ),
+                        })
+                        consecutive_count = 0
+
             # If the model's only action was a scratchpad update after
             # already making file changes, it's posting a final summary.
             # Exit the loop instead of prompting for another turn.
@@ -397,6 +585,13 @@ class LLMClient:
                     "chat_with_tools: exiting — sole scratchpad update after writes"
                 )
                 break
+
+            # Compress conversation history if approaching context limits
+            await self._maybe_compress(
+                messages,
+                threshold=settings.compression_threshold,
+                preserve=settings.compression_preserve,
+            )
 
             # Inject periodic task reminder to keep the original task in
             # the model's active attention window.  Ollama truncates from the

@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     implementation_max_tokens: int | None = None  # Derived: 25% of context window
     implementation_max_turns: int = 0  # 0 = unlimited
     reminder_interval: int = 10  # Re-inject task every N tool-calling turns
+    loop_detection_threshold: int = 3  # Consecutive identical tool calls before warning (0 = off)
+    compression_threshold: float = 0.7  # Compress history at this % of context window
+    compression_preserve: float = 0.3  # Keep recent % of history after compression
 
     # ── Tool execution ──
     tool_timeout_seconds: int = 60

@@ -1,8 +1,8 @@
-"""Tests for LLMClient.chat_with_tools() task reminder injection."""
+"""Tests for LLMClient.chat_with_tools() — reminders, loop detection, compression, sanitization."""
 
 import pytest
 
-from lean_ai.llm.client import LLMClient
+from lean_ai.llm.client import LLMClient, _sanitize_messages
 
 
 class FakeOllamaClient:
@@ -139,6 +139,7 @@ async def test_no_reminder_when_none():
         max_turns=20,
         task_reminder=None,
         reminder_interval=5,
+        loop_detection_threshold=0,  # Disable to isolate reminder test
     )
 
     # Only system, user, and tool messages — no reminders
@@ -244,3 +245,286 @@ async def test_callable_reminder_invoked_at_interval():
     assert len(reminder_msgs) == 2
     assert reminder_msgs[0]["content"] == "REMINDER #1"
     assert reminder_msgs[1]["content"] == "REMINDER #2"
+
+
+# ── Loop detection tests ──
+
+
+@pytest.mark.asyncio
+async def test_loop_detection_triggers_at_threshold():
+    """Warning injected after N consecutive identical tool calls."""
+    # 5 identical calls, threshold=3 → warning after 3rd
+    responses = [
+        _make_tool_call_response("edit_file", {"path": "f.py", "search": "a", "replace": "b"})
+        for _ in range(5)
+    ] + [_make_text_response()]
+
+    client, _fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=10,
+        loop_detection_threshold=3,
+    )
+
+    warnings = [
+        m for m in messages
+        if m["role"] == "user" and "identical arguments" in m.get("content", "")
+    ]
+    assert len(warnings) >= 1
+    assert "edit_file" in warnings[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_loop_detection_resets_on_different_call():
+    """Counter resets when a different tool call is seen."""
+    responses = [
+        # 2 identical
+        _make_tool_call_response("edit_file", {"path": "a.py", "search": "x", "replace": "y"}),
+        _make_tool_call_response("edit_file", {"path": "a.py", "search": "x", "replace": "y"}),
+        # 1 different
+        _make_tool_call_response("read_file", {"path": "b.py"}),
+        # 2 identical (same as first)
+        _make_tool_call_response("edit_file", {"path": "a.py", "search": "x", "replace": "y"}),
+        _make_tool_call_response("edit_file", {"path": "a.py", "search": "x", "replace": "y"}),
+        _make_text_response(),
+    ]
+
+    client, _fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=10,
+        loop_detection_threshold=3,
+    )
+
+    warnings = [
+        m for m in messages
+        if m["role"] == "user" and "identical arguments" in m.get("content", "")
+    ]
+    # Never hit 3 consecutive — no warning
+    assert len(warnings) == 0
+
+
+@pytest.mark.asyncio
+async def test_loop_detection_threshold_zero_disables():
+    """threshold=0 disables loop detection."""
+    responses = [
+        _make_tool_call_response("edit_file", {"path": "f.py", "search": "a", "replace": "b"})
+        for _ in range(10)
+    ] + [_make_text_response()]
+
+    client, _fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=15,
+        loop_detection_threshold=0,
+    )
+
+    warnings = [
+        m for m in messages
+        if m["role"] == "user" and "identical arguments" in m.get("content", "")
+    ]
+    assert len(warnings) == 0
+
+
+# ── Sanitize messages tests ──
+
+
+def test_sanitize_preserves_valid_messages():
+    """Well-formed conversation passes through unchanged."""
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"function": {"name": "read_file", "arguments": {"path": "f.py"}}},
+        ]},
+        {"role": "tool", "content": "file contents"},
+        {"role": "assistant", "content": "Done."},
+    ]
+    result = _sanitize_messages(msgs)
+    assert len(result) == 5
+    assert result[0]["role"] == "system"
+    assert result[4]["content"] == "Done."
+
+
+def test_sanitize_removes_orphaned_tool_calls():
+    """Assistant with 2 tool_calls but only 1 result → trimmed to 1."""
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"function": {"name": "read_file", "arguments": {"path": "a.py"}}},
+            {"function": {"name": "read_file", "arguments": {"path": "b.py"}}},
+        ]},
+        {"role": "tool", "content": "contents of a.py"},
+        {"role": "user", "content": "next"},
+    ]
+    result = _sanitize_messages(msgs)
+    # Assistant should have only 1 tool_call now
+    assistant = result[1]
+    assert len(assistant["tool_calls"]) == 1
+    assert assistant["tool_calls"][0]["function"]["arguments"]["path"] == "a.py"
+
+
+def test_sanitize_removes_assistant_with_no_tool_results():
+    """Assistant with tool_calls but zero results → removed."""
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "assistant", "content": "I'll read the file", "tool_calls": [
+            {"function": {"name": "read_file", "arguments": {"path": "f.py"}}},
+        ]},
+        {"role": "user", "content": "next"},
+    ]
+    result = _sanitize_messages(msgs)
+    assert len(result) == 2  # system + user
+    assert result[0]["role"] == "system"
+    assert result[1]["role"] == "user"
+
+
+def test_sanitize_merges_consecutive_assistants():
+    """Two adjacent assistant messages → merged into one."""
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "assistant", "content": "First part."},
+        {"role": "assistant", "content": "Second part."},
+        {"role": "user", "content": "ok"},
+    ]
+    result = _sanitize_messages(msgs)
+    assert len(result) == 3
+    assert result[1]["role"] == "assistant"
+    assert "First part." in result[1]["content"]
+    assert "Second part." in result[1]["content"]
+
+
+def test_sanitize_handles_empty_list():
+    """Empty list returns empty list."""
+    assert _sanitize_messages([]) == []
+
+
+# ── Compression tests ──
+
+
+@pytest.mark.asyncio
+async def test_compression_triggers_at_threshold():
+    """Messages exceeding threshold get compressed."""
+    client, fake = _build_client([])
+    # Small context window — total content ~860 chars ≈ 215 tokens.
+    # Threshold of 0.7 * 200 = 140 tokens, so 215 > 140 triggers compression.
+    client._context_window = 200
+
+    # Override chat_raw to return a fake summary
+    async def fake_chat_raw(messages, max_tokens=None):
+        return "Summary: edited files a.py and b.py."
+
+    client.chat_raw = fake_chat_raw
+
+    tc = [{"function": {"name": "edit_file", "arguments": {"path": "a.py"}}}]
+    messages = [
+        {"role": "system", "content": "System prompt here"},
+        {"role": "user", "content": "Task: " + "x" * 200},
+        {"role": "assistant", "content": "", "tool_calls": tc},
+        {"role": "tool", "content": "Result: " + "z" * 200},
+        {"role": "user", "content": "Continue " + "c" * 200},
+        {"role": "assistant", "content": "", "tool_calls": tc},
+        {"role": "tool", "content": "Done: " + "v" * 200},
+        {"role": "user", "content": "Recent message"},
+    ]
+    original_len = len(messages)
+
+    await client._maybe_compress(messages, threshold=0.7, preserve=0.3)
+
+    # System prompt should still be first
+    assert messages[0]["role"] == "system"
+    assert messages[0]["content"] == "System prompt here"
+    # Should have been compressed — fewer messages now
+    assert len(messages) < original_len
+    # Should contain the summary
+    summary_msgs = [m for m in messages if "[Previous conversation summary]" in m.get("content", "")]
+    assert len(summary_msgs) == 1
+
+
+@pytest.mark.asyncio
+async def test_compression_preserves_system_prompt():
+    """System prompt remains at index 0 after compression."""
+    client, _fake = _build_client([])
+    client._context_window = 200
+
+    async def fake_chat_raw(messages, max_tokens=None):
+        return "Compressed summary."
+
+    client.chat_raw = fake_chat_raw
+
+    messages = [
+        {"role": "system", "content": "Important system prompt"},
+        {"role": "user", "content": "x" * 300},
+        {"role": "assistant", "content": "y" * 300},
+        {"role": "user", "content": "recent"},
+    ]
+
+    await client._maybe_compress(messages, threshold=0.7, preserve=0.3)
+
+    assert messages[0]["role"] == "system"
+    assert messages[0]["content"] == "Important system prompt"
+
+
+@pytest.mark.asyncio
+async def test_compression_skips_below_threshold():
+    """Messages below threshold are not compressed."""
+    client, _fake = _build_client([])
+    client._context_window = 100000  # Large window
+
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "short message"},
+        {"role": "assistant", "content": "short reply"},
+    ]
+    original_len = len(messages)
+
+    await client._maybe_compress(messages, threshold=0.7, preserve=0.3)
+
+    assert len(messages) == original_len
+
+
+@pytest.mark.asyncio
+async def test_compression_failure_doesnt_break():
+    """If chat_raw raises, compression is skipped gracefully."""
+    client, _fake = _build_client([])
+    client._context_window = 200
+
+    async def failing_chat_raw(messages, max_tokens=None):
+        raise ConnectionError("Ollama down")
+
+    client.chat_raw = failing_chat_raw
+
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "x" * 300},
+        {"role": "assistant", "content": "y" * 300},
+        {"role": "user", "content": "recent"},
+    ]
+    original_len = len(messages)
+
+    # Should not raise
+    await client._maybe_compress(messages, threshold=0.7, preserve=0.3)
+
+    # Messages unchanged
+    assert len(messages) == original_len
