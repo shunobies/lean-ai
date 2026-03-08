@@ -125,8 +125,6 @@ LEAN_AI_ENABLE_EMBEDDINGS=true
 |---|---|---|
 | `LEAN_AI_ENABLE_PROJECT_CONTEXT` | `true` | Generate `.lean_ai/project_context.md` on workspace init |
 | `LEAN_AI_ENABLE_MULTI_ROUND_CONTEXT` | `true` | Use multi-round LLM calls for richer context generation |
-| `LEAN_AI_ENABLE_DEPRECATION_LOOKUP` | `true` | Web-search for deprecations after context generation |
-| `LEAN_AI_DEPRECATION_MAX_SEARCHES` | `5` | Max concurrent deprecation web searches |
 | `LEAN_AI_ENABLE_FRAMEWORK_GUIDE` | `true` | Auto-generate `.lean_ai/framework_guide.md` for detected frameworks (Laravel, Django, Rails, etc.) |
 
 #### Knowledge Base
