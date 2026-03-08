@@ -7,6 +7,7 @@ import json
 
 from lean_ai.context.framework_guide import (
     _build_guide_search_queries,
+    _extract_urls_from_search,
     _get_primary_frameworks,
 )
 
@@ -115,3 +116,44 @@ class TestBuildGuideSearchQueries:
     def test_empty_frameworks(self):
         queries = _build_guide_search_queries([], [])
         assert queries == []
+
+
+# ---------------------------------------------------------------------------
+# _extract_urls_from_search
+# ---------------------------------------------------------------------------
+
+
+class TestExtractUrlsFromSearch:
+    def test_extracts_urls(self):
+        text = (
+            "Title: Laravel Docs\n"
+            "URL: https://laravel.com/docs/12.x\n"
+            "Some snippet text\n\n"
+            "---\n\n"
+            "Title: Another Result\n"
+            "URL: https://example.com/guide\n"
+            "More text"
+        )
+        urls = _extract_urls_from_search(text)
+        assert urls == [
+            "https://laravel.com/docs/12.x",
+            "https://example.com/guide",
+        ]
+
+    def test_deduplicates(self):
+        text = (
+            "URL: https://laravel.com/docs\nsnippet\n\n"
+            "URL: https://laravel.com/docs\nsnippet again"
+        )
+        urls = _extract_urls_from_search(text)
+        assert len(urls) == 1
+
+    def test_respects_max(self):
+        lines = [f"URL: https://example.com/{i}\n" for i in range(20)]
+        text = "\n".join(lines)
+        urls = _extract_urls_from_search(text, max_urls=3)
+        assert len(urls) == 3
+
+    def test_empty_input(self):
+        assert _extract_urls_from_search("") == []
+        assert _extract_urls_from_search("no urls here") == []

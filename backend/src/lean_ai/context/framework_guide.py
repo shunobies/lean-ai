@@ -213,6 +213,25 @@ def _build_guide_system_prompt(
 # Orchestrator
 # ---------------------------------------------------------------------------
 
+def _extract_urls_from_search(search_text: str, max_urls: int = 5) -> list[str]:
+    """Extract URLs from formatted search result text.
+
+    Search results are formatted as ``URL: <url>`` lines by the search
+    providers.  Returns unique URLs in order of appearance.
+    """
+    seen: set[str] = set()
+    urls: list[str] = []
+    for line in search_text.splitlines():
+        if line.startswith("URL: "):
+            url = line[5:].strip()
+            if url and url not in seen:
+                seen.add(url)
+                urls.append(url)
+                if len(urls) >= max_urls:
+                    break
+    return urls
+
+
 async def generate_framework_guide(
     repo_root: str,
     llm_client: LLMClient,
@@ -224,7 +243,7 @@ async def generate_framework_guide(
     frameworks are detected or any step fails.
     """
     from lean_ai.config import settings
-    from lean_ai.tools.internet import search_internet
+    from lean_ai.tools.internet import fetch_url, search_internet
 
     if not settings.enable_framework_guide:
         return ""
@@ -249,10 +268,11 @@ async def generate_framework_guide(
     # Step 2: Get project tree for project-specific guide
     project_tree = _get_compact_tree(repo_root)
 
-    # Step 3: Web search for current best practices
+    # Step 3: Web search for current best practices (snippets)
     # Sequential — primp/lxml are not thread-safe for concurrent use.
     queries = _build_guide_search_queries(frameworks, runtimes)
     search_parts: list[str] = []
+    all_urls: list[str] = []
 
     logger.info("Framework guide: running %d web searches", len(queries))
     for i, query in enumerate(queries, 1):
@@ -262,22 +282,97 @@ async def generate_framework_guide(
                 timeout=15,
             )
             if result.success and result.output:
-                search_parts.append(f"=== Search: {query} ===\n{result.output}")
+                search_parts.append(
+                    f"=== Search: {query} ===\n{result.output}"
+                )
+                all_urls.extend(_extract_urls_from_search(result.output))
                 logger.info(
                     "Framework guide: search %d/%d OK (%d chars)",
                     i, len(queries), len(result.output),
                 )
             else:
-                logger.info("Framework guide: search %d/%d returned no results", i, len(queries))
+                logger.info(
+                    "Framework guide: search %d/%d returned no results",
+                    i, len(queries),
+                )
         except asyncio.TimeoutError:
-            logger.info("Framework guide: search %d/%d timed out", i, len(queries))
+            logger.info(
+                "Framework guide: search %d/%d timed out", i, len(queries),
+            )
         except Exception as exc:
-            logger.info("Framework guide: search %d/%d failed: %s", i, len(queries), exc)
+            logger.info(
+                "Framework guide: search %d/%d failed: %s",
+                i, len(queries), exc,
+            )
 
-    # Step 4: Build user message with search results + project tree
+    # Step 3b: Fetch full page content from top search result URLs.
+    # DuckDuckGo only returns ~100-200 char snippets per result.
+    # Fetching the actual pages gives the LLM real documentation to
+    # work from, which dramatically improves version accuracy.
+    seen_urls: set[str] = set()
+    unique_urls = []
+    for url in all_urls:
+        if url not in seen_urls:
+            seen_urls.add(url)
+            unique_urls.append(url)
+    fetch_urls = unique_urls[:4]  # Top 4 unique URLs
+
+    page_parts: list[str] = []
+    page_chars_budget = 16000  # Total budget for fetched pages
+    page_chars_used = 0
+    per_page_cap = 5000
+
+    if fetch_urls:
+        logger.info(
+            "Framework guide: fetching %d page(s) for full content",
+            len(fetch_urls),
+        )
+    for j, url in enumerate(fetch_urls, 1):
+        if page_chars_used >= page_chars_budget:
+            break
+        try:
+            page_result = await asyncio.wait_for(
+                fetch_url(url, llm_client=None),
+                timeout=20,
+            )
+            if page_result.success and page_result.output:
+                remaining = page_chars_budget - page_chars_used
+                cap = min(per_page_cap, remaining)
+                text = page_result.output[:cap]
+                page_parts.append(f"=== Page: {url} ===\n{text}")
+                page_chars_used += len(text)
+                logger.info(
+                    "Framework guide: fetched page %d/%d (%d chars): %s",
+                    j, len(fetch_urls), len(text), url,
+                )
+            else:
+                logger.info(
+                    "Framework guide: page %d/%d empty: %s",
+                    j, len(fetch_urls), url,
+                )
+        except asyncio.TimeoutError:
+            logger.info(
+                "Framework guide: page %d/%d timed out: %s",
+                j, len(fetch_urls), url,
+            )
+        except Exception as exc:
+            logger.info(
+                "Framework guide: page %d/%d failed: %s — %s",
+                j, len(fetch_urls), url, exc,
+            )
+
+    # Step 4: Build user message with search results + pages + tree
     user_parts: list[str] = []
     if search_parts:
-        user_parts.append("WEB SEARCH RESULTS:\n\n" + "\n\n".join(search_parts))
+        user_parts.append(
+            "WEB SEARCH RESULTS (snippets):\n\n"
+            + "\n\n".join(search_parts)
+        )
+    if page_parts:
+        user_parts.append(
+            "FULL PAGE CONTENT (from top search results):\n\n"
+            + "\n\n".join(page_parts)
+        )
     if project_tree:
         user_parts.append(f"PROJECT FILE TREE:\n{project_tree}")
 
@@ -287,11 +382,14 @@ async def generate_framework_guide(
         else "Generate based on training knowledge."
     )
 
-    # Step 5: LLM generates the guide
+    total_chars = len(user_content)
     logger.info(
-        "Framework guide: generating via LLM (%d search results, %d-char prompt)",
-        len(search_parts), min(len(user_content), 20000),
+        "Framework guide: generating via LLM "
+        "(%d snippets, %d pages, %d-char prompt)",
+        len(search_parts), len(page_parts), min(total_chars, 40000),
     )
+
+    # Step 5: LLM generates the guide
     try:
         guide = await llm_client.chat_raw(
             messages=[
@@ -299,7 +397,7 @@ async def generate_framework_guide(
                     "role": "system",
                     "content": _build_guide_system_prompt(frameworks, runtimes),
                 },
-                {"role": "user", "content": user_content[:20000]},
+                {"role": "user", "content": user_content[:40000]},
             ],
             max_tokens=max_tokens,
         )
