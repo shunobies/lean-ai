@@ -42,7 +42,7 @@ _KNOWN_FRAMEWORKS: frozenset[str] = frozenset({
     "sqlalchemy", "pydantic",
     # JavaScript / TypeScript
     "react", "next", "vue", "nuxt", "angular", "svelte", "express",
-    "nestjs", "vite",
+    "nestjs",
     # PHP
     "laravel/framework", "symfony/framework-bundle", "symfony/symfony",
     "cakephp/cakephp",

@@ -6,6 +6,7 @@ Pure unit tests — no LLM, no network calls required.
 import json
 
 from lean_ai.context.deprecations import (
+    _categorize,
     _detect_versions,
     _extract_major_minor,
     _parse_pep508,
@@ -183,5 +184,21 @@ class TestDetectVersions:
     def test_no_files(self, tmp_path):
         deps = _detect_versions(str(tmp_path))
         assert deps == []
+
+
+# ---------------------------------------------------------------------------
+# _categorize
+# ---------------------------------------------------------------------------
+
+
+class TestCategorize:
+    def test_vite_is_library(self):
+        assert _categorize("vite") == "library"
+
+    def test_laravel_is_framework(self):
+        assert _categorize("laravel/framework") == "framework"
+
+    def test_react_is_framework(self):
+        assert _categorize("react") == "framework"
 
 

@@ -120,6 +120,50 @@ def _extract_file_paths(text: str) -> set[str]:
     return paths
 
 
+# PHP vendor namespace prefixes — these are framework/library namespaces
+# that should NOT be validated against the project tree.
+_PHP_STDLIB_PREFIXES = frozenset({
+    "Illuminate", "Symfony", "Carbon", "Doctrine", "League",
+    "Monolog", "Psr", "GuzzleHttp", "Ramsey", "Faker",
+    "PHPUnit", "Mockery", "Composer",
+})
+
+
+def _extract_php_class_refs(text: str) -> dict[str, str]:
+    """Extract PHP namespace references and convert to file paths.
+
+    Finds backslash-separated tokens starting with an uppercase letter
+    (e.g., ``App\\Http\\Kernel``) and converts them to file paths using
+    PSR-4 convention: replace ``\\`` with ``/``, lowercase the first
+    segment, append ``.php``.
+
+    Skips vendor/framework namespaces (Illuminate, Symfony, etc.).
+
+    Returns ``{converted_path: original_namespace}`` so callers can
+    search for the original string in the text when removing blocks.
+    """
+    refs: dict[str, str] = {}
+    for word in text.split():
+        clean = word.strip("`()[]{}\"',:;")
+        if "\\" not in clean:
+            continue
+        parts = clean.split("\\")
+        if len(parts) < 2:
+            continue
+        # Must start with an uppercase letter (namespace convention)
+        if not parts[0] or not parts[0][0].isupper():
+            continue
+        # Skip vendor/framework namespaces
+        if parts[0] in _PHP_STDLIB_PREFIXES:
+            continue
+        # Convert to file path: App\Http\Kernel → app/Http/Kernel.php
+        path_parts = list(parts)
+        path_parts[0] = path_parts[0].lower()
+        converted = "/".join(path_parts) + ".php"
+        refs[converted] = clean
+    return refs
+
+
 def _get_project_paths(repo_root: str) -> set[str]:
     """Return a set of all file paths in the project (relative to root)."""
     from lean_ai.indexer.tree import list_repo_tree
@@ -132,13 +176,30 @@ def _check_invalid_paths(
     project_paths: set[str],
     project_top_dirs: set[str],
 ) -> set[str]:
-    """Return referenced file paths that don't exist in the project."""
+    """Return referenced strings whose file paths don't exist in the project.
+
+    Checks both explicit file paths (with ``/``) and PHP namespace
+    references (with ``\\``) converted to paths via PSR-4.
+
+    Returns the original text strings (not converted paths) so that
+    block removal can find them in the source text.
+    """
+    # Explicit file paths — the string in the text IS the file path
     referenced = _extract_file_paths(text)
     invalid: set[str] = set()
     for path in referenced:
         top_dir = path.split("/")[0]
         if top_dir in project_top_dirs and path not in project_paths:
             invalid.add(path)
+
+    # PHP namespace references — convert to path, validate, but return
+    # the original namespace string for block matching
+    php_refs = _extract_php_class_refs(text)
+    for converted_path, original_namespace in php_refs.items():
+        top_dir = converted_path.split("/")[0]
+        if top_dir in project_top_dirs and converted_path not in project_paths:
+            invalid.add(original_namespace)
+
     return invalid
 
 
@@ -394,6 +455,89 @@ async def _validate_guide(
         )
 
     return stripped
+
+
+# ---------------------------------------------------------------------------
+# Post-generation deduplication — remove repeated ## sections
+# ---------------------------------------------------------------------------
+
+def _deduplicate_sections(guide: str) -> str:
+    """Remove duplicate ``##`` heading sections, keeping the first occurrence.
+
+    The LLM sometimes outputs the same section heading multiple times,
+    producing a bloated guide.  This function keeps only the first
+    occurrence of each ``## Heading`` and discards subsequent duplicates.
+
+    Returns the original text on any error.
+    """
+    try:
+        lines = guide.split("\n")
+
+        # Build list of (heading_text, start_line, end_line) tuples
+        sections: list[tuple[str, int, int]] = []
+        for i, line in enumerate(lines):
+            if line.lstrip().startswith("## "):
+                sections.append((line.strip(), i, -1))
+                if len(sections) > 1:
+                    sections[-2] = (
+                        sections[-2][0],
+                        sections[-2][1],
+                        i,
+                    )
+        if sections:
+            sections[-1] = (
+                sections[-1][0],
+                sections[-1][1],
+                len(lines),
+            )
+
+        if not sections:
+            return guide
+
+        # Preamble: lines before the first heading
+        preamble_end = sections[0][1]
+
+        # Keep only the first occurrence of each heading
+        seen: set[str] = set()
+        kept_ranges: list[tuple[int, int]] = []
+        removed = 0
+        for heading, start, end in sections:
+            if heading not in seen:
+                seen.add(heading)
+                kept_ranges.append((start, end))
+            else:
+                removed += 1
+
+        if removed == 0:
+            return guide
+
+        # Reassemble
+        result_lines = list(lines[:preamble_end])
+        for start, end in kept_ranges:
+            result_lines.extend(lines[start:end])
+
+        # Collapse triple+ blank lines to double
+        cleaned: list[str] = []
+        blank_count = 0
+        for line in result_lines:
+            if not line.strip():
+                blank_count += 1
+                if blank_count <= 2:
+                    cleaned.append(line)
+            else:
+                blank_count = 0
+                cleaned.append(line)
+
+        logger.info(
+            "Framework guide: removed %d duplicate section(s)", removed,
+        )
+        return "\n".join(cleaned)
+    except Exception as exc:
+        logger.warning(
+            "Framework guide: deduplication failed (non-blocking): %s",
+            exc,
+        )
+        return guide
 
 
 # ---------------------------------------------------------------------------
@@ -1037,6 +1181,9 @@ async def generate_framework_guide(
     if not guide.strip():
         logger.info("Framework guide: LLM returned empty output")
         return ""
+
+    # Step 5a: Deduplicate repeated sections
+    guide = _deduplicate_sections(guide)
 
     # Step 5b: Validate file references against project tree
     try:

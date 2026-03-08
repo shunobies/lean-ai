@@ -12,7 +12,9 @@ from lean_ai.context.framework_guide import (
     _build_guide_search_queries,
     _canonicalize_name,
     _check_invalid_paths,
+    _deduplicate_sections,
     _extract_file_paths,
+    _extract_php_class_refs,
     _extract_search_results,
     _extract_urls_from_search,
     _find_block_boundaries,
@@ -643,3 +645,158 @@ class TestRankUrlsWithLlm:
         )
         # No valid numbers parsed → fallback
         assert urls == ["https://a.com", "https://b.com"]
+
+
+# ---------------------------------------------------------------------------
+# _deduplicate_sections
+# ---------------------------------------------------------------------------
+
+
+class TestDeduplicateSections:
+    def test_no_duplicates_unchanged(self):
+        text = (
+            "## Framework Architecture\n"
+            "Content A\n\n"
+            "## Common CLI Commands\n"
+            "Content B\n\n"
+            "## File Organization Conventions\n"
+            "Content C"
+        )
+        result = _deduplicate_sections(text)
+        assert result == text
+
+    def test_removes_second_occurrence(self):
+        text = (
+            "## Framework Architecture\n"
+            "First version\n\n"
+            "## Framework Architecture\n"
+            "Second version\n"
+        )
+        result = _deduplicate_sections(text)
+        assert result.count("## Framework Architecture") == 1
+        assert "First version" in result
+        assert "Second version" not in result
+
+    def test_preserves_preamble(self):
+        text = (
+            "# Framework Guide\n\n"
+            "Some intro text.\n\n"
+            "## Section One\n"
+            "Content\n\n"
+            "## Section One\n"
+            "Duplicate"
+        )
+        result = _deduplicate_sections(text)
+        assert "# Framework Guide" in result
+        assert "Some intro text." in result
+        assert result.count("## Section One") == 1
+
+    def test_multiple_duplicates(self):
+        text = (
+            "## Architecture\n"
+            "First\n\n"
+            "## Architecture\n"
+            "Second\n\n"
+            "## Architecture\n"
+            "Third"
+        )
+        result = _deduplicate_sections(text)
+        assert result.count("## Architecture") == 1
+        assert "First" in result
+        assert "Second" not in result
+        assert "Third" not in result
+
+    def test_collapses_blank_lines(self):
+        text = (
+            "## Section A\n"
+            "Content A\n\n\n\n"
+            "## Section A\n"
+            "Duplicate\n\n\n\n"
+            "## Section B\n"
+            "Content B"
+        )
+        result = _deduplicate_sections(text)
+        # Max 2 blank lines (3 newlines) — no runs of 4+ newlines
+        assert "\n\n\n\n" not in result
+        assert "## Section B" in result
+
+    def test_no_headings_unchanged(self):
+        text = "Just plain text with no headings."
+        result = _deduplicate_sections(text)
+        assert result == text
+
+
+# ---------------------------------------------------------------------------
+# _extract_php_class_refs
+# ---------------------------------------------------------------------------
+
+
+class TestExtractPhpClassRefs:
+    def test_basic_namespace(self):
+        text = "The App\\Http\\Kernel handles requests"
+        refs = _extract_php_class_refs(text)
+        assert "app/Http/Kernel.php" in refs
+        assert refs["app/Http/Kernel.php"] == "App\\Http\\Kernel"
+
+    def test_backtick_wrapped(self):
+        text = "Edit `App\\Models\\User` to add the trait"
+        refs = _extract_php_class_refs(text)
+        assert "app/Models/User.php" in refs
+        assert refs["app/Models/User.php"] == "App\\Models\\User"
+
+    def test_skips_stdlib(self):
+        text = "Uses Illuminate\\Foundation\\Application internally"
+        refs = _extract_php_class_refs(text)
+        assert len(refs) == 0
+
+    def test_multiple_refs(self):
+        text = "App\\Http\\Kernel and App\\Models\\User are key classes"
+        refs = _extract_php_class_refs(text)
+        assert len(refs) == 2
+        assert "app/Http/Kernel.php" in refs
+        assert "app/Models/User.php" in refs
+
+    def test_single_segment_skipped(self):
+        text = "The App class does something"
+        refs = _extract_php_class_refs(text)
+        assert len(refs) == 0
+
+    def test_empty_input(self):
+        assert _extract_php_class_refs("") == {}
+
+
+# ---------------------------------------------------------------------------
+# Extended _check_invalid_paths — PHP namespace tests
+# ---------------------------------------------------------------------------
+
+
+class TestCheckInvalidPathsPhp:
+    def test_detects_invalid_php_namespace(self):
+        text = "The App\\Http\\Kernel processes requests"
+        project_paths = {"app/Models/User.php"}
+        top_dirs = {"app"}
+        invalid = _check_invalid_paths(text, project_paths, top_dirs)
+        assert "App\\Http\\Kernel" in invalid
+
+    def test_valid_php_namespace_not_flagged(self):
+        text = "See App\\Models\\User for the model"
+        project_paths = {"app/Models/User.php"}
+        top_dirs = {"app"}
+        invalid = _check_invalid_paths(text, project_paths, top_dirs)
+        assert len(invalid) == 0
+
+
+# ---------------------------------------------------------------------------
+# _get_primary_frameworks — vite not detected as framework
+# ---------------------------------------------------------------------------
+
+
+class TestViteNotFramework:
+    def test_vite_not_detected_as_framework(self, tmp_path):
+        pkg = tmp_path / "package.json"
+        pkg.write_text(json.dumps({
+            "devDependencies": {"vite": "^7.0.0"},
+        }))
+        frameworks, _runtimes = _get_primary_frameworks(str(tmp_path))
+        fw_names = [n for n, _v in frameworks]
+        assert "vite" not in fw_names
