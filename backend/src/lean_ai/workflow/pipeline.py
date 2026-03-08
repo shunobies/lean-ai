@@ -7,6 +7,7 @@ handles each step in 1-3 turns — translating the planner's detailed
 instruction into a single tool invocation.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -23,7 +24,7 @@ from lean_ai.llm.prompts import FIX_SYSTEM_PROMPT, STEP_EXECUTION_SYSTEM_PROMPT
 from lean_ai.llm.tool_definitions import IMPLEMENTATION_TOOLS
 from lean_ai.tools import file_ops, scratchpad, shell
 from lean_ai.tools.command_safety import CommandRisk, check_command
-from lean_ai.workflow.ws_handler import safe_receive, ws_send
+from lean_ai.workflow.ws_handler import safe_receive, ws_send, ws_send_nowait
 
 if TYPE_CHECKING:
     from lean_ai.llm.client import LLMClient
@@ -256,36 +257,39 @@ async def _execute_plan(
     # Build the system prompt once (shared across all steps)
     system_prompt = _build_step_system_prompt(context)
 
-    # Callbacks for WebSocket progress + conversation logging
+    # Callbacks for WebSocket progress + conversation logging.
+    # Progress messages are fire-and-forget (non-blocking) since they are
+    # informational.  Conversation logging is also fire-and-forget — the
+    # data is for post-hoc review and does not need to block tool execution.
     async def on_tool_call(name: str, args: dict) -> None:
-        await ws_send(ws, "tool_progress", {
+        ws_send_nowait(ws, "tool_progress", {
             "tool": name,
             "status": "running",
             "description": f"{name} {args.get('path', args.get('command', ''))}",
         })
         if conversation_logger:
-            await conversation_logger(
+            asyncio.create_task(conversation_logger(
                 "tool_call", f"{name} {args.get('path', args.get('command', ''))}",
                 tool_name=name, tool_args=json.dumps(args),
-            )
+            ))
 
     async def on_tool_result(name: str, result: str) -> None:
         is_error = result.startswith("ERROR:")
-        await ws_send(ws, "tool_progress", {
+        ws_send_nowait(ws, "tool_progress", {
             "tool": name,
             "status": "error" if is_error else "complete",
             "output": result[:500],
         })
         if conversation_logger:
-            await conversation_logger(
+            asyncio.create_task(conversation_logger(
                 "tool_result", result[:2000],
                 tool_name=name,
-            )
+            ))
 
     async def on_content(text: str) -> None:
-        await ws_send(ws, "assistant_content", {"content": text})
+        ws_send_nowait(ws, "assistant_content", {"content": text})
         if conversation_logger:
-            await conversation_logger("assistant", text)
+            asyncio.create_task(conversation_logger("assistant", text))
 
     # Execute each step
     for step in plan.steps:
@@ -428,37 +432,37 @@ async def _run_fix(
     tool_executor = _make_tool_executor(repo_root, ws, session_id)
     system_prompt = _build_fix_system_prompt(context)
 
-    # Callbacks for WebSocket progress + conversation logging
+    # Callbacks — fire-and-forget (same rationale as plan mode callbacks)
     async def on_tool_call(name: str, args: dict) -> None:
-        await ws_send(ws, "tool_progress", {
+        ws_send_nowait(ws, "tool_progress", {
             "tool": name,
             "status": "running",
             "description": f"{name} {args.get('path', args.get('command', ''))}",
         })
         if conversation_logger:
-            await conversation_logger(
+            asyncio.create_task(conversation_logger(
                 "tool_call",
                 f"{name} {args.get('path', args.get('command', ''))}",
                 tool_name=name, tool_args=json.dumps(args),
-            )
+            ))
 
     async def on_tool_result(name: str, result: str) -> None:
         is_error = result.startswith("ERROR:")
-        await ws_send(ws, "tool_progress", {
+        ws_send_nowait(ws, "tool_progress", {
             "tool": name,
             "status": "error" if is_error else "complete",
             "output": result[:500],
         })
         if conversation_logger:
-            await conversation_logger(
+            asyncio.create_task(conversation_logger(
                 "tool_result", result[:2000],
                 tool_name=name,
-            )
+            ))
 
     async def on_content(text: str) -> None:
-        await ws_send(ws, "assistant_content", {"content": text})
+        ws_send_nowait(ws, "assistant_content", {"content": text})
         if conversation_logger:
-            await conversation_logger("assistant", text)
+            asyncio.create_task(conversation_logger("assistant", text))
 
     messages = [
         {"role": "system", "content": system_prompt},

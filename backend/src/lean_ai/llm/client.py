@@ -441,6 +441,10 @@ class LLMClient:
         # 0 means unlimited — use a practically infinite ceiling
         effective_max = max_turns if max_turns > 0 else 2**31
 
+        # Sanitize once on entry — the loop builds well-formed messages
+        # itself, so re-sanitizing every turn is wasted O(n) work.
+        messages[:] = _sanitize_messages(messages)
+
         for turn in range(effective_max):
             logger.info(
                 "chat_with_tools turn %d/%s: %d messages",
@@ -452,7 +456,7 @@ class LLMClient:
             async def _chat():
                 return await self._client.chat(
                     model=self._model,
-                    messages=_sanitize_messages(messages),
+                    messages=messages,
                     tools=tools,
                     options={
                         "temperature": self._temperature,

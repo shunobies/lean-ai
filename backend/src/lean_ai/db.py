@@ -233,6 +233,29 @@ async def log_conversation_entry(
     await db.commit()
 
 
+async def log_conversation_entry_nocommit(
+    db: aiosqlite.Connection,
+    session_id: str,
+    role: str,
+    content: str,
+    tool_name: str | None = None,
+    tool_args: str | None = None,
+) -> None:
+    """Record a conversation entry without committing (caller must flush)."""
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "INSERT INTO conversation_logs "
+        "(session_id, role, content, tool_name, tool_args, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (session_id, role, content, tool_name, tool_args, now),
+    )
+
+
+async def flush_conversation_log(db: aiosqlite.Connection) -> None:
+    """Commit any buffered conversation log entries."""
+    await db.commit()
+
+
 async def get_conversation_log(
     db: aiosqlite.Connection,
     session_id: str,
