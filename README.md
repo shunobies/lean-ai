@@ -9,7 +9,7 @@ Lean AI extracts the proven ideas from [single_ai](../single_ai) into a clean, m
 - **Direct agentic execution** — give the LLM the task and tools, let it explore, plan, and execute in one continuous conversation
 - **Tree-sitter AST parsing** instead of regex patterns for source code analysis
 - **Native tool calling** via Ollama — no text-based SEARCH/REPLACE parsing
-- **Interactive prompt building** — chat mode helps users craft detailed prompts before sending to the agent
+- **No prompt engineering required** — chat mode refines vague ideas into detailed tasks, project context teaches the LLM your codebase, and framework guides fill in the conventions so you don't have to
 - **Minimal persistence** — 2 SQLite tables instead of ORM models
 - **Trust the LLM** — no stagnation detection, no implementation review loops, no rubric scoring
 
