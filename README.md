@@ -125,6 +125,8 @@ LEAN_AI_ENABLE_EMBEDDINGS=true
 |---|---|---|
 | `LEAN_AI_ENABLE_PROJECT_CONTEXT` | `true` | Generate `.lean_ai/project_context.md` on workspace init |
 | `LEAN_AI_ENABLE_MULTI_ROUND_CONTEXT` | `true` | Use multi-round LLM calls for richer context generation |
+| `LEAN_AI_ENABLE_DEPRECATION_LOOKUP` | `true` | Web-search for deprecations after context generation |
+| `LEAN_AI_DEPRECATION_MAX_SEARCHES` | `5` | Max concurrent deprecation web searches |
 
 #### Knowledge Base
 
@@ -140,6 +142,9 @@ LEAN_AI_ENABLE_EMBEDDINGS=true
 | `LEAN_AI_IMPLEMENTATION_MAX_TURNS` | `0` | Max tool-calling turns per agent session (`0` = unlimited) |
 | `LEAN_AI_IMPLEMENTATION_MAX_TOKENS` | *(derived: 25% of context window)* | Max tokens per LLM turn during implementation |
 | `LEAN_AI_REMINDER_INTERVAL` | `10` | Re-inject task reminder every N tool-calling turns |
+| `LEAN_AI_LOOP_DETECTION_THRESHOLD` | `3` | Consecutive identical tool calls before warning (`0` = off) |
+| `LEAN_AI_COMPRESSION_THRESHOLD` | `0.7` | Compress conversation history at this fraction of context window |
+| `LEAN_AI_COMPRESSION_PRESERVE` | `0.3` | Keep recent fraction of history after compression |
 
 #### Tool Execution
 
@@ -241,6 +246,7 @@ Available from the Command Palette (`Ctrl+Shift+P`):
 | `Lean AI: View Session Details` | View details of a session |
 | `Lean AI: Merge Session Branch` | Merge a session's branch into base |
 | `Lean AI: Abandon Session` | Abandon a session and clean up its branch |
+| `Lean AI: Delete Session` | Delete a session from the sessions list |
 
 ## API Endpoints
 
@@ -256,6 +262,10 @@ All under the `/api` prefix.
 | `WS` | `/sessions/{id}/stream` | WebSocket for real-time workflow streaming |
 | `POST` | `/sessions/{id}/merge` | Merge agent's branch into base branch |
 | `POST` | `/sessions/{id}/abandon` | Abandon agent's branch and clean up |
+| `DELETE` | `/sessions/{id}` | Delete a session |
+| `GET` | `/sessions/{id}/conversation` | Get session conversation history |
+| `GET` | `/sessions/{id}/checkpoints` | Get session checkpoints |
+| `GET` | `/sessions/{id}/git-events` | Get session git events |
 
 ### Workspace
 
@@ -287,9 +297,9 @@ All under the `/api` prefix.
 
 ### WebSocket Protocol
 
-Message types sent from server to client: `token`, `stage_change`, `assistant_content`, `tool_progress`, `tool_approval_required`, `diff`, `test_result`, `error`, `complete`, `index_status`, `stage_status`, `clarification_needed`, `pong`, `branch_created`, `checkpoint`, `merge_complete`.
+Message types sent from server to client: `stage_change`, `assistant_content`, `approval_required`, `plan_rejected`, `plan_revision`, `tool_progress`, `tool_approval_required`, `diff`, `test_result`, `error`, `complete`, `stage_status`, `clarification_needed`, `pong`, `branch_created`, `checkpoint`.
 
-Message types sent from client to server: `user_message`, `approve`, `reject`, `approve_tool`, `ping`.
+Message types sent from client to server: `user_message`, `approve`, `reject`, `approve_tool`, `deny_tool`, `ping`.
 
 ## Project Structure
 
@@ -305,6 +315,8 @@ lean_ai/
 │       ├── router.py          # All API endpoints
 │       ├── llm/
 │       │   ├── client.py      # Async Ollama client with tool-calling loop
+│       │   ├── planner.py     # 6-phase decomposed planning pipeline
+│       │   ├── plan_schema.py # Pydantic models for structured plan output
 │       │   ├── prompts.py     # All system prompts
 │       │   └── tool_definitions.py  # Tool schemas for Ollama
 │       ├── tools/
@@ -318,7 +330,8 @@ lean_ai/
 │       ├── context/           # Project context generation
 │       ├── knowledge/         # Domain document indexing
 │       ├── workflow/
-│       │   └── pipeline.py    # Plan + fix workflows
+│       │   ├── pipeline.py    # Plan + fix workflows
+│       │   └── ws_handler.py  # WebSocket message helper
 │       └── scaffolds/         # 19 YAML scaffold recipes
 │
 └── extension/                 # VSCodium extension
@@ -326,10 +339,18 @@ lean_ai/
     └── src/
         ├── extension.ts       # Extension entry point
         ├── sidebarProvider.ts # Sidebar chat panel + slash commands
+        ├── sidebarHtml.ts     # Sidebar HTML template
         ├── chatParticipant.ts # VSCodium Chat Participant API
         ├── inlineProvider.ts  # Copilot-style inline completions
         ├── backendClient.ts   # HTTP/WebSocket client for the backend
-        └── sessionTree.ts     # Sessions tree view
+        ├── backendProcess.ts  # Backend process management
+        ├── streamHandler.ts   # WebSocket message handler
+        ├── sessionTreeProvider.ts  # Sessions tree view
+        ├── sessionDetailProvider.ts # Session detail webview
+        ├── indexingService.ts # Workspace indexing service
+        ├── wsHandler.ts       # WebSocket connection handler
+        ├── constants.ts       # Shared constants
+        └── types.ts           # TypeScript type definitions
 ```
 
 ## Technology Stack
