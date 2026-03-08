@@ -10,7 +10,9 @@ No regex — all text processing uses simple string operations.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -44,12 +46,91 @@ def _get_primary_frameworks(
 
 
 # ---------------------------------------------------------------------------
+# Training cutoff detection
+# ---------------------------------------------------------------------------
+
+async def _get_training_cutoff(
+    llm_client: LLMClient,
+    repo_root: str,
+) -> str | None:
+    """Ask the LLM for its training data cutoff date.
+
+    Returns a date string like ``"2024-04"`` or ``None`` on failure.
+    Caches per model name in ``.lean_ai/model_cutoff.json`` so we only
+    ask once per model.
+    """
+    cache_path = Path(repo_root) / ".lean_ai" / "model_cutoff.json"
+    model_name = llm_client.model_name
+
+    # Check cache first
+    if cache_path.exists():
+        try:
+            cache = json.loads(cache_path.read_text(encoding="utf-8"))
+            if model_name in cache:
+                logger.info(
+                    "Framework guide: using cached training cutoff "
+                    "%s for model %s",
+                    cache[model_name], model_name,
+                )
+                return cache[model_name]
+        except Exception:
+            pass
+
+    # Ask the LLM
+    logger.info(
+        "Framework guide: asking %s for training cutoff date", model_name,
+    )
+    try:
+        response = await llm_client.chat_raw(
+            messages=[{
+                "role": "user",
+                "content": (
+                    "What is your training data cutoff date? "
+                    "Reply with ONLY the date in YYYY-MM format, "
+                    "nothing else. Example: 2024-04"
+                ),
+            }],
+            max_tokens=32,
+        )
+        # Parse — expect something like "2024-04"
+        cutoff = response.strip()[:7]
+        datetime.strptime(cutoff, "%Y-%m")  # validate format
+
+        # Save to cache
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        existing: dict[str, str] = {}
+        if cache_path.exists():
+            try:
+                existing = json.loads(
+                    cache_path.read_text(encoding="utf-8"),
+                )
+            except Exception:
+                pass
+        existing[model_name] = cutoff
+        cache_path.write_text(
+            json.dumps(existing, indent=2), encoding="utf-8",
+        )
+
+        logger.info(
+            "Framework guide: model %s reports cutoff %s",
+            model_name, cutoff,
+        )
+        return cutoff
+    except Exception as exc:
+        logger.info(
+            "Framework guide: could not determine cutoff: %s", exc,
+        )
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Search query generation
 # ---------------------------------------------------------------------------
 
 def _build_guide_search_queries(
     frameworks: list[tuple[str, str]],
     runtimes: list[tuple[str, str]],
+    cutoff: str | None = None,
 ) -> list[str]:
     """Generate web search queries for framework architecture and best practices."""
     from lean_ai.context.deprecations import _extract_major_minor
@@ -58,11 +139,19 @@ def _build_guide_search_queries(
     for name, version in frameworks:
         v = _extract_major_minor(version)
         label = f"{name} {v}" if v else name
-        queries.append(f"{label} architecture guide request lifecycle MVC")
-        queries.append(f"{label} CLI commands common artisan make")
-        queries.append(f"{label} project structure conventions best practices")
+        queries.append(f"{label} architecture guide request lifecycle")
+        queries.append(f"{label} CLI commands scaffolding generators")
+        queries.append(
+            f"{label} project structure directory conventions",
+        )
+        # When we know the LLM's training cutoff, add a query that
+        # specifically targets post-cutoff changes.
+        if cutoff:
+            queries.append(
+                f"{label} changelog breaking changes new features",
+            )
 
-    return queries[:6]
+    return queries[:8]
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +177,7 @@ def _get_compact_tree(repo_root: str, max_entries: int = 100) -> str:
 def _build_guide_system_prompt(
     frameworks: list[tuple[str, str]],
     runtimes: list[tuple[str, str]],
+    cutoff: str | None = None,
 ) -> str:
     """Build the system prompt that instructs the LLM to generate a guide."""
     from lean_ai.context.deprecations import _extract_major_minor
@@ -101,52 +191,62 @@ def _build_guide_system_prompt(
         for name, ver in runtimes
     ) or "not detected"
 
+    # Cutoff awareness block — tells the LLM exactly what it doesn't know
+    cutoff_block = ""
+    if cutoff:
+        cutoff_block = (
+            f"YOUR TRAINING DATA CUTOFF: {cutoff}. Any framework "
+            "changes after this date are NOT in your training data. "
+            "You MUST rely on the web search results and fetched page "
+            "content for information after this date. Do NOT guess "
+            "about post-cutoff features, file locations, or APIs.\n\n"
+        )
+
     return (
         "Generate a framework guide for a development project.\n\n"
         f"DETECTED FRAMEWORKS: {fw_list}\n"
         f"DETECTED RUNTIMES: {rt_list}\n\n"
+        f"{cutoff_block}"
         "The guide must be tailored to THIS project's specific framework "
-        "and version. Use the web search results and the project file tree "
-        "to produce a guide that covers framework concepts and this "
-        "project's actual structure.\n\n"
+        "and version. Use the web search results and the project file "
+        "tree to produce a guide that covers framework concepts and "
+        "this project's actual structure.\n\n"
         "Use the PROJECT FILE TREE to identify which components this "
-        "project actually uses. Tailor examples to match the project's "
-        "real structure when possible (e.g., if the tree shows "
-        "app/Models/Customer.php, use Customer as the example model).\n\n"
+        "project actually uses. Tailor examples to use names from the "
+        "project's actual files rather than generic placeholders.\n\n"
         "REQUIRED SECTIONS (use exactly these ## headings):\n\n"
         "## Framework Architecture\n"
-        "Explain the framework's architectural pattern (MVC, MVVM, etc.) "
-        "and the request lifecycle for THIS version. Describe how a "
-        "request flows from entry point to response as a numbered "
-        "sequence — which files and classes are involved at each stage. "
-        "Only reference files and classes that exist in the detected "
-        "version.\n\n"
+        "Explain the framework's architectural pattern (MVC, MVVM, "
+        "component-based, etc.) and the request/render lifecycle for "
+        "THIS version. Describe how a request flows from entry point "
+        "to response as a numbered sequence — which files and classes "
+        "are involved at each stage. Only reference files and classes "
+        "that exist in the detected version.\n\n"
         "## Component Relationships\n"
-        "For each relationship below, show a SHORT code snippet "
-        "demonstrating the exact connection point between the two "
-        "components:\n\n"
-        "1. **Migration to Model**: Show a migration column definition "
-        "(e.g., a foreign key column) alongside the corresponding model "
-        "relationship method (e.g., belongsTo, hasMany). Explain the "
-        "naming convention that makes the implicit binding work.\n\n"
-        "2. **Route to Controller**: Show a route definition and the "
-        "controller method it maps to. Explain how the framework "
-        "resolves the controller class and method name.\n\n"
-        "3. **Controller to View**: Show a controller method returning "
-        "a view with data, and how the view accesses that data. Include "
-        "both template and API resource patterns if applicable.\n\n"
-        "4. **Middleware to Request Pipeline**: Show how middleware is "
-        "registered and which file controls the middleware stack for "
-        "THIS version. Do NOT reference middleware configuration files "
-        "from older versions.\n\n"
-        "5. **Service Provider to Container**: Show a service provider "
-        "binding and how a controller or service resolves it via "
-        "dependency injection.\n\n"
-        "6. **Form Request to Controller**: Show a form request class "
-        "with validation rules and how it auto-validates when "
-        "type-hinted in a controller method.\n\n"
-        "Do NOT draw ASCII dependency diagrams. Instead, describe the "
-        "request flow as a numbered prose sequence.\n\n"
+        "Identify the major component relationships that exist in the "
+        "detected framework. For EACH relationship show a SHORT code "
+        "snippet demonstrating the exact connection point between the "
+        "two components.\n\n"
+        "Common relationships to cover (skip any that do not apply to "
+        "this framework):\n"
+        "- Data schema to data model (migrations/schema to ORM "
+        "model/entity)\n"
+        "- Route definition to handler (URL routing to controller/"
+        "view function/handler)\n"
+        "- Handler to template/response (controller to view/template/"
+        "serializer)\n"
+        "- Middleware or interceptors in the request pipeline\n"
+        "- Dependency injection or service registration (if the "
+        "framework uses it)\n"
+        "- Request validation (form objects, request classes, schema "
+        "validators)\n\n"
+        "For each relationship:\n"
+        "- Show both sides of the connection as code snippets\n"
+        "- Explain the naming convention or configuration that links "
+        "them\n"
+        "- Note which file(s) each side lives in\n\n"
+        "Do NOT draw ASCII dependency diagrams. Describe the request "
+        "flow as a numbered prose sequence.\n\n"
         "## Common CLI Commands\n"
         "List the essential CLI commands for this EXACT version. Group "
         "by purpose:\n"
@@ -156,17 +256,15 @@ def _build_guide_system_prompt(
         "- Testing and debugging\n"
         "- Cache, config, and maintenance\n\n"
         "For each command show the EXACT syntax including all flags.\n\n"
-        "CRITICAL: Only include commands and flags you are CERTAIN exist "
-        "in the detected version. Common mistakes to avoid:\n"
-        "- Do not mix up flags between different CLI commands (e.g., "
-        "the -m flag on make:model creates a migration, but -m does NOT "
-        "exist on make:controller)\n"
-        "- Do not invent commands that do not exist\n"
-        "- If the web search results include CLI documentation, use "
-        "those exact command signatures\n\n"
+        "CRITICAL: Only include commands and flags you are CERTAIN "
+        "exist in the detected version:\n"
+        "- Do not mix up flags between different subcommands\n"
+        "- Do not invent commands or flags that do not exist\n"
+        "- If the fetched page content includes CLI documentation, "
+        "use those exact command signatures\n\n"
         "## File Organization Conventions\n"
-        "Describe the standard directory structure for THIS version and "
-        "where each type of component lives. Map directories to "
+        "Describe the standard directory structure for THIS version "
+        "and where each type of component lives. Map directories to "
         "framework concepts. Only list directories that exist in this "
         "version — do not carry over directory structures from older "
         "versions.\n\n"
@@ -174,8 +272,8 @@ def _build_guide_system_prompt(
         "Provide a step-by-step workflow for adding a typical new "
         "feature (e.g., a new CRUD resource). IMPORTANT:\n"
         "- Do NOT create the same artifact twice (e.g., if a command "
-        "creates both a model and migration, do not also run a separate "
-        "migration command)\n"
+        "creates both a model and migration, do not also run a "
+        "separate migration command)\n"
         "- Show the SINGLE optimal command that creates the most "
         "artifacts at once, then list what it generated\n"
         "- For each step show the exact file(s) created and what to "
@@ -183,25 +281,35 @@ def _build_guide_system_prompt(
         "- Show how each new file connects back to previously created "
         "components\n\n"
         "## Common Patterns and Pitfalls\n"
-        "List 5-10 patterns that are easy to get wrong in the DETECTED "
-        "VERSION. Each pattern MUST be specific to this version — "
-        "generic advice that applies to all versions is not useful. "
-        "Focus on:\n"
-        "- What changed in this version vs. the previous major version\n"
-        "- Deprecated features that developers might still try to use\n"
+        "List 5-10 patterns that are easy to get wrong in the "
+        "DETECTED VERSION. Each pattern MUST be specific to this "
+        "version — generic advice that applies to all versions is "
+        "not useful. Focus on:\n"
+        "- What changed in this version vs. the previous major "
+        "version\n"
+        "- Deprecated features that developers might still try to "
+        "use\n"
         "- New recommended patterns that replace old ones\n"
         "- Naming conventions the framework enforces implicitly\n\n"
         "RULES:\n"
         f"- ONLY cover the detected frameworks: {fw_list}\n"
-        "- Web search results are the SOURCE OF TRUTH for "
-        "version-specific details. If search results contradict your "
-        "training knowledge, ALWAYS prefer the search results. "
-        "Frameworks change significantly between major versions — do "
-        "not assume features from older versions still exist.\n"
+        "- Web search results and fetched page content are the "
+        "SOURCE OF TRUTH for version-specific details. If they "
+        "contradict your training knowledge, ALWAYS prefer the "
+        "search results. Frameworks change significantly between "
+        "major versions — do not assume features from older versions "
+        "still exist.\n"
+        "- CROSS-CHECK: Before including any file path, class name, "
+        "or CLI command, verify it appears in either the web search "
+        "results, the fetched page content, or the project file "
+        "tree. If it does not appear in any of these sources and "
+        "the information postdates your training cutoff, DO NOT "
+        "include it.\n"
         "- NEVER reference files, classes, or commands that do not "
         "exist in the detected version. If unsure whether something "
         "exists in this version, omit it rather than guess.\n"
-        "- Use concrete code examples (short snippets, not full files)\n"
+        "- Use concrete code examples (short snippets, not full "
+        "files)\n"
         "- Reference actual class names and method names from the "
         "framework\n"
         "- Format the output as clean Markdown with ## headings\n"
@@ -265,12 +373,17 @@ async def generate_framework_guide(
         ", ".join(f"{n} {v}" for n, v in frameworks),
     )
 
+    # Step 1b: Detect training cutoff (cached per model)
+    cutoff = await _get_training_cutoff(llm_client, repo_root)
+
     # Step 2: Get project tree for project-specific guide
     project_tree = _get_compact_tree(repo_root)
 
     # Step 3: Web search for current best practices (snippets)
     # Sequential — primp/lxml are not thread-safe for concurrent use.
-    queries = _build_guide_search_queries(frameworks, runtimes)
+    queries = _build_guide_search_queries(
+        frameworks, runtimes, cutoff=cutoff,
+    )
     search_parts: list[str] = []
     all_urls: list[str] = []
 
@@ -395,7 +508,9 @@ async def generate_framework_guide(
             messages=[
                 {
                     "role": "system",
-                    "content": _build_guide_system_prompt(frameworks, runtimes),
+                    "content": _build_guide_system_prompt(
+                        frameworks, runtimes, cutoff=cutoff,
+                    ),
                 },
                 {"role": "user", "content": user_content[:40000]},
             ],

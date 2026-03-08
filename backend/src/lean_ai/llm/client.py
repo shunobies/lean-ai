@@ -131,6 +131,11 @@ class LLMClient:
         else:
             self._embed_client = self._client
 
+    @property
+    def model_name(self) -> str:
+        """The Ollama model name used by this client."""
+        return self._model
+
     async def _retry_with_backoff(self, coro_factory, label: str = "LLM call"):
         """Retry an async callable with exponential backoff for transient errors."""
         max_retries = settings.llm_retry_max

@@ -97,7 +97,7 @@ class TestBuildGuideSearchQueries:
         assert len(queries) >= 2
         assert any("laravel" in q.lower() for q in queries)
         assert any("architecture" in q.lower() for q in queries)
-        assert any("CLI" in q or "artisan" in q.lower() for q in queries)
+        assert any("CLI" in q or "scaffolding" in q.lower() for q in queries)
 
     def test_generates_queries_for_django(self):
         frameworks = [("django", ">=5.0")]
@@ -106,16 +106,41 @@ class TestBuildGuideSearchQueries:
         assert len(queries) >= 2
         assert any("django" in q.lower() for q in queries)
 
-    def test_caps_at_six(self):
+    def test_caps_at_eight(self):
         frameworks = [
             (f"framework{i}", f">={i}.0") for i in range(10)
         ]
         queries = _build_guide_search_queries(frameworks, [])
-        assert len(queries) <= 6
+        assert len(queries) <= 8
 
     def test_empty_frameworks(self):
         queries = _build_guide_search_queries([], [])
         assert queries == []
+
+    def test_cutoff_adds_changelog_query(self):
+        frameworks = [("laravel/framework", "^12.0")]
+        runtimes = [("PHP", "^8.4")]
+        queries = _build_guide_search_queries(
+            frameworks, runtimes, cutoff="2024-04",
+        )
+        assert any("changelog" in q.lower() for q in queries)
+
+    def test_no_cutoff_no_changelog_query(self):
+        frameworks = [("laravel/framework", "^12.0")]
+        runtimes = [("PHP", "^8.4")]
+        queries = _build_guide_search_queries(
+            frameworks, runtimes, cutoff=None,
+        )
+        assert not any("changelog" in q.lower() for q in queries)
+
+    def test_queries_are_framework_agnostic(self):
+        """Queries should not contain framework-specific CLI names."""
+        frameworks = [("django", ">=5.0")]
+        runtimes = [("Python", ">=3.12")]
+        queries = _build_guide_search_queries(frameworks, runtimes)
+        joined = " ".join(queries).lower()
+        assert "artisan" not in joined
+        assert "make:model" not in joined
 
 
 # ---------------------------------------------------------------------------
