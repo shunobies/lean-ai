@@ -376,93 +376,22 @@ def _build_expansion_prompt(
     )
 
 
-def _extract_section_headings(doc: str) -> list[str]:
-    """Extract ## heading lines from a context document."""
-    return [
-        line.rstrip()
-        for line in doc.split("\n")
-        if line.startswith("## ")
-    ]
-
-
-def _extract_covered_names(doc: str) -> str:
-    """Extract a compact list of class/function names already mentioned in the doc.
-
-    Scans for backtick-wrapped names (``ClassName``, ``function_name()``).
-    No regex — simple character scanning.
-    """
-    names: list[str] = []
-    i = 0
-    while i < len(doc):
-        if doc[i] == "`" and i + 1 < len(doc) and doc[i + 1] != "`":
-            # Found opening backtick — find closing
-            end = doc.find("`", i + 1)
-            if end > i and end - i < 120:
-                name = doc[i + 1:end].strip()
-                if name and not name.startswith("/") and " " not in name:
-                    names.append(name)
-                i = end + 1
-            else:
-                i += 1
-        else:
-            i += 1
-
-    # Deduplicate while preserving order
-    seen: set[str] = set()
-    unique: list[str] = []
-    for n in names:
-        if n not in seen:
-            seen.add(n)
-            unique.append(n)
-
-    # Also extract ### sub-heading paths as covered context.
-    # Expansion rounds often re-describe files already covered under these headings.
-    for line in doc.split("\n"):
-        if line.startswith("### "):
-            heading_text = line[4:].strip()
-            if heading_text and heading_text not in seen:
-                seen.add(heading_text)
-                unique.append(heading_text)
-
-    # Also extract route paths as covered context to prevent API Surface duplication.
-    # Endpoints appear as "- GET /admin/foo — handler" or "- `GET /admin/foo` → ..."
-    for line in doc.split("\n"):
-        stripped = line.strip()
-        if stripped.startswith("- ") and "/" in stripped:
-            parts = stripped[2:].split()
-            for part in parts:
-                if part.startswith("/") and len(part) > 1 and part not in seen:
-                    seen.add(part)
-                    unique.append(part)
-
-    return ", ".join(unique)
-
-
 def build_additive_expansion_prompt(
     existing_doc: str,
     file_batch: str,
 ) -> str:
     """Build the user prompt for an additive expansion round.
 
-    Sends section headings + already-covered names (compact) + full file batch.
-    This keeps the prompt lean, leaving maximum input budget for new source files.
+    Sends the full existing document + new source files so the LLM can
+    see all current content and avoid duplicates.  The LLM returns the
+    complete updated document.
     """
-    headings = _extract_section_headings(existing_doc)
-    heading_list = "\n".join(headings)
-
-    covered = _extract_covered_names(existing_doc)
-    # Cap the covered names to avoid bloating the prompt
-    if len(covered) > 8000:
-        covered = covered[:8000] + " ..."
-
     return (
-        "=== SECTION HEADINGS (existing document) ===\n"
-        f"{heading_list}\n\n"
-        "=== ALREADY COVERED (do not repeat these) ===\n"
-        f"{covered}\n\n"
+        "=== EXISTING DOCUMENT ===\n"
+        f"{existing_doc}\n\n"
         "=== SOURCE FILES (not yet in the document) ===\n"
         f"{file_batch}\n\n"
-        "Produce ONLY new entries to add to the sections listed above. "
-        "Do NOT reproduce the existing document. "
+        "Update the existing document by adding new data from the source "
+        "files above. Return the complete updated document. "
         "ONLY reference names visible in the source files provided."
     )

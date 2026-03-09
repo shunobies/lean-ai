@@ -122,55 +122,20 @@ CRITICAL — accuracy:
 
 
 _ADDITIVE_EXPANSION_PROMPT = """\
-Use your knowledge of software architecture to analyze new source files and \
-produce entries to ADD to an existing project context document.
+This is an additive expansion round. You are given:
+1. EXISTING DOCUMENT — the project context document produced so far
+2. SOURCE FILES — additional source files not yet covered in the document
 
-You are given:
-1. SECTION HEADINGS — the top-level sections already in the document
-2. ALREADY COVERED — class/function names already described (do NOT repeat these)
-3. SOURCE FILES — new files not yet described in the document
-
-Your task: produce ONLY new entries to insert into the existing sections. \
-Do NOT reproduce the existing document — output only the delta.
-
-Output format — group entries under matching ## headings:
-
-## Module Map
-### path/to/new_module/
-- Responsible for X
-- Key files: `file_a.py`, `file_b.py`, `file_c.py`
-- Key classes: `ClassName`, `OtherClass`
-- Key functions: `function_name()`, `other_function()`
-(List names only — detailed descriptions belong in Key Abstractions)
-
-## Key Abstractions
-### path/to/file.py
-- `ClassName` — responsibility, interacts with X
-- `function_name()` — responsibility
-
-## Integration Points
-- `new_module/` → `other_module/` — imports client classes for API communication
-
-## Data Flow
-- (Add numbered steps ONLY if the new files reveal a completely new request/data path \
-not covered above. Do NOT restate existing flows in different words.)
-
-## Conventions
-- (Add a pattern ONLY if it is a genuinely new convention not already stated above. \
-Do NOT rephrase or elaborate on existing conventions.)
-
-## API Surface
-- `POST /new-endpoint` → `handler_function()` in `file.py`
+Your task: update the existing document by placing new data from the source \
+files under the proper existing headings. Return the complete updated document.
 
 Rules:
-- ONLY include sections where the new files contribute something. Skip empty sections.
-- Use EXACT class names, function names, and file paths from the provided source files.
-- Do NOT invent or generalize. If a name is not in the source files, do not mention it.
-- Do NOT repeat entries already listed in the ALREADY COVERED section.
-- Do NOT rephrase or elaborate on content already in the document. Only add \
-genuinely new classes, functions, endpoints, or relationships.
-- Be concise but thorough — every class, function, and endpoint in the source files \
-should be accounted for.\
+- Do NOT remove or rephrase existing content — only add new entries.
+- Place new findings under the correct existing ## headings.
+- Use EXACT class names, function names, and file paths from the source files.
+- Do not invent or generalize names not visible in the provided data.
+- Keep the same Markdown structure and heading order.
+- Keep the total document under 6000 words.\
 """
 
 
@@ -187,6 +152,9 @@ NEVER invent class names, function names, or relationships that are not shown.
 
 STRUCTURE RULES:
 - Each ## heading must appear EXACTLY ONCE in your output.
+- ALL 7 ## headings listed below MUST appear in your output. If you have no \
+data for a section, write the heading followed by a single line: \
+"No data extracted yet."
 - Within each section use ONE coherent list or narrative. Do not restart \
 numbering or start a second list covering the same topic.
 

@@ -372,74 +372,6 @@ async def _generate_project_context_multi_round(
     return current_doc
 
 
-def _merge_additions(base_doc: str, additions: str) -> str:
-    """Merge additive expansion output into the base document by section.
-
-    Finds ``## Heading`` markers in *additions* that match headings in
-    *base_doc*, then appends the addition content at the end of the
-    matching section (before the next ``## `` heading).
-
-    Unmatched addition sections are discarded.
-    No regex — uses simple string operations.
-    """
-    if not additions.strip():
-        return base_doc
-
-    # Parse additions into {normalized_heading: content} pairs.
-    add_sections: list[tuple[str, str]] = []
-    current_heading: str | None = None
-    current_lines: list[str] = []
-
-    for line in additions.split("\n"):
-        if line.startswith("## "):
-            if current_heading is not None:
-                add_sections.append((current_heading, "\n".join(current_lines)))
-            current_heading = _normalize_h2(line.rstrip())
-            current_lines = []
-        elif current_heading is not None:
-            current_lines.append(line)
-
-    if current_heading is not None:
-        add_sections.append((current_heading, "\n".join(current_lines)))
-
-    if not add_sections:
-        return base_doc
-
-    # Build a map of normalized heading → list of content blocks to append.
-    additions_by_heading: dict[str, list[str]] = {}
-    for heading, content in add_sections:
-        content = content.strip()
-        if content:
-            additions_by_heading.setdefault(heading, []).append(content)
-
-    if not additions_by_heading:
-        return base_doc
-
-    # Walk through the base document and insert additions at section boundaries.
-    base_lines = base_doc.split("\n")
-    result: list[str] = []
-    active_heading: str | None = None
-
-    for line in base_lines:
-        if line.startswith("## "):
-            # Before switching to a new section, flush any additions for the
-            # section we're leaving.
-            if active_heading and active_heading in additions_by_heading:
-                for block in additions_by_heading.pop(active_heading):
-                    result.append("")
-                    result.append(block)
-            active_heading = _normalize_h2(line.rstrip())
-        result.append(line)
-
-    # Flush additions for the last section.
-    if active_heading and active_heading in additions_by_heading:
-        for block in additions_by_heading.pop(active_heading):
-            result.append("")
-            result.append(block)
-
-    return "\n".join(result)
-
-
 async def _expand_project_context(
     base_doc: str,
     repo_root: str,
@@ -528,14 +460,24 @@ async def _expand_project_context(
                 )
 
             if additions.strip():
-                prev_len = len(current_doc)
-                current_doc = _merge_additions(current_doc, additions)
-                current_doc = _deduplicate_subsections(current_doc)
-                added = len(current_doc) - prev_len
-                logger.info(
-                    "expansion: round %d merged (+%d chars, total %d chars)",
-                    round_num, added, len(current_doc),
-                )
+                # The LLM returns the complete updated document.
+                # Sanity check: output should be at least 70% of current
+                # length — if much shorter, the LLM likely dropped content.
+                if len(additions) >= len(current_doc) * 0.7:
+                    prev_len = len(current_doc)
+                    current_doc = additions
+                    current_doc = _deduplicate_subsections(current_doc)
+                    added = len(current_doc) - prev_len
+                    logger.info(
+                        "expansion: round %d updated (+%d chars, total %d chars)",
+                        round_num, added, len(current_doc),
+                    )
+                else:
+                    logger.warning(
+                        "expansion: round %d output too short (%d vs %d chars), "
+                        "keeping existing document",
+                        round_num, len(additions), len(current_doc),
+                    )
             else:
                 logger.info("expansion: round %d produced empty output, skipping", round_num)
         except Exception as exc:
@@ -695,7 +637,18 @@ async def update_project_context(
         logger.info("update_project_context: LLM produced empty output, skipping")
         return None
 
-    merged = _merge_additions(existing_doc, additions)
+    # The LLM returns the complete updated document.
+    # Sanity check: output should be at least 70% of current length.
+    if len(additions) >= len(existing_doc) * 0.7:
+        merged = additions
+    else:
+        logger.warning(
+            "update_project_context: output too short (%d vs %d chars), "
+            "keeping original",
+            len(additions), len(existing_doc),
+        )
+        merged = existing_doc
+
     path = write_project_context(repo_root, merged)
     logger.info(
         "update_project_context: done (%d → %d chars)",
