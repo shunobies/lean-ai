@@ -187,7 +187,6 @@ NEVER invent class names, function names, or relationships that are not shown.
 
 STRUCTURE RULES (follow these exactly):
 - Write exactly 5 sections in the order listed below. Each ## heading appears ONCE.
-- NEVER go back to add to or rewrite a section you already completed.
 - Within each section use ONE coherent list or narrative. Do not restart numbering \
 or start a second list covering the same topic.
 - Use explicit sequential numbers (1. 2. 3.) — NOT repeated 1. 1. 1.
