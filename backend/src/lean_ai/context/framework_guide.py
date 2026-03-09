@@ -1157,12 +1157,16 @@ async def generate_framework_guide(
     search_parts: list[str] = []
     all_results: list[tuple[str, str, str]] = []  # (title, url, snippet)
 
+    # Google provider needs more time: browser init + rate-limit +
+    # navigation + WebDriverWait can exceed 15s easily.
+    search_timeout = 45 if settings.search_provider == "google" else 15
+
     logger.info("Framework guide: running %d web searches", len(queries))
     for i, query in enumerate(queries, 1):
         try:
             result = await asyncio.wait_for(
                 search_internet(query, llm_client=None),
-                timeout=15,
+                timeout=search_timeout,
             )
             if result.success and result.output:
                 search_parts.append(
@@ -1172,22 +1176,23 @@ async def generate_framework_guide(
                     _extract_search_results(result.output),
                 )
                 logger.info(
-                    "Framework guide: search %d/%d OK (%d chars)",
-                    i, len(queries), len(result.output),
+                    "Framework guide: search %d/%d %r -> OK (%d chars)",
+                    i, len(queries), query, len(result.output),
                 )
             else:
                 logger.info(
-                    "Framework guide: search %d/%d returned no results",
-                    i, len(queries),
+                    "Framework guide: search %d/%d %r -> no results",
+                    i, len(queries), query,
                 )
         except asyncio.TimeoutError:
             logger.info(
-                "Framework guide: search %d/%d timed out", i, len(queries),
+                "Framework guide: search %d/%d %r -> timed out",
+                i, len(queries), query,
             )
         except Exception as exc:
             logger.info(
-                "Framework guide: search %d/%d failed: %s",
-                i, len(queries), exc,
+                "Framework guide: search %d/%d %r -> failed: %s",
+                i, len(queries), query, exc,
             )
 
     # Step 3b: LLM-ranked page fetching.

@@ -282,13 +282,16 @@ def _do_google_search(query: str, max_results: int = 10) -> str:
     elapsed = time.monotonic() - _last_search_time
     target_delay = base_delay + random.uniform(0, base_delay)
     if elapsed < target_delay:
-        time.sleep(target_delay - elapsed)
+        wait = target_delay - elapsed
+        logger.debug("Google search: rate-limit delay %.1fs", wait)
+        time.sleep(wait)
 
     browser = _get_browser()
 
     # Navigate directly to search results
     url = f"https://www.google.com/search?q={quote_plus(query)}&hl=en"
     browser.get(url)
+    logger.info("Google search: %r", query)
     _last_search_time = time.monotonic()
 
     # Handle consent dialog (EU regions)
@@ -300,11 +303,11 @@ def _do_google_search(query: str, max_results: int = 10) -> str:
             expected_conditions.presence_of_element_located((By.ID, "search")),
         )
     except Exception:
-        # May still have results without #search div
-        pass
+        logger.debug("Google search: #search div not found, parsing anyway")
 
     # Parse results
     results = _parse_google_results(browser.page_source, max_results)
+    logger.info("Google search: %r -> %d results", query, len(results))
 
     if not results:
         return f"No results found for: {query}"

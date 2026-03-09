@@ -149,9 +149,14 @@ async def search_internet(
             error=f"Unknown search provider: '{settings.search_provider}'",
         )
 
+    logger.info("Search [%s]: %r", settings.search_provider, query)
+
     try:
         raw_content = await provider_fn(query)
     except Exception as e:
+        logger.warning(
+            "Search [%s]: %r failed: %s", settings.search_provider, query, e,
+        )
         return ToolResult(success=False, error=f"Search failed: {e}")
 
     sanitized = _strip_html(raw_content)
@@ -159,6 +164,10 @@ async def search_internet(
     if llm_client is not None:
         sanitized = await _summarize_if_long(sanitized, llm_client)
 
+    logger.info(
+        "Search [%s]: %r -> %d chars",
+        settings.search_provider, query, len(sanitized),
+    )
     return ToolResult(success=True, output=sanitized)
 
 
@@ -168,6 +177,7 @@ async def fetch_url(
     max_content_bytes: int = 500_000,
 ) -> ToolResult:
     """Fetch a URL and return sanitized content."""
+    logger.info("Fetch URL: %s", url)
     try:
         async with httpx.AsyncClient(
             timeout=settings.internet_timeout_seconds, follow_redirects=True,
@@ -184,10 +194,13 @@ async def fetch_url(
             encoding = response.encoding or "utf-8"
             raw_content = raw_bytes.decode(encoding, errors="replace")
     except httpx.TimeoutException:
+        logger.warning("Fetch URL: timeout: %s", url)
         return ToolResult(success=False, error=f"Timeout fetching: {url}")
     except httpx.HTTPStatusError as e:
+        logger.warning("Fetch URL: HTTP %d: %s", e.response.status_code, url)
         return ToolResult(success=False, error=f"HTTP {e.response.status_code}: {url}")
     except Exception as e:
+        logger.warning("Fetch URL: failed: %s — %s", url, e)
         return ToolResult(success=False, error=f"Failed to fetch: {e}")
 
     sanitized = _strip_html(raw_content)
@@ -195,4 +208,5 @@ async def fetch_url(
     if llm_client is not None:
         sanitized = await _summarize_if_long(sanitized, llm_client)
 
+    logger.info("Fetch URL: %s -> %d chars", url, len(sanitized))
     return ToolResult(success=True, output=sanitized)
