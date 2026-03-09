@@ -22,6 +22,8 @@ from lean_ai.context.framework_guide import (
     _get_primary_frameworks,
     _rank_urls_with_llm,
     _remove_blocks,
+    _renumber_steps,
+    _repair_code_blocks,
 )
 
 # ---------------------------------------------------------------------------
@@ -884,3 +886,123 @@ class TestViteNotFramework:
         frameworks, _runtimes = _get_primary_frameworks(str(tmp_path))
         fw_names = [n for n, _v in frameworks]
         assert "vite" not in fw_names
+
+
+# ---------------------------------------------------------------------------
+# _repair_code_blocks
+# ---------------------------------------------------------------------------
+
+
+class TestRepairCodeBlocks:
+    def test_wraps_unfenced_php(self):
+        text = (
+            "Here is the route:\n"
+            "Route::get('/users', [UserController::class, 'index']);\n"
+            "\n"
+            "And the controller:"
+        )
+        result = _repair_code_blocks(text)
+        assert "```php" in result
+        assert "Route::get" in result
+        assert result.count("```") == 2  # open + close
+
+    def test_wraps_unfenced_bash(self):
+        text = (
+            "Run this command:\n"
+            "$ php artisan make:model Customer\n"
+            "\n"
+            "This creates the model."
+        )
+        result = _repair_code_blocks(text)
+        assert "```bash" in result
+        assert "php artisan" in result
+
+    def test_preserves_already_fenced(self):
+        text = (
+            "```php\n"
+            "Route::get('/', fn() => view('welcome'));\n"
+            "```"
+        )
+        result = _repair_code_blocks(text)
+        assert result == text
+
+    def test_splits_mixed_languages(self):
+        text = (
+            "Run the command:\n"
+            "$ php artisan make:controller UserController\n"
+            "Then edit the controller:\n"
+            "class UserController extends Controller {}\n"
+        )
+        result = _repair_code_blocks(text)
+        assert "```bash" in result
+        assert "```php" in result
+
+    def test_no_code_lines_unchanged(self):
+        text = "This is just prose about the framework."
+        result = _repair_code_blocks(text)
+        assert result == text
+
+    def test_wraps_dollar_variable(self):
+        text = (
+            "Access the user:\n"
+            "$user = User::find(1);\n"
+            "$user->name = 'Alex';\n"
+        )
+        result = _repair_code_blocks(text)
+        assert "```php" in result
+        assert result.count("```") == 2
+
+
+# ---------------------------------------------------------------------------
+# _renumber_steps
+# ---------------------------------------------------------------------------
+
+
+class TestRenumberSteps:
+    def test_renumbers_after_gap(self):
+        text = (
+            "## Adding a New Feature\n"
+            "1. Create the model\n"
+            "3. Add routes\n"
+            "5. Create the view\n"
+        )
+        result = _renumber_steps(text)
+        assert "1. Create the model" in result
+        assert "2. Add routes" in result
+        assert "3. Create the view" in result
+
+    def test_renumbers_step_headings(self):
+        text = (
+            "## Adding a New Feature\n"
+            "### Step 1: Create model\n"
+            "Content here\n"
+            "### Step 3: Add routes\n"
+            "More content\n"
+        )
+        result = _renumber_steps(text)
+        assert "### Step 1:" in result
+        assert "### Step 2:" in result
+        assert "### Step 3:" not in result
+
+    def test_resets_at_section_boundary(self):
+        text = (
+            "## Section A\n"
+            "1. First\n"
+            "3. Third\n"
+            "\n"
+            "## Section B\n"
+            "2. Second item\n"
+            "4. Fourth item\n"
+        )
+        result = _renumber_steps(text)
+        # Section A: renumbered to 1, 2
+        assert "1. First" in result
+        assert "2. Third" in result
+        # Section B: renumbered to 1, 2 (fresh start)
+        assert "1. Second item" in result
+        assert "2. Fourth item" in result
+
+    def test_no_numbers_unchanged(self):
+        text = "## Section\nJust prose here.\nMore prose."
+        result = _renumber_steps(text)
+        assert result == text

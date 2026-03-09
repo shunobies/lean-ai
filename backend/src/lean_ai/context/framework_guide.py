@@ -663,6 +663,148 @@ async def _deduplicate_sections(
 
 
 # ---------------------------------------------------------------------------
+# Post-generation code block repair
+# ---------------------------------------------------------------------------
+
+# Prefixes that indicate code lines when found outside a fenced block.
+# Grouped by language for automatic language identification.
+_PHP_PREFIXES = (
+    "<?php", "namespace ", "use App\\", "use Illuminate\\",
+    "class ", "public ", "private ", "protected ", "function ",
+    "Route::", "return view(", "return response(", "$",
+)
+_BASH_PREFIXES = (
+    "$ ", "php ", "composer ", "npm ", "artisan ",
+    "python ", "pip ", "rails ", "bundle ", "cargo ", "go ",
+)
+
+
+def _repair_code_blocks(text: str) -> str:
+    """Wrap unfenced code lines in appropriate fenced code blocks.
+
+    Detects lines that look like code (based on leading tokens) but
+    are not inside a fenced code block, and wraps them.  This is a
+    mechanical safety net — the prompt should handle most cases.
+
+    No regex — uses simple string prefix checks.
+    """
+    lines = text.split("\n")
+    result: list[str] = []
+    in_fence = False
+    code_run: list[str] = []
+    code_lang = ""
+
+    def _flush_code_run() -> None:
+        nonlocal code_run, code_lang
+        if code_run:
+            result.append(f"```{code_lang}")
+            result.extend(code_run)
+            result.append("```")
+            code_run = []
+            code_lang = ""
+
+    for line in lines:
+        stripped = line.lstrip()
+
+        # Track fenced code blocks
+        if stripped.startswith("```"):
+            if in_fence:
+                in_fence = False
+            else:
+                _flush_code_run()
+                in_fence = True
+            result.append(line)
+            continue
+
+        if in_fence:
+            result.append(line)
+            continue
+
+        # Detect code-like lines outside fences.
+        # Check bash first — "$ " (bash prompt) must not be caught
+        # by the PHP "$" prefix.
+        detected_lang = ""
+        if stripped.startswith(_BASH_PREFIXES):
+            detected_lang = "bash"
+        elif stripped.startswith(_PHP_PREFIXES):
+            detected_lang = "php"
+
+        if detected_lang and stripped:
+            if code_run and code_lang != detected_lang:
+                _flush_code_run()
+            code_lang = code_lang or detected_lang
+            code_run.append(line)
+        else:
+            _flush_code_run()
+            result.append(line)
+
+    _flush_code_run()
+    return "\n".join(result)
+
+
+def _renumber_steps(text: str) -> str:
+    """Renumber sequential step patterns after section removal.
+
+    Handles two patterns:
+    1. Markdown numbered lists: ``1. **Step** ...``
+    2. Heading-style steps: ``### Step 3: ...``
+
+    Only renumbers within each ``##`` section boundary.
+    No regex — uses simple string operations.
+    """
+    lines = text.split("\n")
+    result: list[str] = []
+    list_counter = 0
+    step_counter = 0
+
+    for line in lines:
+        stripped = line.lstrip()
+
+        # Reset counters at ## section boundaries
+        if stripped.startswith("## "):
+            list_counter = 0
+            step_counter = 0
+            result.append(line)
+            continue
+
+        # Pattern 1: Numbered list items "1. " or "2. **Step**"
+        if stripped and stripped[0].isdigit() and ". " in stripped[:5]:
+            dot_pos = stripped.index(". ")
+            old_num = stripped[:dot_pos]
+            if old_num.isdigit():
+                list_counter += 1
+                indent = line[:len(line) - len(stripped)]
+                rest = stripped[dot_pos:]  # ". rest of line"
+                result.append(f"{indent}{list_counter}{rest}")
+                continue
+
+        # Pattern 2: "### Step N:" headings
+        if stripped.startswith("### Step "):
+            rest = stripped[9:]  # after "### Step "
+            colon_pos = rest.find(":")
+            if colon_pos > 0:
+                old_num_str = rest[:colon_pos].strip()
+                if old_num_str.isdigit():
+                    step_counter += 1
+                    after_colon = rest[colon_pos:]
+                    indent = line[:len(line) - len(stripped)]
+                    result.append(
+                        f"{indent}### Step {step_counter}{after_colon}",
+                    )
+                    continue
+
+        # Non-numbered lines reset the list counter
+        if not stripped or not (
+            stripped[0].isdigit() and ". " in stripped[:5]
+        ):
+            list_counter = 0
+
+        result.append(line)
+
+    return "\n".join(result)
+
+
+# ---------------------------------------------------------------------------
 # Framework detection (reuses deprecations._detect_versions)
 # ---------------------------------------------------------------------------
 
@@ -966,6 +1108,14 @@ def _build_guide_system_prompt(
         "- Reference actual class names and method names from the "
         "framework\n"
         "- Format the output as clean Markdown with ## headings\n"
+        "- ALWAYS wrap code examples in fenced code blocks with the "
+        "language identifier (```php, ```bash, ```json, etc.)\n"
+        "- Each distinct code example MUST be in its own fenced code "
+        "block — never combine code from different files or different "
+        "languages in one block\n"
+        "- Separate code blocks with a brief prose explanation of what "
+        "each shows\n"
+        "- Number steps sequentially starting from 1 with no gaps\n"
         "- Maximum 4000 words total\n"
     )
 
@@ -1309,10 +1459,16 @@ async def generate_framework_guide(
         logger.info("Framework guide: LLM returned empty output")
         return ""
 
-    # Step 5a: Deduplicate repeated sections
+    # Step 5a: Repair unfenced code blocks
+    guide = _repair_code_blocks(guide)
+
+    # Step 5b: Deduplicate repeated sections
     guide = await _deduplicate_sections(guide, llm_client)
 
-    # Step 5b: Validate file references against project tree
+    # Step 5c: Renumber steps after dedup may have removed some
+    guide = _renumber_steps(guide)
+
+    # Step 5d: Validate file references against project tree
     try:
         guide = await _validate_guide(
             guide,
