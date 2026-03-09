@@ -544,11 +544,17 @@ async def _deduplicate_sections(
     guide: str,
     llm_client: LLMClient,
 ) -> str:
-    """Remove duplicate or overlapping ``##`` sections using the LLM.
+    """Remove duplicate or overlapping ``##`` sections.
 
-    Delegates to the shared :func:`deduplicate_sections_llm` utility,
-    falling back to :func:`_deduplicate_sections_mechanical` on any
-    failure or if the LLM finds nothing to remove.
+    Two-pass approach:
+    1. LLM-based semantic dedup (catches near-duplicates with different
+       wording).
+    2. Mechanical dedup on the LLM result (catches exact heading matches
+       the LLM missed).
+
+    Always runs both passes — the LLM may remove some duplicates but
+    miss others, and the old conditional logic only ran mechanical dedup
+    when the LLM changed nothing at all.
     """
     from lean_ai.context.dedup import deduplicate_sections_llm
 
@@ -556,13 +562,11 @@ async def _deduplicate_sections(
         guide, llm_client, log_prefix="Framework guide",
     )
 
-    # If the shared function returned unchanged (LLM found nothing or
-    # returned no valid numbers), try mechanical fallback for exact
-    # heading matches the LLM might have missed.
-    if result == guide:
-        mechanical = _deduplicate_sections_mechanical(guide)
-        if mechanical != guide:
-            return mechanical
+    # Always run mechanical dedup on the result — the LLM may have
+    # removed some duplicates but missed exact heading matches.
+    mechanical = _deduplicate_sections_mechanical(result)
+    if mechanical != result:
+        return mechanical
 
     return result
 
@@ -991,7 +995,24 @@ def _build_guide_system_prompt(
         "use\n"
         "- New recommended patterns that replace old ones\n"
         "- Naming conventions the framework enforces implicitly\n\n"
-        "RULES:\n"
+        "STRUCTURE RULES:\n"
+        "- Each ## heading above MUST appear EXACTLY ONCE. Never "
+        "repeat a ## heading. If you have already written "
+        "## Framework Architecture, do not write it again.\n"
+        "- Do NOT restart or re-draft sections. Write each section "
+        "once, completely, then move to the next.\n"
+        "- Every fenced code block MUST have a matching opening "
+        "and closing ``` pair. Never leave a code block unclosed.\n"
+        "- Never put multiple PHP files or multiple code languages "
+        "inside a single fenced code block. Each code example gets "
+        "its own ``` pair with its own language tag.\n"
+        "- Separate every code block from surrounding text with a "
+        "brief prose explanation of what it shows.\n"
+        "- Never leave a subsection heading empty — if a subsection "
+        "has no applicable content, omit the heading entirely.\n"
+        "- Number steps sequentially starting from 1 with no gaps.\n"
+        "- Maximum 4000 words total.\n\n"
+        "CONTENT RULES:\n"
         f"- ONLY cover the detected frameworks: {fw_list}\n"
         "- Web search results and fetched page content are the "
         "SOURCE OF TRUTH for version-specific details. If they "
@@ -1009,19 +1030,9 @@ def _build_guide_system_prompt(
         "exist in the detected version. If unsure whether something "
         "exists in this version, omit it rather than guess.\n"
         "- Use concrete code examples (short snippets, not full "
-        "files)\n"
+        "files).\n"
         "- Reference actual class names and method names from the "
-        "framework\n"
-        "- Format the output as clean Markdown with ## headings\n"
-        "- ALWAYS wrap code examples in fenced code blocks with the "
-        "language identifier (```php, ```bash, ```json, etc.)\n"
-        "- Each distinct code example MUST be in its own fenced code "
-        "block — never combine code from different files or different "
-        "languages in one block\n"
-        "- Separate code blocks with a brief prose explanation of what "
-        "each shows\n"
-        "- Number steps sequentially starting from 1 with no gaps\n"
-        "- Maximum 4000 words total\n"
+        "framework.\n"
     )
 
 
@@ -1336,10 +1347,8 @@ async def generate_framework_guide(
     # Step 5b: Deduplicate repeated sections
     guide = await _deduplicate_sections(guide, llm_client)
 
-    # Step 5c: Renumber steps after dedup may have removed some
-    guide = _renumber_steps(guide)
-
-    # Step 5d: Validate file references against project tree
+    # Step 5c: Validate file references against project tree
+    # (runs before renumber because LLM surgical fixes can change text)
     try:
         guide = await _validate_guide(
             guide,
@@ -1352,6 +1361,10 @@ async def generate_framework_guide(
             "Framework guide: validation pass failed (non-blocking): %s",
             exc,
         )
+
+    # Step 5d: Renumber steps (runs last since dedup and validation
+    # can both remove or rewrite content, introducing gaps)
+    guide = _renumber_steps(guide)
 
     # Step 6: Add header
     fw_label = ", ".join(
