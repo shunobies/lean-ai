@@ -1212,9 +1212,9 @@ async def generate_framework_guide(
     search_parts: list[str] = []
     all_results: list[tuple[str, str, str]] = []  # (title, url, snippet)
 
-    # Google provider needs more time: browser init + rate-limit +
-    # navigation + WebDriverWait can exceed 15s easily.
-    search_timeout = 45 if settings.search_provider in ("google", "bing") else 15
+    # Browser providers need more time: browser init + rate-limit delay +
+    # navigation + consent handling + potential Bing fallback.
+    search_timeout = 90 if settings.search_provider in ("google", "bing") else 15
 
     logger.info("Framework guide: running %d web searches", len(queries))
     for i, query in enumerate(queries, 1):

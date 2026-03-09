@@ -374,9 +374,9 @@ def _do_google_search(query: str, max_results: int = 10) -> str:
     # Handle consent dialog (EU regions)
     _dismiss_consent(browser)
 
-    # Wait for results to load
+    # Wait for results to load (5s is plenty — pages load in <2s)
     try:
-        WebDriverWait(browser, 10).until(
+        WebDriverWait(browser, 5).until(
             expected_conditions.presence_of_element_located((By.ID, "search")),
         )
     except Exception:
@@ -393,7 +393,7 @@ def _do_google_search(query: str, max_results: int = 10) -> str:
         bing_url = f"https://www.bing.com/search?q={quote_plus(query)}"
         browser.get(bing_url)
         try:
-            WebDriverWait(browser, 10).until(
+            WebDriverWait(browser, 5).until(
                 expected_conditions.presence_of_element_located(
                     (By.ID, "b_results"),
                 ),
@@ -433,7 +433,7 @@ def _do_bing_search(query: str, max_results: int = 10) -> str:
     logger.info("Bing search: %r", query)
 
     try:
-        WebDriverWait(browser, 10).until(
+        WebDriverWait(browser, 5).until(
             expected_conditions.presence_of_element_located(
                 (By.ID, "b_results"),
             ),
