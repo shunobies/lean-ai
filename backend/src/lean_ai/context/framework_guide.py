@@ -546,120 +546,25 @@ async def _deduplicate_sections(
 ) -> str:
     """Remove duplicate or overlapping ``##`` sections using the LLM.
 
-    Sends a compact summary (heading + first ~200 chars) of each section
-    to the LLM, which identifies redundant sections by number.  Python
-    then mechanically removes those sections from the guide.
-
-    Falls back to :func:`_deduplicate_sections_mechanical` on LLM failure
-    or unparseable response.
+    Delegates to the shared :func:`deduplicate_sections_llm` utility,
+    falling back to :func:`_deduplicate_sections_mechanical` on any
+    failure or if the LLM finds nothing to remove.
     """
-    try:
-        lines = guide.split("\n")
+    from lean_ai.context.dedup import deduplicate_sections_llm
 
-        # Build (heading, start_line, end_line) tuples — same as mechanical
-        sections: list[tuple[str, int, int]] = []
-        for i, line in enumerate(lines):
-            if line.lstrip().startswith("## "):
-                sections.append((line.strip(), i, -1))
-                if len(sections) > 1:
-                    sections[-2] = (
-                        sections[-2][0],
-                        sections[-2][1],
-                        i,
-                    )
-        if sections:
-            sections[-1] = (
-                sections[-1][0],
-                sections[-1][1],
-                len(lines),
-            )
+    result = await deduplicate_sections_llm(
+        guide, llm_client, log_prefix="Framework guide",
+    )
 
-        if len(sections) < 2:
-            return guide
+    # If the shared function returned unchanged (LLM found nothing or
+    # returned no valid numbers), try mechanical fallback for exact
+    # heading matches the LLM might have missed.
+    if result == guide:
+        mechanical = _deduplicate_sections_mechanical(guide)
+        if mechanical != guide:
+            return mechanical
 
-        # Build numbered list with content previews
-        numbered: list[str] = []
-        for idx, (heading, start, end) in enumerate(sections, 1):
-            # Content preview: first ~200 chars after the heading line
-            content_lines = lines[start + 1:end]
-            preview = " ".join(
-                ln.strip() for ln in content_lines if ln.strip()
-            )[:200]
-            numbered.append(f"{idx}. {heading}\n   \"{preview}\"")
-
-        prompt = (
-            f"The following Markdown document has {len(sections)} sections. "
-            "Review for duplicate or overlapping sections that cover the "
-            "same topic.\n\n"
-            "Sections:\n"
-            + "\n\n".join(numbered)
-            + "\n\n"
-            "For each group of duplicates, keep the BEST version (most "
-            "complete and accurate content). Return ONLY the section "
-            "numbers to REMOVE, one per line. If no duplicates exist, "
-            "respond with: NONE"
-        )
-
-        response = await llm_client.chat_raw(
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=64,
-        )
-
-        # Check for explicit "no duplicates" response
-        if "NONE" in response.upper().split():
-            logger.info("Framework guide: LLM found no duplicate sections")
-            return guide
-
-        # Parse section numbers to remove (same pattern as _rank_urls_with_llm)
-        to_remove: list[int] = []
-        for token in response.split():
-            clean = token.strip(".,;:()[]")
-            if clean.isdigit():
-                idx = int(clean)
-                if 1 <= idx <= len(sections) and idx not in to_remove:
-                    to_remove.append(idx)
-
-        if not to_remove:
-            logger.info(
-                "Framework guide: LLM dedup returned no valid numbers, "
-                "falling back to mechanical dedup",
-            )
-            return _deduplicate_sections_mechanical(guide)
-
-        # Mechanically remove identified sections
-        remove_set = set(to_remove)
-        preamble_end = sections[0][1]
-        result_lines = list(lines[:preamble_end])
-        for idx, (_heading, start, end) in enumerate(sections, 1):
-            if idx not in remove_set:
-                result_lines.extend(lines[start:end])
-
-        # Collapse triple+ blank lines to double
-        cleaned: list[str] = []
-        blank_count = 0
-        for line in result_lines:
-            if not line.strip():
-                blank_count += 1
-                if blank_count <= 2:
-                    cleaned.append(line)
-            else:
-                blank_count = 0
-                cleaned.append(line)
-
-        logger.info(
-            "Framework guide: LLM identified %d duplicate section(s) "
-            "to remove: %s",
-            len(to_remove),
-            ", ".join(str(n) for n in to_remove),
-        )
-        return "\n".join(cleaned)
-    except Exception as exc:
-        logger.info(
-            "Framework guide: LLM dedup failed, falling back to "
-            "mechanical dedup: %s",
-            exc,
-        )
-        return _deduplicate_sections_mechanical(guide)
+    return result
 
 
 # ---------------------------------------------------------------------------
