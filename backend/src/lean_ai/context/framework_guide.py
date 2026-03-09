@@ -1114,18 +1114,22 @@ _DEPRIORITIZED_DOMAINS = (
 
 def _select_one_per_query(
     query_results: list[list[tuple[str, str, str]]],
-) -> list[str]:
-    """Pick one URL per search query, avoiding registry/repo pages.
+) -> list[list[str]]:
+    """Pick ranked candidate URLs per search query.
 
-    Iterates each query's result list and selects the first URL that
-    is not from a deprioritized domain and has not already been selected
-    for a previous query (global dedup).  Falls back to the first
-    unseen URL if all candidates are deprioritized.
+    Iterates each query's result list and returns an ordered list of
+    candidate URLs for each query.  The first URL is the preferred pick
+    (non-deprioritized domain when possible), followed by fallbacks in
+    case the primary fetch fails (403, 404, timeout, etc.).
 
-    Returns a list of unique URLs — one per query that produced results.
+    Candidates are globally deduped — a URL picked as primary for one
+    query won't appear as a candidate for another.
+
+    Returns a list of URL lists — one list per query that produced
+    results.
     """
     selected: set[str] = set()
-    picks: list[str] = []
+    picks: list[list[str]] = []
 
     for results in query_results:
         # Dedup within this query's results, skip globally selected
@@ -1144,10 +1148,16 @@ def _select_one_per_query(
             u for u in candidates
             if not any(d in u for d in _DEPRIORITIZED_DOMAINS)
         ]
+        deprioritized = [
+            u for u in candidates
+            if any(d in u for d in _DEPRIORITIZED_DOMAINS)
+        ]
 
-        pick = preferred[0] if preferred else candidates[0]
-        selected.add(pick)
-        picks.append(pick)
+        # Ordered: preferred first, then deprioritized as fallbacks
+        ranked = preferred + deprioritized
+        # Reserve the primary pick globally so other queries don't reuse it
+        selected.add(ranked[0])
+        picks.append(ranked)
 
     return picks
 
@@ -1254,41 +1264,58 @@ async def generate_framework_guide(
 
     if fetch_urls:
         logger.info(
-            "Framework guide: fetching %d page(s) for full content",
+            "Framework guide: fetching %d category page(s) for full content",
             len(fetch_urls),
         )
-    for j, url in enumerate(fetch_urls, 1):
+    for j, url_candidates in enumerate(fetch_urls, 1):
         if page_chars_used >= page_chars_budget:
             break
-        try:
-            page_result = await asyncio.wait_for(
-                fetch_url(url, llm_client=None),
-                timeout=20,
-            )
-            if page_result.success and page_result.output:
-                remaining = page_chars_budget - page_chars_used
-                cap = min(per_page_cap, remaining)
-                text = page_result.output[:cap]
-                page_parts.append(f"=== Page: {url} ===\n{text}")
-                page_chars_used += len(text)
-                logger.info(
-                    "Framework guide: fetched page %d/%d (%d chars): %s",
-                    j, len(fetch_urls), len(text), url,
+        fetched = False
+        for attempt, url in enumerate(url_candidates, 1):
+            try:
+                page_result = await asyncio.wait_for(
+                    fetch_url(url, llm_client=None),
+                    timeout=20,
                 )
-            else:
+                if page_result.success and page_result.output:
+                    remaining = page_chars_budget - page_chars_used
+                    cap = min(per_page_cap, remaining)
+                    text = page_result.output[:cap]
+                    page_parts.append(f"=== Page: {url} ===\n{text}")
+                    page_chars_used += len(text)
+                    if attempt > 1:
+                        logger.info(
+                            "Framework guide: category %d/%d fetched "
+                            "fallback %d (%d chars): %s",
+                            j, len(fetch_urls), attempt, len(text), url,
+                        )
+                    else:
+                        logger.info(
+                            "Framework guide: fetched page %d/%d "
+                            "(%d chars): %s",
+                            j, len(fetch_urls), len(text), url,
+                        )
+                    fetched = True
+                    break
+                else:
+                    logger.info(
+                        "Framework guide: category %d page empty: %s",
+                        j, url,
+                    )
+            except asyncio.TimeoutError:
                 logger.info(
-                    "Framework guide: page %d/%d empty: %s",
-                    j, len(fetch_urls), url,
+                    "Framework guide: category %d page timed out: %s",
+                    j, url,
                 )
-        except asyncio.TimeoutError:
+            except Exception as exc:
+                logger.info(
+                    "Framework guide: category %d page failed: %s — %s",
+                    j, url, exc,
+                )
+        if not fetched:
             logger.info(
-                "Framework guide: page %d/%d timed out: %s",
-                j, len(fetch_urls), url,
-            )
-        except Exception as exc:
-            logger.info(
-                "Framework guide: page %d/%d failed: %s — %s",
-                j, len(fetch_urls), url, exc,
+                "Framework guide: category %d/%d — all %d URL(s) failed",
+                j, len(fetch_urls), len(url_candidates),
             )
 
     # Step 4: Build user message with search results + pages + tree

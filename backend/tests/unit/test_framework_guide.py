@@ -571,10 +571,10 @@ class TestSelectOnePerQuery:
                 ("Tutorial", "https://laracasts.com/cli", "Tutorial"),
             ],
         ]
-        urls = _select_one_per_query(query_results)
-        assert len(urls) == 2
-        assert urls[0] == "https://laravel.com/docs"
-        assert urls[1] == "https://laravel.com/cli"
+        picks = _select_one_per_query(query_results)
+        assert len(picks) == 2
+        assert picks[0][0] == "https://laravel.com/docs"
+        assert picks[1][0] == "https://laravel.com/cli"
 
     def test_skips_deprioritized_domains(self):
         query_results = [
@@ -584,8 +584,13 @@ class TestSelectOnePerQuery:
                 ("Laravel Docs", "https://laravel.com/docs", "Official"),
             ],
         ]
-        urls = _select_one_per_query(query_results)
-        assert urls == ["https://laravel.com/docs"]
+        picks = _select_one_per_query(query_results)
+        assert len(picks) == 1
+        # Preferred (non-deprioritized) is first
+        assert picks[0][0] == "https://laravel.com/docs"
+        # Deprioritized are fallbacks
+        assert "https://packagist.org/laravel" in picks[0]
+        assert "https://github.com/laravel" in picks[0]
 
     def test_falls_back_to_deprioritized_if_only_option(self):
         query_results = [
@@ -594,8 +599,8 @@ class TestSelectOnePerQuery:
                 ("Packagist", "https://packagist.org/laravel", "Package"),
             ],
         ]
-        urls = _select_one_per_query(query_results)
-        assert urls == ["https://github.com/laravel"]
+        picks = _select_one_per_query(query_results)
+        assert picks[0][0] == "https://github.com/laravel"
 
     def test_global_dedup_across_queries(self):
         """Same URL appearing in two queries should only be picked once."""
@@ -608,10 +613,10 @@ class TestSelectOnePerQuery:
                 ("Upgrade", "https://laravel.com/upgrade", "Upgrade"),
             ],
         ]
-        urls = _select_one_per_query(query_results)
-        assert len(urls) == 2
-        assert urls[0] == "https://laravel.com/docs"
-        assert urls[1] == "https://laravel.com/upgrade"
+        picks = _select_one_per_query(query_results)
+        assert len(picks) == 2
+        assert picks[0][0] == "https://laravel.com/docs"
+        assert picks[1][0] == "https://laravel.com/upgrade"
 
     def test_skips_empty_query_results(self):
         query_results = [
@@ -619,13 +624,14 @@ class TestSelectOnePerQuery:
             [("Docs", "https://laravel.com/docs", "Official")],
             [],
         ]
-        urls = _select_one_per_query(query_results)
-        assert urls == ["https://laravel.com/docs"]
+        picks = _select_one_per_query(query_results)
+        assert len(picks) == 1
+        assert picks[0][0] == "https://laravel.com/docs"
 
     def test_all_empty_returns_nothing(self):
         query_results = [[], [], []]
-        urls = _select_one_per_query(query_results)
-        assert urls == []
+        picks = _select_one_per_query(query_results)
+        assert picks == []
 
     def test_eight_queries_eight_picks(self):
         """Simulates realistic 8-category search with one pick each."""
@@ -633,9 +639,11 @@ class TestSelectOnePerQuery:
             [("R1", f"https://example.com/cat{i}", "Snippet")]
             for i in range(8)
         ]
-        urls = _select_one_per_query(query_results)
-        assert len(urls) == 8
-        assert len(set(urls)) == 8  # all unique
+        picks = _select_one_per_query(query_results)
+        assert len(picks) == 8
+        # Each pick list has the primary URL
+        primaries = [p[0] for p in picks]
+        assert len(set(primaries)) == 8  # all unique
 
     def test_dedup_within_single_query(self):
         query_results = [
@@ -645,8 +653,46 @@ class TestSelectOnePerQuery:
                 ("Other", "https://other.com", "Other"),
             ],
         ]
-        urls = _select_one_per_query(query_results)
-        assert urls == ["https://laravel.com/docs"]
+        picks = _select_one_per_query(query_results)
+        assert picks[0][0] == "https://laravel.com/docs"
+        # "other.com" is a fallback
+        assert "https://other.com" in picks[0]
+
+    def test_returns_fallback_urls(self):
+        """Each query returns ranked candidates, not just primary."""
+        query_results = [
+            [
+                ("Docs", "https://laravel.com/docs", "Official"),
+                ("Blog", "https://blog.example.com", "Blog post"),
+                ("GitHub", "https://github.com/laravel", "Repo"),
+            ],
+        ]
+        picks = _select_one_per_query(query_results)
+        assert len(picks) == 1
+        # Primary is non-deprioritized
+        assert picks[0][0] == "https://laravel.com/docs"
+        # Has fallbacks
+        assert len(picks[0]) == 3
+        # Deprioritized (github) comes last
+        assert picks[0][-1] == "https://github.com/laravel"
+
+    def test_preferred_before_deprioritized_in_ranking(self):
+        """Non-deprioritized URLs come before deprioritized in ranked list."""
+        query_results = [
+            [
+                ("GH", "https://github.com/laravel", "Repo"),
+                ("Docs", "https://laravel.com/docs", "Official"),
+                ("SO", "https://stackoverflow.com/q/123", "Q&A"),
+                ("Blog", "https://blog.example.com", "Blog"),
+            ],
+        ]
+        picks = _select_one_per_query(query_results)
+        ranked = picks[0]
+        # Preferred (laravel.com, blog) come before deprioritized (github, SO)
+        assert ranked[0] == "https://laravel.com/docs"
+        assert ranked[1] == "https://blog.example.com"
+        assert "https://github.com/laravel" in ranked[2:]
+        assert "https://stackoverflow.com/q/123" in ranked[2:]
 
 
 # ---------------------------------------------------------------------------
