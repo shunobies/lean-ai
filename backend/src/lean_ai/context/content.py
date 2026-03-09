@@ -224,7 +224,7 @@ def build_generation_prompt(
         f"{import_graph}\n\n"
         "=== API ENDPOINTS ===\n"
         "These are the ACTUAL REST and WebSocket endpoint routes defined in "
-        "the source code. Include ALL of these in your API Surface section — "
+        "the source code. Include ALL of these in the Architecture Overview — "
         "do not invent endpoints that are not listed here.\n\n"
         f"{api_endpoints}\n\n"
         "=== KEY FILE CONTENTS ===\n"
@@ -424,7 +424,7 @@ def _extract_covered_names(doc: str) -> str:
                 seen.add(heading_text)
                 unique.append(heading_text)
 
-    # Also extract route paths as covered context to prevent API Surface duplication.
+    # Also extract route paths as covered context to prevent endpoint duplication.
     # Endpoints appear as "- GET /admin/foo — handler" or "- `GET /admin/foo` → ..."
     for line in doc.split("\n"):
         stripped = line.strip()
