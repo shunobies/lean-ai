@@ -1,10 +1,10 @@
-"""Tests for Google search HTML parsing.
+"""Tests for browser search HTML parsing (Google + Bing).
 
 Pure unit tests — no browser, no network.  Tests ``_parse_google_results``
-with representative HTML fragments.
+and ``_parse_bing_results`` with representative HTML fragments.
 """
 
-from lean_ai.tools.google_search import _parse_google_results
+from lean_ai.tools.browser_search import _parse_bing_results, _parse_google_results
 
 # ---------------------------------------------------------------------------
 # _parse_google_results
@@ -148,6 +148,135 @@ class TestParseGoogleResults:
     def test_empty_html(self):
         assert _parse_google_results("") == []
         assert _parse_google_results("<html></html>") == []
+
+
+# ---------------------------------------------------------------------------
+# _parse_bing_results
+# ---------------------------------------------------------------------------
+
+
+class TestParseBingResults:
+    def test_standard_result(self):
+        html = """
+        <ol id="b_results">
+          <li class="b_algo">
+            <h2><a href="https://laravel.com/docs/12.x">Laravel 12.x Docs</a></h2>
+            <div class="b_caption"><p>Laravel is a PHP web framework.</p></div>
+          </li>
+        </ol>
+        """
+        results = _parse_bing_results(html)
+        assert len(results) == 1
+        assert results[0]["title"] == "Laravel 12.x Docs"
+        assert results[0]["url"] == "https://laravel.com/docs/12.x"
+        assert "PHP web framework" in results[0]["snippet"]
+
+    def test_multiple_results(self):
+        html = """
+        <ol id="b_results">
+          <li class="b_algo">
+            <h2><a href="https://example.com/1">Result 1</a></h2>
+            <div class="b_caption"><p>Snippet 1</p></div>
+          </li>
+          <li class="b_algo">
+            <h2><a href="https://example.com/2">Result 2</a></h2>
+            <div class="b_caption"><p>Snippet 2</p></div>
+          </li>
+          <li class="b_algo">
+            <h2><a href="https://example.com/3">Result 3</a></h2>
+            <div class="b_caption"><p>Snippet 3</p></div>
+          </li>
+        </ol>
+        """
+        results = _parse_bing_results(html, max_results=5)
+        assert len(results) == 3
+        assert results[0]["title"] == "Result 1"
+        assert results[2]["title"] == "Result 3"
+
+    def test_max_results_capped(self):
+        items = ""
+        for i in range(10):
+            items += f"""
+            <li class="b_algo">
+              <h2><a href="https://example.com/{i}">Result {i}</a></h2>
+              <div class="b_caption"><p>Snippet {i}</p></div>
+            </li>
+            """
+        html = f'<ol id="b_results">{items}</ol>'
+        results = _parse_bing_results(html, max_results=3)
+        assert len(results) == 3
+
+    def test_skips_bing_internal_links(self):
+        html = """
+        <ol id="b_results">
+          <li class="b_algo">
+            <h2><a href="/search?q=test">Bing Internal</a></h2>
+            <div class="b_caption"><p>Should skip</p></div>
+          </li>
+          <li class="b_algo">
+            <h2><a href="https://www.bing.com/maps">Bing Maps</a></h2>
+            <div class="b_caption"><p>Should skip too</p></div>
+          </li>
+          <li class="b_algo">
+            <h2><a href="https://example.com/real">Real Result</a></h2>
+            <div class="b_caption"><p>Should keep</p></div>
+          </li>
+        </ol>
+        """
+        results = _parse_bing_results(html)
+        assert len(results) == 1
+        assert results[0]["url"] == "https://example.com/real"
+
+    def test_no_results(self):
+        html = '<ol id="b_results"><li>No results found</li></ol>'
+        results = _parse_bing_results(html)
+        assert results == []
+
+    def test_snippet_truncated_at_300(self):
+        long_snippet = "y" * 500
+        html = f"""
+        <ol id="b_results">
+          <li class="b_algo">
+            <h2><a href="https://example.com">Title</a></h2>
+            <div class="b_caption"><p>{long_snippet}</p></div>
+          </li>
+        </ol>
+        """
+        results = _parse_bing_results(html)
+        assert len(results[0]["snippet"]) <= 300
+
+    def test_b_lineclamp_snippet(self):
+        """Bing sometimes uses p.b_lineclamp* for snippets."""
+        html = """
+        <ol id="b_results">
+          <li class="b_algo">
+            <h2><a href="https://example.com">Title</a></h2>
+            <p class="b_lineclamp2">Snippet via lineclamp class</p>
+          </li>
+        </ol>
+        """
+        results = _parse_bing_results(html)
+        assert len(results) == 1
+        assert "lineclamp" in results[0]["snippet"]
+
+    def test_fallback_h2_scan(self):
+        """When li.b_algo is absent, fall back to scanning h2 > a tags."""
+        html = """
+        <ol id="b_results">
+          <div>
+            <h2><a href="https://example.com/fallback">Fallback Title</a></h2>
+            <span>Fallback snippet text</span>
+          </div>
+        </ol>
+        """
+        results = _parse_bing_results(html)
+        assert len(results) == 1
+        assert results[0]["title"] == "Fallback Title"
+        assert results[0]["url"] == "https://example.com/fallback"
+
+    def test_empty_html(self):
+        assert _parse_bing_results("") == []
+        assert _parse_bing_results("<html></html>") == []
 
 
 # ---------------------------------------------------------------------------

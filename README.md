@@ -117,10 +117,10 @@ LEAN_AI_ENABLE_EMBEDDINGS=true
 
 | Variable | Default | Description |
 |---|---|---|
-| `LEAN_AI_SEARCH_PROVIDER` | `duckduckgo` | Search provider (`duckduckgo`, `searxng`, or `google`) |
+| `LEAN_AI_SEARCH_PROVIDER` | `duckduckgo` | Search provider (`duckduckgo`, `searxng`, `google`, or `bing`). The `google` provider automatically falls back to Bing when Google returns no results (e.g. CAPTCHA, rate-limiting) |
 | `LEAN_AI_SEARCH_API_URL` | *(empty)* | SearXNG API URL (if using SearXNG) |
 | `LEAN_AI_SEARCH_API_KEY` | *(empty)* | SearXNG API key (if using SearXNG) |
-| `LEAN_AI_SEARCH_DELAY` | `2.0` | Min seconds between searches (Google provider) |
+| `LEAN_AI_SEARCH_DELAY` | `2.0` | Min seconds between searches (Google/Bing providers) |
 | `LEAN_AI_INTERNET_TIMEOUT_SECONDS` | `30` | Timeout for internet requests |
 
 #### Project Context
@@ -366,7 +366,7 @@ lean_ai/
 | Ollama SDK | ollama (official, async) |
 | Search index | Whoosh |
 | Source analysis | tree-sitter + 13 grammar packages |
-| Internet search | duckduckgo-search, Selenium (optional Google provider) |
+| Internet search | duckduckgo-search, Selenium (optional Google/Bing provider with automatic fallback) |
 | HTML sanitization | BeautifulSoup4 |
 | Testing | pytest + pytest-asyncio |
 | Linting | ruff |

@@ -1,4 +1,7 @@
-"""Google search via headless Chrome + BeautifulSoup parsing.
+"""Web search via headless Chrome + BeautifulSoup parsing.
+
+Supports Google (primary) with automatic Bing fallback when Google
+returns no results (e.g. CAPTCHA, rate-limiting).
 
 Lazily initializes a headless Chrome browser and reuses it across
 sequential searches.  The browser is closed explicitly via
@@ -91,7 +94,7 @@ def _get_browser():
                 },
             )
             atexit.register(close_browser)
-            logger.info("Google search: headless Chrome initialized")
+            logger.info("Browser search: headless Chrome initialized")
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to start headless Chrome: {exc}. "
@@ -108,7 +111,7 @@ def close_browser() -> None:
         if _browser is not None:
             try:
                 _browser.quit()
-                logger.info("Google search: headless Chrome closed")
+                logger.info("Browser search: headless Chrome closed")
             except Exception:
                 pass
             _browser = None
@@ -259,7 +262,98 @@ def _parse_google_results(
 
 
 # ---------------------------------------------------------------------------
-# Async search function (matches provider signature)
+# Bing HTML result parser
+# ---------------------------------------------------------------------------
+
+def _parse_bing_results(
+    page_source: str,
+    max_results: int = 10,
+) -> list[dict[str, str]]:
+    """Parse a Bing search result page into structured results.
+
+    Multi-fallback strategy:
+
+    1. ``li.b_algo`` containers (Bing's stable result selector)
+    2. ``h2 > a`` for title + URL
+    3. ``div.b_caption p`` or ``p.b_lineclamp2`` for snippets
+    4. Broad ``h2 > a`` scan fallback
+
+    Returns ``[{"title": ..., "url": ..., "snippet": ...}]``.
+    """
+    soup = BeautifulSoup(page_source, "html.parser")
+    results: list[dict[str, str]] = []
+
+    results_ol = soup.find("ol", id="b_results") or soup
+    algo_items = results_ol.find_all(
+        "li", class_="b_algo", limit=max_results + 5,
+    )
+
+    for li in algo_items:
+        if len(results) >= max_results:
+            break
+
+        # Title + URL from h2 > a
+        h2 = li.find("h2")
+        if not h2:
+            continue
+        link = h2.find("a", href=True)
+        if not link or not link.get("href"):
+            continue
+        url = link["href"]
+        # Skip Bing internal links
+        if url.startswith("/") or "bing.com" in url:
+            continue
+        title = link.get_text(strip=True)
+
+        # Snippet — try several known selectors
+        snippet = ""
+        caption = li.find("div", class_="b_caption")
+        if caption:
+            snippet_el = caption.find("p")
+            if snippet_el:
+                snippet = snippet_el.get_text(separator=" ", strip=True)[:300]
+        if not snippet:
+            snippet_el = li.find(
+                "p",
+                class_=lambda c: c and "b_lineclamp" in c,
+            )
+            if snippet_el:
+                snippet = snippet_el.get_text(separator=" ", strip=True)[:300]
+        if not snippet:
+            # Last resort: all text minus the title
+            all_text = li.get_text(separator=" ", strip=True)
+            if all_text.startswith(title):
+                snippet = all_text[len(title):].strip()[:300]
+
+        results.append({"title": title, "url": url, "snippet": snippet})
+
+    # Fallback: if li.b_algo found nothing, scan h2 > a directly
+    if not results:
+        for h2 in results_ol.find_all("h2", limit=max_results + 5):
+            if len(results) >= max_results:
+                break
+            link = h2.find("a", href=True)
+            if not link or not link.get("href"):
+                continue
+            url = link["href"]
+            if url.startswith("/") or "bing.com" in url:
+                continue
+            title = link.get_text(strip=True)
+            parent = h2.parent
+            if parent:
+                full_text = parent.get_text(separator=" ", strip=True)
+                snippet = full_text.replace(title, "", 1).strip()[:300]
+            else:
+                snippet = ""
+            results.append(
+                {"title": title, "url": url, "snippet": snippet},
+            )
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Async search functions (match provider signature)
 # ---------------------------------------------------------------------------
 
 _last_search_time: float = 0.0
@@ -309,6 +403,75 @@ def _do_google_search(query: str, max_results: int = 10) -> str:
     results = _parse_google_results(browser.page_source, max_results)
     logger.info("Google search: %r -> %d results", query, len(results))
 
+    # Automatic Bing fallback when Google returns nothing
+    # (e.g. CAPTCHA page, rate-limited, or parsing failure).
+    if not results:
+        logger.info("Google search: no results, falling back to Bing")
+        bing_url = f"https://www.bing.com/search?q={quote_plus(query)}"
+        browser.get(bing_url)
+        try:
+            WebDriverWait(browser, 10).until(
+                expected_conditions.presence_of_element_located(
+                    (By.ID, "b_results"),
+                ),
+            )
+        except Exception:
+            pass
+        results = _parse_bing_results(browser.page_source, max_results)
+        logger.info("Bing fallback: %r -> %d results", query, len(results))
+
+    if not results:
+        return f"No results found for: {query}"
+
+    parts: list[str] = []
+    for r in results:
+        parts.append(
+            f"Title: {r['title']}\nURL: {r['url']}\n{r['snippet']}",
+        )
+
+    return "\n\n---\n\n".join(parts)
+
+
+def _do_bing_search(query: str, max_results: int = 10) -> str:
+    """Synchronous Bing search — runs in a thread pool.
+
+    Standalone Bing search (no Google attempt).  Uses the same browser
+    singleton and rate limiting as the Google provider.
+    """
+    global _last_search_time
+
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support import expected_conditions
+    from selenium.webdriver.support.ui import WebDriverWait
+
+    # Rate limiting with random jitter
+    base_delay = settings.search_delay
+    elapsed = time.monotonic() - _last_search_time
+    target_delay = base_delay + random.uniform(0, base_delay)
+    if elapsed < target_delay:
+        wait = target_delay - elapsed
+        logger.debug("Bing search: rate-limit delay %.1fs", wait)
+        time.sleep(wait)
+
+    browser = _get_browser()
+
+    url = f"https://www.bing.com/search?q={quote_plus(query)}"
+    browser.get(url)
+    logger.info("Bing search: %r", query)
+    _last_search_time = time.monotonic()
+
+    try:
+        WebDriverWait(browser, 10).until(
+            expected_conditions.presence_of_element_located(
+                (By.ID, "b_results"),
+            ),
+        )
+    except Exception:
+        logger.debug("Bing search: #b_results not found, parsing anyway")
+
+    results = _parse_bing_results(browser.page_source, max_results)
+    logger.info("Bing search: %r -> %d results", query, len(results))
+
     if not results:
         return f"No results found for: {query}"
 
@@ -322,5 +485,10 @@ def _do_google_search(query: str, max_results: int = 10) -> str:
 
 
 async def search_google(query: str, max_results: int = 10) -> str:
-    """Async wrapper for Google search.  Matches provider signature."""
+    """Google search with automatic Bing fallback.  Matches provider signature."""
     return await asyncio.to_thread(_do_google_search, query, max_results)
+
+
+async def search_bing(query: str, max_results: int = 10) -> str:
+    """Standalone Bing search.  Matches provider signature."""
+    return await asyncio.to_thread(_do_bing_search, query, max_results)
