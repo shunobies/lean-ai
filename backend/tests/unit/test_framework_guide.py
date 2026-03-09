@@ -20,10 +20,10 @@ from lean_ai.context.framework_guide import (
     _extract_urls_from_search,
     _find_block_boundaries,
     _get_primary_frameworks,
-    _rank_urls_with_llm,
     _remove_blocks,
     _renumber_steps,
     _repair_code_blocks,
+    _select_one_per_query,
 )
 
 # ---------------------------------------------------------------------------
@@ -555,99 +555,98 @@ class TestExtractSearchResults:
 
 
 # ---------------------------------------------------------------------------
-# _rank_urls_with_llm
+# _select_one_per_query
 # ---------------------------------------------------------------------------
 
 
-class TestRankUrlsWithLlm:
-    @pytest.mark.asyncio
-    async def test_returns_selected_urls(self):
-        results = [
-            ("Docker Hub", "https://hub.docker.com/laravel", "Docker image"),
-            ("Laravel Docs", "https://laravel.com/docs", "Official docs"),
-            ("Packagist", "https://packagist.org/laravel", "Package"),
-            ("Upgrade Guide", "https://laravel.com/docs/upgrade", "Upgrade"),
-            ("GitHub", "https://github.com/laravel", "Repository"),
-            ("Tutorial", "https://laracasts.com/series", "Video tutorial"),
-            ("Blog Post", "https://blog.example.com", "Blog about Laravel"),
+class TestSelectOnePerQuery:
+    def test_picks_one_per_query(self):
+        query_results = [
+            [
+                ("Docs", "https://laravel.com/docs", "Official"),
+                ("Blog", "https://blog.example.com", "Blog"),
+            ],
+            [
+                ("CLI Guide", "https://laravel.com/cli", "CLI docs"),
+                ("Tutorial", "https://laracasts.com/cli", "Tutorial"),
+            ],
         ]
-        mock_llm = AsyncMock()
-        mock_llm.chat_raw = AsyncMock(return_value="2\n4\n6")
+        urls = _select_one_per_query(query_results)
+        assert len(urls) == 2
+        assert urls[0] == "https://laravel.com/docs"
+        assert urls[1] == "https://laravel.com/cli"
 
-        urls = await _rank_urls_with_llm(
-            results,
-            [("laravel/framework", "^12.0")],
-            mock_llm,
-            pick=3,
-        )
-        assert urls == [
-            "https://laravel.com/docs",
-            "https://laravel.com/docs/upgrade",
-            "https://laracasts.com/series",
+    def test_skips_deprioritized_domains(self):
+        query_results = [
+            [
+                ("Packagist", "https://packagist.org/laravel", "Package"),
+                ("GitHub", "https://github.com/laravel", "Repo"),
+                ("Laravel Docs", "https://laravel.com/docs", "Official"),
+            ],
         ]
+        urls = _select_one_per_query(query_results)
+        assert urls == ["https://laravel.com/docs"]
 
-    @pytest.mark.asyncio
-    async def test_fallback_on_llm_failure(self):
-        results = [
-            ("Docs", "https://laravel.com/docs", "Official"),
-            ("Hub", "https://hub.docker.com", "Docker"),
-            ("Guide", "https://example.com/guide", "Guide"),
+    def test_falls_back_to_deprioritized_if_only_option(self):
+        query_results = [
+            [
+                ("GitHub", "https://github.com/laravel", "Repo"),
+                ("Packagist", "https://packagist.org/laravel", "Package"),
+            ],
         ]
-        mock_llm = AsyncMock()
-        mock_llm.chat_raw = AsyncMock(side_effect=Exception("LLM down"))
+        urls = _select_one_per_query(query_results)
+        assert urls == ["https://github.com/laravel"]
 
-        urls = await _rank_urls_with_llm(
-            results,
-            [("laravel/framework", "^12.0")],
-            mock_llm,
-            pick=2,
-        )
-        # Falls back to first N
-        assert urls == [
-            "https://laravel.com/docs",
-            "https://hub.docker.com",
+    def test_global_dedup_across_queries(self):
+        """Same URL appearing in two queries should only be picked once."""
+        query_results = [
+            [
+                ("Docs", "https://laravel.com/docs", "Official"),
+            ],
+            [
+                ("Docs Again", "https://laravel.com/docs", "Same URL"),
+                ("Upgrade", "https://laravel.com/upgrade", "Upgrade"),
+            ],
         ]
+        urls = _select_one_per_query(query_results)
+        assert len(urls) == 2
+        assert urls[0] == "https://laravel.com/docs"
+        assert urls[1] == "https://laravel.com/upgrade"
 
-    @pytest.mark.asyncio
-    async def test_returns_all_when_fewer_than_pick(self):
-        results = [
-            ("Docs", "https://laravel.com/docs", "Official"),
-            ("Guide", "https://example.com/guide", "Guide"),
+    def test_skips_empty_query_results(self):
+        query_results = [
+            [],
+            [("Docs", "https://laravel.com/docs", "Official")],
+            [],
         ]
-        mock_llm = AsyncMock()
-        # Should not even call LLM
-        urls = await _rank_urls_with_llm(
-            results,
-            [("laravel/framework", "^12.0")],
-            mock_llm,
-            pick=6,
-        )
-        assert urls == [
-            "https://laravel.com/docs",
-            "https://example.com/guide",
-        ]
-        mock_llm.chat_raw.assert_not_called()
+        urls = _select_one_per_query(query_results)
+        assert urls == ["https://laravel.com/docs"]
 
-    @pytest.mark.asyncio
-    async def test_fallback_on_unparseable_response(self):
-        results = [
-            ("A", "https://a.com", "A"),
-            ("B", "https://b.com", "B"),
-            ("C", "https://c.com", "C"),
-        ]
-        mock_llm = AsyncMock()
-        mock_llm.chat_raw = AsyncMock(
-            return_value="I think the best ones are the docs",
-        )
+    def test_all_empty_returns_nothing(self):
+        query_results = [[], [], []]
+        urls = _select_one_per_query(query_results)
+        assert urls == []
 
-        urls = await _rank_urls_with_llm(
-            results,
-            [("django", ">=5.0")],
-            mock_llm,
-            pick=2,
-        )
-        # No valid numbers parsed → fallback
-        assert urls == ["https://a.com", "https://b.com"]
+    def test_eight_queries_eight_picks(self):
+        """Simulates realistic 8-category search with one pick each."""
+        query_results = [
+            [("R1", f"https://example.com/cat{i}", "Snippet")]
+            for i in range(8)
+        ]
+        urls = _select_one_per_query(query_results)
+        assert len(urls) == 8
+        assert len(set(urls)) == 8  # all unique
+
+    def test_dedup_within_single_query(self):
+        query_results = [
+            [
+                ("Docs", "https://laravel.com/docs", "First"),
+                ("Docs", "https://laravel.com/docs", "Duplicate"),
+                ("Other", "https://other.com", "Other"),
+            ],
+        ]
+        urls = _select_one_per_query(query_results)
+        assert urls == ["https://laravel.com/docs"]
 
 
 # ---------------------------------------------------------------------------

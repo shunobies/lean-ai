@@ -1087,82 +1087,58 @@ def _extract_search_results(
     return results
 
 
-async def _rank_urls_with_llm(
-    results: list[tuple[str, str, str]],
-    frameworks: list[tuple[str, str]],
-    llm_client: LLMClient,
-    pick: int = 6,
+# Domains that indicate package registries, repository hosts, or Q&A
+# sites rather than documentation — deprioritized when selecting the
+# best URL from each search category.
+_DEPRIORITIZED_DOMAINS = (
+    "packagist.org",
+    "npmjs.com",
+    "pypi.org",
+    "hub.docker.com",
+    "github.com",
+    "stackoverflow.com",
+    "stackexchange.com",
+)
+
+
+def _select_one_per_query(
+    query_results: list[list[tuple[str, str, str]]],
 ) -> list[str]:
-    """Ask the LLM to pick the most relevant URLs for the framework guide.
+    """Pick one URL per search query, avoiding registry/repo pages.
 
-    Presents a numbered list of ``(title, url, snippet)`` search results
-    and asks the LLM to choose the best *pick* URLs.  Falls back to
-    the first *pick* URLs if the LLM call fails.
+    Iterates each query's result list and selects the first URL that
+    is not from a deprioritized domain and has not already been selected
+    for a previous query (global dedup).  Falls back to the first
+    unseen URL if all candidates are deprioritized.
+
+    Returns a list of unique URLs — one per query that produced results.
     """
-    if len(results) <= pick:
-        return [url for _, url, _ in results]
+    selected: set[str] = set()
+    picks: list[str] = []
 
-    fw_names = ", ".join(
-        _canonicalize_name(name) for name, _ in frameworks
-    )
+    for results in query_results:
+        # Dedup within this query's results, skip globally selected
+        seen: set[str] = set()
+        candidates: list[str] = []
+        for _title, url, _snippet in results:
+            if url not in seen and url not in selected:
+                seen.add(url)
+                candidates.append(url)
 
-    numbered: list[str] = []
-    for i, (title, url, snippet) in enumerate(results, 1):
-        entry = f"{i}. {title} — {url}"
-        if snippet:
-            entry += f"\n   {snippet[:200]}"
-        numbered.append(entry)
+        if not candidates:
+            continue
 
-    prompt = (
-        f"Pick the {pick} most useful URLs for generating a "
-        f"framework architecture guide about {fw_names}.\n\n"
-        "Prefer: official documentation, upgrade guides, architecture "
-        "overviews, tutorials, changelog pages.\n"
-        "Avoid: package registries (Packagist, npm, PyPI, Docker Hub), "
-        "GitHub repository pages, issue trackers, Stack Overflow.\n\n"
-        "SEARCH RESULTS:\n"
-        + "\n".join(numbered)
-        + f"\n\nReturn ONLY the {pick} numbers, one per line. "
-        "Nothing else."
-    )
+        # Prefer URLs not from deprioritized domains
+        preferred = [
+            u for u in candidates
+            if not any(d in u for d in _DEPRIORITIZED_DOMAINS)
+        ]
 
-    fallback_urls = [url for _, url, _ in results[:pick]]
+        pick = preferred[0] if preferred else candidates[0]
+        selected.add(pick)
+        picks.append(pick)
 
-    try:
-        response = await llm_client.chat_raw(
-            messages=[{"role": "user", "content": prompt[:8000]}],
-            max_tokens=64,
-        )
-        # Parse numbers from response
-        selected_indices: list[int] = []
-        for token in response.split():
-            clean = token.strip(".,;:()[]")
-            if clean.isdigit():
-                idx = int(clean)
-                if 1 <= idx <= len(results) and idx not in selected_indices:
-                    selected_indices.append(idx)
-                    if len(selected_indices) >= pick:
-                        break
-
-        if not selected_indices:
-            logger.info(
-                "Framework guide: URL ranking returned no valid indices, "
-                "using fallback order",
-            )
-            return fallback_urls
-
-        ranked_urls = [results[i - 1][1] for i in selected_indices]
-        logger.info(
-            "Framework guide: LLM ranked %d/%d URLs for fetching",
-            len(ranked_urls), len(results),
-        )
-        return ranked_urls
-    except Exception as exc:
-        logger.info(
-            "Framework guide: URL ranking failed (%s), using fallback",
-            exc,
-        )
-        return fallback_urls
+    return picks
 
 
 async def generate_framework_guide(
@@ -1210,7 +1186,7 @@ async def generate_framework_guide(
         frameworks, runtimes, cutoff=cutoff,
     )
     search_parts: list[str] = []
-    all_results: list[tuple[str, str, str]] = []  # (title, url, snippet)
+    query_results: list[list[tuple[str, str, str]]] = []
 
     # Browser providers need more time: browser init + rate-limit delay +
     # navigation + consent handling + potential Bing fallback.
@@ -1218,6 +1194,7 @@ async def generate_framework_guide(
 
     logger.info("Framework guide: running %d web searches", len(queries))
     for i, query in enumerate(queries, 1):
+        extracted: list[tuple[str, str, str]] = []
         try:
             result = await asyncio.wait_for(
                 search_internet(query, llm_client=None),
@@ -1227,9 +1204,7 @@ async def generate_framework_guide(
                 search_parts.append(
                     f"=== Search: {query} ===\n{result.output}"
                 )
-                all_results.extend(
-                    _extract_search_results(result.output),
-                )
+                extracted = _extract_search_results(result.output)
                 logger.info(
                     "Framework guide: search %d/%d %r -> OK (%d chars)",
                     i, len(queries), query, len(result.output),
@@ -1249,29 +1224,20 @@ async def generate_framework_guide(
                 "Framework guide: search %d/%d %r -> failed: %s",
                 i, len(queries), query, exc,
             )
+        query_results.append(extracted)
 
-    # Step 3b: LLM-ranked page fetching.
-    # Deduplicate by URL, keep top 20, then let the LLM pick the
-    # most relevant pages to fetch instead of blindly taking the first N.
-    seen_urls: set[str] = set()
-    unique_results: list[tuple[str, str, str]] = []
-    for title, url, snippet in all_results:
-        if url not in seen_urls:
-            seen_urls.add(url)
-            unique_results.append((title, url, snippet))
-    unique_results = unique_results[:20]
+    # Step 3b: Per-category page fetching.
+    # Select one URL per search query (category), preferring documentation
+    # over package registries and repository hosts.
+    fetch_urls = _select_one_per_query(query_results)
 
     logger.info(
-        "Framework guide: %d unique URLs from searches, "
-        "ranking top 20 for fetch",
-        len(unique_results),
-    )
-    fetch_urls = await _rank_urls_with_llm(
-        unique_results, frameworks, llm_client, pick=6,
+        "Framework guide: selected %d URLs (one per search category)",
+        len(fetch_urls),
     )
 
     page_parts: list[str] = []
-    page_chars_budget = 24000  # Total budget for fetched pages
+    page_chars_budget = 32000  # Total budget for per-category pages
     page_chars_used = 0
     per_page_cap = 5000
 
