@@ -66,6 +66,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         this.slashCommands.set("/scaffold", (args) => this.handleScaffoldCommand(args));
         this.slashCommands.set("/agent",    (args) => this.handleAgentCommand(args));
         this.slashCommands.set("/fix",      (args) => this.handleFixCommand(args));
+        this.slashCommands.set("/guide",    (args) => this.handleGuideCommand(args));
         this.slashCommands.set("/reboot",   (args) => this.handleRebootCommand(args));
         this.slashCommands.set("/approve",  (args) => this.handleApproveCommand(args));
         this.slashCommands.set("/reject",   (args) => this.handleRejectCommand(args));
@@ -582,6 +583,75 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 : "Workspace initialized successfully! Chat and agent modes now have full context.",
             cls: "msg-system",
         });
+    }
+
+    // ── Slash command: /guide — regenerate framework guide only ──
+
+    private async handleGuideCommand(_args: string): Promise<void> {
+        // Health check
+        this.postMessage({ type: "thinking", show: true, text: "Checking backend..." });
+        const healthy = await this.client.healthCheck();
+        if (!healthy) {
+            this.postMessage({ type: "thinking", show: false });
+            this.postMessage({
+                type: "error",
+                text: "Backend not available. Start the server:\ncd backend && uvicorn lean_ai.main:app --reload --port 8422",
+            });
+            return;
+        }
+
+        const repoRoot = this.getRepoRoot();
+
+        // Elapsed-time ticker
+        const guideStart = Date.now();
+        const guideTicker = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - guideStart) / 1000);
+            const mins = Math.floor(elapsed / 60);
+            const secs = elapsed % 60;
+            const timeStr = mins > 0
+                ? `${mins}m ${secs.toString().padStart(2, "0")}s`
+                : `${secs}s`;
+            this.postMessage({
+                type: "thinking",
+                show: true,
+                text: `Generating framework guide... (${timeStr})`,
+            });
+        }, 5_000);
+
+        this.postMessage({
+            type: "thinking",
+            show: true,
+            text: "Generating framework guide...",
+        });
+
+        try {
+            // Always force-regenerate — the whole point of /guide
+            const guideResult = await this.client.generateFrameworkGuide(repoRoot, true);
+            clearInterval(guideTicker);
+            this.postMessage({
+                type: "reply",
+                text: `Framework guide generated (${guideResult.chars.toLocaleString()} chars).`,
+                cls: "msg-system",
+            });
+        } catch (e) {
+            clearInterval(guideTicker);
+            const error = e instanceof Error ? e.message : String(e);
+            if (error.includes("404")) {
+                this.postMessage({
+                    type: "reply",
+                    text: "No frameworks detected — framework guide skipped.",
+                    cls: "msg-system",
+                });
+            } else {
+                this.postMessage({
+                    type: "reply",
+                    text: `Framework guide generation failed: ${error}`,
+                    cls: "msg-system",
+                });
+            }
+        }
+
+        this.postMessage({ type: "thinking", show: false });
     }
 
     // ── Slash command: /scaffold — create a new project from a recipe ──
