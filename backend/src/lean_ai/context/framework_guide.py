@@ -1373,8 +1373,11 @@ async def generate_framework_guide(
     # Step 5a: Repair unfenced code blocks
     guide = _repair_code_blocks(guide)
 
-    # Step 5b: Deduplicate repeated sections
-    guide = await _deduplicate_sections(guide, llm_client)
+    # Step 5b was: deduplicate repeated sections.
+    # Disabled — the STRUCTURE RULES in the system prompt now handle this,
+    # and the LLM dedup was producing false positives (removing Framework
+    # Architecture and Component Relationships as "overlapping").
+    # guide = await _deduplicate_sections(guide, llm_client)
 
     # Step 5c: Validate file references against project tree
     # (runs before renumber because LLM surgical fixes can change text)
