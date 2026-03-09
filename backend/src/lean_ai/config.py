@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     search_provider: str = "duckduckgo"  # "duckduckgo", "searxng", "google", or "bing"
     search_api_url: str = ""
     search_api_key: str = ""
-    search_delay: float = 2.0  # Min seconds between searches (Google/Bing providers)
+    search_delay: float = 2.0  # Min seconds between all searches (jitter adds 0–100%)
     internet_timeout_seconds: int = 30
 
     # ── Project context ──

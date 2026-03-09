@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
+import time
 from typing import TYPE_CHECKING
 
 import httpx
@@ -144,6 +146,34 @@ _SEARCH_PROVIDERS = {
 }
 
 
+# ── Rate limiting ──
+
+_last_search_time: float = 0.0
+
+
+async def _enforce_search_delay() -> None:
+    """Wait if needed to respect the configured delay between searches.
+
+    Uses ``settings.search_delay`` with random jitter (0–100 % of base delay)
+    to avoid bursty request patterns.  Applied universally across all
+    search providers.
+    """
+    global _last_search_time
+
+    base_delay = settings.search_delay
+    if base_delay <= 0:
+        return
+
+    elapsed = time.monotonic() - _last_search_time
+    target_delay = base_delay + random.uniform(0, base_delay)
+    if elapsed < target_delay:
+        wait = target_delay - elapsed
+        logger.debug("Search rate-limit: sleeping %.1fs", wait)
+        await asyncio.sleep(wait)
+
+    _last_search_time = time.monotonic()
+
+
 # ── Public API ──
 
 
@@ -159,6 +189,9 @@ async def search_internet(
         )
 
     logger.info("Search [%s]: %r", settings.search_provider, query)
+
+    # Universal rate limiting — all providers respect search_delay
+    await _enforce_search_delay()
 
     try:
         raw_content = await provider_fn(query)

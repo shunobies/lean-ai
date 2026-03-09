@@ -17,14 +17,11 @@ from __future__ import annotations
 import asyncio
 import atexit
 import logging
-import random
 import time
 from threading import Lock
 from urllib.parse import quote_plus
 
 from bs4 import BeautifulSoup
-
-from lean_ai.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -356,29 +353,16 @@ def _parse_bing_results(
 # Async search functions (match provider signature)
 # ---------------------------------------------------------------------------
 
-_last_search_time: float = 0.0
-
-
 def _do_google_search(query: str, max_results: int = 10) -> str:
     """Synchronous Google search — runs in a thread pool.
 
     Returns results in the standard ``Title:/URL:/snippet`` format
-    used by all search providers.
+    used by all search providers.  Rate limiting is handled at the
+    ``internet.py`` dispatch layer.
     """
-    global _last_search_time
-
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support import expected_conditions
     from selenium.webdriver.support.ui import WebDriverWait
-
-    # Rate limiting with random jitter to avoid CAPTCHA
-    base_delay = settings.search_delay
-    elapsed = time.monotonic() - _last_search_time
-    target_delay = base_delay + random.uniform(0, base_delay)
-    if elapsed < target_delay:
-        wait = target_delay - elapsed
-        logger.debug("Google search: rate-limit delay %.1fs", wait)
-        time.sleep(wait)
 
     browser = _get_browser()
 
@@ -386,7 +370,6 @@ def _do_google_search(query: str, max_results: int = 10) -> str:
     url = f"https://www.google.com/search?q={quote_plus(query)}&hl=en"
     browser.get(url)
     logger.info("Google search: %r", query)
-    _last_search_time = time.monotonic()
 
     # Handle consent dialog (EU regions)
     _dismiss_consent(browser)
@@ -436,29 +419,18 @@ def _do_bing_search(query: str, max_results: int = 10) -> str:
     """Synchronous Bing search — runs in a thread pool.
 
     Standalone Bing search (no Google attempt).  Uses the same browser
-    singleton and rate limiting as the Google provider.
+    singleton as the Google provider.  Rate limiting is handled at the
+    ``internet.py`` dispatch layer.
     """
-    global _last_search_time
-
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support import expected_conditions
     from selenium.webdriver.support.ui import WebDriverWait
-
-    # Rate limiting with random jitter
-    base_delay = settings.search_delay
-    elapsed = time.monotonic() - _last_search_time
-    target_delay = base_delay + random.uniform(0, base_delay)
-    if elapsed < target_delay:
-        wait = target_delay - elapsed
-        logger.debug("Bing search: rate-limit delay %.1fs", wait)
-        time.sleep(wait)
 
     browser = _get_browser()
 
     url = f"https://www.bing.com/search?q={quote_plus(query)}"
     browser.get(url)
     logger.info("Bing search: %r", query)
-    _last_search_time = time.monotonic()
 
     try:
         WebDriverWait(browser, 10).until(

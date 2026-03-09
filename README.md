@@ -120,7 +120,7 @@ LEAN_AI_ENABLE_EMBEDDINGS=true
 | `LEAN_AI_SEARCH_PROVIDER` | `duckduckgo` | Search provider (`duckduckgo`, `searxng`, `google`, or `bing`). The `google` provider automatically falls back to Bing when Google returns no results (e.g. CAPTCHA, rate-limiting) |
 | `LEAN_AI_SEARCH_API_URL` | *(empty)* | SearXNG API URL (if using SearXNG) |
 | `LEAN_AI_SEARCH_API_KEY` | *(empty)* | SearXNG API key (if using SearXNG) |
-| `LEAN_AI_SEARCH_DELAY` | `2.0` | Min seconds between searches (Google/Bing providers) |
+| `LEAN_AI_SEARCH_DELAY` | `2.0` | Min seconds between searches (all providers, with random jitter) |
 | `LEAN_AI_INTERNET_TIMEOUT_SECONDS` | `30` | Timeout for internet requests |
 
 #### Project Context
