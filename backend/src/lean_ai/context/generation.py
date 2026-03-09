@@ -115,7 +115,6 @@ _EXPANSION_ARTIFACT_HEADINGS: frozenset[str] = frozenset({
     "## Additional Files",
     "## New Classes and Functions",
     "## Updated Module Map",
-    "## Updated Architecture Overview",
     "## Additional Information",
     "## Additional Context",
     "## Additional Details",
