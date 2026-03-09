@@ -18,6 +18,12 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Lean AI backend...")
     logger.info("Lean AI backend ready.")
     yield
+    # Cleanup headless Chrome if Google search provider was used
+    try:
+        from lean_ai.tools.google_search import close_browser
+        close_browser()
+    except ImportError:
+        pass
     logger.info("Shutting down Lean AI backend.")
 
 

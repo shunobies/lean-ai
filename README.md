@@ -26,6 +26,9 @@ pip install -e ".[dev]"
 # Optional: knowledge base format support (EPUB, PDF, Word)
 pip install -e ".[dev,knowledge]"
 
+# Optional: Google search via headless Chrome (requires Chrome installed)
+pip install -e ".[dev,google]"
+
 # Start the server
 uvicorn lean_ai.main:app --reload --port 8422
 ```
@@ -114,9 +117,10 @@ LEAN_AI_ENABLE_EMBEDDINGS=true
 
 | Variable | Default | Description |
 |---|---|---|
-| `LEAN_AI_SEARCH_PROVIDER` | `duckduckgo` | Search provider (`duckduckgo` or `searxng`) |
+| `LEAN_AI_SEARCH_PROVIDER` | `duckduckgo` | Search provider (`duckduckgo`, `searxng`, or `google`) |
 | `LEAN_AI_SEARCH_API_URL` | *(empty)* | SearXNG API URL (if using SearXNG) |
 | `LEAN_AI_SEARCH_API_KEY` | *(empty)* | SearXNG API key (if using SearXNG) |
+| `LEAN_AI_SEARCH_DELAY` | `2.0` | Min seconds between searches (Google provider) |
 | `LEAN_AI_INTERNET_TIMEOUT_SECONDS` | `30` | Timeout for internet requests |
 
 #### Project Context
@@ -362,7 +366,7 @@ lean_ai/
 | Ollama SDK | ollama (official, async) |
 | Search index | Whoosh |
 | Source analysis | tree-sitter + 13 grammar packages |
-| Internet search | duckduckgo-search |
+| Internet search | duckduckgo-search, Selenium (optional Google provider) |
 | HTML sanitization | BeautifulSoup4 |
 | Testing | pytest + pytest-asyncio |
 | Linting | ruff |

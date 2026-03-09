@@ -40,9 +40,10 @@ class Settings(BaseSettings):
     chunk_overlap_lines: int = 10
 
     # ── Internet / Search ──
-    search_provider: str = "duckduckgo"  # "duckduckgo" or "searxng"
+    search_provider: str = "duckduckgo"  # "duckduckgo", "searxng", or "google"
     search_api_url: str = ""
     search_api_key: str = ""
+    search_delay: float = 2.0  # Min seconds between searches (Google provider)
     internet_timeout_seconds: int = 30
 
     # ── Project context ──

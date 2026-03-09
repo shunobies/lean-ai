@@ -1,8 +1,9 @@
 """Web search and URL fetching with HTML sanitization.
 
-Supports two search backends:
+Supports three search backends:
 - duckduckgo (default) — uses duckduckgo-search package
 - searxng — queries a self-hosted SearXNG instance
+- google — headless Chrome via Selenium (requires ``selenium`` extra)
 
 Sanitization: HTML strip via BeautifulSoup, then optional LLM summary
 for long content. No regex injection detection — trust the prompt setup.
@@ -120,9 +121,17 @@ async def _search_searxng(query: str, max_results: int = 5) -> str:
     return "\n\n---\n\n".join(parts)
 
 
+async def _search_google(query: str, max_results: int = 10) -> str:
+    """Search via headless Chrome + Google.  Requires ``selenium``."""
+    from lean_ai.tools.google_search import search_google
+
+    return await search_google(query, max_results)
+
+
 _SEARCH_PROVIDERS = {
     "duckduckgo": _search_duckduckgo,
     "searxng": _search_searxng,
+    "google": _search_google,
 }
 
 

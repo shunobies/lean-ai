@@ -17,6 +17,9 @@ cd backend && pip install -e ".[dev]"
 # Install with optional knowledge base deps (EPUB, PDF, Word support)
 cd backend && pip install -e ".[dev,knowledge]"
 
+# Install with Google search provider (requires Chrome installed)
+cd backend && pip install -e ".[dev,google]"
+
 # Run the server
 cd backend && uvicorn lean_ai.main:app --reload --port 8422
 
@@ -73,7 +76,7 @@ cd extension && npm install && npm run build
 | Ollama SDK | ollama (official, async) |
 | Search index | Whoosh |
 | Source analysis | tree-sitter + 13 grammar packages |
-| Internet search | duckduckgo-search |
+| Internet search | duckduckgo-search, Selenium (optional Google provider) |
 | HTML sanitization | BeautifulSoup4 |
 | Testing | pytest + pytest-asyncio |
 | Linting | ruff |
@@ -98,7 +101,8 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_EMBEDDING_MODEL` | `qwen3-embedding:0.6b` | Embedding model for semantic search |
 | `LEAN_AI_ENABLE_EMBEDDINGS` | `true` | Enable embedding generation + RRF hybrid search |
 | `LEAN_AI_INDEX_DIR` | `.lean_ai_index` | Whoosh index directory name |
-| `LEAN_AI_SEARCH_PROVIDER` | `duckduckgo` | Search provider (`duckduckgo` or `searxng`) |
+| `LEAN_AI_SEARCH_PROVIDER` | `duckduckgo` | Search provider (`duckduckgo`, `searxng`, or `google`) |
+| `LEAN_AI_SEARCH_DELAY` | `2.0` | Min seconds between searches (Google provider) |
 | `LEAN_AI_KNOWLEDGE_DIR` | `.lean_ai/knowledge` | Knowledge documents directory |
 | `LEAN_AI_ENABLE_FRAMEWORK_GUIDE` | `true` | Generate `.lean_ai/framework_guide.md` for detected frameworks |
 | `LEAN_AI_IMPLEMENTATION_MAX_TURNS` | `0` | Max tool-calling turns per session (`0` = unlimited) |
