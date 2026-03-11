@@ -55,20 +55,22 @@ def _classify_file(path: str) -> str | None:
 
     # Tier 2: Global CSS / SCSS variables
     if suffix in (".css", ".scss", ".sass", ".less"):
+        # SCSS partials starting with underscore (e.g. _variables.scss)
+        if name.startswith("_"):
+            return "scss_variables"
         _css_keywords = ("variables", "theme", "colors", "typography", "custom-properties")
         if any(kw in stem for kw in _css_keywords):
             return "global_css"
         if name in ("app.css", "global.css", "globals.css", "style.css", "styles.css", "main.css"):
             return "global_css"
-        # SCSS partials starting with underscore (e.g. _variables.scss)
-        if name.startswith("_"):
-            return "scss_variables"
         # Other CSS files — treat as lower-priority global
         return "global_css"
 
     # Tier 3: Layout / master templates
     if ".blade.php" in lower:
-        if "/layouts/" in lower or stem in ("app", "master", "layout", "base", "main"):
+        # Blade stems have double extension: master.blade.php → stem="master.blade"
+        blade_stem = name.split(".")[0]
+        if "/layouts/" in lower or blade_stem in ("app", "master", "layout", "base", "main"):
             return "layout_templates"
         if "/partials/" in lower or "/components/" in lower:
             return "component_templates"
