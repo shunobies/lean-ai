@@ -49,7 +49,7 @@ cd extension && npm install && npm run build
 
 6. **Indexer** (`indexer/`) — Gitignore-aware tree listing. Tree-sitter AST-aware code chunking. Whoosh BM25F search. Embedding store with RRF re-ranking. SHA-256 manifest for incremental updates.
 
-7. **Context Generation** (`context/`) — Generates `.lean_ai/project_context.md` via single-pass or multi-round LLM calls. Tree-sitter metadata extraction with disk cache. Auto-scaling size caps proportional to context window. Optional framework guide generation (`.lean_ai/framework_guide.md`) — detects frameworks from dependency files, web-searches for best practices, and LLM-generates an architecture/conventions guide covering component relationships, CLI commands, and patterns.
+7. **Context Generation** (`context/`) — Generates `.lean_ai/project_context.md` via single-pass or multi-round LLM calls. Tree-sitter metadata extraction with disk cache. Auto-scaling size caps proportional to context window. Optional framework guide generation (`.lean_ai/framework_guide.md`) — detects frameworks from dependency files, web-searches for best practices, and LLM-generates an architecture/conventions guide covering component relationships, CLI commands, and patterns. Custom steering documents in `.lean_ai/context/` are loaded after the generated files (alphabetically) to provide additional project-specific guidance.
 
 8. **Language Registry** (`languages/`) — 13 language definitions in YAML. Tree-sitter AST parsing (no regex patterns). Generic extraction engine for classes, functions, imports.
 

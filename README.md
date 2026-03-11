@@ -131,6 +131,8 @@ LEAN_AI_ENABLE_EMBEDDINGS=true
 | `LEAN_AI_ENABLE_MULTI_ROUND_CONTEXT` | `true` | Use multi-round LLM calls for richer context generation |
 | `LEAN_AI_ENABLE_FRAMEWORK_GUIDE` | `true` | Auto-generate `.lean_ai/framework_guide.md` for detected frameworks (Laravel, Django, Rails, etc.) |
 
+Custom steering documents can be added to `.lean_ai/context/` — see [Custom Steering Documents](#custom-steering-documents).
+
 #### Knowledge Base
 
 | Variable | Default | Description |
@@ -200,6 +202,19 @@ For small bugs that don't need a full plan:
 2. **Git branch** — same branch-from-default-branch setup as the normal workflow
 3. **Direct execution** — the LLM gets the task, project context, and full tool access, then explores, diagnoses, fixes, and verifies autonomously
 4. **Done** — same auto-commit and merge/abandon flow
+
+### Custom Steering Documents
+
+You can provide additional guidance to the agent by placing `.md` files in `.lean_ai/context/`. These are loaded into the LLM's context at the start of every workflow, after the auto-generated `project_context.md` and `framework_guide.md`.
+
+```
+.lean_ai/context/
+├── coding-standards.md     # Your team's style rules
+├── domain-glossary.md      # Domain-specific terminology
+└── testing-conventions.md  # How tests should be written
+```
+
+Files are loaded alphabetically. Use numeric prefixes (e.g. `01-standards.md`, `02-glossary.md`) to control ordering.
 
 ### Agent Tools
 
