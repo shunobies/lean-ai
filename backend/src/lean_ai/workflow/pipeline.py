@@ -389,21 +389,42 @@ async def _execute_plan(
         )
 
     # ── Incremental project_context.md update ──
-    if files_modified:
+    if files_modified and settings.enable_project_context:
+        await ws_send(ws, "stage_status", {
+            "stage": "context_update",
+            "status": "running",
+            "summary": f"Updating project context with {len(files_modified)} modified file(s)...",
+        })
         try:
-            if settings.enable_project_context:
-                from lean_ai.context.generation import update_project_context
+            from lean_ai.context.generation import update_project_context
 
-                ctx_path = await update_project_context(
-                    repo_root, files_modified, llm_client,
+            ctx_path = await update_project_context(
+                repo_root, files_modified, llm_client,
+            )
+            if ctx_path:
+                logger.info(
+                    "project_context.md updated with %d modified files",
+                    len(files_modified),
                 )
-                if ctx_path:
-                    logger.info(
-                        "project_context.md updated with %d modified files",
-                        len(files_modified),
-                    )
+                await ws_send(ws, "stage_status", {
+                    "stage": "context_update",
+                    "status": "done",
+                    "summary": "Project context updated.",
+                })
+            else:
+                logger.info("project_context.md update skipped (no changes needed)")
+                await ws_send(ws, "stage_status", {
+                    "stage": "context_update",
+                    "status": "done",
+                    "summary": "Project context update skipped (no changes needed).",
+                })
         except Exception as exc:
             logger.warning("Incremental context update failed (non-fatal): %s", exc)
+            await ws_send(ws, "stage_status", {
+                "stage": "context_update",
+                "status": "done",
+                "summary": f"Project context update failed: {exc}",
+            })
 
     complete_data: dict = {"summary": summary, "files_modified": files_modified}
     if branch_name:
@@ -535,21 +556,42 @@ async def _run_fix(
         summary += f"\n\n{explanation.strip()}"
 
     # ── Incremental project_context.md update ──
-    if files_modified:
+    if files_modified and settings.enable_project_context:
+        await ws_send(ws, "stage_status", {
+            "stage": "context_update",
+            "status": "running",
+            "summary": f"Updating project context with {len(files_modified)} modified file(s)...",
+        })
         try:
-            if settings.enable_project_context:
-                from lean_ai.context.generation import update_project_context
+            from lean_ai.context.generation import update_project_context
 
-                ctx_path = await update_project_context(
-                    repo_root, files_modified, llm_client,
+            ctx_path = await update_project_context(
+                repo_root, files_modified, llm_client,
+            )
+            if ctx_path:
+                logger.info(
+                    "project_context.md updated with %d modified files",
+                    len(files_modified),
                 )
-                if ctx_path:
-                    logger.info(
-                        "project_context.md updated with %d modified files",
-                        len(files_modified),
-                    )
+                await ws_send(ws, "stage_status", {
+                    "stage": "context_update",
+                    "status": "done",
+                    "summary": "Project context updated.",
+                })
+            else:
+                logger.info("project_context.md update skipped (no changes needed)")
+                await ws_send(ws, "stage_status", {
+                    "stage": "context_update",
+                    "status": "done",
+                    "summary": "Project context update skipped (no changes needed).",
+                })
         except Exception as exc:
             logger.warning("Incremental context update failed (non-fatal): %s", exc)
+            await ws_send(ws, "stage_status", {
+                "stage": "context_update",
+                "status": "done",
+                "summary": f"Project context update failed: {exc}",
+            })
 
     complete_data: dict = {"summary": summary, "files_modified": files_modified}
     if branch_name:

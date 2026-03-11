@@ -21,6 +21,7 @@ export function formatStageName(stage: string): string {
         USER_APPROVAL: "Awaiting approval",
         IMPLEMENTATION: "Implementing",
         FINALIZATION: "Finalizing",
+        context_update: "Updating project context",
     };
     return names[stage] || stage.replace(/_/g, " ").toLowerCase();
 }
