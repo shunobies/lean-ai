@@ -22,7 +22,8 @@ export type WSMessage =
     | BranchCreatedMessage
     | CheckpointMessage
     | MergeCompleteMessage
-    | AssistantContentMessage;
+    | AssistantContentMessage
+    | MetricsUpdateMessage;
 
 export interface TokenMessage {
     type: "token";
@@ -137,6 +138,13 @@ export interface MergeCompleteMessage {
 export interface AssistantContentMessage {
     type: "assistant_content";
     content: string;
+}
+
+export interface MetricsUpdateMessage {
+    type: "metrics_update";
+    context_percent: number;
+    prompt_tokens: number;
+    context_window: number;
 }
 
 // --- REST API Types ---

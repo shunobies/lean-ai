@@ -54,6 +54,27 @@ export function getWebviewHtml(chatFontSize: number): string {
     }
     .stage-badge.visible { display: inline-block; }
 
+    .metrics-badge {
+        display: none;
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 10px;
+        background: var(--vscode-badge-background);
+        color: var(--vscode-badge-foreground);
+        font-weight: 500;
+        font-variant-numeric: tabular-nums;
+        opacity: 0.85;
+    }
+    .metrics-badge.visible { display: inline-block; }
+    .metrics-badge.warning {
+        background: var(--vscode-inputValidation-warningBackground, #332b00);
+        color: var(--vscode-inputValidation-warningForeground, #ffcc00);
+    }
+    .metrics-badge.critical {
+        background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+        color: var(--vscode-errorForeground, #f48771);
+    }
+
     .header-right {
         display: flex;
         align-items: center;
@@ -448,6 +469,8 @@ export function getWebviewHtml(chatFontSize: number): string {
     <div class="header-left">
         <span class="header-title">Lean AI</span>
         <span class="stage-badge" id="stageBadge"></span>
+        <span class="metrics-badge" id="ctxBadge" title="Context window usage"></span>
+        <span class="metrics-badge" id="timeBadge" title="Elapsed time"></span>
     </div>
     <div class="header-right">
         <button class="header-icon-btn" id="backBtn" title="Back to current chat" style="display:none;">&#8592;</button>
@@ -494,8 +517,12 @@ export function getWebviewHtml(chatFontSize: number): string {
     const searchInput = document.getElementById('searchInput');
     const searchClearBtn = document.getElementById('searchClearBtn');
     const tabBar = document.getElementById('tabBar');
+    const ctxBadge = document.getElementById('ctxBadge');
+    const timeBadge = document.getElementById('timeBadge');
 
     let sending = false;
+    let runtimeInterval = null;
+    let runtimeStart = null;
     let lastTimestamp = null;
     let searchMode = false;
     let savedMessagesHtml = null;
@@ -734,6 +761,41 @@ export function getWebviewHtml(chatFontSize: number): string {
         }
     }
 
+    function formatElapsed(totalSeconds) {
+        const h = Math.floor(totalSeconds / 3600);
+        const m = Math.floor((totalSeconds % 3600) / 60);
+        const s = totalSeconds % 60;
+        if (h > 0) {
+            return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+        }
+        return m + ':' + String(s).padStart(2, '0');
+    }
+
+    function startRuntime() {
+        if (runtimeInterval) return;
+        runtimeStart = Date.now();
+        timeBadge.textContent = '0:00';
+        timeBadge.classList.add('visible');
+        runtimeInterval = setInterval(function() {
+            const elapsed = Math.floor((Date.now() - runtimeStart) / 1000);
+            timeBadge.textContent = formatElapsed(elapsed);
+        }, 1000);
+    }
+
+    function stopRuntime() {
+        if (runtimeInterval) {
+            clearInterval(runtimeInterval);
+            runtimeInterval = null;
+        }
+    }
+
+    function resetMetrics() {
+        stopRuntime();
+        ctxBadge.classList.remove('visible', 'warning', 'critical');
+        timeBadge.classList.remove('visible');
+        runtimeStart = null;
+    }
+
     let sendTimeout = null;
     function send() {
         const text = inputEl.value.trim();
@@ -790,6 +852,7 @@ export function getWebviewHtml(chatFontSize: number): string {
         if (searchMode) closeSearch();
         messagesEl.innerHTML = '<div class="msg msg-system">Describe what you\\'d like to build or change. I\\'ll help you refine it into a clear task for the agent.</div>';
         setStage(null);
+        resetMetrics();
         approvalBar.classList.remove('visible');
         sending = false;
         sendBtn.disabled = false;
@@ -871,6 +934,24 @@ export function getWebviewHtml(chatFontSize: number): string {
 
             case 'stage':
                 setStage(msg.stage);
+                if (msg.stage && !runtimeInterval) {
+                    startRuntime();
+                }
+                break;
+
+            case 'metricsUpdate':
+                ctxBadge.textContent = 'Ctx ' + msg.contextPercent + '%';
+                ctxBadge.classList.add('visible');
+                ctxBadge.classList.toggle('warning', msg.contextPercent >= 75 && msg.contextPercent < 90);
+                ctxBadge.classList.toggle('critical', msg.contextPercent >= 90);
+                break;
+
+            case 'metricsFinal':
+                stopRuntime();
+                break;
+
+            case 'metricsReset':
+                resetMetrics();
                 break;
 
             case 'reply':

@@ -10,384 +10,38 @@ No regex — all text processing uses simple string operations.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from lean_ai.context.framework_detection import (
+    build_guide_search_queries,
+    canonicalize_name,
+    get_compact_tree,
+    get_primary_frameworks,
+    get_training_cutoff,
+)
+from lean_ai.context.framework_search import (
+    extract_search_results,
+    select_one_per_query,
+)
+from lean_ai.context.framework_validation import (
+    check_invalid_paths,
+    extract_file_paths,
+    get_project_paths,
+    remove_blocks,
+    surgical_llm_fix,
+)
 
 if TYPE_CHECKING:
     from lean_ai.llm.client import LLMClient
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Name canonicalization — package manager names → search-friendly names
-# ---------------------------------------------------------------------------
-
-_CANONICAL_NAMES: dict[str, str] = {
-    # PHP / Composer
-    "laravel/framework": "Laravel",
-    "laravel/tinker": "Laravel Tinker",
-    "laravel/sanctum": "Laravel Sanctum",
-    "laravel/cashier": "Laravel Cashier",
-    "laravel/scout": "Laravel Scout",
-    "laravel/horizon": "Laravel Horizon",
-    "laravel/breeze": "Laravel Breeze",
-    "laravel/jetstream": "Laravel Jetstream",
-    "symfony/framework-bundle": "Symfony",
-    "symfony/symfony": "Symfony",
-    "symfony/console": "Symfony Console",
-    "cakephp/cakephp": "CakePHP",
-    # Go modules
-    "github.com/gin-gonic/gin": "Gin",
-    "github.com/labstack/echo": "Echo",
-    "github.com/gofiber/fiber": "Fiber",
-    # npm scoped
-    "@angular/core": "Angular",
-    "@nestjs/core": "NestJS",
-    "@vue/core": "Vue",
-    # .NET
-    "microsoft.aspnetcore": "ASP.NET Core",
-}
-
-
-def _canonicalize_name(raw_name: str) -> str:
-    """Convert a package manager name to a human-friendly search term.
-
-    Checks an explicit mapping first, then applies heuristics for
-    Composer ``vendor/package``, Go ``github.com/user/repo``, and npm
-    scoped ``@scope/package`` formats.  Plain names (``django``,
-    ``react``) pass through unchanged.
-    """
-    # Exact match in mapping
-    if raw_name in _CANONICAL_NAMES:
-        return _CANONICAL_NAMES[raw_name]
-    lower = raw_name.lower()
-    if lower in _CANONICAL_NAMES:
-        return _CANONICAL_NAMES[lower]
-
-    # npm scoped: @scope/package → package part, title-cased
-    if raw_name.startswith("@") and "/" in raw_name:
-        return raw_name.split("/")[-1].replace("-", " ").title()
-
-    # Composer vendor/package or Go github.com/user/repo
-    if "/" in raw_name:
-        parts = raw_name.split("/")
-        # Go modules: github.com/user/repo → last segment
-        if "." in parts[0]:
-            return parts[-1].replace("-", " ").title()
-        # Composer: vendor/package → package, title-cased
-        return parts[-1].replace("-", " ").title()
-
-    # Already fine (django, flask, react, rails, axum, etc.)
-    return raw_name
-
 
 # ---------------------------------------------------------------------------
-# Post-generation validation — file-path extraction
+# Post-generation validation — three-phase path checking
 # ---------------------------------------------------------------------------
-
-_FILE_EXTENSIONS = frozenset({
-    ".php", ".js", ".ts", ".tsx", ".jsx", ".py", ".rb",
-    ".java", ".go", ".rs", ".c", ".h", ".cpp", ".cs",
-    ".vue", ".svelte", ".blade.php", ".erb", ".html",
-    ".css", ".scss", ".json", ".yaml", ".yml", ".toml",
-    ".xml", ".sql", ".sh", ".env",
-})
-
-
-def _extract_file_paths(text: str) -> set[str]:
-    """Extract potential file paths from markdown text.
-
-    Looks for substrings containing ``/`` that end with a known
-    file extension.  Strips surrounding punctuation (backticks,
-    parens, quotes).  Ignores URLs.
-    """
-    paths: set[str] = set()
-    for word in text.split():
-        clean = word.strip("`()[]{}\"',:;")
-        if "/" not in clean or clean.startswith(("http://", "https://")):
-            continue
-        # Handle .blade.php (compound extension)
-        if clean.endswith(".blade.php"):
-            paths.add(clean)
-            continue
-        # Check single extensions
-        dot = clean.rfind(".")
-        if dot != -1 and clean[dot:] in _FILE_EXTENSIONS:
-            paths.add(clean)
-    return paths
-
-
-# PHP vendor namespace prefixes — these are framework/library namespaces
-# that should NOT be validated against the project tree.
-_PHP_STDLIB_PREFIXES = frozenset({
-    "Illuminate", "Symfony", "Carbon", "Doctrine", "League",
-    "Monolog", "Psr", "GuzzleHttp", "Ramsey", "Faker",
-    "PHPUnit", "Mockery", "Composer",
-})
-
-
-def _extract_php_class_refs(text: str) -> dict[str, str]:
-    """Extract PHP namespace references and convert to file paths.
-
-    Finds backslash-separated tokens starting with an uppercase letter
-    (e.g., ``App\\Http\\Kernel``) and converts them to file paths using
-    PSR-4 convention: replace ``\\`` with ``/``, lowercase the first
-    segment, append ``.php``.
-
-    Skips vendor/framework namespaces (Illuminate, Symfony, etc.).
-
-    Returns ``{converted_path: original_namespace}`` so callers can
-    search for the original string in the text when removing blocks.
-    """
-    refs: dict[str, str] = {}
-    for word in text.split():
-        clean = word.strip("`()[]{}\"',:;")
-        if "\\" not in clean:
-            continue
-        parts = clean.split("\\")
-        if len(parts) < 2:
-            continue
-        # Must start with an uppercase letter (namespace convention)
-        if not parts[0] or not parts[0][0].isupper():
-            continue
-        # Skip vendor/framework namespaces
-        if parts[0] in _PHP_STDLIB_PREFIXES:
-            continue
-        # Convert to file path: App\Http\Kernel → app/Http/Kernel.php
-        path_parts = list(parts)
-        path_parts[0] = path_parts[0].lower()
-        converted = "/".join(path_parts) + ".php"
-        refs[converted] = clean
-    return refs
-
-
-def _get_project_paths(repo_root: str) -> set[str]:
-    """Return a set of all file paths in the project (relative to root)."""
-    from lean_ai.indexer.tree import list_repo_tree
-
-    return {e.path for e in list_repo_tree(repo_root)}
-
-
-def _check_invalid_paths(
-    text: str,
-    project_paths: set[str],
-    project_top_dirs: set[str],
-) -> set[str]:
-    """Return referenced strings whose file paths don't exist in the project.
-
-    Checks both explicit file paths (with ``/``) and PHP namespace
-    references (with ``\\``) converted to paths via PSR-4.
-
-    Returns the original text strings (not converted paths) so that
-    block removal can find them in the source text.
-    """
-    # Explicit file paths — the string in the text IS the file path
-    referenced = _extract_file_paths(text)
-    invalid: set[str] = set()
-    for path in referenced:
-        top_dir = path.split("/")[0]
-        if top_dir in project_top_dirs and path not in project_paths:
-            invalid.add(path)
-
-    # PHP namespace references — convert to path, validate, but return
-    # the original namespace string for block matching
-    php_refs = _extract_php_class_refs(text)
-    for converted_path, original_namespace in php_refs.items():
-        top_dir = converted_path.split("/")[0]
-        if top_dir in project_top_dirs and converted_path not in project_paths:
-            invalid.add(original_namespace)
-
-    return invalid
-
-
-def _find_block_boundaries(
-    lines: list[str],
-    path: str,
-) -> list[tuple[int, int]]:
-    """Find line ranges of Markdown blocks that reference *path*.
-
-    Returns ``(start_inclusive, end_exclusive)`` tuples.  A "block" is
-    a fenced code block, a list item, or a contiguous paragraph.
-    """
-    blocks: list[tuple[int, int]] = []
-    i = 0
-    while i < len(lines):
-        stripped = lines[i].lstrip()
-        # ── Fenced code block ──
-        if stripped.startswith("```"):
-            fence_start = i
-            fence_has_path = path in lines[i]
-            i += 1
-            while i < len(lines):
-                if path in lines[i]:
-                    fence_has_path = True
-                if lines[i].lstrip().startswith("```"):
-                    i += 1
-                    break
-                i += 1
-            if fence_has_path:
-                blocks.append((fence_start, i))
-            continue
-        # ── Check if this line references the path ──
-        if path not in lines[i]:
-            i += 1
-            continue
-        # ── List item ──
-        if stripped.startswith(("- ", "* ")) or (
-            stripped[:1].isdigit() and ". " in stripped[:4]
-        ):
-            block_start = i
-            i += 1
-            while i < len(lines):
-                s = lines[i].lstrip()
-                if not lines[i].strip():
-                    break
-                if s.startswith(("- ", "* ")) or (
-                    s[:1].isdigit() and ". " in s[:4]
-                ):
-                    break
-                i += 1
-            blocks.append((block_start, i))
-            continue
-        # ── Paragraph ──
-        block_start = i
-        while block_start > 0 and lines[block_start - 1].strip():
-            if lines[block_start - 1].lstrip().startswith("#"):
-                break
-            block_start -= 1
-        i += 1
-        while i < len(lines) and lines[i].strip():
-            if lines[i].lstrip().startswith("#"):
-                break
-            i += 1
-        blocks.append((block_start, i))
-    return blocks
-
-
-def _remove_blocks(text: str, invalid_paths: set[str]) -> str:
-    """Remove Markdown blocks referencing any *invalid_paths*.
-
-    Uses line-level operations only — no LLM.
-    """
-    lines = text.split("\n")
-
-    remove_ranges: list[tuple[int, int]] = []
-    for path in invalid_paths:
-        remove_ranges.extend(_find_block_boundaries(lines, path))
-
-    if not remove_ranges:
-        return text
-
-    # Merge overlapping ranges
-    remove_ranges.sort()
-    merged: list[tuple[int, int]] = [remove_ranges[0]]
-    for start, end in remove_ranges[1:]:
-        if start <= merged[-1][1]:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
-        else:
-            merged.append((start, end))
-
-    remove_lines: set[int] = set()
-    for start, end in merged:
-        remove_lines.update(range(start, end))
-
-    kept = [line for i, line in enumerate(lines) if i not in remove_lines]
-
-    # Collapse triple+ blank lines to double
-    cleaned: list[str] = []
-    blank_count = 0
-    for line in kept:
-        if not line.strip():
-            blank_count += 1
-            if blank_count <= 2:
-                cleaned.append(line)
-        else:
-            blank_count = 0
-            cleaned.append(line)
-
-    return "\n".join(cleaned)
-
-
-async def _surgical_llm_fix(
-    guide: str,
-    invalid_paths: set[str],
-    llm_client: LLMClient,
-    system_prompt: str,
-    max_llm_calls: int = 5,
-) -> str:
-    """Fix invalid path references by correcting individual blocks."""
-    lines = guide.split("\n")
-
-    # Collect all blocks referencing any invalid path
-    all_ranges: list[tuple[int, int]] = []
-    for path in invalid_paths:
-        all_ranges.extend(_find_block_boundaries(lines, path))
-
-    if not all_ranges:
-        return guide
-
-    # Merge overlapping ranges
-    all_ranges.sort()
-    merged: list[tuple[int, int]] = [all_ranges[0]]
-    for start, end in all_ranges[1:]:
-        if start <= merged[-1][1]:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
-        else:
-            merged.append((start, end))
-
-    # Cap at max_llm_calls by merging closest blocks
-    while len(merged) > max_llm_calls and len(merged) > 1:
-        min_gap = float("inf")
-        min_idx = 0
-        for idx in range(len(merged) - 1):
-            gap = merged[idx + 1][0] - merged[idx][1]
-            if gap < min_gap:
-                min_gap = gap
-                min_idx = idx
-        merged[min_idx] = (merged[min_idx][0], merged[min_idx + 1][1])
-        del merged[min_idx + 1]
-
-    # Process in reverse order to preserve line indices
-    result_lines = list(lines)
-    for start, end in reversed(merged):
-        block_text = "\n".join(lines[start:end])
-        block_invalid = {p for p in invalid_paths if p in block_text}
-
-        prompt = (
-            "The following file paths do NOT exist in this project:\n"
-            + "\n".join(f"- `{p}`" for p in sorted(block_invalid))
-            + "\n\n"
-            "Rewrite ONLY the following Markdown excerpt, correcting "
-            "or removing references to the non-existent paths. "
-            "If a code block references a non-existent file and you "
-            "cannot determine the correct replacement, remove the "
-            "entire code block. Output ONLY the corrected excerpt, "
-            "nothing else.\n\n"
-            "EXCERPT:\n" + block_text
-        )
-
-        try:
-            fixed = await llm_client.chat_raw(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt[:8000]},
-                ],
-                max_tokens=1024,
-            )
-            fixed = fixed.strip()
-            if fixed:
-                result_lines[start:end] = fixed.split("\n")
-        except Exception as exc:
-            logger.info(
-                "Framework guide: surgical fix lines %d-%d failed: %s",
-                start, end, exc,
-            )
-
-    return "\n".join(result_lines)
-
 
 async def _validate_guide(
     guide: str,
@@ -403,12 +57,12 @@ async def _validate_guide(
     3. Mechanical strip of any remaining invalid paths.
     """
     # Phase 1: Detect
-    project_paths = _get_project_paths(repo_root)
+    project_paths = get_project_paths(repo_root)
     project_top_dirs = {p.split("/")[0] for p in project_paths}
 
-    invalid = _check_invalid_paths(guide, project_paths, project_top_dirs)
+    invalid = check_invalid_paths(guide, project_paths, project_top_dirs)
     if not invalid:
-        referenced = _extract_file_paths(guide)
+        referenced = extract_file_paths(guide)
         logger.info(
             "Framework guide: all %d file references valid",
             len(referenced),
@@ -422,11 +76,11 @@ async def _validate_guide(
     )
 
     # Phase 2: Surgical LLM correction
-    corrected = await _surgical_llm_fix(
+    corrected = await surgical_llm_fix(
         guide, invalid, llm_client, system_prompt,
     )
 
-    still_invalid = _check_invalid_paths(
+    still_invalid = check_invalid_paths(
         corrected, project_paths, project_top_dirs,
     )
     if not still_invalid:
@@ -441,9 +95,9 @@ async def _validate_guide(
     )
 
     # Phase 3: Mechanical strip
-    stripped = _remove_blocks(corrected, still_invalid)
+    stripped = remove_blocks(corrected, still_invalid)
 
-    final_invalid = _check_invalid_paths(
+    final_invalid = check_invalid_paths(
         stripped, project_paths, project_top_dirs,
     )
     if final_invalid:
@@ -714,165 +368,6 @@ def _renumber_steps(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Framework detection (reuses deprecations._detect_versions)
-# ---------------------------------------------------------------------------
-
-def _get_primary_frameworks(
-    repo_root: str,
-) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
-    """Detect frameworks and runtimes in the project.
-
-    Returns ``(frameworks, runtimes)`` where each is a list of
-    ``(name, version)`` tuples.  Frameworks are capped at 3,
-    runtimes at 2.
-    """
-    from lean_ai.context.deprecations import _detect_versions
-
-    deps = _detect_versions(repo_root)
-
-    frameworks = [(d.name, d.version) for d in deps if d.category == "framework"]
-    runtimes = [(d.name, d.version) for d in deps if d.category == "runtime"]
-
-    return frameworks[:3], runtimes[:2]
-
-
-# ---------------------------------------------------------------------------
-# Training cutoff detection
-# ---------------------------------------------------------------------------
-
-async def _get_training_cutoff(
-    llm_client: LLMClient,
-    repo_root: str,
-) -> str | None:
-    """Ask the LLM for its training data cutoff date.
-
-    Returns a date string like ``"2024-04"`` or ``None`` on failure.
-    Caches per model name in ``.lean_ai/model_cutoff.json`` so we only
-    ask once per model.
-    """
-    cache_path = Path(repo_root) / ".lean_ai" / "model_cutoff.json"
-    model_name = llm_client.model_name
-
-    # Check cache first
-    if cache_path.exists():
-        try:
-            cache = json.loads(cache_path.read_text(encoding="utf-8"))
-            if model_name in cache:
-                logger.info(
-                    "Framework guide: using cached training cutoff "
-                    "%s for model %s",
-                    cache[model_name], model_name,
-                )
-                return cache[model_name]
-        except Exception:
-            pass
-
-    # Ask the LLM
-    logger.info(
-        "Framework guide: asking %s for training cutoff date", model_name,
-    )
-    try:
-        response = await llm_client.chat_raw(
-            messages=[{
-                "role": "user",
-                "content": (
-                    "What is your training data cutoff date? "
-                    "Reply with ONLY the date in YYYY-MM format, "
-                    "nothing else. Example: 2024-04"
-                ),
-            }],
-            max_tokens=32,
-        )
-        # Parse — expect something like "2024-04"
-        cutoff = response.strip()[:7]
-        datetime.strptime(cutoff, "%Y-%m")  # validate format
-
-        # Save to cache
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        existing: dict[str, str] = {}
-        if cache_path.exists():
-            try:
-                existing = json.loads(
-                    cache_path.read_text(encoding="utf-8"),
-                )
-            except Exception:
-                pass
-        existing[model_name] = cutoff
-        cache_path.write_text(
-            json.dumps(existing, indent=2), encoding="utf-8",
-        )
-
-        logger.info(
-            "Framework guide: model %s reports cutoff %s",
-            model_name, cutoff,
-        )
-        return cutoff
-    except Exception as exc:
-        logger.info(
-            "Framework guide: could not determine cutoff: %s", exc,
-        )
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Search query generation
-# ---------------------------------------------------------------------------
-
-def _build_guide_search_queries(
-    frameworks: list[tuple[str, str]],
-    runtimes: list[tuple[str, str]],
-    cutoff: str | None = None,
-) -> list[str]:
-    """Generate web search queries for framework architecture and best practices."""
-    from lean_ai.context.deprecations import _extract_major_minor
-
-    queries: list[str] = []
-    for name, version in frameworks:
-        v = _extract_major_minor(version)
-        canonical = _canonicalize_name(name)
-        label = f"{canonical} {v}" if v else canonical
-        queries.append(f"{label} architecture guide request lifecycle")
-        queries.append(f"{label} CLI commands scaffolding generators")
-        queries.append(
-            f"{label} project structure directory conventions",
-        )
-        queries.append(
-            f"{label} upgrade guide migration from previous version",
-        )
-        queries.append(f"{label} middleware configuration setup")
-        queries.append(
-            f"{label} testing patterns setup best practices",
-        )
-        queries.append(
-            f"{label} common pitfalls gotchas version specific",
-        )
-        # When we know the LLM's training cutoff, add a query that
-        # specifically targets post-cutoff changes.
-        if cutoff:
-            queries.append(
-                f"{label} changelog breaking changes new features",
-            )
-
-    return queries[:16]
-
-
-# ---------------------------------------------------------------------------
-# Project tree (compact, for prompt inclusion)
-# ---------------------------------------------------------------------------
-
-def _get_compact_tree(repo_root: str, max_entries: int = 100) -> str:
-    """Return a compact file tree of the project for inclusion in the prompt."""
-    try:
-        from lean_ai.indexer.tree import list_repo_tree
-
-        entries = list_repo_tree(repo_root)
-        lines = [e.path for e in entries[:max_entries]]
-        return "\n".join(lines)
-    except Exception:
-        return ""
-
-
-# ---------------------------------------------------------------------------
 # LLM system prompt
 # ---------------------------------------------------------------------------
 
@@ -885,13 +380,13 @@ def _build_guide_system_prompt(
     from lean_ai.context.deprecations import _extract_major_minor
 
     fw_list = ", ".join(
-        f"{_canonicalize_name(name)} {_extract_major_minor(ver)}"
-        if ver else _canonicalize_name(name)
+        f"{canonicalize_name(name)} {_extract_major_minor(ver)}"
+        if ver else canonicalize_name(name)
         for name, ver in frameworks
     )
     rt_list = ", ".join(
-        f"{_canonicalize_name(name)} {_extract_major_minor(ver)}"
-        if ver else _canonicalize_name(name)
+        f"{canonicalize_name(name)} {_extract_major_minor(ver)}"
+        if ver else canonicalize_name(name)
         for name, ver in runtimes
     ) or "not detected"
 
@@ -1042,128 +537,6 @@ def _build_guide_system_prompt(
 # Orchestrator
 # ---------------------------------------------------------------------------
 
-def _extract_urls_from_search(search_text: str, max_urls: int = 5) -> list[str]:
-    """Extract URLs from formatted search result text.
-
-    Search results are formatted as ``URL: <url>`` lines by the search
-    providers.  Returns unique URLs in order of appearance.
-    """
-    seen: set[str] = set()
-    urls: list[str] = []
-    for line in search_text.splitlines():
-        if line.startswith("URL: "):
-            url = line[5:].strip()
-            if url and url not in seen:
-                seen.add(url)
-                urls.append(url)
-                if len(urls) >= max_urls:
-                    break
-    return urls
-
-
-def _extract_search_results(
-    search_text: str,
-) -> list[tuple[str, str, str]]:
-    """Extract ``(title, url, snippet)`` tuples from formatted search output.
-
-    Both DuckDuckGo and SearXNG providers format results as::
-
-        Title: <title>
-        URL: <url>
-        <snippet body>
-
-        ---
-
-    Returns a list of tuples preserving order.
-    """
-    results: list[tuple[str, str, str]] = []
-    blocks = search_text.split("---")
-    for block in blocks:
-        block = block.strip()
-        if not block:
-            continue
-        title = ""
-        url = ""
-        snippet_lines: list[str] = []
-        for line in block.splitlines():
-            if line.startswith("Title: "):
-                title = line[7:].strip()
-            elif line.startswith("URL: "):
-                url = line[5:].strip()
-            else:
-                snippet_lines.append(line)
-        if url:
-            snippet = " ".join(
-                ln.strip() for ln in snippet_lines if ln.strip()
-            )
-            results.append((title, url, snippet[:300]))
-    return results
-
-
-# Domains that indicate package registries, repository hosts, or Q&A
-# sites rather than documentation — deprioritized when selecting the
-# best URL from each search category.
-_DEPRIORITIZED_DOMAINS = (
-    "packagist.org",
-    "npmjs.com",
-    "pypi.org",
-    "hub.docker.com",
-    "github.com",
-    "stackoverflow.com",
-    "stackexchange.com",
-)
-
-
-def _select_one_per_query(
-    query_results: list[list[tuple[str, str, str]]],
-) -> list[list[str]]:
-    """Pick ranked candidate URLs per search query.
-
-    Iterates each query's result list and returns an ordered list of
-    candidate URLs for each query.  The first URL is the preferred pick
-    (non-deprioritized domain when possible), followed by fallbacks in
-    case the primary fetch fails (403, 404, timeout, etc.).
-
-    Candidates are globally deduped — a URL picked as primary for one
-    query won't appear as a candidate for another.
-
-    Returns a list of URL lists — one list per query that produced
-    results.
-    """
-    selected: set[str] = set()
-    picks: list[list[str]] = []
-
-    for results in query_results:
-        # Dedup within this query's results, skip globally selected
-        seen: set[str] = set()
-        candidates: list[str] = []
-        for _title, url, _snippet in results:
-            if url not in seen and url not in selected:
-                seen.add(url)
-                candidates.append(url)
-
-        if not candidates:
-            continue
-
-        # Prefer URLs not from deprioritized domains
-        preferred = [
-            u for u in candidates
-            if not any(d in u for d in _DEPRIORITIZED_DOMAINS)
-        ]
-        deprioritized = [
-            u for u in candidates
-            if any(d in u for d in _DEPRIORITIZED_DOMAINS)
-        ]
-
-        # Ordered: preferred first, then deprioritized as fallbacks
-        ranked = preferred + deprioritized
-        # Reserve the primary pick globally so other queries don't reuse it
-        selected.add(ranked[0])
-        picks.append(ranked)
-
-    return picks
-
-
 async def generate_framework_guide(
     repo_root: str,
     llm_client: LLMClient,
@@ -1182,7 +555,7 @@ async def generate_framework_guide(
 
     # Step 1: Detect frameworks
     try:
-        frameworks, runtimes = _get_primary_frameworks(repo_root)
+        frameworks, runtimes = get_primary_frameworks(repo_root)
     except Exception as exc:
         logger.warning("Framework guide: detection failed: %s", exc)
         return ""
@@ -1198,14 +571,14 @@ async def generate_framework_guide(
     )
 
     # Step 1b: Detect training cutoff (cached per model)
-    cutoff = await _get_training_cutoff(llm_client, repo_root)
+    cutoff = await get_training_cutoff(llm_client, repo_root)
 
     # Step 2: Get project tree for project-specific guide
-    project_tree = _get_compact_tree(repo_root)
+    project_tree = get_compact_tree(repo_root)
 
     # Step 3: Web search for current best practices (snippets)
     # Sequential — primp/lxml are not thread-safe for concurrent use.
-    queries = _build_guide_search_queries(
+    queries = build_guide_search_queries(
         frameworks, runtimes, cutoff=cutoff,
     )
     search_parts: list[str] = []
@@ -1227,7 +600,7 @@ async def generate_framework_guide(
                 search_parts.append(
                     f"=== Search: {query} ===\n{result.output}"
                 )
-                extracted = _extract_search_results(result.output)
+                extracted = extract_search_results(result.output)
                 logger.info(
                     "Framework guide: search %d/%d %r -> OK (%d chars)",
                     i, len(queries), query, len(result.output),
@@ -1252,7 +625,7 @@ async def generate_framework_guide(
     # Step 3b: Per-category page fetching.
     # Select one URL per search query (category), preferring documentation
     # over package registries and repository hosts.
-    fetch_urls = _select_one_per_query(query_results)
+    fetch_urls = select_one_per_query(query_results)
 
     logger.info(
         "Framework guide: selected %d URLs (one per search category)",
@@ -1399,7 +772,7 @@ async def generate_framework_guide(
 
     # Step 6: Add header
     fw_label = ", ".join(
-        _canonicalize_name(name) for name, _ver in frameworks
+        canonicalize_name(name) for name, _ver in frameworks
     )
     content = (
         f"# Framework Guide: {fw_label}\n\n"

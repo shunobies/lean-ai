@@ -12,18 +12,21 @@ import json
 import logging
 import os
 from collections.abc import Callable
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import WebSocket, WebSocketDisconnect
 
 from lean_ai.config import settings
-from lean_ai.llm.plan_schema import ExecutionPlan, PlanStep, plan_to_markdown
+from lean_ai.llm.plan_schema import ExecutionPlan, plan_to_markdown
 from lean_ai.llm.planner import assess_clarity, create_plan
-from lean_ai.llm.prompts import FIX_SYSTEM_PROMPT, STEP_EXECUTION_SYSTEM_PROMPT
 from lean_ai.llm.tool_definitions import IMPLEMENTATION_TOOLS
-from lean_ai.tools import file_ops, scratchpad, shell
-from lean_ai.tools.command_safety import CommandRisk, check_command
+from lean_ai.tools import scratchpad
+from lean_ai.workflow.prompts import (
+    build_fix_system_prompt,
+    build_step_system_prompt,
+    build_step_user_message,
+)
+from lean_ai.workflow.tool_executor import make_tool_executor
 from lean_ai.workflow.ws_handler import safe_receive, ws_send, ws_send_nowait
 
 if TYPE_CHECKING:
@@ -248,14 +251,14 @@ async def _execute_plan(
     session_id: str = "",
 ) -> str:
     """Execute each plan step sequentially with a constrained LLM."""
-    tool_executor = _make_tool_executor(repo_root, ws, session_id)
+    tool_executor = make_tool_executor(repo_root, ws, session_id)
     total_steps = len(plan.steps)
     all_executed = []
     step_explanations: list[str] = []
     completed_descriptions: list[str] = []
 
     # Build the system prompt once (shared across all steps)
-    system_prompt = _build_step_system_prompt(context)
+    system_prompt = build_step_system_prompt(context)
 
     # Callbacks for WebSocket progress + conversation logging.
     # Progress messages are fire-and-forget (non-blocking) since they are
@@ -291,6 +294,14 @@ async def _execute_plan(
         if conversation_logger:
             asyncio.create_task(conversation_logger("assistant", text))
 
+    async def on_metrics(prompt_tokens: int, context_window: int) -> None:
+        context_pct = round((prompt_tokens / context_window) * 100) if context_window else 0
+        ws_send_nowait(ws, "metrics_update", {
+            "context_percent": context_pct,
+            "prompt_tokens": prompt_tokens,
+            "context_window": context_window,
+        })
+
     # Execute each step
     for step in plan.steps:
         logger.info(
@@ -308,7 +319,7 @@ async def _execute_plan(
         })
 
         # Build step-specific user message
-        user_msg = _build_step_user_message(
+        user_msg = build_step_user_message(
             step, completed_descriptions, total_steps,
         )
 
@@ -327,6 +338,7 @@ async def _execute_plan(
             on_tool_call=on_tool_call,
             on_tool_result=on_tool_result,
             on_content=on_content,
+            on_metrics=on_metrics,
         )
 
         all_executed.extend(executed)
@@ -429,8 +441,8 @@ async def _run_fix(
     """
     await ws_send(ws, "stage_change", {"stage": "implementing"})
 
-    tool_executor = _make_tool_executor(repo_root, ws, session_id)
-    system_prompt = _build_fix_system_prompt(context)
+    tool_executor = make_tool_executor(repo_root, ws, session_id)
+    system_prompt = build_fix_system_prompt(context)
 
     # Callbacks — fire-and-forget (same rationale as plan mode callbacks)
     async def on_tool_call(name: str, args: dict) -> None:
@@ -464,6 +476,14 @@ async def _run_fix(
         if conversation_logger:
             asyncio.create_task(conversation_logger("assistant", text))
 
+    async def on_metrics(prompt_tokens: int, context_window: int) -> None:
+        context_pct = round((prompt_tokens / context_window) * 100) if context_window else 0
+        ws_send_nowait(ws, "metrics_update", {
+            "context_percent": context_pct,
+            "prompt_tokens": prompt_tokens,
+            "context_window": context_window,
+        })
+
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": task},
@@ -496,6 +516,7 @@ async def _run_fix(
         on_tool_call=on_tool_call,
         on_tool_result=on_tool_result,
         on_content=on_content,
+        on_metrics=on_metrics,
     )
 
     # ── Completion ────────────────────────────────────────────────
@@ -544,235 +565,3 @@ async def _run_fix(
     if files_modified:
         commit_msg += f"\n\nFiles modified: {', '.join(files_modified)}"
     return commit_msg
-
-
-# ── Prompt Builders ────────────────────────────────────────────────
-
-
-def _build_fix_system_prompt(context: str) -> str:
-    """Build the system prompt for fix mode (no planning)."""
-    if not context:
-        return FIX_SYSTEM_PROMPT
-
-    max_context = 3000
-    ctx = context[:max_context]
-    if len(context) > max_context:
-        ctx += "\n... (condensed)"
-
-    return (
-        f"{FIX_SYSTEM_PROMPT}\n"
-        f"## Project Context\n\n{ctx}"
-    )
-
-
-def _build_step_system_prompt(context: str) -> str:
-    """Build the system prompt for per-step execution."""
-    if not context:
-        return STEP_EXECUTION_SYSTEM_PROMPT
-
-    # Include condensed project context so the executor knows patterns
-    max_context = 3000
-    ctx = context[:max_context]
-    if len(context) > max_context:
-        ctx += "\n... (condensed)"
-
-    return (
-        f"{STEP_EXECUTION_SYSTEM_PROMPT}\n"
-        f"## Project Context\n\n{ctx}"
-    )
-
-
-def _build_step_user_message(
-    step: PlanStep,
-    completed: list[str],
-    total_steps: int,
-) -> str:
-    """Build the user message for a specific step execution."""
-    parts: list[str] = []
-
-    # Progress header
-    parts.append(
-        f"STEP {step.step_number} OF {total_steps}"
-    )
-
-    if completed:
-        parts.append("\nCompleted so far:")
-        for desc in completed:
-            parts.append(f"  ✓ {desc}")
-        parts.append("")
-
-    # Step details
-    parts.append(f"Tool: {step.tool}")
-    if step.file_path:
-        parts.append(f"File: {step.file_path}")
-    parts.append(f"Instruction: {step.instruction}")
-
-    if step.context:
-        parts.append(
-            "\nContext (file content from planner investigation):"
-            f"\n```\n{step.context}\n```"
-        )
-
-    # Explicit directive
-    if step.tool in ("run_tests", "run_lint", "format_code"):
-        parts.append(
-            f"\nCall {step.tool} with the command specified in the instruction."
-        )
-    elif step.tool == "edit_file":
-        parts.append(
-            f"\nRead {step.file_path} first if the context above seems "
-            "incomplete, then call edit_file with accurate search/replace blocks."
-        )
-    elif step.tool == "create_file":
-        parts.append(
-            f"\nCall create_file to create {step.file_path} with the content "
-            "described in the instruction. Produce complete, working code."
-        )
-
-    return "\n".join(parts)
-
-
-# ── Tool Executor ──────────────────────────────────────────────────
-
-
-def _make_tool_executor(repo_root: str, ws: WebSocket, session_id: str = ""):
-    """Create a tool executor closure for the workflow."""
-
-    async def execute(name: str, arguments: dict) -> str:
-        """Execute a tool and return the result as a string."""
-
-        if name == "create_file":
-            result = await file_ops.create_file(
-                path=arguments["path"],
-                content=arguments["content"],
-                repo_root=repo_root,
-            )
-            diff = result.metadata.get("diff", "")
-            if diff:
-                await ws_send(ws, "diff", {"file": arguments["path"], "diff": diff})
-            return result.output if result.success else f"ERROR: {result.error}"
-
-        elif name == "edit_file":
-            result = await file_ops.edit_file(
-                path=arguments["path"],
-                search=arguments["search"],
-                replace=arguments["replace"],
-                repo_root=repo_root,
-            )
-            diff = result.metadata.get("diff", "")
-            if diff:
-                await ws_send(ws, "diff", {"file": arguments["path"], "diff": diff})
-            return result.output if result.success else f"ERROR: {result.error}"
-
-        elif name == "read_file":
-            result = await file_ops.read_file(
-                path=arguments["path"],
-                repo_root=repo_root,
-                start_line=arguments.get("start_line"),
-                end_line=arguments.get("end_line"),
-            )
-            return result.output if result.success else f"ERROR: {result.error}"
-
-        elif name in ("run_tests", "run_lint", "format_code"):
-            command = arguments["command"]
-            risk, reason = check_command(command)
-            if risk == CommandRisk.ALWAYS_BLOCK:
-                return f"ERROR: Command blocked: {reason}"
-            if risk == CommandRisk.REQUIRES_APPROVAL:
-                await ws_send(ws, "tool_approval_required", {
-                    "tool": name, "command": command, "reason": reason,
-                })
-                approval_msg = await safe_receive(ws)
-                if approval_msg is None:
-                    return "ERROR: WebSocket disconnected — command skipped (requires approval)"
-                if approval_msg.get("type") != "approve_tool":
-                    return "ERROR: Command not approved by user"
-
-            handler = {
-                "run_tests": shell.run_tests,
-                "run_lint": shell.run_lint,
-                "format_code": shell.format_code,
-            }[name]
-            result = await handler(command=command, repo_root=repo_root)
-            if name == "run_tests":
-                await ws_send(ws, "test_result", {
-                    "command": command,
-                    "passed": result.success,
-                    "output": result.output[:2000],
-                })
-            if result.success:
-                output = result.output or ""
-            else:
-                prefix = (
-                    f"FAILED (exit code {result.exit_code})\n"
-                    if result.exit_code else "FAILED\n"
-                )
-                output = prefix + (
-                    result.output or result.error or "No output"
-                )
-            max_output = 8000
-            if len(output) > max_output:
-                output = (
-                    output[:max_output]
-                    + f"\n\n[OUTPUT TRUNCATED — showing first"
-                    f" {max_output} of {len(output)} characters]"
-                )
-            return output
-
-        elif name == "list_directory":
-            target = Path(repo_root) / arguments.get("path", "")
-            if not target.is_dir():
-                return f"ERROR: Not a directory: {arguments.get('path', '')}"
-            max_entries = arguments.get("max_entries", 100)
-            all_entries = sorted(target.iterdir())
-            total = len(all_entries)
-            entries = all_entries[:max_entries]
-            lines = []
-            for e in entries:
-                prefix = "d" if e.is_dir() else "f"
-                lines.append(f"  {prefix}  {e.name}")
-            output = "\n".join(lines) or "(empty)"
-            if total > max_entries:
-                output += (
-                    f"\n\n[TRUNCATED — showing {max_entries} of {total}"
-                    f" entries. Use max_entries parameter to see more.]"
-                )
-            return output
-
-        elif name == "update_scratchpad":
-            result = await scratchpad.update_scratchpad(
-                content=arguments["content"],
-                repo_root=repo_root,
-                session_id=session_id,
-            )
-            return result.output if result.success else f"ERROR: {result.error}"
-
-        elif name == "directory_tree":
-            from lean_ai.indexer.tree import list_repo_tree
-            sub_path = arguments.get("path", "")
-            tree_root = f"{repo_root}/{sub_path}" if sub_path else repo_root
-            entries = list_repo_tree(tree_root)
-            total = len(entries)
-            max_entries = 200
-            max_depth = arguments.get("max_depth", 3)
-            lines = []
-            for e in entries[:max_entries]:
-                depth = e.path.count("/")
-                if depth <= max_depth:
-                    indent = "  " * depth
-                    lines.append(f"{indent}{e.path.split('/')[-1]}")
-            output = "\n".join(lines) or "(empty)"
-            if total > max_entries:
-                output += (
-                    f"\n\n[TRUNCATED — showing {max_entries} of"
-                    f" {total} entries. Use path parameter to"
-                    f" focus on a subtree, or increase max_depth.]"
-                )
-            return output
-
-        elif name == "task_complete":
-            return "Task marked complete."
-
-        return f"ERROR: Unknown tool: {name}"
-
-    return execute

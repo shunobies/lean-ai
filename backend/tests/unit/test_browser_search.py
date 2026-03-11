@@ -287,7 +287,9 @@ class TestParseBingResults:
 class TestOutputFormat:
     def test_output_matches_extract_format(self):
         """Formatted output must be parseable by _extract_search_results."""
-        from lean_ai.context.framework_guide import _extract_search_results
+        from lean_ai.context.framework_search import (
+            extract_search_results as _extract_search_results,
+        )
 
         formatted = (
             "Title: Laravel Docs\n"

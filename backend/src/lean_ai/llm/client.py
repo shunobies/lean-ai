@@ -416,6 +416,7 @@ class LLMClient:
         on_tool_call: Callable | None = None,
         on_tool_result: Callable | None = None,
         on_content: Callable | None = None,
+        on_metrics: Callable | None = None,
     ) -> tuple[list[ToolCall], str]:
         """Multi-turn tool calling loop using Ollama's native tools= parameter.
 
@@ -481,6 +482,9 @@ class LLMClient:
             content = msg.get("content") or ""
             tool_calls = msg.get("tool_calls") or []
             last_prompt_tokens = response.get("prompt_eval_count") or 0
+
+            if on_metrics and last_prompt_tokens:
+                await on_metrics(last_prompt_tokens, self._context_window)
 
             if content.strip():
                 explanation_parts.append(content.strip())

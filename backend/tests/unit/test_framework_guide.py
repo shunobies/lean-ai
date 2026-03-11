@@ -8,22 +8,44 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from lean_ai.context.framework_detection import (
+    build_guide_search_queries as _build_guide_search_queries,
+)
+from lean_ai.context.framework_detection import (
+    canonicalize_name as _canonicalize_name,
+)
+from lean_ai.context.framework_detection import (
+    get_primary_frameworks as _get_primary_frameworks,
+)
 from lean_ai.context.framework_guide import (
-    _build_guide_search_queries,
-    _canonicalize_name,
-    _check_invalid_paths,
     _deduplicate_sections,
     _deduplicate_sections_mechanical,
-    _extract_file_paths,
-    _extract_php_class_refs,
-    _extract_search_results,
-    _extract_urls_from_search,
-    _find_block_boundaries,
-    _get_primary_frameworks,
-    _remove_blocks,
     _renumber_steps,
     _repair_code_blocks,
-    _select_one_per_query,
+)
+from lean_ai.context.framework_search import (
+    extract_search_results as _extract_search_results,
+)
+from lean_ai.context.framework_search import (
+    extract_urls_from_search as _extract_urls_from_search,
+)
+from lean_ai.context.framework_search import (
+    select_one_per_query as _select_one_per_query,
+)
+from lean_ai.context.framework_validation import (
+    check_invalid_paths as _check_invalid_paths,
+)
+from lean_ai.context.framework_validation import (
+    extract_file_paths as _extract_file_paths,
+)
+from lean_ai.context.framework_validation import (
+    extract_php_class_refs as _extract_php_class_refs,
+)
+from lean_ai.context.framework_validation import (
+    find_block_boundaries as _find_block_boundaries,
+)
+from lean_ai.context.framework_validation import (
+    remove_blocks as _remove_blocks,
 )
 
 # ---------------------------------------------------------------------------

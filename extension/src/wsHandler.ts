@@ -182,6 +182,7 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
                 cls: "msg-ai",
             });
             ctx.postMessage({ type: "sendEnabled" });
+            ctx.postMessage({ type: "metricsFinal" });
             // Close WS so user returns to chat mode automatically
             ctx.closeWebSocket();
             ctx.clearSession();
@@ -199,6 +200,7 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
             ctx.postMessage({ type: "sendEnabled" });
             // Close WS on non-recoverable errors so user returns to chat
             if (!raw.recoverable) {
+                ctx.postMessage({ type: "metricsFinal" });
                 ctx.closeWebSocket();
                 ctx.clearSession();
                 ctx.postMessage({ type: "stage", stage: null });
@@ -340,6 +342,15 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
             if (content) {
                 ctx.postMessage({ type: "reply", text: content, cls: "msg-ai" });
             }
+            break;
+        }
+
+        // --- Metrics update: context window usage ---
+        case "metrics_update": {
+            ctx.postMessage({
+                type: "metricsUpdate",
+                contextPercent: raw.context_percent as number,
+            });
             break;
         }
 

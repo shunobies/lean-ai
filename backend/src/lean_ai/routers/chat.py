@@ -1,0 +1,253 @@
+"""Chat, inline prediction, scaffolding, knowledge, and health endpoints."""
+
+import asyncio
+import logging
+import os
+import shutil
+
+from fastapi import APIRouter, HTTPException
+
+from lean_ai.config import settings
+from lean_ai.routers.context_helpers import (
+    build_chat_system_prompt,
+    extract_urls,
+    get_file_tree,
+    read_active_file,
+    read_project_context,
+    search_workspace,
+)
+from lean_ai.routers.dependencies import _inline_client, llm_client
+from lean_ai.routers.models import (
+    ChatRequest,
+    ChatResponse,
+    IndexKnowledgeRequest,
+    IndexKnowledgeResponse,
+    InlinePredictRequest,
+    ScaffoldInfo,
+    ScaffoldListResponse,
+    ScaffoldRequest,
+    ScaffoldResponse,
+)
+from lean_ai.tools import internet
+
+logger = logging.getLogger(__name__)
+
+chat_router = APIRouter()
+
+
+@chat_router.get("/scaffold/list", response_model=ScaffoldListResponse)
+async def list_scaffolds():
+    """List all available scaffold templates."""
+    from lean_ai.tools.scaffold import get_scaffold_registry
+
+    registry = get_scaffold_registry()
+    return ScaffoldListResponse(
+        scaffolds=[
+            ScaffoldInfo(
+                name=t.name,
+                display_name=t.display_name,
+                description=t.description,
+                language=t.language,
+                framework=t.framework,
+                aliases=t.aliases,
+                setup_type=t.setup_type,
+            )
+            for t in registry.list_all()
+        ]
+    )
+
+
+@chat_router.post("/scaffold", response_model=ScaffoldResponse)
+async def scaffold_project(request: ScaffoldRequest):
+    """Set up a new project from a scaffold recipe."""
+    from lean_ai.tools.scaffold import get_scaffold_registry, get_scaffold_runner
+
+    registry = get_scaffold_registry()
+    template = registry.get(request.scaffold_name)
+    if template is None:
+        available = [t.name for t in registry.list_all()]
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown scaffold '{request.scaffold_name}'. Available: {available}",
+        )
+
+    runner = get_scaffold_runner()
+    result = await runner.run(template, request.project_name, request.parent_dir)
+
+    if not result.success:
+        raise HTTPException(status_code=500, detail=result.error or "Scaffold failed")
+
+    return ScaffoldResponse(
+        scaffold_name=result.scaffold_name,
+        project_dir=result.project_dir,
+        files_created=result.files_created,
+        command_output=result.command_output,
+        message=(
+            f"Created {template.display_name} project '{request.project_name}' "
+            f"at {result.project_dir}"
+        ),
+    )
+
+
+@chat_router.post("/index-knowledge", response_model=IndexKnowledgeResponse)
+async def index_knowledge_endpoint(request: IndexKnowledgeRequest):
+    """Index the knowledge directory for domain document retrieval."""
+    try:
+        from lean_ai.knowledge.indexer import index_knowledge, knowledge_index_dir
+    except ImportError:
+        raise HTTPException(
+            status_code=501,
+            detail="Knowledge module not yet available",
+        )
+
+    if request.force_reindex:
+        idx_path = knowledge_index_dir(request.repo_root)
+        if os.path.exists(idx_path):
+            shutil.rmtree(idx_path)
+
+    try:
+        stats = await asyncio.to_thread(index_knowledge, request.repo_root)
+    except Exception as e:
+        logger.warning("Knowledge indexing failed: %s", e)
+        return IndexKnowledgeResponse(status="failed")
+
+    return IndexKnowledgeResponse(
+        status=stats.get("status", "indexed"),
+        doc_count=stats.get("doc_count", 0),
+        chunk_count=stats.get("chunk_count", 0),
+    )
+
+
+@chat_router.post("/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest):
+    """Lightweight read-only chat with workspace context.
+
+    Gathers workspace context (file tree, project architecture, active file,
+    search results, web search) and sends to the LLM. No FSM, no database,
+    no tool execution.
+    """
+    workspace = request.workspace
+    file_tree: list[str] = []
+    active_file_content: str | None = None
+    search_results: list[dict] = []
+    project_context: str | None = None
+    web_search_text: str | None = None
+    fetched_pages: list[dict] = []
+
+    async def _gather_workspace_context():
+        nonlocal file_tree, active_file_content, search_results, project_context
+        try:
+            if not (workspace and workspace.workspace_root):
+                return
+            root = workspace.workspace_root
+
+            file_tree = await asyncio.to_thread(get_file_tree, root)
+            project_context = await asyncio.to_thread(read_project_context, root)
+
+            if workspace.active_file and not workspace.active_selection:
+                active_file_content = await asyncio.to_thread(
+                    read_active_file, root, workspace.active_file,
+                )
+
+            if request.message and len(request.message) > 5:
+                search_results = await asyncio.to_thread(
+                    search_workspace, root, request.message, 8,
+                )
+        except Exception as e:
+            logger.warning("Chat workspace context failed (non-fatal): %s", e)
+
+    async def _do_web_search():
+        nonlocal web_search_text
+        if not request.message or len(request.message) < 10:
+            return
+        try:
+            result = await internet.search_internet(
+                request.message, llm_client=llm_client,
+            )
+            if result.success and result.output:
+                web_search_text = result.output
+        except Exception as e:
+            logger.debug("Chat web search failed (non-fatal): %s", e)
+
+    async def _fetch_urls():
+        nonlocal fetched_pages
+        urls = extract_urls(request.message)
+        summarize_threshold = min(30_000, max(5_000, settings.ollama_context_window // 4))
+        for url in urls[:3]:
+            try:
+                result = await internet.fetch_url(
+                    url, llm_client=llm_client,
+                    summarize_threshold=summarize_threshold,
+                )
+                if result.success:
+                    fetched_pages.append({"url": url, "content": result.output})
+                else:
+                    fetched_pages.append({
+                        "url": url,
+                        "content": f"(Failed to fetch: {result.error})",
+                    })
+            except Exception as e:
+                logger.debug("Chat URL fetch failed for %s: %s", url, e)
+                fetched_pages.append({"url": url, "content": f"(Failed to fetch: {e})"})
+
+    await asyncio.gather(
+        _gather_workspace_context(),
+        _do_web_search(),
+        _fetch_urls(),
+    )
+
+    system_prompt = build_chat_system_prompt(
+        workspace=workspace,
+        file_tree=file_tree,
+        active_file_content=active_file_content,
+        search_results=search_results,
+        project_context=project_context,
+        fetched_pages=fetched_pages or None,
+        web_search_results=web_search_text,
+    )
+    messages = [{"role": "system", "content": system_prompt}]
+
+    for msg in request.history[-20:]:
+        messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": request.message})
+
+    logger.info(
+        "Chat: history=%d, files=%d, search=%d, project_ctx=%s, web=%s",
+        len(request.history), len(file_tree), len(search_results),
+        bool(project_context), bool(web_search_text),
+    )
+
+    try:
+        reply = await llm_client.chat_raw(
+            messages,
+            max_tokens=settings.ollama_max_tokens,
+        )
+        metrics = llm_client.last_chat_metrics or {}
+        return ChatResponse(
+            reply=reply,
+            tokens_per_second=metrics.get("tokens_per_second"),
+            eval_count=metrics.get("eval_count"),
+        )
+    except Exception as e:
+        logger.exception("Chat call failed")
+        return ChatResponse(reply=f"Error: {e}")
+
+
+@chat_router.post("/predict")
+async def inline_predict(request: InlinePredictRequest):
+    """Stateless inline prediction — Copilot-style completions."""
+    try:
+        completion = await _inline_client.generate_completion(
+            request.prefix, suffix=request.suffix,
+        )
+        confidence = 0.8 if completion.strip() else 0.0
+        return {"completion": completion, "confidence": confidence}
+    except Exception as e:
+        logger.exception("Inline prediction failed")
+        return {"completion": "", "confidence": 0.0, "error": str(e)}
+
+
+@chat_router.get("/health")
+async def health():
+    """Health check."""
+    return {"status": "ok"}
