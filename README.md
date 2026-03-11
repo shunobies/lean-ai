@@ -401,3 +401,67 @@ lean_ai/
 - Python 3.10+
 - Node.js 18+ (for the extension)
 - Ollama running locally with a capable model (e.g., `qwen3-coder:30b`)
+
+## Customizing the LLM with an Ollama Modelfile
+
+If the model produces deprecated APIs, uses outdated patterns, or doesn't follow your project's conventions, you can bake rules directly into the model using an Ollama Modelfile. This creates a custom model variant with a persistent system prompt — no extra context cost per request.
+
+### 1. Create a Modelfile
+
+Create a file called `Modelfile` (no extension) with your base model and rules:
+
+```
+FROM qwen3-coder:30b-a3b-q4_K_M
+
+SYSTEM """
+Target Laravel 12 and PHPUnit 12+. Never use deprecated APIs.
+
+## Laravel Rewrite Rules
+- dispatchNow → dispatchSync
+- dispatch_now → dispatch_sync
+- Redirect::home → Redirect::route('home')
+- protected $dates → protected $casts (datetime)
+- Schema::getAllTables → Schema::getTables
+- unsignedDecimal() → decimal()->unsigned()
+- HasVersion7Uuids → HasUuids
+- All Doctrine DBAL methods removed — use native Schema inspection
+
+## PHPUnit Rewrite Rules
+- Never use doc-comment annotations (@test, @dataProvider, @covers, etc.)
+- Use PHP 8 attributes: #[Test], #[DataProvider(...)], #[CoversClass(...)], etc.
+- assertContainsOnly() → use type-specific variant (assertContainsOnlyString, etc.)
+- No Prophecy — use native PHPUnit mocks
+- Data providers must be static methods
+
+If deprecated patterns appear in existing code, refactor them automatically.
+"""
+```
+
+Adapt the rules to your language and framework. Keep the system prompt focused — a concise set of rewrite rules is followed more reliably than a verbose document.
+
+### 2. Build the custom model
+
+```bash
+ollama create my-custom-model -f Modelfile
+```
+
+The file can be named anything and placed anywhere — just pass the path to `ollama create`:
+
+```bash
+ollama create my-custom-model -f /path/to/my-modelfile
+```
+
+### 3. Use it with Lean AI
+
+Update your `backend/.env` to point to the new model:
+
+```env
+LEAN_AI_OLLAMA_MODEL=my-custom-model
+```
+
+### Tips
+
+- **One SYSTEM block** — if you have multiple Modelfiles or multiple `SYSTEM` lines, only the last one takes effect. Combine all rules into a single `SYSTEM` block.
+- **Keep it concise** — the model already knows most languages and frameworks from pretraining. You only need to provide the mapping table for things it gets wrong (e.g., deprecated API replacements).
+- **Complement with steering documents** — Modelfile rules are language/framework-level conventions that apply to every project. For project-specific guidance, use `.lean_ai/context/*.md` steering documents instead (see [Custom Steering Documents](#custom-steering-documents)).
+- **Iterate** — if the model still produces deprecated patterns, add those specific patterns to the system prompt. If it follows the rules reliably, don't add more — every rule dilutes the weight of the others.
