@@ -251,6 +251,7 @@ Commands available in the VSCodium sidebar chat:
 |---|---|
 | `/init` | Index the workspace and generate project context. Use `/init --force` to regenerate from scratch |
 | `/guide` | Regenerate `.lean_ai/framework_guide.md` without re-indexing or regenerating project context |
+| `/style` | Generate `.lean_ai/context/style_guide.md` from the project's CSS, templates, and component files |
 | `/scaffold` | Create a new project from a scaffold recipe. `/scaffold list` shows available recipes, `/scaffold <name> <project>` creates one |
 | `/agent` | Send a task directly to the agent (skips chat, goes straight to planning) |
 | `/fix` | Skip planning — the agent explores, diagnoses, and fixes directly with full tool access |
