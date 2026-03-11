@@ -20,6 +20,8 @@ from lean_ai.routers.models import (
     GenerateFrameworkGuideResponse,
     GenerateProjectContextRequest,
     GenerateProjectContextResponse,
+    GenerateStyleGuideRequest,
+    GenerateStyleGuideResponse,
     InitWorkspaceRequest,
     InitWorkspaceResponse,
 )
@@ -134,6 +136,35 @@ async def generate_framework_guide_endpoint(request: GenerateFrameworkGuideReque
             )
         path = write_framework_guide(request.repo_root, content)
         return GenerateFrameworkGuideResponse(path=path, chars=len(content))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@generation_router.post("/generate-style-guide", response_model=GenerateStyleGuideResponse)
+async def generate_style_guide_endpoint(request: GenerateStyleGuideRequest):
+    """Generate .lean_ai/context/style_guide.md for the workspace."""
+    guide_path = Path(request.repo_root) / ".lean_ai" / "context" / "style_guide.md"
+    if request.skip_if_exists and guide_path.is_file():
+        return GenerateStyleGuideResponse(
+            path=str(guide_path), chars=guide_path.stat().st_size, skipped=True,
+        )
+
+    try:
+        from lean_ai.context.style_guide import (
+            generate_style_guide,
+            write_style_guide,
+        )
+
+        content = await generate_style_guide(request.repo_root, llm_client)
+        if not content:
+            raise HTTPException(
+                status_code=404,
+                detail="No style files detected in the project",
+            )
+        path = write_style_guide(request.repo_root, content)
+        return GenerateStyleGuideResponse(path=path, chars=len(content))
     except HTTPException:
         raise
     except Exception as exc:

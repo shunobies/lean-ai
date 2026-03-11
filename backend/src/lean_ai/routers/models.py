@@ -116,3 +116,14 @@ class GenerateFrameworkGuideResponse(BaseModel):
     path: str
     chars: int
     skipped: bool = False
+
+
+class GenerateStyleGuideRequest(BaseModel):
+    repo_root: str
+    skip_if_exists: bool = False
+
+
+class GenerateStyleGuideResponse(BaseModel):
+    path: str
+    chars: int
+    skipped: bool = False
