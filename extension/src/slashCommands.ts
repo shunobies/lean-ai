@@ -38,6 +38,7 @@ export function createSlashCommands(
     map.set("/agent",    (args) => handleAgentCommand(ctx, args));
     map.set("/fix",      (args) => handleFixCommand(ctx, args));
     map.set("/guide",    (args) => handleGuideCommand(ctx, args));
+    map.set("/style",    (args) => handleStyleCommand(ctx, args));
     map.set("/reboot",   (args) => handleRebootCommand(ctx, args));
     map.set("/approve",  (args) => handleApproveCommand(ctx, args));
     map.set("/reject",   (args) => handleRejectCommand(ctx, args));
@@ -290,6 +291,78 @@ export async function handleGuideCommand(
             ctx.postMessage({
                 type: "reply",
                 text: `Framework guide generation failed: ${error}`,
+                cls: "msg-system",
+            });
+        }
+    }
+
+    ctx.postMessage({ type: "thinking", show: false });
+}
+
+// ── /style — generate style guide from CSS and template files ────────
+
+export async function handleStyleCommand(
+    ctx: SlashCommandContext,
+    _args: string,
+): Promise<void> {
+    // Health check
+    ctx.postMessage({ type: "thinking", show: true, text: "Checking backend..." });
+    const healthy = await ctx.client.healthCheck();
+    if (!healthy) {
+        ctx.postMessage({ type: "thinking", show: false });
+        ctx.postMessage({
+            type: "error",
+            text: "Backend not available. Start the server:\ncd backend && uvicorn lean_ai.main:app --reload --port 8422",
+        });
+        return;
+    }
+
+    const repoRoot = ctx.getRepoRoot();
+
+    // Elapsed-time ticker
+    const styleStart = Date.now();
+    const styleTicker = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - styleStart) / 1000);
+        const mins = Math.floor(elapsed / 60);
+        const secs = elapsed % 60;
+        const timeStr = mins > 0
+            ? `${mins}m ${secs.toString().padStart(2, "0")}s`
+            : `${secs}s`;
+        ctx.postMessage({
+            type: "thinking",
+            show: true,
+            text: `Generating style guide... (${timeStr})`,
+        });
+    }, 5_000);
+
+    ctx.postMessage({
+        type: "thinking",
+        show: true,
+        text: "Generating style guide...",
+    });
+
+    try {
+        // Always force-regenerate — the whole point of /style
+        const styleResult = await ctx.client.generateStyleGuide(repoRoot, true);
+        clearInterval(styleTicker);
+        ctx.postMessage({
+            type: "reply",
+            text: `Style guide generated (${styleResult.chars.toLocaleString()} chars).`,
+            cls: "msg-system",
+        });
+    } catch (e) {
+        clearInterval(styleTicker);
+        const error = e instanceof Error ? e.message : String(e);
+        if (error.includes("404")) {
+            ctx.postMessage({
+                type: "reply",
+                text: "No style files detected — style guide skipped.",
+                cls: "msg-system",
+            });
+        } else {
+            ctx.postMessage({
+                type: "reply",
+                text: `Style guide generation failed: ${error}`,
                 cls: "msg-system",
             });
         }

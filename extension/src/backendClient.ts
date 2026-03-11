@@ -440,6 +440,18 @@ export class BackendClient {
         )) as { path: string; chars: number; skipped?: boolean };
     }
 
+    async generateStyleGuide(
+        repoRoot: string,
+        force: boolean = false,
+    ): Promise<{ path: string; chars: number; skipped?: boolean }> {
+        // Generates .lean_ai/context/style_guide.md from CSS and template files.
+        // Returns 404 if no style files detected — caller should treat as non-fatal.
+        return (await this._postJsonNoTimeout(
+            "/api/generate-style-guide",
+            { repo_root: repoRoot, skip_if_exists: !force },
+        )) as { path: string; chars: number; skipped?: boolean };
+    }
+
     async listScaffolds(): Promise<{
         scaffolds: Array<{
             name: string;

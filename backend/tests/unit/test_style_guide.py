@@ -1,7 +1,5 @@
 """Tests for style guide file discovery and classification."""
 
-from pathlib import Path
-
 from lean_ai.context.style_guide import _classify_file, _discover_style_files
 
 
