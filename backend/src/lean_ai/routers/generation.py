@@ -55,14 +55,15 @@ async def init_workspace(request: InitWorkspaceRequest):
         index_status = "indexed"
 
         # Background embedding generation
-        async def _embed_background() -> None:
-            try:
-                await _generate_embeddings(request.repo_root, llm_client)
-                logger.info("Background embedding complete for %s", request.repo_root)
-            except Exception as exc:
-                logger.debug("Background embedding failed (non-fatal): %s", exc)
+        if settings.enable_embeddings:
+            async def _embed_background() -> None:
+                try:
+                    await _generate_embeddings(request.repo_root, llm_client)
+                    logger.info("Background embedding complete for %s", request.repo_root)
+                except Exception as exc:
+                    logger.debug("Background embedding failed (non-fatal): %s", exc)
 
-        asyncio.create_task(_embed_background())
+            asyncio.create_task(_embed_background())
 
         # Background knowledge indexing
         async def _index_knowledge_background() -> None:
