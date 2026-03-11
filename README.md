@@ -148,8 +148,7 @@ Custom steering documents can be added to `.lean_ai/context/` — see [Custom St
 | `LEAN_AI_IMPLEMENTATION_MAX_TOKENS` | *(derived: 25% of context window)* | Max tokens per LLM turn during implementation |
 | `LEAN_AI_REMINDER_INTERVAL` | `10` | Re-inject task + scratchpad reminder every N tool-calling turns |
 | `LEAN_AI_LOOP_DETECTION_THRESHOLD` | `3` | Consecutive identical tool calls before warning (`0` = off) |
-| `LEAN_AI_COMPRESSION_THRESHOLD` | `0.7` | Compress conversation history at this fraction of context window |
-| `LEAN_AI_COMPRESSION_PRESERVE` | `0.3` | Keep recent fraction of history after compression |
+| `LEAN_AI_REFRESH_THRESHOLD` | `0.7` | Refresh context (re-read files from disk, inject scratchpad) at this fraction of context window |
 
 #### Tool Execution
 
@@ -239,9 +238,11 @@ Shell commands (`run_tests`, `run_lint`, `format_code`) pass through a safety ga
 
 The **scratchpad** is a per-session file (`.lean_ai/scratchpads/{session_id}.md`, max 2,000 chars) the LLM uses to track its own progress. It writes structured sections (`## Completed`, `## Current State`, `## Cross-File References`, `## Files Modified`, `## Next Step`) via the `update_scratchpad` tool. Each call overwrites the previous content.
 
-Every `LEAN_AI_REMINDER_INTERVAL` turns (default 10), a **task reminder** is injected into the conversation containing the original task and the current scratchpad content. This keeps the LLM oriented even after Ollama evicts earlier turns from its context window. The scratchpad also survives crashes — on `/resume`, it's injected into the initial prompt so the LLM can continue where it left off without redoing work.
+Every `LEAN_AI_REMINDER_INTERVAL` turns (default 10), a **task reminder** is injected into the conversation containing the original task and the current scratchpad content. This keeps the LLM oriented even after Ollama evicts earlier turns from its context window.
 
-The scratchpad is deleted when a session is closed via `/approve` or `/reject`.
+When the conversation reaches `LEAN_AI_REFRESH_THRESHOLD` (default 70%) of the context window, a **context refresh** occurs: old messages are dropped, all context files are re-read from disk (picking up any updates made during the session), and the scratchpad is injected so the LLM can continue from where it left off. No LLM summarization call is needed — the scratchpad provides continuity. The context percentage resets, giving the LLM a fresh window to work in.
+
+The scratchpad also survives crashes — on `/resume`, it's injected into the initial prompt so the LLM can continue where it left off without redoing work. The scratchpad is deleted when a session is closed via `/approve` or `/reject`.
 
 ## Slash Commands
 
@@ -302,6 +303,7 @@ All under the `/api` prefix.
 | `POST` | `/init-workspace` | Index workspace, generate embeddings, index knowledge base |
 | `POST` | `/generate-project-context` | Regenerate `.lean_ai/project_context.md` |
 | `POST` | `/generate-framework-guide` | Regenerate `.lean_ai/framework_guide.md` for the detected framework |
+| `POST` | `/generate-style-guide` | Generate `.lean_ai/context/style_guide.md` from CSS and template files |
 | `POST` | `/index-knowledge` | Index knowledge documents |
 
 ### Chat & Predictions
@@ -326,7 +328,7 @@ All under the `/api` prefix.
 
 ### WebSocket Protocol
 
-Message types sent from server to client: `stage_change`, `assistant_content`, `approval_required`, `plan_rejected`, `plan_revision`, `tool_progress`, `tool_approval_required`, `diff`, `test_result`, `error`, `complete`, `stage_status`, `clarification_needed`, `pong`, `branch_created`, `checkpoint`.
+Message types sent from server to client: `stage_change`, `assistant_content`, `approval_required`, `plan_rejected`, `plan_revision`, `tool_progress`, `tool_approval_required`, `diff`, `test_result`, `error`, `complete`, `stage_status`, `clarification_needed`, `pong`, `branch_created`, `checkpoint`, `metrics_update`, `merge_complete`, `context_refreshed`.
 
 Message types sent from client to server: `user_message`, `approve`, `reject`, `approve_tool`, `deny_tool`, `ping`.
 
@@ -341,7 +343,15 @@ lean_ai/
 │       ├── main.py            # FastAPI entry point
 │       ├── config.py          # Pydantic settings (LEAN_AI_ prefix)
 │       ├── db.py              # Minimal SQLite (2 tables: sessions, tool_logs)
-│       ├── router.py          # All API endpoints
+│       ├── router.py          # Top-level API router (mounts sub-routers)
+│       ├── routers/
+│       │   ├── chat.py        # /chat endpoint
+│       │   ├── context_helpers.py  # Context file loading utilities
+│       │   ├── dependencies.py     # FastAPI dependency injection
+│       │   ├── generation.py  # Context/guide/style generation endpoints
+│       │   ├── models.py      # Pydantic request/response models
+│       │   ├── sessions.py    # Session CRUD + merge/abandon endpoints
+│       │   └── workflow.py    # WebSocket workflow endpoint
 │       ├── llm/
 │       │   ├── client.py      # Async Ollama client with tool-calling loop
 │       │   ├── planner.py     # 6-phase decomposed planning pipeline
@@ -353,13 +363,30 @@ lean_ai/
 │       │   ├── shell.py       # run_tests, run_lint, format_code
 │       │   ├── git_ops.py     # Git operations (branch, stash, merge)
 │       │   ├── command_safety.py  # Command safety gate
-│       │   └── internet.py    # Web search + URL fetching
+│       │   ├── internet.py    # Web search + URL fetching
+│       │   ├── browser_search.py  # Google/Bing via headless Chrome
+│       │   ├── scratchpad.py  # Per-session progress tracking
+│       │   ├── scaffold.py    # Project scaffolding tool
+│       │   └── executor.py    # Tool execution framework
+│       ├── context/
+│       │   ├── content.py     # Project context generation (single/multi-round)
+│       │   ├── generation.py  # Context update orchestration
+│       │   ├── framework_guide.py    # Framework guide generation
+│       │   ├── framework_detection.py # Framework detection from deps
+│       │   ├── framework_search.py   # Web search for framework docs
+│       │   ├── framework_validation.py # Guide validation + repair
+│       │   ├── style_guide.py # Style guide generation from CSS/templates
+│       │   ├── deprecations.py # Dependency version deprecation checks
+│       │   ├── dedup.py       # Section deduplication utilities
+│       │   ├── metadata.py    # Tree-sitter metadata extraction + cache
+│       │   └── constants.py   # Context generation constants
 │       ├── languages/         # 13 tree-sitter language definitions (YAML)
 │       ├── indexer/           # Whoosh BM25F search + embedding store
-│       ├── context/           # Project context + framework guide generation
 │       ├── knowledge/         # Domain document indexing
 │       ├── workflow/
-│       │   ├── pipeline.py    # Plan + fix workflows
+│       │   ├── pipeline.py    # Plan + fix workflows with context refresh
+│       │   ├── prompts.py     # Prompt builders for workflow modes
+│       │   ├── tool_executor.py  # Tool dispatch + safety gate
 │       │   └── ws_handler.py  # WebSocket message helper
 │       └── scaffolds/         # 19 YAML scaffold recipes
 │
@@ -367,17 +394,19 @@ lean_ai/
     ├── package.json           # Commands, settings, chat participant
     └── src/
         ├── extension.ts       # Extension entry point
-        ├── sidebarProvider.ts # Sidebar chat panel + slash commands
+        ├── sidebarProvider.ts # Sidebar chat panel
         ├── sidebarHtml.ts     # Sidebar HTML template
+        ├── slashCommands.ts   # Slash command handlers (/init, /fix, /style, etc.)
         ├── chatParticipant.ts # VSCodium Chat Participant API
         ├── inlineProvider.ts  # Copilot-style inline completions
         ├── backendClient.ts   # HTTP/WebSocket client for the backend
         ├── backendProcess.ts  # Backend process management
-        ├── streamHandler.ts   # WebSocket message handler
+        ├── streamHandler.ts   # WebSocket stream processing
+        ├── wsHandler.ts       # WebSocket connection + message dispatch
+        ├── conversationManager.ts  # Conversation history management
         ├── sessionTreeProvider.ts  # Sessions tree view
         ├── sessionDetailProvider.ts # Session detail webview
         ├── indexingService.ts # Workspace indexing service
-        ├── wsHandler.ts       # WebSocket connection handler
         ├── constants.ts       # Shared constants
         └── types.ts           # TypeScript type definitions
 ```
