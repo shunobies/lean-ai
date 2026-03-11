@@ -54,13 +54,15 @@ async def edit_file(
         # Fuzzy match with whitespace normalization
         modified = _fuzzy_search_replace(original, search, replace)
         if modified is None:
-            return ToolResult(
-                success=False,
-                error=(
-                    f"SEARCH block not found in {path}. "
-                    f"The search text must match the file exactly."
-                ),
+            diagnostic = _find_closest_match(original, search)
+            hint = (
+                f"SEARCH block not found in {path}. "
+                f"The file may have changed from a previous edit. "
+                f"Re-read it with read_file before retrying."
             )
+            if diagnostic:
+                hint += f"\n\nClosest match in {path}:\n{diagnostic}"
+            return ToolResult(success=False, error=hint)
 
     file_path.write_text(modified, encoding="utf-8")
     diff = _generate_diff(original, modified, path)
@@ -184,6 +186,67 @@ def _reindent_replacement(
             trim = min(current_indent, abs(offset))
             result.append(line[trim:])
     return result
+
+
+def _find_closest_match(original: str, search: str) -> str | None:
+    """Find the closest matching region in a file for a failed search block.
+
+    Uses the first substantive line of the search block as an anchor,
+    scores candidate positions by how many surrounding lines also match,
+    and returns a formatted snippet with line numbers (capped at 15 lines).
+    """
+    orig_lines = original.split("\n")
+    search_lines = search.split("\n")
+
+    # Find the first non-blank search line to use as anchor
+    anchor_idx = None
+    anchor_stripped = ""
+    for i, line in enumerate(search_lines):
+        if line.strip():
+            anchor_idx = i
+            anchor_stripped = line.strip().lower()
+            break
+
+    if anchor_idx is None:
+        return None  # All-blank search block
+
+    # Find all positions where the anchor line appears (stripped, case-insensitive)
+    candidates: list[tuple[int, int]] = []  # (block_start, score)
+    for i, orig_line in enumerate(orig_lines):
+        if orig_line.strip().lower() == anchor_stripped:
+            block_start = i - anchor_idx
+            score = 0
+            for j, s_line in enumerate(search_lines):
+                file_idx = block_start + j
+                if 0 <= file_idx < len(orig_lines):
+                    if s_line.strip().lower() == orig_lines[file_idx].strip().lower():
+                        score += 1
+            candidates.append((block_start, score))
+
+    # Fallback: substring match on anchor
+    if not candidates:
+        for i, orig_line in enumerate(orig_lines):
+            if anchor_stripped in orig_line.strip().lower():
+                candidates.append((i - anchor_idx, 1))
+
+    if not candidates:
+        return None
+
+    best_start, _ = max(candidates, key=lambda c: c[1])
+
+    # Build a display window around the best match
+    display_start = max(0, best_start - 2)
+    display_end = min(len(orig_lines), best_start + len(search_lines) + 2)
+
+    snippet = []
+    for i in range(display_start, display_end):
+        snippet.append(f"{i + 1:>4} | {orig_lines[i]}")
+
+    if len(snippet) > 15:
+        snippet = snippet[:15]
+        snippet.append("     | ...")
+
+    return "\n".join(snippet)
 
 
 def _generate_diff(original: str, modified: str, file_path: str) -> str:

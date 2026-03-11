@@ -57,7 +57,9 @@ search blocks match the actual file content exactly.
 3. Work incrementally — make one change at a time. For edit_file, keep \
 search blocks small: only the lines being changed plus 1-2 lines of \
 surrounding context for uniqueness.
-4. Use multiple edit_file calls for multiple changes in the same file.
+4. Use multiple edit_file calls for multiple changes in the same file. \
+If edit_file fails, re-read the file before retrying — the content changes \
+after each successful edit.
 5. For new files, use create_file with the complete file content.
 6. Verify when appropriate — run_tests or run_lint after significant changes.
 7. Adapt to what you discover — if the codebase is structured differently \
@@ -84,7 +86,9 @@ stale or incomplete, call read_file on the target file first, then make the edit
 no placeholder implementations, no skeleton code.
 3. For edit_file: keep search blocks small — only the lines being changed \
 plus 1-2 lines of surrounding context for uniqueness. Use multiple edit_file \
-calls if the instruction requires changes in multiple locations within the file.
+calls if the instruction requires changes in multiple locations within the file. \
+If edit_file fails, re-read the file before retrying — it may have changed \
+from a previous edit.
 4. For run_tests / run_lint / format_code: call the tool with the exact \
 command specified in the instruction.
 5. Do NOT make changes to any file other than the one specified in this step.
@@ -106,7 +110,8 @@ WORKFLOW:
 1. Start by reading the relevant files to understand the current code.
 2. Use grep_files / directory_tree / list_directory to locate related code \
 if needed.
-3. Make the minimal changes needed to fix the issue.
+3. Make the minimal changes needed to fix the issue. \
+If edit_file fails, re-read the file before retrying.
 4. After making changes, run tests and/or lint if a command is known \
 to verify the fix.
 5. If tests or lint fail, read the output, fix the problem, and re-run.

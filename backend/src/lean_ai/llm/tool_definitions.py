@@ -39,7 +39,10 @@ IMPLEMENTATION_TOOLS: list[dict] = [
                 "The search text must match the file content exactly, including "
                 "indentation and whitespace. Keep search blocks small — only the "
                 "lines being changed plus 1-2 lines of surrounding context. "
-                "Use multiple edit_file calls for multiple changes in the same file."
+                "Use multiple edit_file calls for multiple changes in the same file. "
+                "If edit_file fails, always re-read the file with read_file "
+                "before retrying — the file content changes after each "
+                "successful edit."
             ),
             "parameters": {
                 "type": "object",
