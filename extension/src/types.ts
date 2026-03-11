@@ -147,6 +147,11 @@ export interface MetricsUpdateMessage {
     context_window: number;
 }
 
+export interface ContextRefreshedMessage {
+    type: "context_refreshed";
+    message: string;
+}
+
 // --- REST API Types ---
 
 export interface CreateSessionResponse {

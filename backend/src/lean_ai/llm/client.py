@@ -307,23 +307,27 @@ class LLMClient:
             if token:
                 yield token
 
-    async def _maybe_compress(
+    async def _maybe_refresh_context(
         self,
         messages: list[dict],
         threshold: float,
-        preserve: float,
         prompt_tokens: int | None = None,
-    ) -> None:
-        """Compress older conversation history in-place when nearing context limits.
+        on_context_refresh: Callable | None = None,
+    ) -> bool:
+        """Refresh conversation context when nearing context window limits.
 
-        When *prompt_tokens* (from Ollama's ``prompt_eval_count``) is
-        provided, it is used directly.  Otherwise a rough char-based
-        estimate (chars // 4) is used as a fallback.  When the token
-        count exceeds *threshold* fraction of the context window, older
-        messages (after the system prompt) are summarised by an LLM call
-        and replaced with a single summary message.  The most recent
-        *preserve* fraction of the conversation is kept intact.
+        When *prompt_tokens* (from Ollama's ``prompt_eval_count``) exceeds
+        *threshold* fraction of the context window, delegates to the
+        *on_context_refresh* callback to rebuild the message list from fresh
+        disk state (re-read context files, inject scratchpad).
+
+        No LLM call is needed — the callback handles everything.
+
+        Returns ``True`` if a refresh occurred, ``False`` otherwise.
         """
+        if on_context_refresh is None:
+            return False
+
         if prompt_tokens is not None:
             est_tokens = prompt_tokens
         else:
@@ -331,76 +335,33 @@ class LLMClient:
         limit = int(threshold * self._context_window)
 
         if est_tokens < limit:
-            return
+            return False
         if len(messages) < 4:
-            return
+            return False
 
-        # Walk backward to find split point — keep `preserve` fraction.
-        # If total content is small enough that preserve covers everything,
-        # split at the midpoint to still compress the older half.
-        preserve_tokens = int(preserve * self._context_window)
-        accum = 0
-        split = 2  # Default: compress everything except system + first message
-        for idx in range(len(messages) - 1, 0, -1):
-            accum += len(messages[idx].get("content") or "") // 4
-            if accum >= preserve_tokens:
-                split = idx
-                break
-
-        # Ensure split lands on a valid boundary (not mid-tool-exchange).
-        # Walk backward to find a user message or a non-tool message.
-        while split > 1 and messages[split].get("role") == "tool":
-            split -= 1
-        # Also skip the assistant message with tool_calls that precedes tools
-        if (
-            split > 1
-            and messages[split].get("role") == "assistant"
-            and messages[split].get("tool_calls")
-        ):
-            split -= 1
-
-        if split <= 1:
-            return  # Nothing to compress
-
-        old_messages = messages[1:split]
-        if not old_messages:
-            return
-
-        # Build summary from old messages
-        history_text = "\n".join(
-            f"[{m.get('role', '?')}] {(m.get('content') or '')[:500]}"
-            for m in old_messages
-        )
-
-        compress_prompt = (
-            "Summarize the following conversation history into a concise state snapshot.\n"
-            "Include: what was accomplished, what files were modified, current errors "
-            "or blockers, and what remains to be done.\n"
-            "Be factual and specific. Preserve file paths, function names, and error "
-            "messages exactly.\n\n"
-            f"{history_text}"
+        logger.info(
+            "chat_with_tools: context refresh triggered at %d/%d tokens (%.0f%%)",
+            est_tokens, self._context_window,
+            (est_tokens / self._context_window) * 100,
         )
 
         try:
-            summary = await self.chat_raw(
-                messages=[{"role": "user", "content": compress_prompt}],
-                max_tokens=2048,
-            )
-            if not summary.strip():
-                return
+            new_messages = on_context_refresh(messages)
         except Exception:
-            logger.warning("chat_with_tools: compression LLM call failed, skipping")
-            return
+            logger.warning(
+                "chat_with_tools: context refresh callback failed, skipping",
+                exc_info=True,
+            )
+            return False
 
+        messages[:] = _sanitize_messages(new_messages)
+
+        new_est = sum(len(m.get("content") or "") for m in messages) // 4
         logger.info(
-            "chat_with_tools: compressed %d messages (%d→%d est. tokens)",
-            len(old_messages), est_tokens,
-            sum(len(m.get("content") or "") for m in messages[split:]) // 4
-            + len(summary) // 4,
+            "chat_with_tools: context refreshed — %d→%d est. tokens, %d messages",
+            est_tokens, new_est, len(messages),
         )
-        messages[1:split] = [
-            {"role": "user", "content": f"[Previous conversation summary]\n{summary}"},
-        ]
+        return True
 
     async def chat_with_tools(
         self,
@@ -417,6 +378,7 @@ class LLMClient:
         on_tool_result: Callable | None = None,
         on_content: Callable | None = None,
         on_metrics: Callable | None = None,
+        on_context_refresh: Callable | None = None,
     ) -> tuple[list[ToolCall], str]:
         """Multi-turn tool calling loop using Ollama's native tools= parameter.
 
@@ -443,6 +405,7 @@ class LLMClient:
         )
         prev_tool_hash: str | None = None
         consecutive_count: int = 0
+        last_refresh_turn: int = -10  # Cooldown: no refresh within 5 turns of last
 
         # 0 means unlimited — use a practically infinite ceiling
         effective_max = max_turns if max_turns > 0 else 2**31
@@ -608,14 +571,24 @@ class LLMClient:
                 logger.info("chat_with_tools: task_complete called — exiting loop")
                 break
 
-            # Compress conversation history if approaching context limits.
+            # Refresh context when approaching context limits.
             # Use actual prompt token count from Ollama when available.
-            await self._maybe_compress(
-                messages,
-                threshold=settings.compression_threshold,
-                preserve=settings.compression_preserve,
-                prompt_tokens=last_prompt_tokens or None,
-            )
+            # Cooldown: skip if a refresh happened within the last 5 turns.
+            if turn - last_refresh_turn >= 5:
+                refreshed = await self._maybe_refresh_context(
+                    messages,
+                    threshold=settings.refresh_threshold,
+                    prompt_tokens=last_prompt_tokens or None,
+                    on_context_refresh=on_context_refresh,
+                )
+                if refreshed:
+                    last_refresh_turn = turn
+                    # Send updated metrics so the frontend meter drops.
+                    if on_metrics:
+                        est_new = sum(
+                            len(m.get("content") or "") for m in messages
+                        ) // 4
+                        await on_metrics(est_new, self._context_window)
 
             # Inject periodic task reminder to keep the original task in
             # the model's active attention window.  Ollama truncates from the

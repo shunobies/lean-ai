@@ -20,6 +20,7 @@ from lean_ai.config import settings
 from lean_ai.llm.plan_schema import ExecutionPlan, plan_to_markdown
 from lean_ai.llm.planner import assess_clarity, create_plan
 from lean_ai.llm.tool_definitions import IMPLEMENTATION_TOOLS
+from lean_ai.routers.context_helpers import load_full_context
 from lean_ai.tools import scratchpad
 from lean_ai.workflow.prompts import (
     build_fix_system_prompt,
@@ -533,6 +534,41 @@ async def _run_fix(
             )
         return "\n".join(parts)
 
+    def _build_context_refresh(current_messages: list[dict]) -> list[dict]:
+        """Rebuild message list from fresh disk state."""
+        fresh_context = load_full_context(repo_root)
+        fresh_system_prompt = build_fix_system_prompt(fresh_context)
+        pad = scratchpad.read_scratchpad(repo_root, session_id)
+
+        new_messages: list[dict] = [
+            {"role": "system", "content": fresh_system_prompt},
+            {"role": "user", "content": task},
+        ]
+        if pad:
+            new_messages.append({
+                "role": "user",
+                "content": (
+                    "[CONTEXT REFRESHED — conversation history cleared to "
+                    "free context space. Your scratchpad has your "
+                    "progress.]\n\n" + pad
+                ),
+            })
+        else:
+            new_messages.append({
+                "role": "user",
+                "content": (
+                    "[CONTEXT REFRESHED — conversation history cleared to "
+                    "free context space.]\n\n"
+                    "Call update_scratchpad to record your progress, "
+                    "then continue working on the task."
+                ),
+            })
+
+        ws_send_nowait(ws, "context_refreshed", {
+            "message": "Context refreshed — scratchpad provides continuity.",
+        })
+        return new_messages
+
     executed, explanation = await llm_client.chat_with_tools(
         messages=messages,
         tools=IMPLEMENTATION_TOOLS,
@@ -545,6 +581,7 @@ async def _run_fix(
         on_tool_result=on_tool_result,
         on_content=on_content,
         on_metrics=on_metrics,
+        on_context_refresh=_build_context_refresh,
     )
 
     # ── Completion ────────────────────────────────────────────────

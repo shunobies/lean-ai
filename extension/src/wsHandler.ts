@@ -355,6 +355,16 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
             break;
         }
 
+        // --- Context refreshed: conversation rebuilt from disk ---
+        case "context_refreshed": {
+            ctx.postMessage({
+                type: "reply",
+                text: `\n---\n*Context refreshed* — ${raw.message}\n---\n`,
+                cls: "msg-system",
+            });
+            break;
+        }
+
         // --- Tool approval gate: destructive command needs user confirmation ---
         case "tool_approval_required": {
             // Forward to the webview which renders the inline approve/deny card.

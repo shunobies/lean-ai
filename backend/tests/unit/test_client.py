@@ -608,22 +608,27 @@ def test_sanitize_handles_empty_list():
     assert _sanitize_messages([]) == []
 
 
-# ── Compression tests ──
+# ── Context refresh tests ──
 
 
 @pytest.mark.asyncio
-async def test_compression_triggers_at_threshold():
-    """Messages exceeding threshold get compressed."""
-    client, fake = _build_client([])
+async def test_context_refresh_triggers_at_threshold():
+    """Messages exceeding threshold trigger context refresh via callback."""
+    client, _fake = _build_client([])
     # Small context window — total content ~860 chars ≈ 215 tokens.
-    # Threshold of 0.7 * 200 = 140 tokens, so 215 > 140 triggers compression.
+    # Threshold of 0.7 * 200 = 140 tokens, so 215 > 140 triggers refresh.
     client._context_window = 200
 
-    # Override chat_raw to return a fake summary
-    async def fake_chat_raw(messages, max_tokens=None):
-        return "Summary: edited files a.py and b.py."
+    refresh_called = False
 
-    client.chat_raw = fake_chat_raw
+    def on_refresh(msgs):
+        nonlocal refresh_called
+        refresh_called = True
+        return [
+            {"role": "system", "content": "Fresh system prompt"},
+            {"role": "user", "content": "Original task"},
+            {"role": "user", "content": "[CONTEXT REFRESHED]\nScratchpad"},
+        ]
 
     tc = [{"function": {"name": "edit_file", "arguments": {"path": "a.py"}}}]
     messages = [
@@ -636,52 +641,60 @@ async def test_compression_triggers_at_threshold():
         {"role": "tool", "content": "Done: " + "v" * 200},
         {"role": "user", "content": "Recent message"},
     ]
-    original_len = len(messages)
 
-    await client._maybe_compress(messages, threshold=0.7, preserve=0.3)
+    result = await client._maybe_refresh_context(
+        messages, threshold=0.7, on_context_refresh=on_refresh,
+    )
 
-    # System prompt should still be first
-    assert messages[0]["role"] == "system"
-    assert messages[0]["content"] == "System prompt here"
-    # Should have been compressed — fewer messages now
-    assert len(messages) < original_len
-    # Should contain the summary
-    summary_msgs = [
-        m for m in messages
-        if "[Previous conversation summary]" in m.get("content", "")
-    ]
-    assert len(summary_msgs) == 1
+    assert result is True
+    assert refresh_called
+    assert messages[0]["content"] == "Fresh system prompt"
+    assert len(messages) == 3
 
 
 @pytest.mark.asyncio
-async def test_compression_preserves_system_prompt():
-    """System prompt remains at index 0 after compression."""
+async def test_context_refresh_rebuilds_from_callback():
+    """Callback return value completely replaces the message list."""
     client, _fake = _build_client([])
     client._context_window = 200
 
-    async def fake_chat_raw(messages, max_tokens=None):
-        return "Compressed summary."
-
-    client.chat_raw = fake_chat_raw
+    def on_refresh(msgs):
+        # Callback receives the old messages
+        assert msgs[0]["content"] == "Old system prompt"
+        return [
+            {"role": "system", "content": "New system prompt"},
+            {"role": "user", "content": "Task"},
+        ]
 
     messages = [
-        {"role": "system", "content": "Important system prompt"},
+        {"role": "system", "content": "Old system prompt"},
         {"role": "user", "content": "x" * 300},
         {"role": "assistant", "content": "y" * 300},
         {"role": "user", "content": "recent"},
     ]
 
-    await client._maybe_compress(messages, threshold=0.7, preserve=0.3)
+    result = await client._maybe_refresh_context(
+        messages, threshold=0.7, on_context_refresh=on_refresh,
+    )
 
-    assert messages[0]["role"] == "system"
-    assert messages[0]["content"] == "Important system prompt"
+    assert result is True
+    assert messages[0]["content"] == "New system prompt"
+    assert messages[1]["content"] == "Task"
+    assert len(messages) == 2
 
 
 @pytest.mark.asyncio
-async def test_compression_skips_below_threshold():
-    """Messages below threshold are not compressed."""
+async def test_context_refresh_skips_below_threshold():
+    """Messages below threshold are not refreshed."""
     client, _fake = _build_client([])
     client._context_window = 100000  # Large window
+
+    refresh_called = False
+
+    def on_refresh(msgs):
+        nonlocal refresh_called
+        refresh_called = True
+        return msgs
 
     messages = [
         {"role": "system", "content": "sys"},
@@ -690,21 +703,45 @@ async def test_compression_skips_below_threshold():
     ]
     original_len = len(messages)
 
-    await client._maybe_compress(messages, threshold=0.7, preserve=0.3)
+    result = await client._maybe_refresh_context(
+        messages, threshold=0.7, on_context_refresh=on_refresh,
+    )
 
+    assert result is False
+    assert not refresh_called
     assert len(messages) == original_len
 
 
 @pytest.mark.asyncio
-async def test_compression_failure_doesnt_break():
-    """If chat_raw raises, compression is skipped gracefully."""
+async def test_context_refresh_no_callback_is_noop():
+    """Without a callback, refresh returns False and messages are unchanged."""
     client, _fake = _build_client([])
     client._context_window = 200
 
-    async def failing_chat_raw(messages, max_tokens=None):
-        raise ConnectionError("Ollama down")
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "x" * 300},
+        {"role": "assistant", "content": "y" * 300},
+        {"role": "user", "content": "recent"},
+    ]
+    original_len = len(messages)
 
-    client.chat_raw = failing_chat_raw
+    result = await client._maybe_refresh_context(
+        messages, threshold=0.7, on_context_refresh=None,
+    )
+
+    assert result is False
+    assert len(messages) == original_len
+
+
+@pytest.mark.asyncio
+async def test_context_refresh_callback_exception_handled():
+    """If the callback raises, refresh is skipped gracefully."""
+    client, _fake = _build_client([])
+    client._context_window = 200
+
+    def on_refresh(msgs):
+        raise RuntimeError("disk read failed")
 
     messages = [
         {"role": "system", "content": "sys"},
@@ -715,7 +752,9 @@ async def test_compression_failure_doesnt_break():
     original_len = len(messages)
 
     # Should not raise
-    await client._maybe_compress(messages, threshold=0.7, preserve=0.3)
+    result = await client._maybe_refresh_context(
+        messages, threshold=0.7, on_context_refresh=on_refresh,
+    )
 
-    # Messages unchanged
+    assert result is False
     assert len(messages) == original_len

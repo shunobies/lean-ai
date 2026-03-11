@@ -37,7 +37,7 @@ cd extension && npm install && npm run build
 
 **No FSM.** Two workflow modes: `plan -> approve -> execute -> done` (default) and `fix -> done` (skip planning).
 
-1. **LLM Client** (`llm/client.py`) — Async Ollama client with `chat_with_tools()` multi-turn loop. Native tool calling via Ollama's `tools=` parameter. Retry with backoff. No conversation trimming — Ollama manages its own context.
+1. **LLM Client** (`llm/client.py`) — Async Ollama client with `chat_with_tools()` multi-turn loop. Native tool calling via Ollama's `tools=` parameter. Retry with backoff. Context refresh at 70% threshold — drops old messages, re-reads context files from disk, injects scratchpad for continuity (no LLM summarization call).
 
 2. **Planning** (`llm/planner.py`) — 6-phase decomposed planning: scope -> file identification -> exploration compression -> change design -> risk check -> plan assembly. Structured JSON output from Ollama. Plan template with worked examples (`llm/plan_template.md`).
 
@@ -107,11 +107,12 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_ENABLE_FRAMEWORK_GUIDE` | `true` | Generate `.lean_ai/framework_guide.md` for detected frameworks |
 | `LEAN_AI_IMPLEMENTATION_MAX_TURNS` | `0` | Max tool-calling turns per session (`0` = unlimited) |
 | `LEAN_AI_IMPLEMENTATION_MAX_TOKENS` | *(derived: 25% of context window)* | Max tokens per LLM turn |
+| `LEAN_AI_REFRESH_THRESHOLD` | `0.7` | Refresh context at this % of context window |
 | `LEAN_AI_PORT` | `8422` | Server port |
 
 ## WebSocket Protocol
 
-Message types: `token`, `stage_change`, `approval_required`, `tool_progress`, `tool_approval_required`, `diff`, `test_result`, `error`, `complete`, `index_status`, `stage_status`, `clarification_needed`, `plan_rejected`, `pong`, `branch_created`, `checkpoint`, `merge_complete`.
+Message types: `token`, `stage_change`, `approval_required`, `tool_progress`, `tool_approval_required`, `diff`, `test_result`, `error`, `complete`, `index_status`, `stage_status`, `clarification_needed`, `plan_rejected`, `pong`, `branch_created`, `checkpoint`, `merge_complete`, `context_refreshed`.
 
 ## API Endpoints
 
