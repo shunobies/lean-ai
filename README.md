@@ -146,7 +146,7 @@ Custom steering documents can be added to `.lean_ai/context/` — see [Custom St
 |---|---|---|
 | `LEAN_AI_IMPLEMENTATION_MAX_TURNS` | `0` | Max tool-calling turns per agent session (`0` = unlimited) |
 | `LEAN_AI_IMPLEMENTATION_MAX_TOKENS` | *(derived: 25% of context window)* | Max tokens per LLM turn during implementation |
-| `LEAN_AI_REMINDER_INTERVAL` | `10` | Re-inject task reminder every N tool-calling turns |
+| `LEAN_AI_REMINDER_INTERVAL` | `10` | Re-inject task + scratchpad reminder every N tool-calling turns |
 | `LEAN_AI_LOOP_DETECTION_THRESHOLD` | `3` | Consecutive identical tool calls before warning (`0` = off) |
 | `LEAN_AI_COMPRESSION_THRESHOLD` | `0.7` | Compress conversation history at this fraction of context window |
 | `LEAN_AI_COMPRESSION_PRESERVE` | `0.3` | Keep recent fraction of history after compression |
@@ -234,6 +234,14 @@ During execution, the LLM has access to these tools:
 | `update_scratchpad` | Persist notes/progress across tool-calling turns |
 
 Shell commands (`run_tests`, `run_lint`, `format_code`) pass through a safety gate that blocks dangerous commands and requires user approval for potentially risky ones.
+
+#### Scratchpad & Task Reminders
+
+The **scratchpad** is a per-session file (`.lean_ai/scratchpads/{session_id}.md`, max 2,000 chars) the LLM uses to track its own progress. It writes structured sections (`## Completed`, `## Current State`, `## Cross-File References`, `## Files Modified`, `## Next Step`) via the `update_scratchpad` tool. Each call overwrites the previous content.
+
+Every `LEAN_AI_REMINDER_INTERVAL` turns (default 10), a **task reminder** is injected into the conversation containing the original task and the current scratchpad content. This keeps the LLM oriented even after Ollama evicts earlier turns from its context window. The scratchpad also survives crashes — on `/resume`, it's injected into the initial prompt so the LLM can continue where it left off without redoing work.
+
+The scratchpad is deleted when a session is closed via `/approve` or `/reject`.
 
 ## Slash Commands
 
