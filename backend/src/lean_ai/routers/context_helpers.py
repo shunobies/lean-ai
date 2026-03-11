@@ -85,6 +85,24 @@ def read_project_context(workspace_root: str, max_chars: int = 20_000) -> str | 
     return "\n\n".join(parts) if parts else None
 
 
+def load_custom_steering_docs(repo_root: str) -> str:
+    """Load all .md files from .lean_ai/context/ (custom steering documents only).
+
+    Unlike ``load_full_context`` this deliberately skips project_context.md and
+    framework_guide.md so it can be used *during* their generation without
+    circular dependency.
+    """
+    parts: list[str] = []
+    context_dir = Path(repo_root) / ".lean_ai" / "context"
+    if context_dir.is_dir():
+        for path in sorted(context_dir.glob("*.md")):
+            if path.is_file():
+                chunk = path.read_text(encoding="utf-8", errors="replace")
+                if chunk.strip():
+                    parts.append(chunk)
+    return "\n\n".join(parts)
+
+
 def load_full_context(repo_root: str) -> str:
     """Load project_context.md + framework_guide.md, then all .md from .lean_ai/context/."""
     parts: list[str] = []

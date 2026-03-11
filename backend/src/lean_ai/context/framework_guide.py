@@ -708,6 +708,21 @@ async def generate_framework_guide(
     if project_tree:
         user_parts.append(f"PROJECT FILE TREE:\n{project_tree}")
 
+    # Inject custom steering documents so the LLM is aware of project
+    # conventions (e.g. deprecated API replacements) when generating
+    # the framework guide.
+    from lean_ai.routers.context_helpers import load_custom_steering_docs
+
+    custom_docs = load_custom_steering_docs(repo_root)
+    if custom_docs:
+        user_parts.append(
+            "CUSTOM PROJECT GUIDANCE:\n"
+            "The following documents describe project-specific conventions, "
+            "rules, and constraints. Respect these when writing the "
+            "framework guide.\n\n"
+            + custom_docs
+        )
+
     user_content = (
         "\n\n".join(user_parts)
         if user_parts

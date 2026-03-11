@@ -210,6 +210,20 @@ def build_generation_prompt(
         max_sampled_files=caps.get("max_sampled_files", 15),
     )
 
+    # Load custom steering documents (.lean_ai/context/*.md) so the LLM
+    # is aware of project conventions (e.g. deprecated API replacements)
+    # when generating the project context.
+    from lean_ai.routers.context_helpers import load_custom_steering_docs
+
+    custom_docs = load_custom_steering_docs(repo_root)
+    custom_section = (
+        "=== CUSTOM PROJECT GUIDANCE ===\n"
+        "The following documents describe project-specific conventions, "
+        "rules, and constraints. Respect these when writing the project "
+        "context document.\n\n"
+        f"{custom_docs}\n\n"
+    ) if custom_docs else ""
+
     return (
         "Analyze this repository and produce the project context document.\n\n"
         "=== FILE TREE ===\n"
@@ -229,6 +243,7 @@ def build_generation_prompt(
         f"{api_endpoints}\n\n"
         "=== KEY FILE CONTENTS ===\n"
         f"{file_contents}\n\n"
+        f"{custom_section}"
         "Now write the project context document. Remember: ONLY reference "
         "class names, function names, and files that appear above. "
         "Do NOT invent or generalize."
