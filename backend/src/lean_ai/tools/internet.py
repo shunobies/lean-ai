@@ -217,6 +217,7 @@ async def fetch_url(
     url: str,
     llm_client: LLMClient | None = None,
     max_content_bytes: int = 500_000,
+    summarize_threshold: int = 3000,
 ) -> ToolResult:
     """Fetch a URL and return sanitized content."""
     logger.info("Fetch URL: %s", url)
@@ -248,7 +249,9 @@ async def fetch_url(
     sanitized = _strip_html(raw_content)
 
     if llm_client is not None:
-        sanitized = await _summarize_if_long(sanitized, llm_client)
+        sanitized = await _summarize_if_long(
+            sanitized, llm_client, threshold=summarize_threshold,
+        )
 
     logger.info("Fetch URL: %s -> %d chars", url, len(sanitized))
     return ToolResult(success=True, output=sanitized)
