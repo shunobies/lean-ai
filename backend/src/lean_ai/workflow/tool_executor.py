@@ -144,6 +144,14 @@ def make_tool_executor(repo_root: str, ws: WebSocket, session_id: str = ""):
                 )
             return output
 
+        elif name == "grep_files":
+            result = await file_ops.grep_files(
+                pattern=arguments.get("pattern", ""),
+                repo_root=repo_root,
+                file_glob=arguments.get("file_glob"),
+            )
+            return result.output if result.success else f"ERROR: {result.error}"
+
         elif name == "task_complete":
             return "Task marked complete."
 

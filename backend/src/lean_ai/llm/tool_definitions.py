@@ -240,10 +240,15 @@ IMPLEMENTATION_TOOLS: list[dict] = [
         "function": {
             "name": "update_scratchpad",
             "description": (
-                "Update the session scratchpad to track your progress. Call this "
-                "after completing each logical step. Write the ENTIRE scratchpad "
-                "content (previous content is overwritten, not appended). "
-                "Use these sections:\n"
+                "Save your progress so you don't lose track of completed work. "
+                "As conversations grow long, earlier messages may be evicted "
+                "from context — the scratchpad is your only persistent memory "
+                "across turns. It is automatically included in periodic task "
+                "reminders so you can recall what you have done and what to "
+                "do next.\n\n"
+                "Call this after completing each logical step. Write the ENTIRE "
+                "scratchpad content (previous content is overwritten, not "
+                "appended). Use these sections:\n"
                 "## Completed — tasks done (DO NOT redo these)\n"
                 "## Current State — what works, what's broken, current errors\n"
                 "## Cross-File References — route names, middleware aliases, "
@@ -251,9 +256,7 @@ IMPLEMENTATION_TOOLS: list[dict] = [
                 "across files\n"
                 "## Files Modified — files changed this session\n"
                 "## Next Step — what to do next\n\n"
-                "Keep it concise (under 2000 chars). This scratchpad is "
-                "included in periodic task reminders so you can recall "
-                "your progress."
+                "Keep it concise (under 2000 chars)."
             ),
             "parameters": {
                 "type": "object",
