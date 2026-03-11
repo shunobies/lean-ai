@@ -248,19 +248,21 @@ breakpoints, and any plugins. This is the single most important piece of \
 information for maintaining design consistency.
 
 ## Color Palette
-Extract the actual color values used in the project. \
-List each unique color value ONCE — do not repeat the same color in multiple \
-subsections or under different names.
+Document ONLY the project's custom/configured colors — not default framework \
+colors.
 
-Priority order for color sources:
-1. Tailwind theme.extend.colors (if Tailwind project) — show the config object
-2. CSS custom properties (--primary, --background, etc.)
-3. SCSS/LESS variables ($primary, etc.)
-4. Hard-coded values ONLY if not already captured above
-
-Format as a single flat table or list grouped by purpose (primary, secondary, \
-accent, background, text, border). Include the variable/config name and the \
-resolved hex/RGB value.
+CRITICAL RULES:
+- If the project uses Tailwind WITHOUT custom theme.extend.colors, write: \
+"Uses default Tailwind color palette." Then list ONLY the 3-5 dominant color \
+families actually used in templates (e.g. "Primary actions: blue-500/600, \
+Danger: red-500/600, Neutral: gray-50 through gray-900") — do NOT list every \
+shade with hex values.
+- If the project HAS custom theme.extend.colors, show that config object and \
+list each custom color ONCE.
+- If using CSS custom properties or SCSS variables, list each ONCE.
+- NEVER list the same color under multiple purpose headings.
+- NEVER list default Tailwind hex values — they are already known.
+- Keep this section SHORT — a wall of color values is counterproductive.
 
 ## Typography
 Extract font families, sizes, weights, and line heights. Look for:
