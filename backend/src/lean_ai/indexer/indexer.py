@@ -58,8 +58,8 @@ def _hash_all_files(repo_root: str) -> dict[str, str]:
     return {e.path: hash_file_content(root / e.path) for e in entries}
 
 
-def index_workspace(repo_root: str, force: bool = False) -> int:
-    """Index the workspace. Returns total chunk count.
+def index_workspace(repo_root: str, force: bool = False) -> tuple[int, int]:
+    """Index the workspace. Returns ``(file_count, chunk_count)``.
 
     Uses incremental indexing if a valid manifest exists, otherwise full.
     """
@@ -76,7 +76,7 @@ def index_workspace(repo_root: str, force: bool = False) -> int:
     return _incremental_index(repo_root, idx_dir, old_manifest)
 
 
-def _full_index(repo_root: str, idx_dir: Path) -> int:
+def _full_index(repo_root: str, idx_dir: Path) -> tuple[int, int]:
     """Wipe and rebuild the index from scratch."""
     logger.info("Full index of %s", repo_root)
     root = Path(repo_root)
@@ -118,12 +118,12 @@ def _full_index(repo_root: str, idx_dir: Path) -> int:
     writer.commit()
     save_manifest(idx_dir, manifest)
     logger.info("Full index complete: %d files, %d chunks", len(entries), total_chunks)
-    return total_chunks
+    return len(entries), total_chunks
 
 
 def _incremental_index(
     repo_root: str, idx_dir: Path, old_manifest: Manifest,
-) -> int:
+) -> tuple[int, int]:
     """Update only changed files in the index."""
     root = Path(repo_root)
     current_hashes = _hash_all_files(repo_root)
@@ -131,7 +131,7 @@ def _incremental_index(
 
     if not diff.added and not diff.modified and not diff.deleted:
         logger.info("No changes detected, skipping incremental index")
-        return sum(r.chunk_count for r in old_manifest.files.values())
+        return len(old_manifest.files), sum(r.chunk_count for r in old_manifest.files.values())
 
     logger.info(
         "Incremental index: +%d ~%d -%d",
@@ -185,8 +185,9 @@ def _incremental_index(
     # Remove deleted files from manifest (already handled by not copying)
     writer.commit()
     save_manifest(idx_dir, manifest)
-    logger.info("Incremental index complete: %d total chunks", total_chunks)
-    return total_chunks
+    file_count = len(manifest.files)
+    logger.info("Incremental index complete: %d files, %d chunks", file_count, total_chunks)
+    return file_count, total_chunks
 
 
 async def generate_embeddings(

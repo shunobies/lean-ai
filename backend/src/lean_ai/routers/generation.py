@@ -47,9 +47,10 @@ async def init_workspace(request: InitWorkspaceRequest):
         logger.info("Added %d entries to .gitignore: %s", len(added), added)
 
     index_status = "failed"
+    file_count = None
     chunk_count = None
     try:
-        chunk_count = await asyncio.to_thread(
+        file_count, chunk_count = await asyncio.to_thread(
             _sync_index_workspace, request.repo_root, force=request.force_reindex,
         )
         index_status = "indexed"
@@ -84,6 +85,7 @@ async def init_workspace(request: InitWorkspaceRequest):
 
     return InitWorkspaceResponse(
         index_status=index_status,
+        index_file_count=file_count,
         index_chunk_count=chunk_count,
     )
 
