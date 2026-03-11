@@ -5,6 +5,7 @@ loaded alongside other custom steering documents during workflows and chat.
 """
 
 import logging
+import re
 from pathlib import Path
 
 from lean_ai.context.content import _read_file_safe
@@ -225,6 +226,8 @@ PROJECT FILE TREE:
 {project_tree}
 
 STRUCTURE RULES:
+- Do NOT generate a top-level heading (# Style Guide) — it is added automatically.
+- Start your output directly with the first ## section heading.
 - Each ## heading below MUST appear EXACTLY ONCE.
 - Every code example MUST have matching opening and closing ``` pairs.
 - Maximum 3000 words total.
@@ -238,20 +241,32 @@ Identify the CSS framework (Tailwind, Bootstrap, custom, etc.) and how styles \
 are compiled/loaded. Note the build tool (Vite, Webpack/Mix, etc.) and the \
 main CSS entry point file.
 
+If using Tailwind CSS, this section is CRITICAL — extract the FULL custom \
+theme configuration from tailwind.config.js/ts. Show the complete \
+`theme.extend` object including all custom colors, fonts, spacing, \
+breakpoints, and any plugins. This is the single most important piece of \
+information for maintaining design consistency.
+
 ## Color Palette
-Extract the actual color values used in the project. Look for:
-- CSS custom properties (--primary-color, etc.)
-- Tailwind theme extensions in tailwind.config
-- SCSS/LESS variables ($primary, etc.)
-- Recurring hard-coded color values in CSS
-List each color with its variable name and hex/RGB value. Group by purpose \
-(primary, secondary, accent, background, text, border, etc.)
+Extract the actual color values used in the project. \
+List each unique color value ONCE — do not repeat the same color in multiple \
+subsections or under different names.
+
+Priority order for color sources:
+1. Tailwind theme.extend.colors (if Tailwind project) — show the config object
+2. CSS custom properties (--primary, --background, etc.)
+3. SCSS/LESS variables ($primary, etc.)
+4. Hard-coded values ONLY if not already captured above
+
+Format as a single flat table or list grouped by purpose (primary, secondary, \
+accent, background, text, border). Include the variable/config name and the \
+resolved hex/RGB value.
 
 ## Typography
 Extract font families, sizes, weights, and line heights. Look for:
 - Font imports (@import, link tags, @font-face)
 - CSS custom properties for fonts
-- Tailwind font configuration
+- Tailwind font configuration in theme.extend.fontFamily
 - Body/heading font declarations
 List the font stack and where each is used (headings, body, code, etc.)
 
@@ -263,14 +278,35 @@ Describe the layout system:
 - Breakpoints for responsive design
 
 ## Component Patterns
-For each reusable UI pattern found in templates/components:
-- Navigation/header structure and classes
-- Hero/banner sections — structure and styling approach
-- Card layouts — markup structure and CSS classes
-- Footer structure
-- Form styling patterns
-- Button variants and styles
-Show the actual HTML structure and CSS classes used, not generic examples.
+For each reusable UI pattern found in templates/components, show the ACTUAL \
+markup from the project files. Copy the real HTML/Blade/Vue structure with \
+its CSS classes — do not paraphrase or summarize into prose.
+
+For each component include:
+- The source file path
+- The actual markup snippet (HTML structure with classes)
+- Key Tailwind/CSS classes used and their visual effect
+
+Components to document (if found):
+- Navigation/header
+- Hero/banner sections
+- Card layouts
+- Footer
+- Buttons (show each variant)
+- Form elements
+
+Example of GOOD output:
+```blade
+<!-- resources/views/components/hero.blade.php -->
+<section class="bg-gradient-to-r from-indigo-900 to-purple-900 py-20">
+  <div class="max-w-4xl mx-auto text-center">
+    <h1 class="text-5xl font-bold text-white mb-6">{{{{ $title }}}}</h1>
+  </div>
+</section>
+```
+
+Example of BAD output (do not do this):
+"The hero section uses a gradient background with centered text."
 
 ## Page Layout Structure
 Describe how pages are structured:
@@ -278,12 +314,14 @@ Describe how pages are structured:
 - How child pages extend the layout
 - The HTML document structure (head contents, body wrapper classes)
 - Asset loading patterns (where CSS/JS are included)
+Show the actual @yield/@section slots from the master layout file.
 
 CONTENT RULES:
 - Extract REAL values from the provided files — colors, font names, class names
 - Reference ACTUAL file paths from the project tree
 - Show code snippets from the provided files, not invented examples
-- If using Tailwind, document which custom theme values are configured
+- If using Tailwind, the tailwind.config theme.extend is the PRIMARY source of \
+truth — prioritize it above all other sources for colors, fonts, and spacing
 - If using component classes, show the actual class naming convention
 """
 
@@ -347,12 +385,15 @@ async def generate_style_guide(
         logger.info("Style guide: LLM returned empty output")
         return ""
 
+    # Strip any top-level heading the LLM may have generated despite instructions.
+    cleaned = re.sub(r"^#\s+[Ss]tyle\s+[Gg]uide\s*\n+", "", guide.strip())
+
     header = (
         "# Style Guide\n\n"
         "_Auto-generated from project CSS and template files. "
         "Edit freely — this file is yours to curate._\n\n"
     )
-    return header + guide.strip() + "\n"
+    return header + cleaned.strip() + "\n"
 
 
 def write_style_guide(repo_root: str, content: str) -> str:
