@@ -113,6 +113,15 @@ to verify the fix.
 6. No stubs, no TODOs, no placeholder implementations.
 7. When done, call task_complete with a short summary of what you changed \
 and why. This is the only way to signal completion.
+
+Progress tracking:
+- After completing each logical step (creating a file, fixing a bug, updating \
+a config), call update_scratchpad to record what you did.
+- The scratchpad helps you remember completed work across turns — always check \
+it before starting work to avoid redoing completed tasks.
+- Track cross-file references (route names, middleware aliases, config keys, \
+model-table mappings) in the scratchpad so you can keep them consistent.
+- Items listed under "## Completed" are DONE. Do not revert or redo them.
 """
 
 CLARIFICATION_SYSTEM_PROMPT = """\

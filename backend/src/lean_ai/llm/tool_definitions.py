@@ -252,8 +252,8 @@ IMPLEMENTATION_TOOLS: list[dict] = [
                 "## Files Modified — files changed this session\n"
                 "## Next Step — what to do next\n\n"
                 "Keep it concise (under 2000 chars). This scratchpad is "
-                "injected into your context periodically so you remember "
-                "what you have done."
+                "included in periodic task reminders so you can recall "
+                "your progress."
             ),
             "parameters": {
                 "type": "object",

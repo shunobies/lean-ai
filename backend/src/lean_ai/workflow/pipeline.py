@@ -522,17 +522,24 @@ async def _run_fix(
                 ),
             })
 
+    def _build_fix_reminder() -> str:
+        parts = [
+            f"REMINDER — Your task: {task}\n",
+            "Have you verified the fix works? Run tests or lint if "
+            "applicable. If done, call task_complete with a summary.",
+        ]
+        pad = scratchpad.read_scratchpad(repo_root, session_id)
+        if pad:
+            parts.append(f"\nYour current scratchpad:\n{pad}")
+        return "\n".join(parts)
+
     executed, explanation = await llm_client.chat_with_tools(
         messages=messages,
         tools=IMPLEMENTATION_TOOLS,
         tool_executor_fn=tool_executor,
         max_turns=settings.implementation_max_turns,
         max_tokens=settings.implementation_max_tokens,
-        task_reminder=(
-            f"REMINDER — Your task: {task}\n\n"
-            "Have you verified the fix works? Run tests or lint if "
-            "applicable. If done, call task_complete with a summary."
-        ),
+        task_reminder=_build_fix_reminder,
         reminder_interval=settings.reminder_interval,
         on_tool_call=on_tool_call,
         on_tool_result=on_tool_result,
