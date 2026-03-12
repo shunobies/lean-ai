@@ -850,15 +850,16 @@ export function getWebviewHtml(chatFontSize: number): string {
 
     newChatBtn.addEventListener('click', () => {
         if (searchMode) closeSearch();
-        messagesEl.innerHTML = '<div class="msg msg-system">Describe what you\\'d like to build or change. I\\'ll help you refine it into a clear task for the agent.</div>';
-        setStage(null);
-        resetMetrics();
-        approvalBar.classList.remove('visible');
-        sending = false;
-        sendBtn.disabled = false;
-        lastTimestamp = null;
-        backBtn.style.display = 'none';
-        vscode.postMessage({ type: 'newChat' });
+
+        // Save the current tab's messages before archiving
+        const currentTab = tabs.get('current');
+        if (currentTab) {
+            currentTab.messagesHtml = messagesEl.innerHTML;
+        }
+
+        // Tell the backend to persist + archive the current conversation
+        // (it will reply with 'chatArchived' containing the tab info)
+        vscode.postMessage({ type: 'newChat', messagesHtml: messagesEl.innerHTML });
     });
 
     approveBtn.addEventListener('click', () => {
@@ -985,6 +986,38 @@ export function getWebviewHtml(chatFontSize: number): string {
             case 'chatReset':
                 lastTimestamp = null;
                 break;
+
+            case 'chatArchived': {
+                // Open the old conversation as a read-only tab
+                if (msg.tabId && msg.title && msg.messagesHtml) {
+                    const shortTitle = msg.title.length > 20
+                        ? msg.title.slice(0, 20) + '...' : msg.title;
+                    tabs.set(msg.tabId, {
+                        id: msg.tabId,
+                        label: shortTitle,
+                        messagesHtml: msg.messagesHtml,
+                        readOnly: true,
+                    });
+                }
+
+                // Reset the current tab to a fresh chat
+                activeTabId = 'current';
+                const curTab = tabs.get('current');
+                if (curTab) { curTab.messagesHtml = null; }
+                messagesEl.innerHTML = '<div class="msg msg-system">Describe what you\\'d like to build or change. I\\'ll help you refine it into a clear task for the agent.</div>';
+                setStage(null);
+                resetMetrics();
+                approvalBar.classList.remove('visible');
+                sending = false;
+                sendBtn.disabled = false;
+                inputEl.disabled = false;
+                inputEl.placeholder = 'Ask a question or describe a task...';
+                lastTimestamp = null;
+                backBtn.style.display = 'none';
+
+                renderTabs();
+                break;
+            }
 
             case 'setFontSize':
                 document.documentElement.style.setProperty('--sai-chat-font-size', msg.size + 'px');

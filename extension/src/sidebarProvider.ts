@@ -137,9 +137,20 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                     });
                     await this.handleAgentMessage(msg.text as string);
                     break;
-                case "newChat":
-                    // Persist current conversation before clearing
+                case "newChat": {
+                    // Persist current conversation, then archive it as a tab
                     await this.conversations.persistCurrentConversation(this.chatHistory);
+
+                    // Build archive info before clearing state
+                    const archiveTabId = this.conversations.currentConversationId
+                        ? `chat-${this.conversations.currentConversationId}`
+                        : undefined;
+                    const firstUserMsg = this.chatHistory.find(m => m.role === "user");
+                    const archiveTitle = firstUserMsg
+                        ? firstUserMsg.content.slice(0, 80).replace(/\n/g, " ")
+                        : "";
+                    const hasMessages = this.chatHistory.length > 0;
+
                     this.closeWebSocket();
                     this.sessionId = undefined;
                     this.lastCompletedSessionId = undefined;
@@ -147,8 +158,16 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                     this.chatHistory = [];
                     this.conversations.currentConversationId = undefined;
                     this.conversations.viewingHistoricConversation = false;
-                    this.postMessage({ type: "chatReset" });
+
+                    // Send archived tab info + reset in one message
+                    this.postMessage({
+                        type: "chatArchived",
+                        tabId: hasMessages ? archiveTabId : undefined,
+                        title: hasMessages ? archiveTitle : undefined,
+                        messagesHtml: hasMessages ? (msg.messagesHtml as string) : undefined,
+                    });
                     break;
+                }
                 case "approve":
                     this.handleApprove();
                     break;
