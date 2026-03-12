@@ -82,6 +82,11 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         this.slashCommands = createSlashCommands(cmdCtx);
     }
 
+    /** Load a past session's conversation into the chat panel for review. */
+    async loadSessionConversation(sessionId: string): Promise<void> {
+        return this.conversations.loadSessionConversation(sessionId);
+    }
+
     resolveWebviewView(
         webviewView: vscode.WebviewView,
         _context: vscode.WebviewViewResolveContext,
