@@ -389,14 +389,14 @@ export function getWebviewHtml(chatFontSize: number): string {
     .tab-bar::-webkit-scrollbar { height: 3px; }
     .tab {
         padding: 5px 10px;
-        font-size: 11px;
+        font-size: 15px;
         cursor: pointer;
         white-space: nowrap;
         border-bottom: 2px solid transparent;
         opacity: 0.6;
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: 6px;
         flex-shrink: 0;
         user-select: none;
     }
@@ -406,10 +406,10 @@ export function getWebviewHtml(chatFontSize: number): string {
         border-bottom-color: var(--vscode-focusBorder);
     }
     .tab .tab-close {
-        font-size: 12px;
+        font-size: 16px;
         opacity: 0.4;
         cursor: pointer;
-        padding: 0 2px;
+        padding: 0 4px;
         line-height: 1;
     }
     .tab .tab-close:hover { opacity: 1; }
