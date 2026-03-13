@@ -48,6 +48,12 @@ async def init_workspace(request: InitWorkspaceRequest):
     if added:
         logger.info("Added %d entries to .gitignore: %s", len(added), added)
 
+    # Clean up stale tool output from previous sessions
+    from lean_ai.workflow.tool_executor import cleanup_all_tool_output
+    cleaned = cleanup_all_tool_output(request.repo_root)
+    if cleaned:
+        logger.info("Cleaned up %d stale tool output file(s)", cleaned)
+
     index_status = "failed"
     file_count = None
     chunk_count = None

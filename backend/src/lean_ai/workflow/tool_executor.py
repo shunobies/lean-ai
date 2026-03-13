@@ -14,19 +14,63 @@ from lean_ai.workflow.ws_handler import safe_receive, ws_send
 _INLINE_LIMIT = 2000  # chars — fits comfortably in a single tool result
 
 
+_TOOL_OUTPUT_DIR = ".lean_ai/tool_output"
+_MAX_AGE_SECONDS = 3600  # auto-delete files older than 1 hour
+
+
 def _save_tool_output(
     repo_root: str,
     tool_name: str,
     output: str,
 ) -> str:
-    """Save full tool output to .lean_ai/tool_output/ and return the relative path."""
-    out_dir = Path(repo_root) / ".lean_ai" / "tool_output"
+    """Save full tool output to .lean_ai/tool_output/ and return the relative path.
+
+    Automatically cleans up files older than ``_MAX_AGE_SECONDS``.
+    """
+    out_dir = Path(repo_root) / _TOOL_OUTPUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Auto-cleanup: remove stale output files
+    _cleanup_tool_output(out_dir)
+
     timestamp = int(time.time() * 1000)
     filename = f"{tool_name}_{timestamp}.txt"
     out_path = out_dir / filename
     out_path.write_text(output, encoding="utf-8")
-    return f".lean_ai/tool_output/{filename}"
+    return f"{_TOOL_OUTPUT_DIR}/{filename}"
+
+
+def _cleanup_tool_output(out_dir: Path, max_age: float = _MAX_AGE_SECONDS) -> int:
+    """Delete tool output files older than *max_age* seconds.  Returns count deleted."""
+    if not out_dir.is_dir():
+        return 0
+    now = time.time()
+    deleted = 0
+    for f in out_dir.iterdir():
+        if f.is_file() and f.suffix == ".txt":
+            try:
+                if now - f.stat().st_mtime > max_age:
+                    f.unlink()
+                    deleted += 1
+            except OSError:
+                pass
+    return deleted
+
+
+def cleanup_all_tool_output(repo_root: str) -> int:
+    """Delete ALL tool output files.  Called during /init workspace reset."""
+    out_dir = Path(repo_root) / _TOOL_OUTPUT_DIR
+    if not out_dir.is_dir():
+        return 0
+    deleted = 0
+    for f in out_dir.iterdir():
+        if f.is_file():
+            try:
+                f.unlink()
+                deleted += 1
+            except OSError:
+                pass
+    return deleted
 
 
 def make_tool_executor(repo_root: str, ws: WebSocket, session_id: str = ""):
