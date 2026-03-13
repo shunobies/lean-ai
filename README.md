@@ -116,6 +116,7 @@ See the [full configuration reference](docs/configuration.md) for all options.
 | [API Reference](docs/api-reference.md) | REST endpoints and WebSocket protocol |
 | [Extension Guide](docs/extension.md) | VSCode/VSCodium setup, commands, and settings |
 | [Modelfile Guide](docs/modelfile.md) | Customizing Ollama models with persistent rules |
+| [llama-server Guide](docs/llama-server.md) | Using llama.cpp as an alternative to Ollama |
 
 ## Requirements
 

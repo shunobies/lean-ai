@@ -71,7 +71,7 @@ Ollama is always required, even when using cloud providers — it handles inline
 | `LEAN_AI_OPENAI_CONTEXT_WINDOW` | `128000` | Context window size — [shorthand](#context-window-shorthand) accepted |
 | `LEAN_AI_OPENAI_MAX_TOKENS` | *25% of context window* | Max output tokens |
 
-Set `LEAN_AI_OPENAI_BASE_URL` to use OpenAI-compatible providers like Together AI, Groq, or a local vLLM instance.
+Set `LEAN_AI_OPENAI_BASE_URL` to use OpenAI-compatible providers like Together AI, Groq, a local vLLM instance, or [llama-server](llama-server.md).
 
 ## Anthropic
 
