@@ -42,7 +42,7 @@ FROM qwen3-coder:30b
 PARAMETER num_ctx 262144
 ```
 
-Then set `LEAN_AI_OLLAMA_CONTEXT_WINDOW=262144` to match.
+Then set `LEAN_AI_OLLAMA_CONTEXT_WINDOW=256` to match (shorthand for 262144).
 
 ### Dedicated Inline Model
 
@@ -107,7 +107,7 @@ Key Ollama parameters and their effects on Lean AI:
 
 ## Tips
 
-- **Keep `num_ctx` in sync** — The Modelfile's `num_ctx` and `LEAN_AI_OLLAMA_CONTEXT_WINDOW` must match. If they differ, you'll either waste VRAM or hit unexpected truncation.
+- **Keep `num_ctx` in sync** — The Modelfile's `num_ctx` and `LEAN_AI_OLLAMA_CONTEXT_WINDOW` must match. For example, `num_ctx 131072` pairs with `LEAN_AI_OLLAMA_CONTEXT_WINDOW=128`. If they differ, you'll either waste VRAM or hit unexpected truncation.
 - **Don't set system prompts** — Lean AI manages its own system prompts. Setting one in the Modelfile will conflict with the agent's instructions.
 - **Qwen3 and temperature** — Qwen3 models warn against greedy decoding (`temperature: 0.0`). Use at least `0.3` for Qwen3-based models.
 - **Test before committing** — Run `ollama run your-model-name` interactively to verify the model works before pointing Lean AI at it.

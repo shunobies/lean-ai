@@ -97,7 +97,7 @@ LEAN_AI_LLM_PROVIDER=ollama
 
 # Local model (default)
 LEAN_AI_OLLAMA_MODEL=qwen3-coder:30b
-LEAN_AI_OLLAMA_CONTEXT_WINDOW=131072
+LEAN_AI_OLLAMA_CONTEXT_WINDOW=128      # 128k — shorthand for 131072
 
 # Cloud providers (optional — add API keys to enable)
 LEAN_AI_OPENAI_API_KEY=sk-...

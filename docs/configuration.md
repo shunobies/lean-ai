@@ -55,7 +55,7 @@ Switch providers at any time by changing this value and restarting the server (o
 | `LEAN_AI_OLLAMA_TOP_P` | `0.8` | Nucleus sampling threshold |
 | `LEAN_AI_OLLAMA_TOP_K` | `20` | Top-k sampling |
 | `LEAN_AI_OLLAMA_REPEAT_PENALTY` | `1.05` | Repetition penalty |
-| `LEAN_AI_OLLAMA_CONTEXT_WINDOW` | `131072` | Context window size (single source of truth for derived limits) |
+| `LEAN_AI_OLLAMA_CONTEXT_WINDOW` | `128` (131072) | Context window size — [shorthand](#context-window-shorthand) accepted |
 | `LEAN_AI_OLLAMA_MAX_TOKENS` | *25% of context window* | Max output tokens per response |
 
 Ollama is always required, even when using cloud providers — it handles inline predictions, embeddings, and the [local refiner](knowledge-base.md#local-refiner).
@@ -68,7 +68,7 @@ Ollama is always required, even when using cloud providers — it handles inline
 | `LEAN_AI_OPENAI_MODEL` | `gpt-4o` | Model name |
 | `LEAN_AI_OPENAI_BASE_URL` | *(empty)* | Custom base URL for OpenAI-compatible APIs (Together, Groq, vLLM) |
 | `LEAN_AI_OPENAI_TEMPERATURE` | `0.7` | Sampling temperature |
-| `LEAN_AI_OPENAI_CONTEXT_WINDOW` | `128000` | Context window size |
+| `LEAN_AI_OPENAI_CONTEXT_WINDOW` | `128000` | Context window size — [shorthand](#context-window-shorthand) accepted |
 | `LEAN_AI_OPENAI_MAX_TOKENS` | *25% of context window* | Max output tokens |
 
 Set `LEAN_AI_OPENAI_BASE_URL` to use OpenAI-compatible providers like Together AI, Groq, or a local vLLM instance.
@@ -80,7 +80,7 @@ Set `LEAN_AI_OPENAI_BASE_URL` to use OpenAI-compatible providers like Together A
 | `LEAN_AI_ANTHROPIC_API_KEY` | *(empty)* | API key (required to enable Anthropic) |
 | `LEAN_AI_ANTHROPIC_MODEL` | `claude-sonnet-4-20250514` | Model name |
 | `LEAN_AI_ANTHROPIC_TEMPERATURE` | `0.7` | Sampling temperature |
-| `LEAN_AI_ANTHROPIC_CONTEXT_WINDOW` | `200000` | Context window size |
+| `LEAN_AI_ANTHROPIC_CONTEXT_WINDOW` | `200000` | Context window size — [shorthand](#context-window-shorthand) accepted |
 | `LEAN_AI_ANTHROPIC_MAX_TOKENS` | *25% of context window* | Max output tokens |
 
 ## Inline Predictions
@@ -90,7 +90,7 @@ Set `LEAN_AI_OPENAI_BASE_URL` to use OpenAI-compatible providers like Together A
 | `LEAN_AI_INLINE_MODEL` | *(empty — uses primary Ollama model)* | Separate model for Copilot-style completions |
 | `LEAN_AI_INLINE_OLLAMA_URL` | *(falls back to OLLAMA_URL)* | Ollama instance for inline model |
 | `LEAN_AI_INLINE_MAX_TOKENS` | `256` | Max tokens per inline completion |
-| `LEAN_AI_INLINE_CONTEXT_WINDOW` | *12.5% of primary context window* | Context window for inline model |
+| `LEAN_AI_INLINE_CONTEXT_WINDOW` | *12.5% of primary context window* | Context window for inline model — [shorthand](#context-window-shorthand) accepted |
 
 Inline predictions always use Ollama regardless of the active provider. Use a smaller, faster model here for snappy completions (e.g. `qwen2.5-coder:7b`).
 
