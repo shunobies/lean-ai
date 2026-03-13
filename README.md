@@ -1,497 +1,143 @@
 # Lean AI
 
-Agentic coding assistant powered by a single local LLM via Ollama. Plan well, give the LLM tools, let it work.
+**Your codebase already has an architect. It just needs tools.**
 
-## Philosophy
+Lean AI is an agentic coding assistant that reads your project, plans changes, and executes them — all inside your editor. Give it a task in plain English, review the plan, and watch it work.
 
-Lean AI extracts the proven ideas from [single_ai](../single_ai) into a clean, minimal codebase:
-
-- **Direct agentic execution** — give the LLM the task and tools, let it explore, plan, and execute in one continuous conversation
-- **Tree-sitter AST parsing** instead of regex patterns for source code analysis
-- **Native tool calling** via Ollama — no text-based SEARCH/REPLACE parsing
-- **No prompt engineering required** — chat mode refines vague ideas into detailed tasks, project context teaches the LLM your codebase, and framework guides fill in the conventions so you don't have to
-- **Minimal persistence** — 2 SQLite tables instead of ORM models
-- **Trust the LLM** — no stagnation detection, no implementation review loops, no rubric scoring
+Run it fully local with [Ollama](https://ollama.com), or connect to OpenAI and Anthropic when you need heavier reasoning. Switch between models mid-session from the UI. No cloud account required to get started.
 
 ![Example](Example.png)
 
+## Why Lean AI?
+
+- **Plan first, then execute** — a 6-phase planning pipeline reads your codebase, traces data flow across files, and produces a structured plan before touching any code. You approve (or revise) before anything changes.
+- **Multi-provider flexibility** — Ollama for free local inference, OpenAI for GPT-4o, Anthropic for Claude. Switch from the dropdown without restarting. Use cheap local models for small fixes, cloud models for hard problems.
+- **Local Refiner** — when using cloud providers, a local Ollama model pre-processes your prompts: enriches them with private knowledge base context, strips sensitive data, and structures vague requests into detailed specs. Your proprietary docs never leave your machine. [Learn more](docs/knowledge-base.md)
+- **Zero prompt engineering** — chat mode helps you refine ideas into detailed tasks. Project context and framework guides teach the LLM your codebase conventions automatically.
+- **Knowledge base** — drop your internal docs (PDF, EPUB, Word, Markdown) into `.lean_ai/knowledge/` and the agent uses them for better plans without leaking content to cloud APIs.
+- **Git-native workflow** — every task runs on its own branch. Approve to merge, reject to discard. Your main branch stays clean.
+- **19 scaffold recipes** — bootstrap new projects (FastAPI, Next.js, Laravel, Rails, and more) with a single command.
+
 ## Quick Start
 
-### Backend
+### 1. Install the backend
 
 ```bash
 cd backend
 pip install -e ".[dev]"
+```
 
-# Optional: knowledge base format support (EPUB, PDF, Word)
-pip install -e ".[dev,knowledge]"
+Need cloud providers or knowledge base support? See [optional extras](docs/configuration.md#installation-extras).
 
-# Optional: Google search via headless Chrome (requires Chrome installed)
-pip install -e ".[dev,google]"
+### 2. Start the server
 
-# Start the server
+```bash
 uvicorn lean_ai.main:app --reload --port 8422
 ```
 
-### VSCodium Extension
+### 3. Install the extension
 
 ```bash
-cd extension
-npm install
-npm run build
-
-# Package the .vsix file
+cd extension && npm install && npm run build
 npx vsce package --no-dependencies
 ```
 
-This produces a file like `lean-ai-0.1.2.vsix`. To install it in VSCodium:
+Install the `.vsix` in VSCodium/VSCode: **Extensions** sidebar > `...` menu > **Install from VSIX...**
 
-```bash
-codium --install-extension lean-ai-0.1.2.vsix
-```
+### 4. Open a project and start chatting
 
-Or from the VSCodium UI: **Extensions** sidebar → `⋯` menu (top-right) → **Install from VSIX...** → select the `.vsix` file.
-
-Reload VSCodium after installation.
-
-## Configuration
-
-All settings use the `LEAN_AI_` environment variable prefix. Create a `backend/.env` file:
-
-```env
-# Primary model
-LEAN_AI_OLLAMA_URL=http://localhost:11434
-LEAN_AI_OLLAMA_MODEL=qwen3-coder:30b
-LEAN_AI_OLLAMA_CONTEXT_WINDOW=131072
-
-# Inline predictions (optional — separate smaller model)
-LEAN_AI_INLINE_MODEL=qwen2.5-coder:7b-instruct
-LEAN_AI_INLINE_CONTEXT_WINDOW=32768
-
-# Embeddings
-LEAN_AI_EMBEDDING_MODEL=qwen3-embedding:0.6b
-LEAN_AI_ENABLE_EMBEDDINGS=true
-```
-
-### Complete Configuration Reference
-
-#### Primary Model
-
-| Variable | Default | Description |
-|---|---|---|
-| `LEAN_AI_OLLAMA_URL` | `http://localhost:11434` | Ollama API endpoint |
-| `LEAN_AI_OLLAMA_MODEL` | `qwen3-coder:30b` | Primary model for planning and implementation |
-| `LEAN_AI_OLLAMA_TEMPERATURE` | `0.7` | Sampling temperature (Qwen3 recommends 0.7) |
-| `LEAN_AI_OLLAMA_TOP_P` | `0.8` | Nucleus sampling threshold |
-| `LEAN_AI_OLLAMA_TOP_K` | `20` | Top-k sampling |
-| `LEAN_AI_OLLAMA_REPEAT_PENALTY` | `1.05` | Repetition penalty |
-| `LEAN_AI_OLLAMA_CONTEXT_WINDOW` | `131072` | Total context window size (single source of truth — other limits derive from this) |
-| `LEAN_AI_OLLAMA_MAX_TOKENS` | *(derived: 25% of context window)* | Max output tokens per LLM call |
-
-#### Inline Prediction Model
-
-| Variable | Default | Description |
-|---|---|---|
-| `LEAN_AI_INLINE_MODEL` | *(empty — disabled)* | Separate model for Copilot-style inline completions |
-| `LEAN_AI_INLINE_OLLAMA_URL` | *(falls back to OLLAMA_URL)* | Ollama instance for the inline model |
-| `LEAN_AI_INLINE_CONTEXT_WINDOW` | *(derived: 12.5% of context window)* | Context window for inline predictions |
-| `LEAN_AI_INLINE_MAX_TOKENS` | `256` | Max tokens for inline completions |
-
-#### Embedding Model
-
-| Variable | Default | Description |
-|---|---|---|
-| `LEAN_AI_EMBEDDING_MODEL` | `qwen3-embedding:0.6b` | Model for semantic search embeddings |
-| `LEAN_AI_ENABLE_EMBEDDINGS` | `true` | Enable embedding generation and RRF hybrid search |
-| `LEAN_AI_EMBEDDING_OLLAMA_URL` | *(falls back to OLLAMA_URL)* | Ollama instance for embeddings |
-
-#### Indexer
-
-| Variable | Default | Description |
-|---|---|---|
-| `LEAN_AI_INDEX_DIR` | `.lean_ai_index` | Whoosh search index directory name |
-| `LEAN_AI_CHUNK_MAX_LINES` | `50` | Maximum lines per code chunk for indexing |
-| `LEAN_AI_CHUNK_OVERLAP_LINES` | `10` | Overlap lines between adjacent chunks |
-
-#### Internet / Search
-
-| Variable | Default | Description |
-|---|---|---|
-| `LEAN_AI_SEARCH_PROVIDER` | `duckduckgo` | Search provider (`duckduckgo`, `searxng`, `google`, or `bing`). The `google` provider automatically falls back to Bing when Google returns no results (e.g. CAPTCHA, rate-limiting) |
-| `LEAN_AI_SEARCH_API_URL` | *(empty)* | SearXNG API URL (if using SearXNG) |
-| `LEAN_AI_SEARCH_API_KEY` | *(empty)* | SearXNG API key (if using SearXNG) |
-| `LEAN_AI_SEARCH_DELAY` | `2.0` | Min seconds between searches (all providers, with random jitter) |
-| `LEAN_AI_INTERNET_TIMEOUT_SECONDS` | `30` | Timeout for internet requests |
-
-#### Project Context
-
-| Variable | Default | Description |
-|---|---|---|
-| `LEAN_AI_ENABLE_PROJECT_CONTEXT` | `true` | Generate `.lean_ai/project_context.md` on workspace init |
-| `LEAN_AI_ENABLE_MULTI_ROUND_CONTEXT` | `true` | Use multi-round LLM calls for richer context generation |
-| `LEAN_AI_ENABLE_FRAMEWORK_GUIDE` | `true` | Auto-generate `.lean_ai/framework_guide.md` for detected frameworks (Laravel, Django, Rails, etc.) |
-
-Custom steering documents can be added to `.lean_ai/context/` — see [Custom Steering Documents](#custom-steering-documents).
-
-#### Knowledge Base
-
-| Variable | Default | Description |
-|---|---|---|
-| `LEAN_AI_KNOWLEDGE_DIR` | `.lean_ai/knowledge` | Directory for domain documents (EPUB, PDF, Word, Markdown, etc.) |
-| `LEAN_AI_KNOWLEDGE_INDEX_DIR` | `.lean_ai_knowledge_index` | Whoosh index directory for knowledge base |
-
-#### Implementation
-
-| Variable | Default | Description |
-|---|---|---|
-| `LEAN_AI_IMPLEMENTATION_MAX_TURNS` | `0` | Max tool-calling turns per agent session (`0` = unlimited) |
-| `LEAN_AI_IMPLEMENTATION_MAX_TOKENS` | *(derived: 25% of context window)* | Max tokens per LLM turn during implementation |
-| `LEAN_AI_REMINDER_INTERVAL` | `10` | Re-inject task + scratchpad reminder every N tool-calling turns |
-| `LEAN_AI_LOOP_DETECTION_THRESHOLD` | `3` | Consecutive identical tool calls before warning (`0` = off) |
-| `LEAN_AI_REFRESH_THRESHOLD` | `0.7` | Refresh context (re-read files from disk, inject scratchpad) at this fraction of context window |
-
-#### Tool Execution
-
-| Variable | Default | Description |
-|---|---|---|
-| `LEAN_AI_TOOL_TIMEOUT_SECONDS` | `60` | Timeout for shell tool execution (tests, lint, format) |
-
-#### LLM Retry
-
-| Variable | Default | Description |
-|---|---|---|
-| `LEAN_AI_LLM_RETRY_MAX` | `3` | Max retries for transient LLM errors |
-| `LEAN_AI_LLM_RETRY_BASE_DELAY` | `2.0` | Base delay (seconds) for exponential backoff |
-
-#### Server
-
-| Variable | Default | Description |
-|---|---|---|
-| `LEAN_AI_HOST` | `127.0.0.1` | Server bind address |
-| `LEAN_AI_PORT` | `8422` | Server port |
-
-### VSCodium Extension Settings
-
-| Setting | Default | Description |
-|---|---|---|
-| `lean-ai.backendUrl` | `http://localhost:8422` | Backend server URL |
-| `lean-ai.enableInlinePredictions` | `true` | Enable Copilot-style inline completions |
-| `lean-ai.autoStartBackend` | `true` | Auto-start the Python backend on extension activation |
-| `lean-ai.pythonPath` | `python` | Path to Python interpreter |
-| `lean-ai.backendDir` | *(auto-detect)* | Path to backend directory |
-| `lean-ai.chatFontSize` | `13` | Font size in pixels for chat messages (10–20) |
+The sidebar chat panel is your entry point. Describe what you want built, and the agent handles the rest.
 
 ## How It Works
 
-### Workflow (`/agent`)
-
-1. **User submits a task** via the VSCodium sidebar chat or `/agent` command
-2. **Git branch** — a `lean-ai/{session_id}` branch is created from the default branch (master/main), uncommitted changes are stashed
-3. **Clarification (optional)** — if the task is ambiguous, the LLM asks follow-up questions before planning
-4. **Planning** — 6-phase decomposed planning: scope analysis, file identification with codebase exploration, exploration compression, change design, risk check, plan assembly
-5. **Approval** — the plan is sent to the user for review; they can approve, reject, or provide feedback for revision
-6. **Execution** — each plan step is executed sequentially with tool calls, diffs and progress streamed back via WebSocket
-7. **Done** — changes are auto-committed on the branch; user can `/approve` (merge) or `/reject` (abandon)
-
-### Fix Mode (`/fix`)
-
-For small bugs that don't need a full plan:
-
-1. **User types `/fix <description>`** — skips clarification, planning, and approval entirely
-2. **Git branch** — same branch-from-default-branch setup as the normal workflow
-3. **Direct execution** — the LLM gets the task, project context, and full tool access, then explores, diagnoses, fixes, and verifies autonomously
-4. **Done** — same auto-commit and merge/abandon flow
-
-### Custom Steering Documents
-
-You can provide additional guidance to the agent by placing `.md` files in `.lean_ai/context/`. These are loaded into the LLM's context at the start of every workflow, after the auto-generated `project_context.md` and `framework_guide.md`.
-
 ```
-.lean_ai/context/
-├── coding-standards.md     # Your team's style rules
-├── domain-glossary.md      # Domain-specific terminology
-└── testing-conventions.md  # How tests should be written
+You: "Add user authentication with JWT tokens"
+                    |
+          [Chat refines the idea]
+                    |
+          [6-phase planning pipeline]
+            scope -> files -> design -> risks -> plan
+                    |
+          [You review and approve]
+                    |
+          [Agent executes step-by-step]
+            creates files, edits code, runs tests
+                    |
+          [Changes committed on a branch]
+            /approve to merge, /reject to discard
 ```
 
-Files are loaded alphabetically. Use numeric prefixes (e.g. `01-standards.md`, `02-glossary.md`) to control ordering.
+**Two modes:**
+- **`/agent`** — full planning pipeline for features and refactors
+- **`/fix`** — skip planning, let the agent explore and fix directly
 
-### Agent Tools
-
-During execution, the LLM has access to these tools:
-
-| Tool | Description |
-|---|---|
-| `create_file` | Create a new file with full content |
-| `edit_file` | Edit an existing file via find-and-replace |
-| `read_file` | Read file contents with optional line range |
-| `run_tests` | Execute test commands (with safety gate) |
-| `run_lint` | Run linting checks (with safety gate) |
-| `format_code` | Run code formatter (with safety gate) |
-| `list_directory` | List files in a directory |
-| `directory_tree` | Show recursive file tree |
-| `grep_files` | Search file contents across the codebase |
-| `update_scratchpad` | Persist notes/progress across tool-calling turns |
-
-Shell commands (`run_tests`, `run_lint`, `format_code`) pass through a safety gate that blocks dangerous commands and requires user approval for potentially risky ones.
-
-#### Scratchpad & Task Reminders
-
-The **scratchpad** is a per-session file (`.lean_ai/scratchpads/{session_id}.md`, max 2,000 chars) the LLM uses to track its own progress. It writes structured sections (`## Completed`, `## Current State`, `## Cross-File References`, `## Files Modified`, `## Next Step`) via the `update_scratchpad` tool. Each call overwrites the previous content.
-
-Every `LEAN_AI_REMINDER_INTERVAL` turns (default 10), a **task reminder** is injected into the conversation containing the original task and the current scratchpad content. This keeps the LLM oriented even after Ollama evicts earlier turns from its context window.
-
-When the conversation reaches `LEAN_AI_REFRESH_THRESHOLD` (default 70%) of the context window, a **context refresh** occurs: old messages are dropped, all context files are re-read from disk (picking up any updates made during the session), and the scratchpad is injected so the LLM can continue from where it left off. No LLM summarization call is needed — the scratchpad provides continuity. The context percentage resets, giving the LLM a fresh window to work in.
-
-The scratchpad also survives crashes — on `/resume`, it's injected into the initial prompt so the LLM can continue where it left off without redoing work. The scratchpad is deleted when a session is closed via `/approve` or `/reject`.
+See [Architecture](docs/architecture.md) for the full breakdown.
 
 ## Slash Commands
 
-Commands available in the VSCodium sidebar chat:
-
-| Command | Description |
+| Command | What it does |
 |---|---|
-| `/init` | Index the workspace and generate project context. Use `/init --force` to regenerate from scratch |
-| `/guide` | Regenerate `.lean_ai/framework_guide.md` without re-indexing or regenerating project context |
-| `/style` | Generate `.lean_ai/context/style_guide.md` from the project's CSS, templates, and component files |
-| `/scaffold` | Create a new project from a scaffold recipe. `/scaffold list` shows available recipes, `/scaffold <name> <project>` creates one |
-| `/agent` | Send a task directly to the agent (skips chat, goes straight to planning) |
-| `/fix` | Skip planning — the agent explores, diagnoses, and fixes directly with full tool access |
-| `/approve` | Merge the agent's working branch into the base branch after reviewing changes |
-| `/reject` | Abandon the agent's working branch and discard all changes |
-| `/reboot` | Restart the backend Python server |
+| `/init` | Index workspace and generate project context |
+| `/agent` | Send a task to the planning pipeline |
+| `/fix` | Skip planning, fix directly with full tool access |
+| `/approve` | Merge the agent's branch |
+| `/reject` | Discard the agent's branch |
+| `/guide` | Regenerate framework guide |
+| `/style` | Generate style guide from CSS/templates |
+| `/scaffold` | Bootstrap a new project |
+| `/reboot` | Restart the backend server |
 
-### VSCodium Commands
+## Configuration
 
-Available from the Command Palette (`Ctrl+Shift+P`):
+Create a `backend/.env` file:
 
-| Command | Description |
-|---|---|
-| `Lean AI: Approve Plan` | Approve a pending plan during workflow |
-| `Lean AI: Reject Plan` | Reject a pending plan |
-| `Lean AI: Focus Chat Panel` | Focus the sidebar chat panel |
-| `Lean AI: Restart Backend Server` | Restart the Python backend |
-| `Lean AI: Stop Backend Server` | Stop the Python backend |
-| `Lean AI: Refresh Sessions` | Refresh the sessions tree view |
-| `Lean AI: View Session Details` | View details of a session |
-| `Lean AI: Merge Session Branch` | Merge a session's branch into base |
-| `Lean AI: Abandon Session` | Abandon a session and clean up its branch |
-| `Lean AI: Delete Session` | Delete a session from the sessions list |
+```env
+# Provider — "ollama", "openai", or "anthropic"
+LEAN_AI_LLM_PROVIDER=ollama
 
-## API Endpoints
+# Local model (default)
+LEAN_AI_OLLAMA_MODEL=qwen3-coder:30b
+LEAN_AI_OLLAMA_CONTEXT_WINDOW=131072
 
-All under the `/api` prefix.
-
-### Sessions
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/sessions` | Create a new workflow session |
-| `GET` | `/sessions` | List all sessions for a workspace |
-| `GET` | `/sessions/{id}` | Get session detail |
-| `WS` | `/sessions/{id}/stream` | WebSocket for real-time workflow streaming |
-| `POST` | `/sessions/{id}/merge` | Merge agent's branch into base branch |
-| `POST` | `/sessions/{id}/abandon` | Abandon agent's branch and clean up |
-| `DELETE` | `/sessions/{id}` | Delete a session |
-| `GET` | `/sessions/{id}/conversation` | Get session conversation history |
-| `GET` | `/sessions/{id}/checkpoints` | Get session checkpoints |
-| `GET` | `/sessions/{id}/git-events` | Get session git events |
-
-### Workspace
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/init-workspace` | Index workspace, generate embeddings, index knowledge base |
-| `POST` | `/generate-project-context` | Regenerate `.lean_ai/project_context.md` |
-| `POST` | `/generate-framework-guide` | Regenerate `.lean_ai/framework_guide.md` for the detected framework |
-| `POST` | `/generate-style-guide` | Generate `.lean_ai/context/style_guide.md` from CSS and template files |
-| `POST` | `/index-knowledge` | Index knowledge documents |
-
-### Chat & Predictions
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/chat` | Lightweight read-only chat with workspace context (no tools) |
-| `POST` | `/predict` | Stateless inline completion for Copilot-style predictions |
-
-### Scaffolding
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/scaffold/list` | List available scaffold recipes |
-| `POST` | `/scaffold` | Create a new project from a scaffold recipe |
-
-### Health
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/health` | Health check |
-
-### WebSocket Protocol
-
-Message types sent from server to client: `stage_change`, `assistant_content`, `approval_required`, `plan_rejected`, `plan_revision`, `tool_progress`, `tool_approval_required`, `diff`, `test_result`, `error`, `complete`, `stage_status`, `clarification_needed`, `pong`, `branch_created`, `checkpoint`, `metrics_update`, `merge_complete`, `context_refreshed`.
-
-Message types sent from client to server: `user_message`, `approve`, `reject`, `approve_tool`, `deny_tool`, `ping`.
-
-## Project Structure
-
-```
-lean_ai/
-├── backend/
-│   ├── pyproject.toml
-│   ├── .env                   # Local configuration (not committed)
-│   └── src/lean_ai/
-│       ├── main.py            # FastAPI entry point
-│       ├── config.py          # Pydantic settings (LEAN_AI_ prefix)
-│       ├── db.py              # Minimal SQLite (2 tables: sessions, tool_logs)
-│       ├── router.py          # Top-level API router (mounts sub-routers)
-│       ├── routers/
-│       │   ├── chat.py        # /chat endpoint
-│       │   ├── context_helpers.py  # Context file loading utilities
-│       │   ├── dependencies.py     # FastAPI dependency injection
-│       │   ├── generation.py  # Context/guide/style generation endpoints
-│       │   ├── models.py      # Pydantic request/response models
-│       │   ├── sessions.py    # Session CRUD + merge/abandon endpoints
-│       │   └── workflow.py    # WebSocket workflow endpoint
-│       ├── llm/
-│       │   ├── client.py      # Async Ollama client with tool-calling loop
-│       │   ├── planner.py     # 6-phase decomposed planning pipeline
-│       │   ├── plan_schema.py # Pydantic models for structured plan output
-│       │   ├── prompts.py     # All system prompts
-│       │   └── tool_definitions.py  # Tool schemas for Ollama
-│       ├── tools/
-│       │   ├── file_ops.py    # create_file, edit_file, read_file
-│       │   ├── shell.py       # run_tests, run_lint, format_code
-│       │   ├── git_ops.py     # Git operations (branch, stash, merge)
-│       │   ├── command_safety.py  # Command safety gate
-│       │   ├── internet.py    # Web search + URL fetching
-│       │   ├── browser_search.py  # Google/Bing via headless Chrome
-│       │   ├── scratchpad.py  # Per-session progress tracking
-│       │   ├── scaffold.py    # Project scaffolding tool
-│       │   └── executor.py    # Tool execution framework
-│       ├── context/
-│       │   ├── content.py     # Project context generation (single/multi-round)
-│       │   ├── generation.py  # Context update orchestration
-│       │   ├── framework_guide.py    # Framework guide generation
-│       │   ├── framework_detection.py # Framework detection from deps
-│       │   ├── framework_search.py   # Web search for framework docs
-│       │   ├── framework_validation.py # Guide validation + repair
-│       │   ├── style_guide.py # Style guide generation from CSS/templates
-│       │   ├── deprecations.py # Dependency version deprecation checks
-│       │   ├── dedup.py       # Section deduplication utilities
-│       │   ├── metadata.py    # Tree-sitter metadata extraction + cache
-│       │   └── constants.py   # Context generation constants
-│       ├── languages/         # 13 tree-sitter language definitions (YAML)
-│       ├── indexer/           # Whoosh BM25F search + embedding store
-│       ├── knowledge/         # Domain document indexing
-│       ├── workflow/
-│       │   ├── pipeline.py    # Plan + fix workflows with context refresh
-│       │   ├── prompts.py     # Prompt builders for workflow modes
-│       │   ├── tool_executor.py  # Tool dispatch + safety gate
-│       │   └── ws_handler.py  # WebSocket message helper
-│       └── scaffolds/         # 19 YAML scaffold recipes
-│
-└── extension/                 # VSCodium extension
-    ├── package.json           # Commands, settings, chat participant
-    └── src/
-        ├── extension.ts       # Extension entry point
-        ├── sidebarProvider.ts # Sidebar chat panel
-        ├── sidebarHtml.ts     # Sidebar HTML template
-        ├── slashCommands.ts   # Slash command handlers (/init, /fix, /style, etc.)
-        ├── chatParticipant.ts # VSCodium Chat Participant API
-        ├── inlineProvider.ts  # Copilot-style inline completions
-        ├── backendClient.ts   # HTTP/WebSocket client for the backend
-        ├── backendProcess.ts  # Backend process management
-        ├── streamHandler.ts   # WebSocket stream processing
-        ├── wsHandler.ts       # WebSocket connection + message dispatch
-        ├── conversationManager.ts  # Conversation history management
-        ├── sessionTreeProvider.ts  # Sessions tree view
-        ├── sessionDetailProvider.ts # Session detail webview
-        ├── indexingService.ts # Workspace indexing service
-        ├── constants.ts       # Shared constants
-        └── types.ts           # TypeScript type definitions
+# Cloud providers (optional — add API keys to enable)
+LEAN_AI_OPENAI_API_KEY=sk-...
+LEAN_AI_ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-## Technology Stack
+See the [full configuration reference](docs/configuration.md) for all options.
 
-| Concern | Library |
+## Documentation
+
+| Guide | Description |
 |---|---|
-| Web framework | FastAPI (async, built-in WebSocket) |
-| Database | aiosqlite (raw SQL, 2 tables) |
-| Ollama SDK | ollama (official, async) |
-| Search index | Whoosh |
-| Source analysis | tree-sitter + 13 grammar packages |
-| Internet search | duckduckgo-search, Selenium (optional Google/Bing provider with automatic fallback) |
-| HTML sanitization | BeautifulSoup4 |
-| Testing | pytest + pytest-asyncio |
-| Linting | ruff |
-| VSCodium extension | Chat Participant API + InlineCompletionItemProvider |
+| [Configuration](docs/configuration.md) | All environment variables, extension settings, and model setup |
+| [Architecture](docs/architecture.md) | Planning pipeline, workflow modes, tools, and internals |
+| [Knowledge Base & Refiner](docs/knowledge-base.md) | Private docs, RAG enrichment, and cloud privacy |
+| [API Reference](docs/api-reference.md) | REST endpoints and WebSocket protocol |
+| [Extension Guide](docs/extension.md) | VSCode/VSCodium setup, commands, and settings |
+| [Modelfile Guide](docs/modelfile.md) | Customizing Ollama models with persistent rules |
 
 ## Requirements
 
 - Python 3.10+
 - Node.js 18+ (for the extension)
-- Ollama running locally with a capable model (e.g., `qwen3-coder:30b`)
+- At least one LLM provider:
+  - **Ollama** with a capable model (e.g., `qwen3-coder:30b`) — free, local, no account needed
+  - **OpenAI** API key (GPT-4o, etc.)
+  - **Anthropic** API key (Claude, etc.)
 
-## Customizing the LLM with an Ollama Modelfile
+Ollama is always required for inline predictions and embeddings, even when using cloud providers.
 
-If the model produces deprecated APIs, uses outdated patterns, or doesn't follow your project's conventions, you can bake rules directly into the model using an Ollama Modelfile. This creates a custom model variant with a persistent system prompt — no extra context cost per request.
+## Technology Stack
 
-### 1. Create a Modelfile
+| Layer | Technology |
+|---|---|
+| Backend | Python, FastAPI, aiosqlite |
+| LLM providers | Ollama, OpenAI, Anthropic |
+| Code analysis | tree-sitter (13 languages) |
+| Search | Whoosh BM25F + embedding RRF |
+| Extension | TypeScript, VSCode API |
 
-Create a file called `Modelfile` (no extension) with your base model and rules:
+## License
 
-```
-FROM qwen3-coder:30b-a3b-q4_K_M
-
-SYSTEM """
-Target Laravel 12 and PHPUnit 12+. Never use deprecated APIs.
-
-## Laravel Rewrite Rules
-- dispatchNow → dispatchSync
-- dispatch_now → dispatch_sync
-- Redirect::home → Redirect::route('home')
-- protected $dates → protected $casts (datetime)
-- Schema::getAllTables → Schema::getTables
-- unsignedDecimal() → decimal()->unsigned()
-- HasVersion7Uuids → HasUuids
-- All Doctrine DBAL methods removed — use native Schema inspection
-
-## PHPUnit Rewrite Rules
-- Never use doc-comment annotations (@test, @dataProvider, @covers, etc.)
-- Use PHP 8 attributes: #[Test], #[DataProvider(...)], #[CoversClass(...)], etc.
-- assertContainsOnly() → use type-specific variant (assertContainsOnlyString, etc.)
-- No Prophecy — use native PHPUnit mocks
-- Data providers must be static methods
-
-If deprecated patterns appear in existing code, refactor them automatically.
-"""
-```
-
-Adapt the rules to your language and framework. Keep the system prompt focused — a concise set of rewrite rules is followed more reliably than a verbose document.
-
-### 2. Build the custom model
-
-```bash
-ollama create my-custom-model -f Modelfile
-```
-
-The file can be named anything and placed anywhere — just pass the path to `ollama create`:
-
-```bash
-ollama create my-custom-model -f /path/to/my-modelfile
-```
-
-### 3. Use it with Lean AI
-
-Update your `backend/.env` to point to the new model:
-
-```env
-LEAN_AI_OLLAMA_MODEL=my-custom-model
-```
-
-### Tips
-
-- **One SYSTEM block** — if you have multiple Modelfiles or multiple `SYSTEM` lines, only the last one takes effect. Combine all rules into a single `SYSTEM` block.
-- **Keep it concise** — the model already knows most languages and frameworks from pretraining. You only need to provide the mapping table for things it gets wrong (e.g., deprecated API replacements).
-- **Complement with steering documents** — Modelfile rules are language/framework-level conventions that apply to every project. For project-specific guidance, use `.lean_ai/context/*.md` steering documents instead (see [Custom Steering Documents](#custom-steering-documents)).
-- **Iterate** — if the model still produces deprecated patterns, add those specific patterns to the system prompt. If it follows the rules reliably, don't add more — every rule dilutes the weight of the others.
+MIT
