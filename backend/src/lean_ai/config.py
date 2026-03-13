@@ -2,12 +2,46 @@
 
 Token limits are derived from the active provider's context window so that
 changing a single value (or upgrading a GPU) automatically scales all limits.
+
+Context window shorthand
+~~~~~~~~~~~~~~~~~~~~~~~~
+Context window values accept a compact notation so users can write ``128``
+instead of ``131072``.  The rules:
+
+- Values ≤ 10 000 are treated as **k** (× 1024).  ``128`` → 131 072.
+- An explicit ``k`` suffix also works: ``"128k"`` → 131 072.
+- Values > 10 000 are used as-is for backwards compatibility.
 """
 
 from pathlib import Path
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Fields that accept the k-shorthand notation.
+_CONTEXT_WINDOW_FIELDS = frozenset({
+    "ollama_context_window",
+    "openai_context_window",
+    "anthropic_context_window",
+    "inline_context_window",
+})
+
+
+def _expand_ctx(raw: int | str) -> int:
+    """Expand a context-window shorthand value to raw token count.
+
+    >>> _expand_ctx(128)
+    131072
+    >>> _expand_ctx("128k")
+    131072
+    >>> _expand_ctx(131072)
+    131072
+    """
+    s = str(raw).strip().lower()
+    if s.endswith("k"):
+        return int(float(s[:-1]) * 1024)
+    n = int(s)
+    return n * 1024 if n <= 10_000 else n
 
 
 class Settings(BaseSettings):
@@ -23,7 +57,7 @@ class Settings(BaseSettings):
     ollama_top_p: float = 0.8
     ollama_top_k: int = 20
     ollama_repeat_penalty: float = 1.05
-    ollama_context_window: int = 131072  # Single source of truth; 262144 for qwen3-coder-next
+    ollama_context_window: int = 131072  # Accepts shorthand: 128 = 128k = 131072
     ollama_max_tokens: int | None = None  # Derived: 25% of context window
 
     # ── OpenAI ──
@@ -31,20 +65,20 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o"
     openai_base_url: str = ""  # For OpenAI-compatible APIs (Together, Groq, vLLM, etc.)
     openai_temperature: float = 0.7
-    openai_context_window: int = 128000
+    openai_context_window: int = 128000  # Accepts shorthand: 125 ≈ 128000
     openai_max_tokens: int | None = None  # Derived: 25% of context window
 
     # ── Anthropic ──
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-20250514"
     anthropic_temperature: float = 0.7
-    anthropic_context_window: int = 200000
+    anthropic_context_window: int = 200000  # Accepts shorthand: 200 = 204800
     anthropic_max_tokens: int | None = None  # Derived: 25% of context window
 
     # ── Ollama — inline prediction model (always Ollama) ──
     inline_model: str = ""
     inline_max_tokens: int = 256
-    inline_context_window: int | None = None  # Derived: 12.5% of context window
+    inline_context_window: int | None = None  # Derived: 12.5% of context window (accepts shorthand)
     inline_ollama_url: str | None = None
 
     # ── Embedding model (always Ollama) ──
@@ -99,6 +133,22 @@ class Settings(BaseSettings):
     # ── Server ──
     host: str = "127.0.0.1"
     port: int = 8422
+
+    @model_validator(mode="before")
+    @classmethod
+    def _expand_context_shorthand(cls, data: dict) -> dict:
+        """Allow context windows in k — e.g. 128 means 128k (131072 tokens).
+
+        Values ≤ 10 000 are treated as multiples of 1024.  An explicit ``k``
+        suffix (e.g. ``"128k"``) is also accepted.  Values > 10 000 are used
+        as-is for backwards compatibility.
+        """
+        for field in _CONTEXT_WINDOW_FIELDS:
+            raw = data.get(field)
+            if raw is None:
+                continue
+            data[field] = _expand_ctx(raw)
+        return data
 
     @model_validator(mode="after")
     def _derive_from_context_window(self) -> "Settings":

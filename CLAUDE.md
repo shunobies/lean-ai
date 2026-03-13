@@ -101,7 +101,7 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_OLLAMA_TOP_P` | `0.8` | Nucleus sampling threshold |
 | `LEAN_AI_OLLAMA_TOP_K` | `20` | Top-k sampling |
 | `LEAN_AI_OLLAMA_REPEAT_PENALTY` | `1.05` | Repetition penalty |
-| `LEAN_AI_OLLAMA_CONTEXT_WINDOW` | `131072` | Total context window (single source of truth) |
+| `LEAN_AI_OLLAMA_CONTEXT_WINDOW` | `131072` | Context window — accepts shorthand: `128` = 128k = 131072 |
 | `LEAN_AI_OLLAMA_MAX_TOKENS` | *(derived: 25% of context window)* | Max output tokens |
 | `LEAN_AI_OPENAI_API_KEY` | *(empty)* | OpenAI API key (required when provider=openai) |
 | `LEAN_AI_OPENAI_MODEL` | `gpt-4o` | OpenAI model name |

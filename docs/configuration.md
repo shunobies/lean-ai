@@ -2,6 +2,19 @@
 
 All Lean AI settings use the `LEAN_AI_` prefix and can be set via environment variables or in a `backend/.env` file. Settings are defined in `backend/src/lean_ai/config.py` using pydantic-settings.
 
+### Context Window Shorthand
+
+Context window values accept compact notation — enter `128` instead of `131072`:
+
+| You write | Lean AI uses |
+|---|---|
+| `128` | 131072 (128 × 1024) |
+| `128k` | 131072 |
+| `256` | 262144 |
+| `131072` | 131072 (values > 10000 are used as-is) |
+
+This applies to `OLLAMA_CONTEXT_WINDOW`, `OPENAI_CONTEXT_WINDOW`, `ANTHROPIC_CONTEXT_WINDOW`, and `INLINE_CONTEXT_WINDOW`.
+
 ## Installation Extras
 
 The base install covers Ollama-only usage. Add extras for additional features:
