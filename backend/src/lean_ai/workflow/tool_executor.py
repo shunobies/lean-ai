@@ -84,12 +84,18 @@ def make_tool_executor(repo_root: str, ws: WebSocket, session_id: str = ""):
                 output = prefix + (
                     result.output or result.error or "No output"
                 )
-            max_output = 8000
+            max_output = 12000
             if len(output) > max_output:
+                # Keep head (what ran) + tail (failures/summary).
+                # Test runners and linters put the important stuff
+                # at the end — the LLM must see it.
+                head_size = max_output // 3       # ~4000 chars
+                tail_size = max_output - head_size  # ~8000 chars
+                skipped = len(output) - head_size - tail_size
                 output = (
-                    output[:max_output]
-                    + f"\n\n[OUTPUT TRUNCATED — showing first"
-                    f" {max_output} of {len(output)} characters]"
+                    output[:head_size]
+                    + f"\n\n[… {skipped:,} characters omitted …]\n\n"
+                    + output[-tail_size:]
                 )
             return output
 
