@@ -1,5 +1,6 @@
 """Tool executor factory for workflow execution."""
 
+import time
 from pathlib import Path
 
 from fastapi import WebSocket
@@ -7,6 +8,25 @@ from fastapi import WebSocket
 from lean_ai.tools import file_ops, scratchpad, shell
 from lean_ai.tools.command_safety import CommandRisk, check_command
 from lean_ai.workflow.ws_handler import safe_receive, ws_send
+
+# Short output is returned inline; longer output is saved to a file
+# so the LLM can page through it with read_file.
+_INLINE_LIMIT = 2000  # chars — fits comfortably in a single tool result
+
+
+def _save_tool_output(
+    repo_root: str,
+    tool_name: str,
+    output: str,
+) -> str:
+    """Save full tool output to .lean_ai/tool_output/ and return the relative path."""
+    out_dir = Path(repo_root) / ".lean_ai" / "tool_output"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = int(time.time() * 1000)
+    filename = f"{tool_name}_{timestamp}.txt"
+    out_path = out_dir / filename
+    out_path.write_text(output, encoding="utf-8")
+    return f".lean_ai/tool_output/{filename}"
 
 
 def make_tool_executor(repo_root: str, ws: WebSocket, session_id: str = ""):
@@ -84,20 +104,30 @@ def make_tool_executor(repo_root: str, ws: WebSocket, session_id: str = ""):
                 output = prefix + (
                     result.output or result.error or "No output"
                 )
-            max_output = 12000
-            if len(output) > max_output:
-                # Keep head (what ran) + tail (failures/summary).
-                # Test runners and linters put the important stuff
-                # at the end — the LLM must see it.
-                head_size = max_output // 3       # ~4000 chars
-                tail_size = max_output - head_size  # ~8000 chars
-                skipped = len(output) - head_size - tail_size
-                output = (
-                    output[:head_size]
-                    + f"\n\n[… {skipped:,} characters omitted …]\n\n"
-                    + output[-tail_size:]
-                )
-            return output
+
+            # Short output → return inline.
+            # Long output → save to file so the LLM can page through
+            # with read_file (500 lines at a time) and never miss
+            # failures buried in the middle.
+            if len(output) <= _INLINE_LIMIT:
+                return output
+
+            total_lines = output.count("\n") + 1
+            out_path = _save_tool_output(repo_root, name, output)
+
+            # Return a concise summary + the last 40 lines (summary/failures)
+            # and tell the LLM where to find the full output.
+            tail_lines = output.splitlines()[-40:]
+            tail_block = "\n".join(tail_lines)
+
+            status = "PASSED" if result.success else "FAILED"
+            return (
+                f"{status} — full output saved to {out_path} "
+                f"({total_lines} lines)\n"
+                f"Use read_file to review the full output. "
+                f"Last {len(tail_lines)} lines:\n\n"
+                f"{tail_block}"
+            )
 
         elif name == "list_directory":
             target = Path(repo_root) / arguments.get("path", "")
