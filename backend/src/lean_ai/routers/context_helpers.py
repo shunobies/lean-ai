@@ -158,6 +158,7 @@ def build_chat_system_prompt(
     project_context: str | None = None,
     fetched_pages: list[dict] | None = None,
     web_search_results: str | None = None,
+    knowledge_context: str | None = None,
 ) -> str:
     """Build the chat system prompt with workspace context injected."""
     parts = [
@@ -192,6 +193,11 @@ def build_chat_system_prompt(
         parts.append("")
         parts.append("=== PROJECT ARCHITECTURE ===")
         parts.append(project_context)
+
+    if knowledge_context:
+        parts.append("")
+        parts.append("=== DOMAIN KNOWLEDGE ===")
+        parts.append(knowledge_context)
 
     if workspace and workspace.active_selection:
         parts.append("")

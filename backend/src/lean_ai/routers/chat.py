@@ -8,6 +8,7 @@ import shutil
 from fastapi import APIRouter, HTTPException
 
 from lean_ai.config import settings
+from lean_ai.llm.refiner import RefinerResult
 from lean_ai.routers.context_helpers import (
     build_chat_system_prompt,
     extract_urls,
@@ -16,13 +17,15 @@ from lean_ai.routers.context_helpers import (
     read_project_context,
     search_workspace,
 )
-from lean_ai.routers.dependencies import _inline_client, llm_client
+from lean_ai.routers.dependencies import _inline_client, llm_client, refiner
 from lean_ai.routers.models import (
     ChatRequest,
     ChatResponse,
     IndexKnowledgeRequest,
     IndexKnowledgeResponse,
     InlinePredictRequest,
+    ModelInfo,
+    ModelsResponse,
     ScaffoldInfo,
     ScaffoldListResponse,
     ScaffoldRequest,
@@ -33,6 +36,82 @@ from lean_ai.tools import internet
 logger = logging.getLogger(__name__)
 
 chat_router = APIRouter()
+
+
+def _get_default_model_name() -> str:
+    """Return the model name for the active provider."""
+    p = settings.llm_provider.lower()
+    if p == "openai":
+        return settings.openai_model
+    if p == "anthropic":
+        return settings.anthropic_model
+    return settings.ollama_model
+
+
+def _get_active_max_tokens() -> int:
+    """Return max_tokens for the active provider."""
+    p = settings.llm_provider.lower()
+    if p == "openai":
+        return settings.openai_max_tokens
+    if p == "anthropic":
+        return settings.anthropic_max_tokens
+    return settings.ollama_max_tokens
+
+
+@chat_router.get("/models", response_model=ModelsResponse)
+async def list_models():
+    """List available LLM providers/models based on server configuration."""
+    models: list[ModelInfo] = []
+
+    # Ollama: query live API for available models
+    try:
+        import ollama as ollama_lib
+
+        client = ollama_lib.AsyncClient(host=settings.ollama_url)
+        response = await client.list()
+        for m in response.models:
+            name = m.model
+            models.append(ModelInfo(
+                provider="ollama",
+                model=name,
+                display_name=f"Ollama: {name}",
+                is_default=(
+                    settings.llm_provider == "ollama"
+                    and name == settings.ollama_model
+                ),
+            ))
+    except Exception:
+        # Ollama not reachable — add the configured model as fallback
+        models.append(ModelInfo(
+            provider="ollama",
+            model=settings.ollama_model,
+            display_name=f"Ollama: {settings.ollama_model}",
+            is_default=settings.llm_provider == "ollama",
+        ))
+
+    # OpenAI: show if API key configured
+    if settings.openai_api_key:
+        models.append(ModelInfo(
+            provider="openai",
+            model=settings.openai_model,
+            display_name=f"OpenAI: {settings.openai_model}",
+            is_default=settings.llm_provider == "openai",
+        ))
+
+    # Anthropic: show if API key configured
+    if settings.anthropic_api_key:
+        models.append(ModelInfo(
+            provider="anthropic",
+            model=settings.anthropic_model,
+            display_name=f"Anthropic: {settings.anthropic_model}",
+            is_default=settings.llm_provider == "anthropic",
+        ))
+
+    return ModelsResponse(
+        models=models,
+        default_provider=settings.llm_provider,
+        default_model=_get_default_model_name(),
+    )
 
 
 @chat_router.get("/scaffold/list", response_model=ScaffoldListResponse)
@@ -133,6 +212,21 @@ async def chat(request: ChatRequest):
     project_context: str | None = None
     web_search_text: str | None = None
     fetched_pages: list[dict] = []
+    refiner_result: RefinerResult | None = None
+
+    async def _refine_message():
+        nonlocal refiner_result
+        if refiner is None:
+            return
+        try:
+            root = workspace.workspace_root if workspace else None
+            refiner_result = await refiner.refine_chat_message(
+                user_message=request.message,
+                repo_root=root,
+                history=request.history,
+            )
+        except Exception as e:
+            logger.warning("Refiner failed (non-fatal): %s", e)
 
     async def _gather_workspace_context():
         nonlocal file_tree, active_file_content, search_results, project_context
@@ -172,7 +266,7 @@ async def chat(request: ChatRequest):
     async def _fetch_urls():
         nonlocal fetched_pages
         urls = extract_urls(request.message)
-        summarize_threshold = min(30_000, max(5_000, settings.ollama_context_window // 4))
+        summarize_threshold = min(30_000, max(5_000, settings._active_context_window // 4))
         for url in urls[:3]:
             try:
                 result = await internet.fetch_url(
@@ -194,7 +288,16 @@ async def chat(request: ChatRequest):
         _gather_workspace_context(),
         _do_web_search(),
         _fetch_urls(),
+        _refine_message(),
     )
+
+    # Use refined message if available, otherwise original
+    user_message = request.message
+    knowledge_ctx: str | None = None
+    if refiner_result and refiner_result.was_refined:
+        user_message = refiner_result.refined
+    if refiner_result and refiner_result.knowledge_context:
+        knowledge_ctx = refiner_result.knowledge_context
 
     system_prompt = build_chat_system_prompt(
         workspace=workspace,
@@ -204,29 +307,36 @@ async def chat(request: ChatRequest):
         project_context=project_context,
         fetched_pages=fetched_pages or None,
         web_search_results=web_search_text,
+        knowledge_context=knowledge_ctx,
     )
     messages = [{"role": "system", "content": system_prompt}]
 
     for msg in request.history[-20:]:
         messages.append({"role": msg["role"], "content": msg["content"]})
-    messages.append({"role": "user", "content": request.message})
+    messages.append({"role": "user", "content": user_message})
 
     logger.info(
-        "Chat: history=%d, files=%d, search=%d, project_ctx=%s, web=%s",
+        "Chat: history=%d, files=%d, search=%d, project_ctx=%s, web=%s, refined=%s",
         len(request.history), len(file_tree), len(search_results),
         bool(project_context), bool(web_search_text),
+        bool(refiner_result and refiner_result.was_refined),
     )
 
     try:
         reply = await llm_client.chat_raw(
             messages,
-            max_tokens=settings.ollama_max_tokens,
+            max_tokens=_get_active_max_tokens(),
         )
         metrics = llm_client.last_chat_metrics or {}
         return ChatResponse(
             reply=reply,
             tokens_per_second=metrics.get("tokens_per_second"),
             eval_count=metrics.get("eval_count"),
+            refined=bool(refiner_result and refiner_result.was_refined),
+            privacy_redactions=(
+                len(refiner_result.privacy_redactions)
+                if refiner_result else 0
+            ),
         )
     except Exception as e:
         logger.exception("Chat call failed")

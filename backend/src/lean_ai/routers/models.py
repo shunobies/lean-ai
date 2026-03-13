@@ -92,6 +92,8 @@ class ChatResponse(BaseModel):
     reply: str
     tokens_per_second: float | None = None
     eval_count: int | None = None
+    refined: bool = False
+    privacy_redactions: int = 0
 
 
 class InlinePredictRequest(BaseModel):
@@ -127,3 +129,16 @@ class GenerateStyleGuideResponse(BaseModel):
     path: str
     chars: int
     skipped: bool = False
+
+
+class ModelInfo(BaseModel):
+    provider: str       # "ollama", "openai", "anthropic"
+    model: str          # e.g. "qwen3-coder:30b", "gpt-4o"
+    display_name: str   # Human-readable: "Ollama: qwen3-coder:30b"
+    is_default: bool    # True for the server's primary configured model
+
+
+class ModelsResponse(BaseModel):
+    models: list[ModelInfo]
+    default_provider: str
+    default_model: str

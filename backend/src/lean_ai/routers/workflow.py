@@ -13,7 +13,7 @@ from lean_ai.db import (
     update_session,
 )
 from lean_ai.routers.context_helpers import load_full_context
-from lean_ai.routers.dependencies import llm_client
+from lean_ai.routers.dependencies import llm_client, refiner
 from lean_ai.tools.git_ops import (
     git_add_and_commit,
     git_checkout,
@@ -139,6 +139,51 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                 mode = "fix"
                                 task = content[5:]  # strip "/fix " prefix
 
+                            # Refine task with local LLM before cloud execution
+                            if refiner is not None and mode == "plan":
+                                try:
+                                    await websocket.send_json({
+                                        "type": "refiner_status",
+                                        "status": "running",
+                                        "summary": "Refining task with local LLM...",
+                                    })
+                                    refiner_result = await refiner.refine_task(
+                                        task=task,
+                                        repo_root=repo_root,
+                                        context=context,
+                                    )
+                                    if refiner_result.was_refined:
+                                        task = refiner_result.refined
+                                        await websocket.send_json({
+                                            "type": "refiner_status",
+                                            "status": "done",
+                                            "summary": (
+                                                f"Task refined "
+                                                f"({refiner_result.duration_ms:.0f}ms)"
+                                            ),
+                                            "privacy_redactions": len(
+                                                refiner_result.privacy_redactions
+                                            ),
+                                            "knowledge_injected": bool(
+                                                refiner_result.knowledge_context
+                                            ),
+                                        })
+                                    else:
+                                        await websocket.send_json({
+                                            "type": "refiner_status",
+                                            "status": "skipped",
+                                            "summary": "Task already well-structured",
+                                        })
+                                except Exception as e:
+                                    logger.warning(
+                                        "Refiner failed (non-fatal): %s", e,
+                                    )
+                                    await websocket.send_json({
+                                        "type": "refiner_status",
+                                        "status": "error",
+                                        "summary": f"Refinement skipped: {e}",
+                                    })
+
                             commit_msg = await run_workflow(
                                 task=task,
                                 repo_root=repo_root,
@@ -149,6 +194,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                 conversation_logger=_log_conversation,
                                 mode=mode,
                                 session_id=session_id,
+                                refiner=refiner,
                             )
 
                             # --- Auto-commit agent changes ---

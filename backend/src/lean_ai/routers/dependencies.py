@@ -6,6 +6,7 @@ from lean_ai.config import settings
 from lean_ai.llm.base import LLMProvider
 from lean_ai.llm.client import OllamaProvider
 from lean_ai.llm.facade import LLMClient
+from lean_ai.llm.refiner import PromptRefiner
 
 logger = logging.getLogger(__name__)
 
@@ -71,3 +72,34 @@ _inline_client: LLMClient = (
     if settings.inline_model
     else llm_client
 )
+
+# Local refiner — active only when using a cloud provider
+refiner: PromptRefiner | None = None
+if (
+    settings.llm_provider.lower() in ("openai", "anthropic")
+    and settings.enable_refiner
+):
+    try:
+        _refiner_provider = OllamaProvider(
+            ollama_url=settings.effective_refiner_url,
+            model=settings.effective_refiner_model,
+            max_tokens=settings.ollama_max_tokens,
+            context_window=settings.ollama_context_window,
+            temperature=settings.ollama_temperature,
+        )
+        refiner = PromptRefiner(
+            ollama_provider=_refiner_provider,
+            enable_knowledge=settings.refiner_enable_knowledge,
+            enable_privacy=settings.refiner_enable_privacy,
+            knowledge_chunks=settings.refiner_knowledge_chunks,
+            timeout=settings.refiner_timeout,
+        )
+        logger.info(
+            "Local refiner enabled (model=%s, knowledge=%s, privacy=%s)",
+            settings.effective_refiner_model,
+            settings.refiner_enable_knowledge,
+            settings.refiner_enable_privacy,
+        )
+    except Exception:
+        logger.warning("Could not create refiner — Ollama may be unavailable")
+        refiner = None

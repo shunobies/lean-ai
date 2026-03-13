@@ -272,3 +272,79 @@ suggestions, not lengthy explanations.
 for the agent. Do not include it for pure questions, explanations, or \
 conceptual discussions.
 """
+
+# ── Local Refiner Prompts ──
+
+REFINER_CHAT_PROMPT = """\
+Use your knowledge of software development to refine the following user \
+request into a well-structured, detailed prompt suitable for a coding \
+assistant.
+
+RULES:
+1. Preserve the user's intent exactly — do not add features they did not ask for
+2. Add structure: break vague requests into clear, numbered points
+3. If domain knowledge context is provided below, incorporate relevant \
+terminology, constraints, and patterns naturally into the request — do NOT \
+include raw content from domain documents, only extract actionable insights
+4. If the request is already well-structured and specific, return it unchanged
+5. Output ONLY the refined prompt text — no preamble, no explanations
+
+{knowledge_section}\
+USER REQUEST:
+{user_message}
+
+REFINED REQUEST:
+"""
+
+REFINER_TASK_PROMPT = """\
+Use your knowledge of software architecture and project planning to \
+enhance the following task description for a coding agent. The agent \
+will use this to create a detailed implementation plan and then execute it.
+
+RULES:
+1. Preserve the original task intent exactly
+2. Add technical specificity where the original is vague
+3. If domain knowledge is provided, extract relevant constraints, patterns, \
+and terminology to make the task more precise — do NOT include raw content \
+from domain documents
+4. Structure the output as numbered requirements with clear targets where possible
+5. Identify implicit requirements the user likely expects but did not state \
+(e.g., error handling, validation, test coverage)
+6. Do NOT expand scope beyond what the user intended
+7. Output ONLY the enhanced task — no preamble
+
+{knowledge_section}\
+ORIGINAL TASK:
+{task}
+
+ENHANCED TASK:
+"""
+
+PRIVACY_STRIP_PROMPT = """\
+Use your knowledge of security and data privacy to identify and redact \
+sensitive information from the following text. Replace sensitive values \
+with generic placeholders.
+
+SENSITIVE DATA TO REDACT:
+- API keys, tokens, secrets, passwords → <REDACTED_KEY>
+- Internal hostnames, IP addresses, internal URLs → <INTERNAL_HOST>
+- Email addresses of specific people → <EMAIL>
+- Database connection strings → <DB_CONNECTION>
+- Proprietary product/project codenames that appear internal → <CODENAME>
+
+DO NOT REDACT:
+- Public framework/library names (FastAPI, React, Django, etc.)
+- Generic technical terms and concepts
+- Code structure (keep imports, class/function names, logic)
+- File paths within the project being worked on
+- Open-source package names
+
+OUTPUT FORMAT:
+Return the sanitized text with redactions applied. After the text, add \
+a line "---REDACTIONS---" followed by a bullet list of what was redacted \
+and why. If nothing needed redaction, output the original text followed \
+by "---REDACTIONS---\\n- None"
+
+TEXT TO SANITIZE:
+{text}
+"""

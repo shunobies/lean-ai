@@ -73,6 +73,15 @@ class Settings(BaseSettings):
     knowledge_dir: str = ".lean_ai/knowledge"
     knowledge_index_dir: str = ".lean_ai_knowledge_index"
 
+    # ── Local Refiner (cloud pre-processing) ──
+    enable_refiner: bool = True           # Active only with cloud providers
+    refiner_ollama_url: str | None = None  # Falls back to ollama_url
+    refiner_model: str | None = None       # Falls back to ollama_model
+    refiner_timeout: float = 30.0          # Max seconds for refinement pipeline
+    refiner_enable_knowledge: bool = True  # Inject knowledge base context
+    refiner_enable_privacy: bool = True    # Strip sensitive data
+    refiner_knowledge_chunks: int = 5      # Max knowledge chunks to inject
+
     # ── Implementation ──
     implementation_max_tokens: int | None = None  # Derived: 25% of active context window
     implementation_max_turns: int = 0  # 0 = unlimited
@@ -125,6 +134,14 @@ class Settings(BaseSettings):
     @property
     def effective_embedding_url(self) -> str:
         return self.embedding_ollama_url or self.ollama_url
+
+    @property
+    def effective_refiner_url(self) -> str:
+        return self.refiner_ollama_url or self.ollama_url
+
+    @property
+    def effective_refiner_model(self) -> str:
+        return self.refiner_model or self.ollama_model
 
     @property
     def project_root(self) -> Path:

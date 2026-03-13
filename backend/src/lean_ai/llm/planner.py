@@ -28,6 +28,7 @@ from lean_ai.llm.tool_definitions import PLANNING_TOOLS
 
 if TYPE_CHECKING:
     from lean_ai.llm.client import LLMClient
+    from lean_ai.llm.refiner import PromptRefiner
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,7 @@ async def create_plan(
     context: str = "",
     revision_context: str | None = None,
     ws: WebSocket | None = None,
+    refiner: "PromptRefiner | None" = None,
 ) -> ExecutionPlan:
     """Create a plan using 5-phase decomposed planning.
 
@@ -109,6 +111,7 @@ async def create_plan(
         context: Pre-assembled context (project context, search results, etc.).
         revision_context: If revising, the previous plan JSON + user feedback.
         ws: Optional WebSocket for streaming stage progress.
+        refiner: Optional local refiner for privacy-stripping file summaries.
 
     Returns:
         Structured ExecutionPlan ready for per-step execution.
@@ -298,6 +301,15 @@ async def create_plan(
         len(file_identification), len(file_summary),
         (1 - len(file_summary) / max(len(file_identification), 1)) * 100,
     )
+
+    # Privacy pass: strip sensitive data from file summary before
+    # it enters Phases 3-5 (which may run on a cloud provider)
+    if refiner and refiner.is_active:
+        file_summary, redactions = await refiner.strip_privacy(file_summary)
+        if redactions:
+            logger.info(
+                "Privacy: stripped %d items from file summary", len(redactions),
+            )
 
     # Phase 3: Change Design
     await _send_stage(ws, "Phase 3: Designing specific changes...")

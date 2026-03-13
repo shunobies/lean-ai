@@ -32,6 +32,7 @@ from lean_ai.workflow.ws_handler import safe_receive, ws_send, ws_send_nowait
 
 if TYPE_CHECKING:
     from lean_ai.llm.client import LLMClient
+    from lean_ai.llm.refiner import PromptRefiner
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ async def run_workflow(
     conversation_logger: Callable | None = None,
     mode: str = "plan",
     session_id: str = "",
+    refiner: "PromptRefiner | None" = None,
 ) -> str:
     """Run a workflow. Supports two modes:
 
@@ -94,6 +96,7 @@ async def run_workflow(
         llm_client=llm_client,
         context=context,
         ws=ws,
+        refiner=refiner,
     )
 
     # ── Phase 3: Approve ─────────────────────────────────────────
@@ -104,6 +107,7 @@ async def run_workflow(
         llm_client=llm_client,
         context=context,
         ws=ws,
+        refiner=refiner,
     )
 
     # ── Phase 4: Execute per-step ────────────────────────────────
@@ -173,6 +177,7 @@ async def _wait_for_approval(
     llm_client: "LLMClient",
     context: str,
     ws: WebSocket,
+    refiner: "PromptRefiner | None" = None,
 ) -> ExecutionPlan:
     """Send the plan for user approval. Handle feedback/revision loop.
 
@@ -223,6 +228,7 @@ async def _wait_for_approval(
                 context=context,
                 revision_context=revision_context,
                 ws=ws,
+                refiner=refiner,
             )
             plan_md = plan_to_markdown(plan)
             await ws_send(ws, "plan_revision", {
