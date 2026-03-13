@@ -2,69 +2,88 @@
 
 import pytest
 
-from lean_ai.llm.client import LLMClient, _sanitize_messages
+from lean_ai.llm.base import LLMMetrics, LLMProvider, ToolCallInfo
+from lean_ai.llm.client import _sanitize_messages
+from lean_ai.llm.facade import LLMClient
 
 
-class FakeOllamaClient:
-    """Minimal fake Ollama client for testing chat_with_tools flow."""
+class FakeProvider(LLMProvider):
+    """Minimal fake LLM provider for testing the chat_with_tools orchestration loop."""
 
-    def __init__(self, responses: list[dict]):
+    def __init__(self, responses: list):
         self.responses = list(responses)
         self.call_count = 0
         self.messages_at_each_call: list[list[dict]] = []
+        self._context_window_val = 4096
+        self._max_tokens_val = 1024
 
-    async def chat(self, **kwargs):
-        self.messages_at_each_call.append(list(kwargs.get("messages", [])))
+    @property
+    def model_name(self) -> str:
+        return "test-model"
+
+    @property
+    def context_window(self) -> int:
+        return self._context_window_val
+
+    @property
+    def max_tokens(self) -> int:
+        return self._max_tokens_val
+
+    async def chat_raw(self, messages, temperature=None, max_tokens=None):
+        return "", LLMMetrics()
+
+    async def chat_structured(self, messages, schema, temperature=None, max_tokens=None):
+        raise NotImplementedError
+
+    async def chat_with_tools_single(self, messages, tools, max_tokens=None):
+        self.messages_at_each_call.append(list(messages))
         if self.call_count < len(self.responses):
             resp = self.responses[self.call_count]
         else:
-            # Default: signal completion via task_complete
-            resp = _make_task_complete_response("Default done.")
+            resp = _make_task_complete_response()
         self.call_count += 1
         return resp
 
+    async def chat_stream(self, messages, temperature=None, max_tokens=None):
+        yield ""
 
-def _make_tool_call_response(name: str, args: dict, content: str = "") -> dict:
-    """Build a fake Ollama response containing a tool call."""
-    return {
-        "message": {
-            "content": content,
-            "tool_calls": [
-                {"function": {"name": name, "arguments": args}}
-            ],
-        }
-    }
+    async def check_health(self):
+        return True
 
 
-def _make_text_response(content: str = "Done.") -> dict:
-    """Build a fake Ollama response with text only (no tool calls)."""
-    return {"message": {"content": content, "tool_calls": []}}
+def _make_tool_call_response(
+    name: str, args: dict, content: str = "",
+) -> tuple[str, list[ToolCallInfo], LLMMetrics]:
+    """Build a fake provider response containing a tool call."""
+    return (
+        content,
+        [ToolCallInfo(name=name, arguments=args)],
+        LLMMetrics(),
+    )
 
 
-def _make_task_complete_response(summary: str = "Done.") -> dict:
-    """Build a fake Ollama response with a task_complete tool call."""
-    return {
-        "message": {
-            "content": "",
-            "tool_calls": [
-                {"function": {"name": "task_complete", "arguments": {"summary": summary}}}
-            ],
-        }
-    }
+def _make_text_response(
+    content: str = "Done.",
+) -> tuple[str, list[ToolCallInfo], LLMMetrics]:
+    """Build a fake provider response with text only (no tool calls)."""
+    return content, [], LLMMetrics()
 
 
-def _build_client(responses: list[dict]) -> tuple[LLMClient, FakeOllamaClient]:
-    """Create an LLMClient backed by a FakeOllamaClient."""
-    client = LLMClient.__new__(LLMClient)
-    fake = FakeOllamaClient(responses)
-    client._client = fake
-    client._model = "test-model"
-    client._max_tokens = 1024
-    client._context_window = 4096
-    client._temperature = 0.0
-    client._top_p = 0.8
-    client._top_k = 20
-    client._repeat_penalty = 1.05
+def _make_task_complete_response(
+    summary: str = "Done.",
+) -> tuple[str, list[ToolCallInfo], LLMMetrics]:
+    """Build a fake provider response with a task_complete tool call."""
+    return (
+        "",
+        [ToolCallInfo(name="task_complete", arguments={"summary": summary})],
+        LLMMetrics(),
+    )
+
+
+def _build_client(responses: list) -> tuple[LLMClient, FakeProvider]:
+    """Create an LLMClient backed by a FakeProvider."""
+    fake = FakeProvider(responses)
+    client = LLMClient(provider=fake)
     return client, fake
 
 
@@ -400,19 +419,18 @@ async def test_task_complete_with_other_tools():
     # Response with edit_file AND task_complete in the same turn
     responses = [
         _make_tool_call_response("read_file", {"path": "f.py"}),
-        {
-            "message": {
-                "content": "",
-                "tool_calls": [
-                    {"function": {"name": "edit_file", "arguments": {
-                        "path": "f.py", "search": "a", "replace": "b",
-                    }}},
-                    {"function": {"name": "task_complete", "arguments": {
-                        "summary": "All done.",
-                    }}},
-                ],
-            }
-        },
+        (
+            "",
+            [
+                ToolCallInfo(name="edit_file", arguments={
+                    "path": "f.py", "search": "a", "replace": "b",
+                }),
+                ToolCallInfo(name="task_complete", arguments={
+                    "summary": "All done.",
+                }),
+            ],
+            LLMMetrics(),
+        ),
     ]
 
     client, fake = _build_client(responses)
@@ -615,9 +633,8 @@ def test_sanitize_handles_empty_list():
 async def test_context_refresh_triggers_at_threshold():
     """Messages exceeding threshold trigger context refresh via callback."""
     client, _fake = _build_client([])
-    # Small context window — total content ~860 chars ≈ 215 tokens.
-    # Threshold of 0.7 * 200 = 140 tokens, so 215 > 140 triggers refresh.
-    client._context_window = 200
+    # Small context window — force via a custom provider
+    _fake._context_window_val = 200
 
     refresh_called = False
 
@@ -656,7 +673,7 @@ async def test_context_refresh_triggers_at_threshold():
 async def test_context_refresh_rebuilds_from_callback():
     """Callback return value completely replaces the message list."""
     client, _fake = _build_client([])
-    client._context_window = 200
+    _fake._context_window_val = 200
 
     def on_refresh(msgs):
         # Callback receives the old messages
@@ -687,7 +704,7 @@ async def test_context_refresh_rebuilds_from_callback():
 async def test_context_refresh_skips_below_threshold():
     """Messages below threshold are not refreshed."""
     client, _fake = _build_client([])
-    client._context_window = 100000  # Large window
+    _fake._context_window_val = 100000  # Large window
 
     refresh_called = False
 
@@ -716,7 +733,7 @@ async def test_context_refresh_skips_below_threshold():
 async def test_context_refresh_no_callback_is_noop():
     """Without a callback, refresh returns False and messages are unchanged."""
     client, _fake = _build_client([])
-    client._context_window = 200
+    _fake._context_window_val = 200
 
     messages = [
         {"role": "system", "content": "sys"},
@@ -738,7 +755,7 @@ async def test_context_refresh_no_callback_is_noop():
 async def test_context_refresh_callback_exception_handled():
     """If the callback raises, refresh is skipped gracefully."""
     client, _fake = _build_client([])
-    client._context_window = 200
+    _fake._context_window_val = 200
 
     def on_refresh(msgs):
         raise RuntimeError("disk read failed")

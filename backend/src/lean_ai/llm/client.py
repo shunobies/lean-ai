@@ -1,16 +1,14 @@
-"""Async Ollama client wrapper with tool calling and streaming."""
+"""Ollama LLM provider — wraps the Ollama Python SDK."""
 
 import asyncio
-import hashlib
-import json
 import logging
-from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass, field
+from collections.abc import AsyncIterator
 
 import ollama as ollama_lib
 from pydantic import BaseModel, ValidationError
 
 from lean_ai.config import settings
+from lean_ai.llm.base import LLMMetrics, LLMProvider, ToolCallInfo
 
 logger = logging.getLogger(__name__)
 
@@ -79,24 +77,11 @@ def _sanitize_messages(messages: list[dict]) -> list[dict]:
     return result
 
 
-@dataclass
-class ToolCall:
-    """Record of an executed tool call."""
+class OllamaProvider(LLMProvider):
+    """LLM provider backed by a local Ollama instance.
 
-    tool_name: str
-    parameters: dict = field(default_factory=dict)
-    description: str = ""
-
-
-class LLMClient:
-    """Async wrapper around the Ollama Python SDK.
-
-    Provides:
-    - chat_raw: arbitrary multi-turn conversation
-    - chat_structured: JSON-schema-enforced structured output
-    - chat_with_tools: multi-turn tool calling loop
-    - generate_completion: raw text continuation (for inline predictions)
-    - embed: batch embedding generation
+    Handles all Ollama-specific details: SDK calls, response parsing,
+    options dict, retry logic, and Ollama-only features (FIM, embeddings).
     """
 
     def __init__(
@@ -111,11 +96,9 @@ class LLMClient:
         effective_url = ollama_url or settings.ollama_url
         self._url = effective_url
         self._client = ollama_lib.AsyncClient(host=effective_url)
-        self.last_stream_metrics: dict | None = None
-        self.last_chat_metrics: dict | None = None
         self._model = model or settings.ollama_model
-        self._max_tokens = max_tokens if max_tokens is not None else settings.ollama_max_tokens
-        self._context_window = (
+        self._max_tokens_val = max_tokens if max_tokens is not None else settings.ollama_max_tokens
+        self._context_window_val = (
             context_window if context_window is not None else settings.ollama_context_window
         )
         self._temperature = (
@@ -131,10 +114,51 @@ class LLMClient:
         else:
             self._embed_client = self._client
 
+    # ── LLMProvider interface ──
+
     @property
     def model_name(self) -> str:
-        """The Ollama model name used by this client."""
         return self._model
+
+    @property
+    def context_window(self) -> int:
+        return self._context_window_val
+
+    @property
+    def max_tokens(self) -> int:
+        return self._max_tokens_val
+
+    def _build_options(
+        self, *, temperature: float | None = None, max_tokens: int | None = None,
+    ) -> dict:
+        """Build the Ollama options dict."""
+        return {
+            "temperature": temperature if temperature is not None else self._temperature,
+            "top_p": self._top_p,
+            "top_k": self._top_k,
+            "repeat_penalty": self._repeat_penalty,
+            "num_predict": max_tokens if max_tokens is not None else self._max_tokens_val,
+            "num_ctx": self._context_window_val,
+        }
+
+    def _extract_metrics(self, response: dict) -> LLMMetrics:
+        """Extract standardized metrics from an Ollama response."""
+        try:
+            eval_count = response.get("eval_count", 0) or 0
+            eval_duration = response.get("eval_duration", 0) or 0
+            prompt_tokens = response.get("prompt_eval_count", 0) or 0
+            tps = (
+                round(eval_count / (eval_duration / 1_000_000_000), 1)
+                if eval_count and eval_duration and eval_duration > 0
+                else None
+            )
+            return LLMMetrics(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=eval_count,
+                tokens_per_second=tps,
+            )
+        except Exception:
+            return LLMMetrics()
 
     async def _retry_with_backoff(self, coro_factory, label: str = "LLM call"):
         """Retry an async callable with exponential backoff for transient errors."""
@@ -166,72 +190,41 @@ class LLMClient:
 
     async def chat_raw(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict],
         temperature: float | None = None,
         max_tokens: int | None = None,
-    ) -> str:
-        """Send a multi-turn conversation and return the response text."""
+    ) -> tuple[str, LLMMetrics]:
         temp = temperature if temperature is not None else self._temperature
-        tokens = max_tokens if max_tokens is not None else self._max_tokens
+        tokens = max_tokens if max_tokens is not None else self._max_tokens_val
 
         logger.info(
             "LLM chat_raw: model=%s messages=%d temp=%.1f max_tokens=%d",
             self._model, len(messages), temp, tokens,
         )
 
-        self.last_chat_metrics = None
-
         async def _chat():
             return await self._client.chat(
                 model=self._model,
                 messages=messages,
-                options={
-                    "temperature": temp,
-                    "top_p": self._top_p,
-                    "top_k": self._top_k,
-                    "repeat_penalty": self._repeat_penalty,
-                    "num_predict": tokens,
-                    "num_ctx": self._context_window,
-                },
+                options=self._build_options(temperature=temp, max_tokens=tokens),
             )
 
         response = await self._retry_with_backoff(_chat, label="chat_raw")
         text = response["message"]["content"]
-
-        try:
-            eval_count = response.get("eval_count", 0) or 0
-            eval_duration = response.get("eval_duration", 0) or 0
-            prompt_tokens = response.get("prompt_eval_count", 0) or 0
-            tps = (
-                round(eval_count / (eval_duration / 1_000_000_000), 1)
-                if eval_count and eval_duration and eval_duration > 0
-                else None
-            )
-            self.last_chat_metrics = {
-                "tokens_per_second": tps,
-                "eval_count": eval_count,
-                "prompt_tokens": prompt_tokens,
-            }
-        except Exception:
-            pass
+        metrics = self._extract_metrics(response)
 
         logger.info("LLM chat_raw response (%d chars): %s", len(text), text[:200])
-        return text
+        return text, metrics
 
     async def chat_structured(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict],
         schema: type[BaseModel],
         temperature: float | None = None,
         max_tokens: int | None = None,
-    ) -> BaseModel:
-        """Send a conversation and parse the response into a Pydantic model.
-
-        Uses Ollama's JSON schema enforcement so the response is guaranteed
-        to match the schema (assuming the model cooperates).
-        """
+    ) -> tuple[BaseModel, LLMMetrics]:
         temp = temperature if temperature is not None else self._temperature
-        tokens = max_tokens if max_tokens is not None else self._max_tokens
+        tokens = max_tokens if max_tokens is not None else self._max_tokens_val
 
         logger.info(
             "LLM chat_structured: schema=%s model=%s", schema.__name__, self._model,
@@ -242,14 +235,7 @@ class LLMClient:
                 model=self._model,
                 messages=messages,
                 format=schema.model_json_schema(),
-                options={
-                    "temperature": temp,
-                    "top_p": self._top_p,
-                    "top_k": self._top_k,
-                    "repeat_penalty": self._repeat_penalty,
-                    "num_predict": tokens,
-                    "num_ctx": self._context_window,
-                },
+                options=self._build_options(temperature=temp, max_tokens=tokens),
             )
 
         last_error = None
@@ -258,8 +244,9 @@ class LLMClient:
                 _chat, label=f"structured({schema.__name__})",
             )
             raw = response["message"]["content"]
+            metrics = self._extract_metrics(response)
             try:
-                return schema.model_validate_json(raw)
+                return schema.model_validate_json(raw), metrics
             except ValidationError as exc:
                 last_error = exc
                 if attempt == 0:
@@ -275,29 +262,56 @@ class LLMClient:
                 raise
         raise last_error  # type: ignore[misc]
 
+    async def chat_with_tools_single(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        max_tokens: int | None = None,
+    ) -> tuple[str, list[ToolCallInfo], LLMMetrics]:
+        tokens = max_tokens or self._max_tokens_val
+
+        async def _chat():
+            return await self._client.chat(
+                model=self._model,
+                messages=messages,
+                tools=tools,
+                options=self._build_options(max_tokens=tokens),
+            )
+
+        response = await self._retry_with_backoff(
+            _chat, label="chat_with_tools_single",
+        )
+
+        msg = response["message"]
+        content = msg.get("content") or ""
+        raw_tool_calls = msg.get("tool_calls") or []
+        metrics = self._extract_metrics(response)
+
+        tool_calls = [
+            ToolCallInfo(
+                name=tc["function"]["name"],
+                arguments=dict(tc["function"].get("arguments") or {}),
+            )
+            for tc in raw_tool_calls
+        ]
+
+        return content, tool_calls, metrics
+
     async def chat_stream(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict],
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> AsyncIterator[str]:
-        """Stream tokens for real-time display."""
         temp = temperature if temperature is not None else self._temperature
-        num_predict = max_tokens if max_tokens is not None else self._max_tokens
+        num_predict = max_tokens if max_tokens is not None else self._max_tokens_val
 
         async def _chat():
             return await self._client.chat(
                 model=self._model,
                 messages=messages,
                 stream=True,
-                options={
-                    "temperature": temp,
-                    "top_p": self._top_p,
-                    "top_k": self._top_k,
-                    "repeat_penalty": self._repeat_penalty,
-                    "num_predict": num_predict,
-                    "num_ctx": self._context_window,
-                },
+                options=self._build_options(temperature=temp, max_tokens=num_predict),
             )
 
         stream = await self._retry_with_backoff(_chat, label="chat_stream")
@@ -307,336 +321,28 @@ class LLMClient:
             if token:
                 yield token
 
-    async def _maybe_refresh_context(
-        self,
-        messages: list[dict],
-        threshold: float,
-        prompt_tokens: int | None = None,
-        on_context_refresh: Callable | None = None,
-    ) -> bool:
-        """Refresh conversation context when nearing context window limits.
-
-        When *prompt_tokens* (from Ollama's ``prompt_eval_count``) exceeds
-        *threshold* fraction of the context window, delegates to the
-        *on_context_refresh* callback to rebuild the message list from fresh
-        disk state (re-read context files, inject scratchpad).
-
-        No LLM call is needed — the callback handles everything.
-
-        Returns ``True`` if a refresh occurred, ``False`` otherwise.
-        """
-        if on_context_refresh is None:
-            return False
-
-        if prompt_tokens is not None:
-            est_tokens = prompt_tokens
-        else:
-            est_tokens = sum(len(m.get("content") or "") for m in messages) // 4
-        limit = int(threshold * self._context_window)
-
-        if est_tokens < limit:
-            return False
-        if len(messages) < 4:
-            return False
-
-        logger.info(
-            "chat_with_tools: context refresh triggered at %d/%d tokens (%.0f%%)",
-            est_tokens, self._context_window,
-            (est_tokens / self._context_window) * 100,
-        )
-
+    async def check_health(self) -> bool:
         try:
-            new_messages = on_context_refresh(messages)
+            models = await self._client.list()
+            model_names = [m.get("name", "") for m in models.get("models", [])]
+            return any(self._model in name for name in model_names)
         except Exception:
-            logger.warning(
-                "chat_with_tools: context refresh callback failed, skipping",
-                exc_info=True,
-            )
+            logger.exception("Ollama health check failed")
             return False
 
-        messages[:] = _sanitize_messages(new_messages)
-
-        new_est = sum(len(m.get("content") or "") for m in messages) // 4
-        logger.info(
-            "chat_with_tools: context refreshed — %d→%d est. tokens, %d messages",
-            est_tokens, new_est, len(messages),
-        )
-        return True
-
-    async def chat_with_tools(
-        self,
-        messages: list[dict],
-        tools: list[dict],
-        tool_executor_fn: Callable,
-        *,
-        max_turns: int = 50,
-        max_tokens: int | None = None,
-        task_reminder: str | Callable[[], str] | None = None,
-        reminder_interval: int = 10,
-        loop_detection_threshold: int | None = None,
-        on_tool_call: Callable | None = None,
-        on_tool_result: Callable | None = None,
-        on_content: Callable | None = None,
-        on_metrics: Callable | None = None,
-        on_context_refresh: Callable | None = None,
-    ) -> tuple[list[ToolCall], str]:
-        """Multi-turn tool calling loop using Ollama's native tools= parameter.
-
-        Sends messages with tool definitions to the LLM. When the response
-        contains tool_calls, executes each one via tool_executor_fn, appends
-        results, and calls the LLM again. Repeats until the LLM calls the
-        task_complete tool, produces too many consecutive text-only responses,
-        or max_turns is reached.
-
-        Returns (executed_tool_calls, final_explanation).
-        """
-        max_text_only = 3  # exit after N consecutive text-only responses
-
-        tokens = max_tokens or self._max_tokens
-        executed: list[ToolCall] = []
-        explanation_parts: list[str] = []
-        consecutive_text_only: int = 0
-
-        # Loop detection state
-        ld_threshold = (
-            loop_detection_threshold
-            if loop_detection_threshold is not None
-            else settings.loop_detection_threshold
-        )
-        prev_tool_hash: str | None = None
-        consecutive_count: int = 0
-        last_refresh_turn: int = -10  # Cooldown: no refresh within 5 turns of last
-
-        # 0 means unlimited — use a practically infinite ceiling
-        effective_max = max_turns if max_turns > 0 else 2**31
-
-        # Sanitize once on entry — the loop builds well-formed messages
-        # itself, so re-sanitizing every turn is wasted O(n) work.
-        messages[:] = _sanitize_messages(messages)
-
-        for turn in range(effective_max):
-            logger.info(
-                "chat_with_tools turn %d/%s: %d messages",
-                turn + 1,
-                max_turns if max_turns > 0 else "∞",
-                len(messages),
-            )
-
-            async def _chat():
-                return await self._client.chat(
-                    model=self._model,
-                    messages=messages,
-                    tools=tools,
-                    options={
-                        "temperature": self._temperature,
-                        "top_p": self._top_p,
-                        "top_k": self._top_k,
-                        "repeat_penalty": self._repeat_penalty,
-                        "num_predict": tokens,
-                        "num_ctx": self._context_window,
-                    },
-                )
-
-            response = await self._retry_with_backoff(
-                _chat, label=f"chat_with_tools(turn={turn + 1})",
-            )
-
-            msg = response["message"]
-            content = msg.get("content") or ""
-            tool_calls = msg.get("tool_calls") or []
-            last_prompt_tokens = response.get("prompt_eval_count") or 0
-
-            if on_metrics and last_prompt_tokens:
-                await on_metrics(last_prompt_tokens, self._context_window)
-
-            if content.strip():
-                explanation_parts.append(content.strip())
-                if on_content:
-                    await on_content(content.strip())
-
-            if not tool_calls:
-                # Text-only response — the model must call task_complete to
-                # signal completion.  Append the text and continue the loop
-                # so the model gets another chance.  After _MAX_TEXT_ONLY
-                # consecutive text-only responses, exit as a safety valve.
-                messages.append({"role": "assistant", "content": content})
-                consecutive_text_only += 1
-                if consecutive_text_only >= max_text_only:
-                    logger.warning(
-                        "chat_with_tools: %d consecutive text-only responses "
-                        "without task_complete — exiting",
-                        consecutive_text_only,
-                    )
-                    break
-                continue
-
-            # Reset text-only counter when tools are called
-            consecutive_text_only = 0
-
-            # Check for task_complete signal among tool calls
-            completion_call = None
-            for tc in tool_calls:
-                if tc["function"]["name"] == "task_complete":
-                    completion_call = tc
-                    break
-
-            # Build assistant message with tool_calls for conversation history
-            assistant_msg: dict = {
-                "role": "assistant",
-                "content": content,
-                "tool_calls": [
-                    {
-                        "function": {
-                            "name": tc["function"]["name"],
-                            "arguments": dict(tc["function"]["arguments"]),
-                        },
-                    }
-                    for tc in tool_calls
-                ],
-            }
-            messages.append(assistant_msg)
-
-            # Execute each tool call
-            for tc in tool_calls:
-                fn = tc["function"]
-                name = fn["name"]
-                arguments = dict(fn.get("arguments") or {})
-
-                if name == "task_complete":
-                    # Control flow signal — append a synthetic result for
-                    # message history balance but don't execute as a real tool.
-                    messages.append({
-                        "role": "tool",
-                        "content": "Task marked complete.",
-                    })
-                    continue
-
-                if on_tool_call:
-                    await on_tool_call(name, arguments)
-
-                try:
-                    result_str = await tool_executor_fn(name, arguments)
-                except Exception as exc:
-                    result_str = f"ERROR: {exc}"
-                    logger.warning("chat_with_tools: tool %s raised: %s", name, exc)
-
-                executed.append(ToolCall(
-                    tool_name=name,
-                    parameters=arguments,
-                    description=f"{name} {arguments.get('path', arguments.get('command', ''))}",
-                ))
-
-                if on_tool_result:
-                    await on_tool_result(name, result_str)
-
-                messages.append({"role": "tool", "content": result_str})
-
-                # Loop detection: hash tool name + args, track consecutive
-                if ld_threshold > 0:
-                    call_sig = f"{name}:{json.dumps(arguments, sort_keys=True)}"
-                    call_hash = hashlib.sha256(call_sig.encode()).hexdigest()
-                    if call_hash == prev_tool_hash:
-                        consecutive_count += 1
-                    else:
-                        consecutive_count = 1
-                        prev_tool_hash = call_hash
-
-                    if consecutive_count >= ld_threshold:
-                        logger.warning(
-                            "chat_with_tools: loop detected — %s called %d times "
-                            "with identical arguments",
-                            name, consecutive_count,
-                        )
-                        messages.append({
-                            "role": "user",
-                            "content": (
-                                f"You have called {name} with identical arguments "
-                                f"{consecutive_count} times consecutively and it "
-                                f"keeps failing. Try a different approach — read "
-                                f"the file first, check the error, or use different "
-                                f"arguments."
-                            ),
-                        })
-                        consecutive_count = 0
-
-            # Exit the loop if the model called task_complete
-            if completion_call:
-                summary = (
-                    completion_call["function"]
-                    .get("arguments", {})
-                    .get("summary", "")
-                )
-                if summary:
-                    explanation_parts.append(summary)
-                logger.info("chat_with_tools: task_complete called — exiting loop")
-                break
-
-            # Refresh context when approaching context limits.
-            # Use actual prompt token count from Ollama when available.
-            # Cooldown: skip if a refresh happened within the last 5 turns.
-            if turn - last_refresh_turn >= 5:
-                refreshed = await self._maybe_refresh_context(
-                    messages,
-                    threshold=settings.refresh_threshold,
-                    prompt_tokens=last_prompt_tokens or None,
-                    on_context_refresh=on_context_refresh,
-                )
-                if refreshed:
-                    last_refresh_turn = turn
-                    # Send updated metrics so the frontend meter drops.
-                    if on_metrics:
-                        est_new = sum(
-                            len(m.get("content") or "") for m in messages
-                        ) // 4
-                        await on_metrics(est_new, self._context_window)
-
-            # Inject periodic task reminder to keep the original task in
-            # the model's active attention window.  Ollama truncates from the
-            # beginning when messages exceed num_ctx, so the system prompt and
-            # original task are the first things evicted.
-            if (
-                task_reminder
-                and reminder_interval > 0
-                and (turn + 1) % reminder_interval == 0
-                and turn + 1 < effective_max
-            ):
-                reminder_text = task_reminder() if callable(task_reminder) else task_reminder
-                logger.info(
-                    "chat_with_tools: injecting task reminder at turn %d (%d chars)",
-                    turn + 1, len(reminder_text),
-                )
-                messages.append({"role": "user", "content": reminder_text})
-        else:
-            logger.warning(
-                "chat_with_tools: reached max_turns=%s without completion",
-                max_turns if max_turns > 0 else "∞",
-            )
-
-        return executed, "\n".join(explanation_parts)
+    # ── Ollama-only methods (not on ABC) ──
 
     async def generate_completion(
         self, prompt: str, suffix: str = "", timeout: float = 5.0,
     ) -> str:
-        """Raw text completion for inline predictions.
-
-        Uses /api/generate (not chat). When *suffix* is provided, Ollama
-        uses Fill-in-the-Middle (FIM) mode for context-aware infilling.
-        Timeout prevents stale predictions when GPU is busy with the main model.
-        """
+        """Raw text completion for inline predictions (FIM mode)."""
         try:
             response = await asyncio.wait_for(
                 self._client.generate(
                     model=self._model,
                     prompt=prompt,
                     suffix=suffix,
-                    options={
-                        "temperature": self._temperature,
-                        "top_p": self._top_p,
-                        "top_k": self._top_k,
-                        "repeat_penalty": self._repeat_penalty,
-                        "num_predict": self._max_tokens,
-                        "num_ctx": self._context_window,
-                    },
+                    options=self._build_options(),
                 ),
                 timeout=timeout,
             )
@@ -658,12 +364,7 @@ class LLMClient:
         response = await self._embed_client.embed(model=embed_model, input=texts)
         return response.get("embeddings", [])
 
-    async def check_health(self) -> bool:
-        """Check if Ollama is reachable and the model is available."""
-        try:
-            models = await self._client.list()
-            model_names = [m.get("name", "") for m in models.get("models", [])]
-            return any(self._model in name for name in model_names)
-        except Exception:
-            logger.exception("Ollama health check failed")
-            return False
+
+# Backward-compat: callers that import LLMClient from this module still work.
+# The facade is the real LLMClient now.
+from lean_ai.llm.facade import LLMClient  # noqa: E402, F401

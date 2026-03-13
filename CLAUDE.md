@@ -17,6 +17,12 @@ cd backend && pip install -e ".[dev]"
 # Install with optional knowledge base deps (EPUB, PDF, Word support)
 cd backend && pip install -e ".[dev,knowledge]"
 
+# Install with OpenAI provider support
+cd backend && pip install -e ".[dev,openai]"
+
+# Install with Anthropic provider support
+cd backend && pip install -e ".[dev,anthropic]"
+
 # Install with Google search provider (requires Chrome installed)
 cd backend && pip install -e ".[dev,google]"
 
@@ -37,7 +43,7 @@ cd extension && npm install && npm run build
 
 **No FSM.** Two workflow modes: `plan -> approve -> execute -> done` (default) and `fix -> done` (skip planning).
 
-1. **LLM Client** (`llm/client.py`) — Async Ollama client with `chat_with_tools()` multi-turn loop. Native tool calling via Ollama's `tools=` parameter. Retry with backoff. Context refresh at 70% threshold — drops old messages, re-reads context files from disk, injects scratchpad for continuity (no LLM summarization call).
+1. **LLM Client** (`llm/`) — Multi-provider LLM abstraction. `LLMProvider` ABC (`base.py`) with implementations for Ollama (`client.py`), OpenAI (`provider_openai.py`), and Anthropic (`provider_anthropic.py`). `LLMClient` facade (`facade.py`) handles the multi-turn `chat_with_tools()` orchestration loop, delegates single-turn calls to the active provider. Inline predictions (FIM) and embeddings always use Ollama. Context refresh at 70% threshold — drops old messages, re-reads context files from disk, injects scratchpad for continuity (no LLM summarization call).
 
 2. **Planning** (`llm/planner.py`) — 6-phase decomposed planning: scope -> file identification -> exploration compression -> change design -> risk check -> plan assembly. Structured JSON output from Ollama. Plan template with worked examples (`llm/plan_template.md`).
 
@@ -88,17 +94,29 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 
 | Variable | Default | Description |
 |---|---|---|
+| `LEAN_AI_LLM_PROVIDER` | `ollama` | LLM provider: `ollama`, `openai`, or `anthropic` |
 | `LEAN_AI_OLLAMA_URL` | `http://localhost:11434` | Ollama API endpoint |
-| `LEAN_AI_OLLAMA_MODEL` | `qwen3-coder:30b` | Primary model |
+| `LEAN_AI_OLLAMA_MODEL` | `qwen3-coder:30b` | Primary model (when provider=ollama) |
 | `LEAN_AI_OLLAMA_TEMPERATURE` | `0.7` | Sampling temperature (Qwen3 recommends 0.7) |
 | `LEAN_AI_OLLAMA_TOP_P` | `0.8` | Nucleus sampling threshold |
 | `LEAN_AI_OLLAMA_TOP_K` | `20` | Top-k sampling |
 | `LEAN_AI_OLLAMA_REPEAT_PENALTY` | `1.05` | Repetition penalty |
 | `LEAN_AI_OLLAMA_CONTEXT_WINDOW` | `131072` | Total context window (single source of truth) |
 | `LEAN_AI_OLLAMA_MAX_TOKENS` | *(derived: 25% of context window)* | Max output tokens |
-| `LEAN_AI_INLINE_MODEL` | *(empty)* | Separate model for inline predictions |
+| `LEAN_AI_OPENAI_API_KEY` | *(empty)* | OpenAI API key (required when provider=openai) |
+| `LEAN_AI_OPENAI_MODEL` | `gpt-4o` | OpenAI model name |
+| `LEAN_AI_OPENAI_BASE_URL` | *(empty)* | Custom base URL for OpenAI-compatible APIs (Together, Groq, vLLM) |
+| `LEAN_AI_OPENAI_TEMPERATURE` | `0.7` | OpenAI sampling temperature |
+| `LEAN_AI_OPENAI_CONTEXT_WINDOW` | `128000` | OpenAI context window |
+| `LEAN_AI_OPENAI_MAX_TOKENS` | *(derived: 25% of context window)* | OpenAI max output tokens |
+| `LEAN_AI_ANTHROPIC_API_KEY` | *(empty)* | Anthropic API key (required when provider=anthropic) |
+| `LEAN_AI_ANTHROPIC_MODEL` | `claude-sonnet-4-20250514` | Anthropic model name |
+| `LEAN_AI_ANTHROPIC_TEMPERATURE` | `0.7` | Anthropic sampling temperature |
+| `LEAN_AI_ANTHROPIC_CONTEXT_WINDOW` | `200000` | Anthropic context window |
+| `LEAN_AI_ANTHROPIC_MAX_TOKENS` | *(derived: 25% of context window)* | Anthropic max output tokens |
+| `LEAN_AI_INLINE_MODEL` | *(empty)* | Separate model for inline predictions (always Ollama) |
 | `LEAN_AI_INLINE_OLLAMA_URL` | *(falls back to OLLAMA_URL)* | Ollama instance for inline model |
-| `LEAN_AI_EMBEDDING_MODEL` | `qwen3-embedding:0.6b` | Embedding model for semantic search |
+| `LEAN_AI_EMBEDDING_MODEL` | `qwen3-embedding:0.6b` | Embedding model for semantic search (always Ollama) |
 | `LEAN_AI_ENABLE_EMBEDDINGS` | `true` | Enable embedding generation + RRF hybrid search |
 | `LEAN_AI_INDEX_DIR` | `.lean_ai_index` | Whoosh index directory name |
 | `LEAN_AI_SEARCH_PROVIDER` | `duckduckgo` | Search provider (`duckduckgo`, `searxng`, `google`, or `bing`). Google auto-falls back to Bing |

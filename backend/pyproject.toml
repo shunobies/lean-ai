@@ -38,6 +38,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+openai = [
+    "openai>=1.30.0,<2.0",
+]
+anthropic = [
+    "anthropic>=0.30.0,<1.0",
+]
 knowledge = [
     "ebooklib>=0.18,<1.0",
     "pypdf>=5.0.0,<6.0",
