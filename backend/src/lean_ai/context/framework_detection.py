@@ -219,6 +219,110 @@ def build_guide_search_queries(
     return queries[:16]
 
 
+async def build_guide_search_queries_llm(
+    frameworks: list[tuple[str, str]],
+    runtimes: list[tuple[str, str]],
+    llm_client: LLMClient,
+    cutoff: str | None = None,
+    max_queries: int = 16,
+) -> list[str] | None:
+    """Generate varied, natural search queries using the LLM.
+
+    Asks the LLM to produce search queries that sound like a real
+    developer typing into a search engine — varied phrasing, mix of
+    questions and keyword phrases, version-specific.
+
+    Returns ``None`` on any failure so the caller can fall back to
+    the static :func:`build_guide_search_queries`.
+    """
+    from lean_ai.context.deprecations import _extract_major_minor
+
+    if not frameworks:
+        return None
+
+    fw_lines: list[str] = []
+    for name, version in frameworks:
+        v = _extract_major_minor(version)
+        canonical = canonicalize_name(name)
+        label = f"{canonical} {v}" if v else canonical
+        fw_lines.append(label)
+
+    rt_lines: list[str] = []
+    for name, version in runtimes:
+        v = _extract_major_minor(version)
+        canonical = canonicalize_name(name)
+        label = f"{canonical} {v}" if v else canonical
+        rt_lines.append(label)
+
+    fw_text = ", ".join(fw_lines)
+    rt_text = ", ".join(rt_lines) if rt_lines else "not detected"
+
+    topics = (
+        "1. Architecture pattern and request lifecycle\n"
+        "2. CLI tools and code generation commands\n"
+        "3. Directory structure and file organization\n"
+        "4. Upgrade/migration guide from previous version\n"
+        "5. Middleware and request pipeline\n"
+        "6. Testing setup and patterns\n"
+        "7. Common mistakes and version-specific gotchas"
+    )
+    if cutoff:
+        topics += (
+            f"\n8. Breaking changes and new features since {cutoff}"
+        )
+
+    prompt = (
+        f"Generate {max_queries} web search queries to research "
+        f"these frameworks: {fw_text} (runtime: {rt_text}).\n\n"
+        "Each query should sound like a real developer typing into "
+        "a search engine. Vary the phrasing — some as questions, "
+        "some as keyword phrases, some as natural sentences. "
+        "Include the framework version number in most queries.\n\n"
+        f"Cover these topics:\n{topics}\n\n"
+        "IMPORTANT:\n"
+        "- Do NOT include framework-specific CLI command names "
+        "(no 'artisan', 'manage.py', 'rails', etc.)\n"
+        "- Do NOT repeat the same query structure — each query "
+        "should look different\n"
+        "- Output ONLY the queries, one per line, no numbers or "
+        "bullets\n"
+    )
+
+    try:
+        response = await llm_client.chat_raw(
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=512,
+        )
+
+        queries = [
+            line.strip().strip('"').strip("'")
+            for line in response.strip().split("\n")
+            if line.strip() and len(line.strip()) > 10
+        ]
+
+        if len(queries) < 3:
+            logger.info(
+                "Framework guide: LLM query generation returned "
+                "too few queries (%d), falling back to static",
+                len(queries),
+            )
+            return None
+
+        logger.info(
+            "Framework guide: LLM generated %d search queries",
+            len(queries),
+        )
+        return queries[:max_queries]
+
+    except Exception as exc:
+        logger.info(
+            "Framework guide: LLM query generation failed, "
+            "falling back to static: %s",
+            exc,
+        )
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Project tree (compact, for prompt inclusion)
 # ---------------------------------------------------------------------------

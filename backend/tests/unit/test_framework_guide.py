@@ -12,6 +12,9 @@ from lean_ai.context.framework_detection import (
     build_guide_search_queries as _build_guide_search_queries,
 )
 from lean_ai.context.framework_detection import (
+    build_guide_search_queries_llm as _build_guide_search_queries_llm,
+)
+from lean_ai.context.framework_detection import (
     canonicalize_name as _canonicalize_name,
 )
 from lean_ai.context.framework_detection import (
@@ -199,6 +202,122 @@ class TestBuildGuideSearchQueries:
         frameworks = [("laravel/framework", "^12.0")]
         queries = _build_guide_search_queries(frameworks, [])
         assert any("pitfalls" in q.lower() for q in queries)
+
+
+# ---------------------------------------------------------------------------
+# _build_guide_search_queries_llm
+# ---------------------------------------------------------------------------
+
+
+class TestBuildGuideSearchQueriesLlm:
+    @pytest.mark.asyncio
+    async def test_returns_llm_generated_queries(self):
+        mock_llm = AsyncMock()
+        mock_llm.chat_raw = AsyncMock(return_value=(
+            "how does Laravel 12 handle HTTP request routing\n"
+            "Laravel 12 directory structure explained\n"
+            "what changed in Laravel 12 from Laravel 11\n"
+            "Laravel 12 middleware best practices\n"
+            "testing Laravel 12 applications with Pest\n"
+            "common mistakes when upgrading to Laravel 12\n"
+            "Laravel 12 code generation commands overview\n"
+        ))
+        frameworks = [("laravel/framework", "^12.0")]
+        runtimes = [("PHP", "^8.4")]
+        result = await _build_guide_search_queries_llm(
+            frameworks, runtimes, mock_llm,
+        )
+        assert result is not None
+        assert len(result) == 7
+        assert any("laravel" in q.lower() for q in result)
+        mock_llm.chat_raw.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_llm_failure(self):
+        mock_llm = AsyncMock()
+        mock_llm.chat_raw = AsyncMock(
+            side_effect=Exception("LLM unavailable"),
+        )
+        frameworks = [("laravel/framework", "^12.0")]
+        result = await _build_guide_search_queries_llm(
+            frameworks, [], mock_llm,
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_empty_response(self):
+        mock_llm = AsyncMock()
+        mock_llm.chat_raw = AsyncMock(return_value="")
+        frameworks = [("laravel/framework", "^12.0")]
+        result = await _build_guide_search_queries_llm(
+            frameworks, [], mock_llm,
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_too_few_queries(self):
+        mock_llm = AsyncMock()
+        mock_llm.chat_raw = AsyncMock(return_value="just one query\n")
+        frameworks = [("laravel/framework", "^12.0")]
+        result = await _build_guide_search_queries_llm(
+            frameworks, [], mock_llm,
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_caps_at_max_queries(self):
+        lines = [f"query about topic {i} for Laravel" for i in range(20)]
+        mock_llm = AsyncMock()
+        mock_llm.chat_raw = AsyncMock(return_value="\n".join(lines))
+        frameworks = [("laravel/framework", "^12.0")]
+        result = await _build_guide_search_queries_llm(
+            frameworks, [], mock_llm, max_queries=10,
+        )
+        assert result is not None
+        assert len(result) == 10
+
+    @pytest.mark.asyncio
+    async def test_returns_none_for_empty_frameworks(self):
+        mock_llm = AsyncMock()
+        result = await _build_guide_search_queries_llm(
+            [], [], mock_llm,
+        )
+        assert result is None
+        mock_llm.chat_raw.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_strips_quotes_from_queries(self):
+        mock_llm = AsyncMock()
+        mock_llm.chat_raw = AsyncMock(return_value=(
+            '"how does Laravel 12 handle routing"\n'
+            "'Laravel 12 upgrade guide from 11'\n"
+            "plain query about Laravel 12 testing\n"
+        ))
+        frameworks = [("laravel/framework", "^12.0")]
+        result = await _build_guide_search_queries_llm(
+            frameworks, [], mock_llm,
+        )
+        assert result is not None
+        # Quotes should be stripped
+        assert not any(q.startswith('"') for q in result)
+        assert not any(q.startswith("'") for q in result)
+
+    @pytest.mark.asyncio
+    async def test_cutoff_mentioned_in_prompt(self):
+        mock_llm = AsyncMock()
+        mock_llm.chat_raw = AsyncMock(return_value=(
+            "query one about Laravel 12\n"
+            "query two about Laravel 12\n"
+            "query three about Laravel 12\n"
+        ))
+        frameworks = [("laravel/framework", "^12.0")]
+        await _build_guide_search_queries_llm(
+            frameworks, [], mock_llm, cutoff="2024-04",
+        )
+        # The prompt should mention the cutoff date
+        call_args = mock_llm.chat_raw.call_args
+        prompt = call_args[1]["messages"][0]["content"]
+        assert "2024-04" in prompt
 
 
 # ---------------------------------------------------------------------------

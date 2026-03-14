@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from lean_ai.context.framework_detection import (
     build_guide_search_queries,
+    build_guide_search_queries_llm,
     canonicalize_name,
     get_compact_tree,
     get_primary_frameworks,
@@ -646,7 +647,12 @@ async def generate_framework_guide(
 
     # Step 3: Web search for current best practices (snippets)
     # Sequential — primp/lxml are not thread-safe for concurrent use.
-    queries = build_guide_search_queries(
+    # Try LLM-generated queries for more natural, varied searches.
+    # Falls back to static f-string queries if the LLM call fails.
+    llm_queries = await build_guide_search_queries_llm(
+        frameworks, runtimes, llm_client, cutoff=cutoff,
+    )
+    queries = llm_queries or build_guide_search_queries(
         frameworks, runtimes, cutoff=cutoff,
     )
     search_parts: list[str] = []
