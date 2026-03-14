@@ -57,7 +57,8 @@ llama-server \
   -c 131072 \
   -ngl 99 \
   --cache-type-k q8_0 \
-  --cache-type-v q4_0
+  --cache-type-v q8_0 \
+  -np 1
 ```
 
 | Flag | Purpose |
@@ -68,6 +69,11 @@ llama-server \
 | `-ngl` | Layers to offload to GPU (`99` = all) |
 | `--cache-type-k` | KV cache key quantization (reduces VRAM) |
 | `--cache-type-v` | KV cache value quantization |
+| `-np` | Number of parallel slots (default 4 — use 1 for single-user) |
+
+> **Important:** llama-server defaults to 4 parallel slots (`-np 4`), which multiplies KV cache and compute buffer memory by 4x. For single-user use with Lean AI, always set `-np 1` to avoid unnecessary VRAM consumption.
+>
+> **ROCm note:** KV cache value quantization below q8_0 (e.g., `q4_0`) requires Flash Attention, which may not be supported on all ROCm GPUs. If you get a Flash Attention error, use `q8_0` for both K and V cache types.
 
 ### 4. Configure Lean AI
 
@@ -96,9 +102,9 @@ Ollama stores the KV cache in FP16 by default. llama-server lets you quantize it
 
 ```bash
 # Asymmetric quantization — keys need more precision than values
-llama-server -m model.gguf -c 131072 \
+llama-server -m model.gguf -c 131072 -np 1 \
   --cache-type-k q8_0 \
-  --cache-type-v q4_0
+  --cache-type-v q8_0
 ```
 
 At 128k context, this roughly halves the KV cache VRAM compared to FP16. Quality impact is minimal for most coding tasks.
@@ -108,7 +114,7 @@ At 128k context, this roughly halves the KV cache VRAM compared to FP16. Quality
 If your GPU can't fit both the model weights and a large KV cache, you can move the KV cache to system RAM:
 
 ```bash
-llama-server -m model.gguf -c 131072 \
+llama-server -m model.gguf -c 131072 -np 1 \
   -ngl 99 \
   --no-kv-offload
 ```
@@ -128,9 +134,8 @@ This is particularly useful for running larger models at full context — if the
 llama-server supports prompt prefix caching through its slot system. When a new request shares a prefix with a previous one (common in multi-turn conversations), the server reuses the cached KV state instead of reprocessing:
 
 ```bash
-llama-server -m model.gguf -c 131072 \
-  --slot-save-path cache/ \
-  -np 1
+llama-server -m model.gguf -c 131072 -np 1 \
+  --slot-save-path cache/
 ```
 
 | Flag | Purpose |
@@ -154,6 +159,7 @@ llama-server \
   -md models/qwen3-coder-1.5b.gguf \
   -c 131072 \
   -ngl 99 \
+  -np 1 \
   --draft-max 16
 ```
 
@@ -165,11 +171,11 @@ If you have multiple GPUs, llama-server can split model layers across them with 
 
 ```bash
 # Even split across 2 GPUs
-llama-server -m model.gguf -c 131072 -ngl 99 \
+llama-server -m model.gguf -c 131072 -ngl 99 -np 1 \
   --tensor-split 0.5,0.5
 
 # Uneven split (e.g., 16 GB + 8 GB GPUs — give more to the bigger card)
-llama-server -m model.gguf -c 131072 -ngl 99 \
+llama-server -m model.gguf -c 131072 -ngl 99 -np 1 \
   --tensor-split 0.65,0.35
 ```
 
@@ -186,8 +192,9 @@ llama-server \
   -m models/qwen3-coder-30b-a3b-q4_k_m.gguf \
   -c 131072 \
   -ngl 99 \
+  -np 1 \
   --cache-type-k q8_0 \
-  --cache-type-v q4_0 \
+  --cache-type-v q8_0 \
   --no-kv-offload
 ```
 
@@ -209,8 +216,9 @@ llama-server \
   -md models/qwen3-coder-1.5b-q8_0.gguf \
   -c 65536 \
   -ngl 99 \
+  -np 1 \
   --cache-type-k q8_0 \
-  --cache-type-v q4_0 \
+  --cache-type-v q8_0 \
   --draft-max 16
 ```
 
@@ -227,9 +235,10 @@ llama-server \
   -m models/qwen3-coder-30b-a3b-q4_k_m.gguf \
   -c 131072 \
   -ngl 99 \
+  -np 1 \
   --tensor-split 0.5,0.5 \
   --cache-type-k q8_0 \
-  --cache-type-v q4_0
+  --cache-type-v q8_0
 ```
 
 ### Remote Server
@@ -238,7 +247,7 @@ Run llama-server on a different machine (e.g., a GPU workstation):
 
 ```bash
 # On the GPU machine
-llama-server -m model.gguf -c 131072 -ngl 99 --host 0.0.0.0 --port 8080
+llama-server -m model.gguf -c 131072 -ngl 99 -np 1 --host 0.0.0.0 --port 8080
 ```
 
 ```env
