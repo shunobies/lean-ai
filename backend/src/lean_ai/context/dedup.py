@@ -20,12 +20,17 @@ async def deduplicate_sections_llm(
     llm_client: LLMClient,
     *,
     log_prefix: str = "Dedup",
+    protected_headings: set[str] | None = None,
 ) -> str:
     """Remove duplicate or overlapping ``##`` sections using the LLM.
 
     Sends a compact summary (heading + first ~200 chars) of each section
     to the LLM, which identifies redundant sections by number.  Python
     then mechanically removes those sections.
+
+    *protected_headings* — headings that must never be removed (e.g.
+    required framework guide sections).  The LLM prompt is told to skip
+    them, and the removal logic enforces the constraint mechanically.
 
     Falls back gracefully — returns the original document unchanged on
     any failure.
@@ -63,6 +68,16 @@ async def deduplicate_sections_llm(
             )[:200]
             numbered.append(f"{idx}. {heading}\n   \"{preview}\"")
 
+        # Build protected-headings block for the prompt
+        protected_block = ""
+        if protected_headings:
+            protected_list = "\n".join(f"- {h}" for h in sorted(protected_headings))
+            protected_block = (
+                "\n\nThe following headings are REQUIRED and must NEVER "
+                "be removed, even if they seem to overlap with another "
+                "section:\n" + protected_list + "\n"
+            )
+
         prompt = (
             f"The following Markdown document has {len(sections)} sections. "
             "Review for duplicate or overlapping sections that cover the "
@@ -74,6 +89,7 @@ async def deduplicate_sections_llm(
             "complete and accurate content). Return ONLY the section "
             "numbers to REMOVE, one per line. If no duplicates exist, "
             "respond with: NONE"
+            + protected_block
         )
 
         response = await llm_client.chat_raw(
@@ -92,6 +108,15 @@ async def deduplicate_sections_llm(
             if clean.isdigit():
                 idx = int(clean)
                 if 1 <= idx <= len(sections) and idx not in to_remove:
+                    # Enforce protected headings — never remove them
+                    if protected_headings:
+                        heading = sections[idx - 1][0]
+                        if heading in protected_headings:
+                            logger.info(
+                                "%s: skipping removal of protected heading: %s",
+                                log_prefix, heading,
+                            )
+                            continue
                     to_remove.append(idx)
 
         if not to_remove:

@@ -38,6 +38,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Required ## headings that semantic dedup must never remove.
+_REQUIRED_HEADINGS: set[str] = {
+    "## Framework Architecture",
+    "## Component Relationships",
+    "## Common CLI Commands",
+    "## File Organization Conventions",
+    "## Adding a New Feature",
+    "## Common Patterns and Pitfalls",
+}
+
 
 # ---------------------------------------------------------------------------
 # Post-generation validation — three-phase path checking
@@ -213,7 +223,9 @@ async def _deduplicate_sections(
     from lean_ai.context.dedup import deduplicate_sections_llm
 
     result = await deduplicate_sections_llm(
-        guide, llm_client, log_prefix="Framework guide",
+        guide, llm_client,
+        log_prefix="Framework guide",
+        protected_headings=_REQUIRED_HEADINGS,
     )
 
     # Always run mechanical dedup on the result — the LLM may have
@@ -428,7 +440,8 @@ def _build_guide_system_prompt(
         "- Separate every code block from surrounding text with a "
         "brief prose explanation of what it shows.\n"
         "- Never leave a subsection heading empty — if a subsection "
-        "has no applicable content, omit the heading entirely.\n"
+        "has no applicable content, write: \"No information available "
+        "for this version.\"\n"
         "- Number steps sequentially starting from 1 with no gaps.\n"
         "- Maximum 4000 words total.\n\n"
         "CONTENT RULES:\n"
@@ -746,10 +759,15 @@ async def generate_framework_guide(
     # Step 5a: Repair unfenced code blocks
     guide = _repair_code_blocks(guide)
 
-    # Step 5b: LLM semantic dedup disabled (false positives — it removed
-    # Framework Architecture and Component Relationships as "overlapping").
-    # Mechanical dedup still catches exact duplicate headings.
-    guide = _deduplicate_sections_mechanical(guide)
+    # Step 5b: Two-pass dedup (LLM semantic + mechanical).
+    # Required headings are protected from removal to prevent false positives.
+    try:
+        guide = await _deduplicate_sections(guide, llm_client)
+    except Exception as exc:
+        logger.warning(
+            "Framework guide: dedup failed (non-blocking): %s", exc,
+        )
+        guide = _deduplicate_sections_mechanical(guide)
 
     # Step 5c: Validate file references against project tree
     # (runs before renumber because LLM surgical fixes can change text)
