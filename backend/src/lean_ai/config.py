@@ -123,6 +123,13 @@ class Settings(BaseSettings):
     loop_detection_threshold: int = 3  # Consecutive identical tool calls before warning (0 = off)
     refresh_threshold: float = 0.7  # Refresh context at this % of context window
 
+    # ── Post-execution validation ──
+    enable_post_validation: bool = True  # Master switch
+    post_format_command: str = ""     # e.g. "ruff format src/"
+    post_lint_fix_command: str = ""   # e.g. "ruff check --fix src/"
+    post_lint_command: str = ""       # e.g. "ruff check src/"
+    post_test_command: str = ""       # e.g. "pytest tests/ -x -q"
+
     # ── Tool execution ──
     tool_timeout_seconds: int = 60
 

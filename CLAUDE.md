@@ -126,6 +126,11 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_IMPLEMENTATION_MAX_TURNS` | `0` | Max tool-calling turns per session (`0` = unlimited) |
 | `LEAN_AI_IMPLEMENTATION_MAX_TOKENS` | *(derived: 25% of context window)* | Max tokens per LLM turn |
 | `LEAN_AI_REFRESH_THRESHOLD` | `0.7` | Refresh context at this % of context window |
+| `LEAN_AI_ENABLE_POST_VALIDATION` | `true` | Run deterministic lint/test after execution |
+| `LEAN_AI_POST_FORMAT_COMMAND` | *(empty)* | Auto-fix formatting (e.g. `ruff format src/`) |
+| `LEAN_AI_POST_LINT_FIX_COMMAND` | *(empty)* | Auto-fix lint issues (e.g. `ruff check --fix src/`) |
+| `LEAN_AI_POST_LINT_COMMAND` | *(empty)* | Lint check (e.g. `ruff check src/`) |
+| `LEAN_AI_POST_TEST_COMMAND` | *(empty)* | Test check (e.g. `pytest tests/ -x -q`) |
 | `LEAN_AI_PORT` | `8422` | Server port |
 
 ## WebSocket Protocol

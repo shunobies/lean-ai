@@ -372,6 +372,11 @@ async def _execute_plan(
         if tc.tool_name in ("create_file", "edit_file") and tc.parameters.get("path")
     })
 
+    # ── Post-execution validation ──
+    validation_results: dict = {}
+    if files_modified and settings.enable_post_validation:
+        validation_results = await _run_post_validation(repo_root, ws)
+
     # Check for incomplete.md
     incomplete_path = os.path.join(repo_root, ".lean_ai", "incomplete.md")
     incomplete_content = ""
@@ -394,6 +399,14 @@ async def _execute_plan(
             "\n\n⚠️ Some steps had issues — see "
             f".lean_ai/incomplete.md:\n{incomplete_content}"
         )
+    if validation_results:
+        failed = {k: r for k, r in validation_results.items() if not r["success"]}
+        if failed:
+            summary += "\n\n⚠️ Post-validation failures:"
+            for name, result in failed.items():
+                summary += f"\n  {name}: {result['output'][:200]}"
+        else:
+            summary += "\n\n✓ Post-validation passed."
 
     # ── Incremental project_context.md update ──
     if files_modified and settings.enable_project_context:
@@ -448,6 +461,107 @@ async def _execute_plan(
     if files_modified:
         commit_msg += f"\n\nFiles modified: {', '.join(files_modified)}"
     return commit_msg
+
+
+# ── Deterministic Post-Execution Validation ───────────────────────
+
+
+async def _run_post_validation(
+    repo_root: str,
+    ws: WebSocket,
+) -> dict:
+    """Run deterministic post-execution lint, test, and auto-fix commands.
+
+    Only runs commands that are configured in settings.  Auto-fix commands
+    (format, lint-fix) run first and silently succeed; lint and test commands
+    report pass/fail status via WebSocket.
+
+    Returns a dict of results keyed by step name.
+    """
+    from lean_ai.tools import shell
+
+    results: dict[str, dict] = {}
+    any_configured = any([
+        settings.post_format_command,
+        settings.post_lint_fix_command,
+        settings.post_lint_command,
+        settings.post_test_command,
+    ])
+
+    if not any_configured:
+        return results
+
+    await ws_send(ws, "stage_status", {
+        "stage": "post_validation",
+        "status": "running",
+        "summary": "Running post-execution validation...",
+    })
+
+    # ── Auto-fix passes (silent success, report failure) ──
+    for label, command, runner in [
+        ("format", settings.post_format_command, shell.format_code),
+        ("lint_fix", settings.post_lint_fix_command, shell.run_lint),
+    ]:
+        if not command:
+            continue
+        try:
+            result = await runner(command=command, repo_root=repo_root)
+            results[label] = {
+                "success": result.success,
+                "output": result.output[:2000] if result.output else "",
+            }
+            if not result.success:
+                logger.warning(
+                    "Post-validation %s failed (exit %s): %s",
+                    label, result.exit_code, result.output[:500],
+                )
+        except Exception as exc:
+            logger.warning("Post-validation %s error: %s", label, exc)
+            results[label] = {"success": False, "output": str(exc)}
+
+    # ── Reporting passes (always report status) ──
+    for label, command, runner in [
+        ("lint", settings.post_lint_command, shell.run_lint),
+        ("test", settings.post_test_command, shell.run_tests),
+    ]:
+        if not command:
+            continue
+        try:
+            result = await runner(command=command, repo_root=repo_root)
+            results[label] = {
+                "success": result.success,
+                "output": result.output[:2000] if result.output else "",
+            }
+            await ws_send(ws, "test_result", {
+                "command": command,
+                "passed": result.success,
+                "output": result.output[:2000] if result.output else "",
+            })
+        except Exception as exc:
+            logger.warning("Post-validation %s error: %s", label, exc)
+            results[label] = {"success": False, "output": str(exc)}
+            await ws_send(ws, "test_result", {
+                "command": command,
+                "passed": False,
+                "output": str(exc),
+            })
+
+    # ── Summary ──
+    passed = sum(1 for r in results.values() if r["success"])
+    total = len(results)
+    summary = f"Post-validation: {passed}/{total} passed."
+    if any(not r["success"] for r in results.values()):
+        failed_names = [k for k, r in results.items() if not r["success"]]
+        summary += f" Failed: {', '.join(failed_names)}."
+
+    await ws_send(ws, "stage_status", {
+        "stage": "post_validation",
+        "status": "done",
+        "summary": summary,
+    })
+
+    logger.info("Post-validation complete: %s", summary)
+    return results
 
 
 # ── Fix Mode (no planning) ─────────────────────────────────────────
@@ -598,12 +712,25 @@ async def _run_fix(
         and tc.parameters.get("path")
     })
 
+    # ── Post-execution validation ──
+    validation_results: dict = {}
+    if files_modified and settings.enable_post_validation:
+        validation_results = await _run_post_validation(repo_root, ws)
+
     summary = (
         f"Fix complete: {len(executed)} tool calls. "
         f"Files modified: {', '.join(files_modified) if files_modified else 'none'}."
     )
     if explanation.strip():
         summary += f"\n\n{explanation.strip()}"
+    if validation_results:
+        failed = {k: r for k, r in validation_results.items() if not r["success"]}
+        if failed:
+            summary += "\n\n⚠️ Post-validation failures:"
+            for name, result in failed.items():
+                summary += f"\n  {name}: {result['output'][:200]}"
+        else:
+            summary += "\n\n✓ Post-validation passed."
 
     # ── Incremental project_context.md update ──
     if files_modified and settings.enable_project_context:
