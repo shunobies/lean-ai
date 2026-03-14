@@ -153,6 +153,52 @@ Every workflow task runs on its own branch:
 
 This keeps the main branch clean and makes every change reversible.
 
+## Post-Execution Validation
+
+After every workflow execution (both plan mode and fix mode), a three-layer quality system runs automatically:
+
+### 1. Auto-Detection
+
+During `/init`, Lean AI scans your project's dependency files to detect the correct lint, format, and test commands for your ecosystem. No manual configuration needed.
+
+| Ecosystem | What it detects |
+|---|---|
+| PHP | `php -l .`, Pint, PHPUnit, `artisan test` |
+| Python | ruff, black, flake8, pytest |
+| Node/TS | ESLint, Prettier, Jest, Vitest (from `package.json` scripts or devDependencies) |
+| Ruby | RuboCop, RSpec, `rails test` |
+| Go | `go vet`, `gofmt`, `go test` |
+| Rust | Clippy, `cargo fmt`, `cargo test` |
+| Java | `mvn test`, `gradle test` |
+| C# | `dotnet build`, `dotnet format`, `dotnet test` |
+
+Detected commands are saved to `.lean_ai/commands.json`. Manual `LEAN_AI_POST_*` environment variables always take priority over auto-detected commands.
+
+### 2. Deterministic Validation
+
+After execution completes, the system runs a fixed pipeline:
+
+```
+format (auto-fix) → lint fix (auto-fix) → lint check → test
+```
+
+The first two stages (format, lint fix) are auto-fix — they modify files silently. Lint check and test are verification stages that report pass/fail. This runs without any LLM calls.
+
+### 3. Validation-Resubmission Loop
+
+If lint or tests fail, the failure output is fed back to the LLM in a fresh conversation with a 15-turn budget. The LLM reads the errors, inspects files, and applies fixes. After each fix attempt, the full validation pipeline re-runs. This repeats up to `LEAN_AI_POST_VALIDATION_MAX_RETRIES` times (default 2).
+
+The resubmission loop uses a separate, minimal context (just the system prompt and failure output) so it cannot be interrupted by context window refreshes.
+
+### 4. Conditional Test Writing
+
+When a test command is available (auto-detected or manually configured), the LLM is instructed to write tests alongside code changes:
+
+- **Fix mode** — the system prompt includes a test requirement directive
+- **Plan mode** — the planner's final checklist requires test steps for new modules
+
+This only activates when a test command exists — projects without tests are not forced into a testing pattern.
+
 ## Scaffolding
 
 19 YAML scaffold recipes (`scaffolds/`) for bootstrapping new projects: FastAPI, Next.js, Laravel, Rails, Django, Flask, Express, and more. Each recipe defines the setup commands and file structure.

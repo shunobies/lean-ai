@@ -171,6 +171,38 @@ The refiner only activates when using cloud providers (OpenAI or Anthropic). See
 |---|---|---|
 | `LEAN_AI_TOOL_TIMEOUT_SECONDS` | `60` | Timeout for individual tool executions |
 
+## Post-Execution Validation
+
+After every workflow execution, Lean AI can automatically run your project's formatter, linter, and tests. Failures are fed back to the LLM for self-correction.
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEAN_AI_ENABLE_POST_VALIDATION` | `true` | Enable post-execution validation pipeline |
+| `LEAN_AI_POST_FORMAT_COMMAND` | *(empty)* | Auto-fix formatting (e.g. `ruff format src/`) |
+| `LEAN_AI_POST_LINT_FIX_COMMAND` | *(empty)* | Auto-fix lint issues (e.g. `ruff check --fix src/`) |
+| `LEAN_AI_POST_LINT_COMMAND` | *(empty)* | Lint check — failures reported (e.g. `ruff check src/`) |
+| `LEAN_AI_POST_TEST_COMMAND` | *(empty)* | Test check — failures reported (e.g. `pytest tests/ -x -q`) |
+| `LEAN_AI_POST_VALIDATION_MAX_RETRIES` | `2` | Max LLM fix attempts for validation failures (`0` = no retries) |
+
+### Auto-Detection
+
+When these variables are empty, Lean AI falls back to commands auto-detected during `/init`. The system scans your project's dependency files (`composer.json`, `pyproject.toml`, `package.json`, `Gemfile`, `go.mod`, `Cargo.toml`, etc.) and saves detected commands to `.lean_ai/commands.json`.
+
+Manual environment variables always take priority over auto-detected commands. Set a variable to an empty string to disable a specific stage.
+
+### Validation Pipeline
+
+The pipeline runs in order:
+
+1. **Format** (auto-fix) — runs the formatter, modifies files silently
+2. **Lint fix** (auto-fix) — runs the linter in fix mode, modifies files silently
+3. **Lint check** — runs the linter in check mode, reports pass/fail
+4. **Test** — runs the test suite, reports pass/fail
+
+If lint check or tests fail, the output is fed back to the LLM for self-correction (up to `POST_VALIDATION_MAX_RETRIES` attempts).
+
+See [Architecture: Post-Execution Validation](architecture.md#post-execution-validation) for the full design.
+
 ## LLM Retry
 
 | Variable | Default | Description |
