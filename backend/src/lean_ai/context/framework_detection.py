@@ -323,6 +323,88 @@ async def build_guide_search_queries_llm(
         return None
 
 
+async def build_gap_fill_queries_llm(
+    frameworks: list[tuple[str, str]],
+    runtimes: list[tuple[str, str]],
+    gaps: list[tuple[str, str]],
+    llm_client: LLMClient,
+    max_queries: int = 4,
+) -> list[str] | None:
+    """Generate targeted search queries for empty guide subsections.
+
+    Takes a list of ``(parent_heading, sub_heading)`` gaps and asks the
+    LLM to produce focused web search queries that will find content
+    specifically for those missing subsections.
+
+    Returns ``None`` on any failure so the caller can skip gap-filling.
+    """
+    from lean_ai.context.deprecations import _extract_major_minor
+
+    if not frameworks or not gaps:
+        return None
+
+    fw_lines: list[str] = []
+    for name, version in frameworks:
+        v = _extract_major_minor(version)
+        canonical = canonicalize_name(name)
+        label = f"{canonical} {v}" if v else canonical
+        fw_lines.append(label)
+
+    fw_text = ", ".join(fw_lines)
+
+    gap_descriptions = "\n".join(
+        f"- {sub} (under {parent})" for parent, sub in gaps
+    )
+
+    prompt = (
+        f"Generate {max_queries} web search queries to find information "
+        f"about these specific missing topics for {fw_text}:\n\n"
+        f"{gap_descriptions}\n\n"
+        "Each query should sound like a real developer typing into "
+        "a search engine. Include the framework name and version.\n\n"
+        "IMPORTANT:\n"
+        "- Focus ONLY on the missing topics listed above\n"
+        "- Do NOT include framework-specific CLI command names "
+        "(no 'artisan', 'manage.py', 'rails', etc.)\n"
+        "- Each query should target a different aspect of the "
+        "missing content\n"
+        "- Output ONLY the queries, one per line, no numbers or "
+        "bullets\n"
+    )
+
+    try:
+        response = await llm_client.chat_raw(
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=256,
+        )
+
+        queries = [
+            line.strip().strip('"').strip("'")
+            for line in response.strip().split("\n")
+            if line.strip() and len(line.strip()) > 10
+        ]
+
+        if not queries:
+            logger.info(
+                "Framework guide: gap-fill query generation returned "
+                "no usable queries",
+            )
+            return None
+
+        logger.info(
+            "Framework guide: LLM generated %d gap-fill queries for %d gaps",
+            len(queries), len(gaps),
+        )
+        return queries[:max_queries]
+
+    except Exception as exc:
+        logger.info(
+            "Framework guide: gap-fill query generation failed: %s",
+            exc,
+        )
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Project tree (compact, for prompt inclusion)
 # ---------------------------------------------------------------------------

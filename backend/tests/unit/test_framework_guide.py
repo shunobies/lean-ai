@@ -9,6 +9,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from lean_ai.context.framework_detection import (
+    build_gap_fill_queries_llm as _build_gap_fill_queries_llm,
+)
+from lean_ai.context.framework_detection import (
     build_guide_search_queries as _build_guide_search_queries,
 )
 from lean_ai.context.framework_detection import (
@@ -24,6 +27,8 @@ from lean_ai.context.framework_guide import (
     _deduplicate_search_parts,
     _deduplicate_sections,
     _deduplicate_sections_mechanical,
+    _fill_guide_gaps,
+    _find_empty_subsections,
     _renumber_steps,
     _repair_code_blocks,
 )
@@ -1308,3 +1313,280 @@ class TestRenumberSteps:
         text = "## Section\nJust prose here.\nMore prose."
         result = _renumber_steps(text)
         assert result == text
+
+
+# ---------------------------------------------------------------------------
+# _find_empty_subsections
+# ---------------------------------------------------------------------------
+
+
+class TestFindEmptySubsections:
+    def test_empty_h3_heading(self):
+        guide = (
+            "## Component Relationships\n\n"
+            "### Route to Handler\n\n"
+            "### Controller handler in app/Http/Controllers:\n\n"
+            "### Middleware\n"
+            "Middleware intercepts requests before they reach the "
+            "controller, enabling authentication and logging.\n"
+            "Apply middleware via route groups or controller constructors.\n"
+        )
+        gaps = _find_empty_subsections(guide)
+        subs = [sub for _, sub in gaps]
+        assert "Controller handler in app/Http/Controllers:" in subs
+        assert "Route to Handler" in subs
+        assert "Middleware" not in subs
+
+    def test_empty_bold_label_heading(self):
+        guide = (
+            "## Component Relationships\n\n"
+            "**Controller handler in app/Http/Controllers/UserController.php:**\n\n"
+            "### Next Section\n"
+            "Has real content here that explains the section topic "
+            "in enough detail.\n"
+            "More content on the next line.\n"
+        )
+        gaps = _find_empty_subsections(guide)
+        assert len(gaps) == 1
+        assert "Controller handler" in gaps[0][1]
+
+    def test_subsection_with_code_block_not_empty(self):
+        guide = (
+            "## Component Relationships\n\n"
+            "### Route to Handler\n\n"
+            "```php\n"
+            "Route::get('/users', [UserController::class, 'index']);\n"
+            "```\n\n"
+            "### Next Section\n"
+            "Content.\n"
+        )
+        gaps = _find_empty_subsections(guide)
+        subs = [sub for _, sub in gaps]
+        assert "Route to Handler" not in subs
+
+    def test_subsection_with_prose_not_empty(self):
+        guide = (
+            "## Framework Architecture\n\n"
+            "### Request Lifecycle\n\n"
+            "The request enters through public/index.php and is routed "
+            "to the appropriate controller.\n\n"
+            "## Common CLI Commands\n"
+        )
+        gaps = _find_empty_subsections(guide)
+        assert len(gaps) == 0
+
+    def test_subsection_with_sentinel_is_empty(self):
+        guide = (
+            "## Component Relationships\n\n"
+            "### Data Schema to Model\n\n"
+            "No information available for this version.\n\n"
+            "### Route to Handler\n"
+            "Routes are defined in web.php and map to controller methods "
+            "via the Route facade.\n"
+            "Each route specifies the HTTP method and URI pattern.\n"
+        )
+        gaps = _find_empty_subsections(guide)
+        subs = [sub for _, sub in gaps]
+        assert "Data Schema to Model" in subs
+        assert "Route to Handler" not in subs
+
+    def test_returns_parent_heading(self):
+        guide = (
+            "## Component Relationships\n\n"
+            "### Empty Sub\n\n"
+            "## Common CLI Commands\n\n"
+            "### Also Empty\n\n"
+        )
+        gaps = _find_empty_subsections(guide)
+        parents = {parent for parent, _ in gaps}
+        assert "## Component Relationships" in parents
+        assert "## Common CLI Commands" in parents
+
+    def test_no_gaps_in_complete_guide(self):
+        guide = (
+            "## Framework Architecture\n\n"
+            "### Overview\n\n"
+            "Laravel follows MVC pattern with a detailed request lifecycle "
+            "that processes through multiple stages.\n\n"
+            "## Component Relationships\n\n"
+            "### Route to Handler\n\n"
+            "```php\nRoute::get('/', fn() => 'hello');\n```\n"
+        )
+        gaps = _find_empty_subsections(guide)
+        assert len(gaps) == 0
+
+
+# ---------------------------------------------------------------------------
+# build_gap_fill_queries_llm
+# ---------------------------------------------------------------------------
+
+
+class TestBuildGapFillQueriesLlm:
+    @pytest.mark.asyncio
+    async def test_returns_queries_on_success(self):
+        mock_client = AsyncMock()
+        mock_client.chat_raw = AsyncMock(return_value=(
+            "Laravel 12 controller handler binding\n"
+            "how does Laravel 12 connect routes to controllers\n"
+            "Laravel 12 middleware class structure\n"
+        ))
+
+        gaps = [
+            ("## Component Relationships", "Controller handler"),
+            ("## Component Relationships", "Middleware class"),
+        ]
+        result = await _build_gap_fill_queries_llm(
+            [("laravel/framework", "12.0")],
+            [("php", "8.2")],
+            gaps,
+            mock_client,
+        )
+        assert result is not None
+        assert len(result) <= 4
+        assert len(result) == 3
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_failure(self):
+        mock_client = AsyncMock()
+        mock_client.chat_raw = AsyncMock(side_effect=RuntimeError("LLM down"))
+
+        gaps = [("## Section", "Empty sub")]
+        result = await _build_gap_fill_queries_llm(
+            [("laravel/framework", "12.0")],
+            [("php", "8.2")],
+            gaps,
+            mock_client,
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_for_empty_gaps(self):
+        mock_client = AsyncMock()
+        result = await _build_gap_fill_queries_llm(
+            [("laravel/framework", "12.0")],
+            [("php", "8.2")],
+            [],
+            mock_client,
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_queries_capped_at_max(self):
+        mock_client = AsyncMock()
+        mock_client.chat_raw = AsyncMock(return_value="\n".join(
+            f"Query number {i} about Laravel 12" for i in range(10)
+        ))
+
+        gaps = [("## Section", "Sub")]
+        result = await _build_gap_fill_queries_llm(
+            [("laravel/framework", "12.0")],
+            [("php", "8.2")],
+            gaps,
+            mock_client,
+            max_queries=3,
+        )
+        assert result is not None
+        assert len(result) == 3
+
+
+# ---------------------------------------------------------------------------
+# _fill_guide_gaps
+# ---------------------------------------------------------------------------
+
+
+class TestFillGuideGaps:
+    @pytest.mark.asyncio
+    async def test_fills_empty_subsection(self):
+        guide = (
+            "## Component Relationships\n\n"
+            "### Route to Handler\n\n"
+            "### Middleware\n"
+            "Existing middleware content.\n"
+        )
+        gaps = [("## Component Relationships", "Route to Handler")]
+
+        mock_client = AsyncMock()
+        mock_client.chat_raw = AsyncMock(return_value=(
+            "### Route to Handler\n\n"
+            "Routes map URLs to controller methods:\n\n"
+            "```php\n"
+            "Route::get('/users', [UserController::class, 'index']);\n"
+            "```\n"
+        ))
+
+        result = await _fill_guide_gaps(
+            guide, gaps, "search content here",
+            mock_client,
+            [("laravel/framework", "12.0")],
+            [("php", "8.2")],
+            None, 4096,
+        )
+        assert "Routes map URLs to controller methods" in result
+        assert "Existing middleware content" in result
+
+    @pytest.mark.asyncio
+    async def test_preserves_existing_content(self):
+        guide = (
+            "## Framework Architecture\n\n"
+            "Existing architecture description.\n\n"
+            "## Component Relationships\n\n"
+            "### Empty Sub\n\n"
+            "## Common CLI Commands\n\n"
+            "Existing CLI content.\n"
+        )
+        gaps = [("## Component Relationships", "Empty Sub")]
+
+        mock_client = AsyncMock()
+        mock_client.chat_raw = AsyncMock(return_value=(
+            "### Empty Sub\n\n"
+            "Filled content for the subsection.\n"
+        ))
+
+        result = await _fill_guide_gaps(
+            guide, gaps, "search content",
+            mock_client,
+            [("laravel/framework", "12.0")],
+            [("php", "8.2")],
+            None, 4096,
+        )
+        assert "Existing architecture description" in result
+        assert "Existing CLI content" in result
+        assert "Filled content for the subsection" in result
+
+    @pytest.mark.asyncio
+    async def test_returns_original_on_llm_failure(self):
+        guide = "## Section\n\n### Empty Sub\n\n"
+        gaps = [("## Section", "Empty Sub")]
+
+        mock_client = AsyncMock()
+        mock_client.chat_raw = AsyncMock(
+            side_effect=RuntimeError("LLM error"),
+        )
+
+        result = await _fill_guide_gaps(
+            guide, gaps, "search content",
+            mock_client,
+            [("laravel/framework", "12.0")],
+            [("php", "8.2")],
+            None, 4096,
+        )
+        assert result == guide
+
+    @pytest.mark.asyncio
+    async def test_returns_original_on_unparseable_response(self):
+        guide = "## Section\n\n### Empty Sub\n\n"
+        gaps = [("## Section", "Empty Sub")]
+
+        mock_client = AsyncMock()
+        mock_client.chat_raw = AsyncMock(
+            return_value="Just some random text with no headings.",
+        )
+
+        result = await _fill_guide_gaps(
+            guide, gaps, "search content",
+            mock_client,
+            [("laravel/framework", "12.0")],
+            [("php", "8.2")],
+            None, 4096,
+        )
+        assert result == guide

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lean_ai.context.framework_detection import (
+    build_gap_fill_queries_llm,
     build_guide_search_queries,
     build_guide_search_queries_llm,
     canonicalize_name,
@@ -428,6 +429,211 @@ def _deduplicate_search_parts(
             len(kept), len(parts),
         )
     return kept
+
+
+# ---------------------------------------------------------------------------
+# Gap detection — find subsections with no content
+# ---------------------------------------------------------------------------
+
+def _find_empty_subsections(guide: str) -> list[tuple[str, str]]:
+    """Find subsections that have a heading but no substantive content.
+
+    Scans the guide for ``###`` headings and bold-label lines
+    (``**Some Label:**``) that have no meaningful content before the
+    next heading.  A subsection is "empty" if it has zero content
+    lines, or only a single line that is a sentinel phrase like
+    "No information available".
+
+    Returns a list of ``(parent_heading, sub_heading)`` tuples where
+    *parent_heading* is the ``##`` section the empty sub lives under,
+    and *sub_heading* is the heading text (stripped of markdown
+    formatting).
+    """
+    lines = guide.split("\n")
+    gaps: list[tuple[str, str]] = []
+
+    # Scan lines, tracking the current ## parent heading.
+    sub_entries: list[tuple[int, str, str]] = []  # (line_idx, parent, sub)
+    current_parent = ""
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("## ") and not stripped.startswith("### "):
+            current_parent = stripped
+        elif stripped.startswith("### "):
+            sub_entries.append(
+                (i, current_parent, stripped.lstrip("# ").strip())
+            )
+        elif stripped.startswith("**") and stripped.endswith(":**"):
+            sub_entries.append(
+                (i, current_parent, stripped.strip("*: ").strip())
+            )
+
+    for idx, (line_idx, parent, sub_heading) in enumerate(sub_entries):
+        # Determine the end boundary: next sub-heading, next ## heading,
+        # or end of document.
+        end_idx = len(lines)
+        for j in range(line_idx + 1, len(lines)):
+            s = lines[j].strip()
+            if s.startswith("## ") or s.startswith("### "):
+                end_idx = j
+                break
+            if s.startswith("**") and s.endswith(":**"):
+                end_idx = j
+                break
+
+        # Collect non-blank content lines between heading and boundary.
+        content_lines = [
+            lines[k].strip()
+            for k in range(line_idx + 1, end_idx)
+            if lines[k].strip()
+        ]
+
+        # Empty if no content, or only a sentinel phrase.
+        if len(content_lines) == 0:
+            gaps.append((parent, sub_heading))
+        elif (
+            len(content_lines) == 1
+            and "no information available" in content_lines[0].lower()
+        ):
+            gaps.append((parent, sub_heading))
+
+    return gaps
+
+
+# ---------------------------------------------------------------------------
+# Gap-filling — LLM generates content for empty subsections
+# ---------------------------------------------------------------------------
+
+async def _fill_guide_gaps(
+    guide: str,
+    gaps: list[tuple[str, str]],
+    search_content: str,
+    llm_client: LLMClient,
+    frameworks: list[tuple[str, str]],
+    runtimes: list[tuple[str, str]],
+    cutoff: str | None,
+    max_tokens: int,
+) -> str:
+    """Fill empty subsections using new search results.
+
+    Passes the current guide, the new search content, and the list of
+    empty subsections to the LLM.  The LLM returns content for ONLY
+    the empty subsections, which gets spliced back into the guide.
+
+    Returns the updated guide, or the original on any failure.
+    """
+    from lean_ai.context.deprecations import _extract_major_minor
+
+    fw_list = ", ".join(
+        f"{canonicalize_name(name)} {_extract_major_minor(ver)}"
+        if ver else canonicalize_name(name)
+        for name, ver in frameworks
+    )
+
+    gap_list = "\n".join(
+        f"- Under \"{parent}\": \"{sub}\"" for parent, sub in gaps
+    )
+
+    system_prompt = (
+        f"Fill in missing subsections for a {fw_list} framework guide.\n\n"
+        "RULES:\n"
+        "- Write content ONLY for the empty subsections listed below\n"
+        "- Use the search results as the source of truth\n"
+        "- Include short code snippets where appropriate\n"
+        "- Every fenced code block must have matching ``` pairs\n"
+        "- Do NOT repeat content that already exists in the guide\n"
+        "- Do NOT rewrite or restructure existing sections\n\n"
+        "OUTPUT FORMAT:\n"
+        "For each gap, output:\n"
+        "### HEADING_TEXT\n"
+        "(your content here)\n\n"
+        "Output ONLY the filled subsections, nothing else."
+    )
+
+    user_msg = (
+        f"CURRENT GUIDE:\n{guide}\n\n"
+        f"EMPTY SUBSECTIONS TO FILL:\n{gap_list}\n\n"
+        f"NEW SEARCH RESULTS:\n{search_content}"
+    )
+
+    try:
+        response = await llm_client.chat_raw(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_msg[:40000]},
+            ],
+            max_tokens=max_tokens,
+        )
+    except Exception as exc:
+        logger.warning("Framework guide: gap-fill LLM call failed: %s", exc)
+        return guide
+
+    if not response.strip():
+        return guide
+
+    # Parse response into heading → content blocks.
+    filled: dict[str, str] = {}
+    current_heading = ""
+    current_lines: list[str] = []
+
+    for line in response.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("### "):
+            if current_heading and current_lines:
+                filled[current_heading] = "\n".join(current_lines).strip()
+            current_heading = stripped.lstrip("# ").strip()
+            current_lines = []
+        elif current_heading:
+            current_lines.append(line)
+
+    if current_heading and current_lines:
+        filled[current_heading] = "\n".join(current_lines).strip()
+
+    if not filled:
+        logger.info("Framework guide: gap-fill LLM returned no parseable sections")
+        return guide
+
+    # Splice filled content into the guide after each empty heading.
+    result_lines = guide.split("\n")
+    # Process in reverse order so insertions don't shift indices.
+    insertions: list[tuple[int, str]] = []  # (line_idx, content)
+
+    for line_idx in range(len(result_lines)):
+        stripped = result_lines[line_idx].strip()
+        heading_text = ""
+        if stripped.startswith("### "):
+            heading_text = stripped.lstrip("# ").strip()
+        elif stripped.startswith("**") and stripped.endswith(":**"):
+            heading_text = stripped.strip("*: ").strip()
+
+        if heading_text and heading_text in filled:
+            # Check if this heading is actually empty (in our gaps list).
+            is_gap = any(sub == heading_text for _, sub in gaps)
+            if is_gap:
+                insertions.append((line_idx, filled[heading_text]))
+
+    # Apply insertions in reverse order.
+    for line_idx, content in sorted(insertions, reverse=True):
+        # Find the end of the empty area after this heading.
+        end_idx = line_idx + 1
+        while end_idx < len(result_lines):
+            s = result_lines[end_idx].strip()
+            if (s.startswith("## ") or s.startswith("### ")
+                    or (s.startswith("**") and s.endswith(":**"))):
+                break
+            end_idx += 1
+
+        # Replace empty content between heading and next heading.
+        result_lines[line_idx + 1:end_idx] = [
+            "", content, "",
+        ]
+
+    filled_count = len(insertions)
+    logger.info(
+        "Framework guide: gap-fill spliced %d/%d subsection(s)",
+        filled_count, len(gaps),
+    )
+    return "\n".join(result_lines)
 
 
 # ---------------------------------------------------------------------------
@@ -848,9 +1054,95 @@ async def generate_framework_guide(
             exc,
         )
 
-    # Step 5d: Renumber steps (runs last since dedup and validation
-    # can both remove or rewrite content, introducing gaps)
+    # Step 5d: Renumber steps (runs before gap-fill since dedup and
+    # validation can both remove or rewrite content, introducing gaps)
     guide = _renumber_steps(guide)
+
+    # Step 5e: Fill empty subsections with targeted searches.
+    # Detects ### or bold-label headings with no content beneath them,
+    # generates targeted search queries, and asks the LLM to fill just
+    # those gaps.  Max 2 iterations — diminishing returns after that.
+    try:
+        for iteration in range(2):
+            gaps = _find_empty_subsections(guide)
+            if not gaps:
+                break
+
+            logger.info(
+                "Framework guide: gap-fill pass %d — "
+                "%d empty subsection(s): %s",
+                iteration + 1,
+                len(gaps),
+                [sub for _, sub in gaps],
+            )
+
+            gap_queries = await build_gap_fill_queries_llm(
+                frameworks, runtimes, gaps, llm_client,
+            )
+            if not gap_queries:
+                logger.info(
+                    "Framework guide: gap-fill query generation "
+                    "failed, skipping",
+                )
+                break
+
+            gap_search_parts: list[str] = []
+            for qi, query in enumerate(gap_queries, 1):
+                try:
+                    result = await asyncio.wait_for(
+                        search_internet(query, llm_client=None),
+                        timeout=search_timeout,
+                    )
+                    if result.success and result.output:
+                        gap_search_parts.append(
+                            f"=== Search: {query} ===\n"
+                            f"{result.output}"
+                        )
+                        logger.info(
+                            "Framework guide: gap-fill search %d/%d "
+                            "%r -> OK (%d chars)",
+                            qi, len(gap_queries), query,
+                            len(result.output),
+                        )
+                    else:
+                        logger.info(
+                            "Framework guide: gap-fill search %d/%d "
+                            "%r -> no results",
+                            qi, len(gap_queries), query,
+                        )
+                except asyncio.TimeoutError:
+                    logger.info(
+                        "Framework guide: gap-fill search %d/%d "
+                        "%r -> timed out",
+                        qi, len(gap_queries), query,
+                    )
+                except Exception as exc:
+                    logger.info(
+                        "Framework guide: gap-fill search %d/%d "
+                        "%r -> failed: %s",
+                        qi, len(gap_queries), query, exc,
+                    )
+
+            if not gap_search_parts:
+                logger.info(
+                    "Framework guide: gap-fill searches returned "
+                    "nothing, skipping",
+                )
+                break
+
+            gap_content = "\n\n".join(gap_search_parts)
+            guide = await _fill_guide_gaps(
+                guide, gaps, gap_content, llm_client,
+                frameworks, runtimes, cutoff, max_tokens,
+            )
+
+            guide = _repair_code_blocks(guide)
+            guide = _renumber_steps(guide)
+    except Exception as exc:
+        logger.warning(
+            "Framework guide: gap-fill loop failed (non-blocking): %s",
+            exc,
+        )
 
     # Step 6: Add header
     fw_label = ", ".join(
