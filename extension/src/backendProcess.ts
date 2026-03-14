@@ -24,6 +24,47 @@ let serverProcess: ChildProcess | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
 let managedPort: string | undefined;
 
+// Environment variable overrides applied when spawning the backend.
+// Used by the model selector to switch providers/models without editing .env.
+let envOverrides: Record<string, string> = {};
+
+/**
+ * Set environment variable overrides for the next backend start.
+ * These are merged with process.env when spawning uvicorn.
+ */
+export function setModelEnvOverrides(overrides: Record<string, string>): void {
+    envOverrides = overrides;
+}
+
+/**
+ * Restart the backend with a specific provider/model.
+ * Sets the appropriate LEAN_AI_* env vars and restarts.
+ */
+export async function restartWithModel(
+    provider: string,
+    model: string,
+    contextWindow?: number,
+): Promise<boolean> {
+    const overrides: Record<string, string> = {
+        LEAN_AI_LLM_PROVIDER: provider,
+    };
+
+    const p = provider.toLowerCase();
+    if (p === "ollama") {
+        overrides.LEAN_AI_OLLAMA_MODEL = model;
+        if (contextWindow) {
+            overrides.LEAN_AI_OLLAMA_CONTEXT_WINDOW = String(contextWindow);
+        }
+    } else if (p === "openai") {
+        overrides.LEAN_AI_OPENAI_MODEL = model;
+    } else if (p === "anthropic") {
+        overrides.LEAN_AI_ANTHROPIC_MODEL = model;
+    }
+
+    setModelEnvOverrides(overrides);
+    return restartBackend();
+}
+
 // Health monitor state
 let healthMonitorInterval: NodeJS.Timeout | undefined;
 let monitorServerDownNotified = false; // guards one-time "server down" notification
@@ -368,6 +409,9 @@ export async function startBackend(): Promise<boolean> {
         {
             cwd: backendDir,
             stdio: ["ignore", "pipe", "pipe"],
+            env: Object.keys(envOverrides).length > 0
+                ? { ...process.env, ...envOverrides }
+                : undefined,
             // No shell: true — we want the actual uvicorn PID
         },
     );

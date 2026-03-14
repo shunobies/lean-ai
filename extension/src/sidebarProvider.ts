@@ -12,6 +12,7 @@
 
 import * as vscode from "vscode";
 import { BackendClient } from "./backendClient";
+import { restartWithModel } from "./backendProcess";
 import { ConversationManager } from "./conversationManager";
 import { getWebviewHtml } from "./sidebarHtml";
 import { createSlashCommands } from "./slashCommands";
@@ -42,6 +43,10 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     // Persisted in globalState so it survives window reloads.
     private lastCompletedSessionId: string | undefined;
 
+    // Model selector state
+    private selectedProvider: string | undefined;
+    private selectedModel: string | undefined;
+
     // Set by extension.ts when a scaffold was just created and this window is the new project
     private _pendingInit = false;
 
@@ -55,6 +60,15 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         this.lastCompletedSessionId = this.context.globalState.get<string>(
             "lean-ai.lastCompletedSessionId",
         );
+
+        // Restore model selection from globalState
+        const savedModel = this.context.globalState.get<{ provider: string; model: string }>(
+            "lean-ai.selectedChatModel",
+        );
+        if (savedModel) {
+            this.selectedProvider = savedModel.provider;
+            this.selectedModel = savedModel.model;
+        }
 
         // Conversation persistence manager
         this.conversations = new ConversationManager(
@@ -186,6 +200,22 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                     if (this.chatHistory.length > 0) {
                         this.conversations.handleBackToCurrentChat(this.chatHistory);
                     }
+                    // Fetch available models and populate the dropdown
+                    this.fetchAndSendModels();
+                    break;
+                case "modelChanged":
+                    this.handleModelChanged(
+                        msg.provider as string,
+                        msg.model as string,
+                        msg.contextWindow as number | undefined,
+                    );
+                    break;
+                case "contextWindowChanged":
+                    this.handleContextWindowChanged(
+                        msg.provider as string,
+                        msg.model as string,
+                        msg.contextWindow as number,
+                    );
                     break;
                 case "approve_tool":
                 case "deny_tool":
@@ -492,6 +522,115 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     /** Called by extension.ts when this window was opened for a freshly scaffolded project */
     setPendingInit(): void {
         this._pendingInit = true;
+    }
+
+    // ── Model selector helpers ────────────────────────────────────────
+
+    private async fetchAndSendModels(): Promise<void> {
+        try {
+            const healthy = await this.client.healthCheck();
+            if (!healthy) { return; }
+
+            const data = await this.client.getModels();
+            // Load per-model context window overrides
+            const ctxMap = this.context.globalState.get<Record<string, number>>(
+                "lean-ai.modelContextWindows",
+            ) || {};
+
+            this.postMessage({
+                type: "modelsAvailable",
+                models: data.models,
+                defaultProvider: data.default_provider,
+                defaultModel: data.default_model,
+                selectedProvider: this.selectedProvider,
+                selectedModel: this.selectedModel,
+                contextWindows: ctxMap,
+            });
+        } catch (e) {
+            console.warn("Failed to fetch models:", e);
+        }
+    }
+
+    private async handleModelChanged(
+        provider: string,
+        model: string,
+        contextWindow?: number,
+    ): Promise<void> {
+        this.selectedProvider = provider;
+        this.selectedModel = model;
+        this.context.globalState.update("lean-ai.selectedChatModel", { provider, model });
+
+        // Persist context window for this model if provided
+        if (contextWindow && provider === "ollama") {
+            const ctxMap = this.context.globalState.get<Record<string, number>>(
+                "lean-ai.modelContextWindows",
+            ) || {};
+            ctxMap[`${provider}|${model}`] = contextWindow;
+            this.context.globalState.update("lean-ai.modelContextWindows", ctxMap);
+        }
+
+        // Show switching message and clear session state
+        this.postMessage({
+            type: "reply",
+            text: `Switching to ${model}...`,
+            cls: "msg-system",
+        });
+        this.postMessage({ type: "thinking", show: true, text: `Restarting with ${model}...` });
+
+        this.closeWebSocket();
+        this.sessionId = undefined;
+        this.lastCompletedSessionId = undefined;
+        this.context.globalState.update("lean-ai.lastCompletedSessionId", undefined);
+        this.chatHistory = [];
+        this.conversations.currentConversationId = undefined;
+        this.conversations.viewingHistoricConversation = false;
+
+        // Restart backend with new model
+        try {
+            const success = await restartWithModel(provider, model, contextWindow);
+            this.postMessage({ type: "thinking", show: false });
+            if (success) {
+                this.postMessage({
+                    type: "chatArchived",
+                    tabId: undefined,
+                    title: undefined,
+                    messagesHtml: undefined,
+                });
+                this.postMessage({
+                    type: "reply",
+                    text: `Now using **${model}** (${provider}).`,
+                    cls: "msg-system",
+                });
+                // Re-fetch models to update dropdown after restart
+                await this.fetchAndSendModels();
+            } else {
+                this.postMessage({
+                    type: "error",
+                    text: "Failed to restart backend with new model.",
+                });
+            }
+        } catch (e) {
+            this.postMessage({ type: "thinking", show: false });
+            const error = e instanceof Error ? e.message : String(e);
+            this.postMessage({ type: "error", text: `Model switch failed: ${error}` });
+        }
+        this.postMessage({ type: "sendEnabled" });
+    }
+
+    private async handleContextWindowChanged(
+        provider: string,
+        model: string,
+        contextWindow: number,
+    ): Promise<void> {
+        // Persist context window for this model
+        const ctxMap = this.context.globalState.get<Record<string, number>>(
+            "lean-ai.modelContextWindows",
+        ) || {};
+        ctxMap[`${provider}|${model}`] = contextWindow;
+        this.context.globalState.update("lean-ai.modelContextWindows", ctxMap);
+
+        // Restart with new context window
+        await this.handleModelChanged(provider, model, contextWindow);
     }
 
     private getHtml(): string {
