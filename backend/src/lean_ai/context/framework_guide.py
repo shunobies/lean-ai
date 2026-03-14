@@ -380,6 +380,56 @@ def _renumber_steps(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Web search content deduplication
+# ---------------------------------------------------------------------------
+
+def _deduplicate_search_parts(
+    parts: list[str],
+    threshold: float = 0.5,
+) -> list[str]:
+    """Remove search snippets that overlap significantly with earlier ones.
+
+    Splits each snippet into sentences (strings ending with ``'.'`` that
+    are longer than 30 chars) and computes the fraction of sentences
+    already seen in previous snippets.  If the overlap exceeds
+    *threshold*, the snippet is dropped.
+    """
+    if len(parts) <= 1:
+        return parts
+
+    kept: list[str] = []
+    seen_sentences: set[str] = set()
+
+    for part in parts:
+        sentences = {
+            s.strip().lower()
+            for s in part.split(".")
+            if len(s.strip()) > 30
+        }
+        if not sentences:
+            kept.append(part)
+            continue
+
+        overlap = len(sentences & seen_sentences) / len(sentences)
+        if overlap < threshold:
+            kept.append(part)
+            seen_sentences |= sentences
+        else:
+            logger.info(
+                "Framework guide: dropped search snippet "
+                "(%.0f%% overlap with previous)",
+                overlap * 100,
+            )
+
+    if len(kept) < len(parts):
+        logger.info(
+            "Framework guide: search dedup kept %d/%d snippets",
+            len(kept), len(parts),
+        )
+    return kept
+
+
+# ---------------------------------------------------------------------------
 # LLM system prompt
 # ---------------------------------------------------------------------------
 
@@ -442,8 +492,7 @@ def _build_guide_system_prompt(
         "- Never leave a subsection heading empty — if a subsection "
         "has no applicable content, write: \"No information available "
         "for this version.\"\n"
-        "- Number steps sequentially starting from 1 with no gaps.\n"
-        "- Maximum 4000 words total.\n\n"
+        "- Number steps sequentially starting from 1 with no gaps.\n\n"
         "CONTENT RULES:\n"
         f"- ONLY cover the detected frameworks: {fw_list}\n"
         "- Web search results and fetched page content are the "
@@ -553,9 +602,12 @@ def _build_guide_system_prompt(
 async def generate_framework_guide(
     repo_root: str,
     llm_client: LLMClient,
-    max_tokens: int = 4096,
+    max_tokens: int | None = None,
 ) -> str:
     """Detect frameworks, search for best practices, and generate a guide.
+
+    *max_tokens* defaults to 25 % of the active context window (same
+    derivation as project context and implementation turns).
 
     Returns the guide content as a Markdown string, or ``""`` if no
     frameworks are detected or any step fails.
@@ -565,6 +617,9 @@ async def generate_framework_guide(
 
     if not settings.enable_framework_guide:
         return ""
+
+    if max_tokens is None:
+        max_tokens = settings.implementation_max_tokens or 4096
 
     # Step 1: Detect frameworks
     try:
@@ -706,7 +761,10 @@ async def generate_framework_guide(
                 j, len(fetch_urls), len(url_candidates),
             )
 
-    # Step 4: Build user message with search results + pages + tree
+    # Step 4: Deduplicate overlapping search content, then build
+    # the user message with search results + pages + tree.
+    search_parts = _deduplicate_search_parts(search_parts)
+
     user_parts: list[str] = []
     if search_parts:
         user_parts.append(

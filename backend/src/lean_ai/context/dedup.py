@@ -28,9 +28,9 @@ async def deduplicate_sections_llm(
     to the LLM, which identifies redundant sections by number.  Python
     then mechanically removes those sections.
 
-    *protected_headings* — headings that must never be removed (e.g.
-    required framework guide sections).  The LLM prompt is told to skip
-    them, and the removal logic enforces the constraint mechanically.
+    *protected_headings* — heading texts whose *first* occurrence must
+    never be removed.  Duplicate instances of a protected heading ARE
+    eligible for removal — only the first occurrence is protected.
 
     Falls back gracefully — returns the original document unchanged on
     any failure.
@@ -68,14 +68,28 @@ async def deduplicate_sections_llm(
             )[:200]
             numbered.append(f"{idx}. {heading}\n   \"{preview}\"")
 
+        # Build set of first-occurrence indices for protected headings.
+        # Only the FIRST instance of each protected heading is shielded
+        # from removal — duplicate instances are eligible for removal.
+        first_protected: set[int] = set()
+        if protected_headings:
+            seen_headings: set[str] = set()
+            for idx, (heading, _start, _end) in enumerate(sections, 1):
+                if heading in protected_headings and heading not in seen_headings:
+                    seen_headings.add(heading)
+                    first_protected.add(idx)
+
         # Build protected-headings block for the prompt
         protected_block = ""
         if protected_headings:
-            protected_list = "\n".join(f"- {h}" for h in sorted(protected_headings))
+            protected_list = "\n".join(
+                f"- {h}" for h in sorted(protected_headings)
+            )
             protected_block = (
-                "\n\nThe following headings are REQUIRED and must NEVER "
-                "be removed, even if they seem to overlap with another "
-                "section:\n" + protected_list + "\n"
+                "\n\nThe following headings are REQUIRED — keep the "
+                "FIRST (best) occurrence of each. If a heading appears "
+                "more than once, remove the duplicate:\n"
+                + protected_list + "\n"
             )
 
         prompt = (
@@ -108,15 +122,15 @@ async def deduplicate_sections_llm(
             if clean.isdigit():
                 idx = int(clean)
                 if 1 <= idx <= len(sections) and idx not in to_remove:
-                    # Enforce protected headings — never remove them
-                    if protected_headings:
-                        heading = sections[idx - 1][0]
-                        if heading in protected_headings:
-                            logger.info(
-                                "%s: skipping removal of protected heading: %s",
-                                log_prefix, heading,
-                            )
-                            continue
+                    # Only protect the FIRST instance of each
+                    # protected heading — duplicates are removable.
+                    if idx in first_protected:
+                        logger.info(
+                            "%s: skipping removal of protected "
+                            "heading (first instance): %s",
+                            log_prefix, sections[idx - 1][0],
+                        )
+                        continue
                     to_remove.append(idx)
 
         if not to_remove:

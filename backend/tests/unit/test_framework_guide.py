@@ -18,6 +18,7 @@ from lean_ai.context.framework_detection import (
     get_primary_frameworks as _get_primary_frameworks,
 )
 from lean_ai.context.framework_guide import (
+    _deduplicate_search_parts,
     _deduplicate_sections,
     _deduplicate_sections_mechanical,
     _renumber_steps,
@@ -877,6 +878,121 @@ class TestDeduplicateSections:
         result = await _deduplicate_sections(text, mock_llm)
         assert result == text
         mock_llm.chat_raw.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_protected_heading_first_instance_kept(self):
+        """First instance of a protected heading must survive LLM dedup."""
+        text = (
+            "## Framework Architecture\n"
+            "Original detailed architecture section.\n\n"
+            "## Component Relationships\n"
+            "Components connect via routes.\n\n"
+            "## Framework Architecture\n"
+            "Duplicate shorter architecture section."
+        )
+        # LLM says remove sections 1 and 3 (both Framework Architecture)
+        mock_llm = AsyncMock()
+        mock_llm.chat_raw = AsyncMock(return_value="1 3")
+
+        result = await _deduplicate_sections(text, mock_llm)
+        # First instance is protected — must survive
+        assert "Original detailed architecture" in result
+        # Duplicate is removed
+        assert "Duplicate shorter architecture" not in result
+        # Only one occurrence of the heading
+        assert result.count("## Framework Architecture") == 1
+
+    @pytest.mark.asyncio
+    async def test_protected_heading_duplicate_removed(self):
+        """Duplicate instances of protected headings ARE removable."""
+        text = (
+            "## Framework Architecture\n"
+            "First architecture content.\n\n"
+            "## Component Relationships\n"
+            "Component content here.\n\n"
+            "## Framework Architecture\n"
+            "Second duplicate architecture.\n\n"
+            "## Common CLI Commands\n"
+            "CLI content here."
+        )
+        # LLM says remove section 3 (duplicate Framework Architecture)
+        mock_llm = AsyncMock()
+        mock_llm.chat_raw = AsyncMock(return_value="3")
+
+        result = await _deduplicate_sections(text, mock_llm)
+        # First instance kept
+        assert "First architecture content" in result
+        # Duplicate removed
+        assert "Second duplicate architecture" not in result
+        # Other sections untouched
+        assert "## Component Relationships" in result
+        assert "## Common CLI Commands" in result
+
+
+# ---------------------------------------------------------------------------
+# _deduplicate_search_parts
+# ---------------------------------------------------------------------------
+
+
+class TestDeduplicateSearchParts:
+    def test_single_part_unchanged(self):
+        parts = ["This is a single search snippet with enough content."]
+        result = _deduplicate_search_parts(parts)
+        assert result == parts
+
+    def test_empty_list(self):
+        assert _deduplicate_search_parts([]) == []
+
+    def test_no_overlap_keeps_all(self):
+        parts = [
+            "Laravel uses the MVC pattern with controllers and models. "
+            "Routes are defined in the web.php file for HTTP requests.",
+            "Django uses views and templates for rendering pages. "
+            "URL patterns are defined in urls.py for routing purposes.",
+        ]
+        result = _deduplicate_search_parts(parts)
+        assert len(result) == 2
+
+    def test_high_overlap_drops_duplicate(self):
+        shared = (
+            "Laravel uses the MVC pattern with controllers and models. "
+            "Routes are defined in the web.php file for HTTP requests. "
+            "Middleware handles authentication and authorization logic."
+        )
+        parts = [
+            shared,
+            shared + " Extra sentence at the end for slight difference.",
+        ]
+        result = _deduplicate_search_parts(parts)
+        assert len(result) == 1
+        assert result[0] == parts[0]
+
+    def test_short_sentences_ignored(self):
+        """Sentences under 30 chars are ignored for overlap calculation."""
+        parts = [
+            "Short. Also short. Tiny.",
+            "Short. Also short. Tiny.",
+        ]
+        # All sentences are too short — both kept
+        result = _deduplicate_search_parts(parts)
+        assert len(result) == 2
+
+    def test_threshold_respected(self):
+        """Custom threshold changes sensitivity."""
+        base = (
+            "Laravel middleware handles request filtering and authentication. "
+            "Service providers bootstrap application services on startup."
+        )
+        parts = [
+            base + " Controllers process incoming HTTP requests.",
+            base + " Views render HTML templates for the browser.",
+        ]
+        # With threshold=0.9 (very strict), both should be kept
+        result_strict = _deduplicate_search_parts(parts, threshold=0.9)
+        assert len(result_strict) == 2
+        # With threshold=0.3 (very lenient), second should be dropped
+        result_lenient = _deduplicate_search_parts(parts, threshold=0.3)
+        assert len(result_lenient) == 1
 
 
 # ---------------------------------------------------------------------------
