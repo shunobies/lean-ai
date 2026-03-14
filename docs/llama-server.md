@@ -8,17 +8,36 @@ No code changes are needed — llama-server exposes an OpenAI-compatible API, so
 
 ### 1. Build or install llama.cpp
 
+Building from source is recommended — especially on Linux with AMD GPUs, where pre-built binaries may not match your ROCm version.
+
 ```bash
-# Clone and build with CUDA support
 git clone https://github.com/ggerganov/llama.cpp
 cd llama.cpp
-cmake -B build -DGGML_CUDA=ON
-cmake --build build --config Release -j
-
-# The server binary is at build/bin/llama-server
 ```
 
-Pre-built binaries are also available from the [releases page](https://github.com/ggerganov/llama.cpp/releases).
+**NVIDIA (CUDA):**
+```bash
+cmake -B build -DGGML_CUDA=ON
+cmake --build build --config Release -j$(nproc)
+```
+
+**AMD (ROCm/HIP):**
+```bash
+cmake -B build -DGGML_HIP=ON
+cmake --build build --config Release -j$(nproc)
+```
+
+ROCm 5.7+ is required. CMake detects your ROCm installation automatically. If it doesn't find HIP, set `CMAKE_PREFIX_PATH=/opt/rocm`.
+
+**CPU only:**
+```bash
+cmake -B build
+cmake --build build --config Release -j$(nproc)
+```
+
+The server binary is at `build/bin/llama-server`.
+
+Pre-built binaries (primarily CUDA) are available from the [releases page](https://github.com/ggerganov/llama.cpp/releases).
 
 ### 2. Download a GGUF model
 
@@ -140,6 +159,22 @@ llama-server \
 
 The draft model proposes tokens in batches, and the main model verifies them. When the draft model's predictions are accepted (common for boilerplate code), generation speed improves substantially.
 
+### Multi-GPU Tensor Splitting
+
+If you have multiple GPUs, llama-server can split model layers across them with `--tensor-split`:
+
+```bash
+# Even split across 2 GPUs
+llama-server -m model.gguf -c 131072 -ngl 99 \
+  --tensor-split 0.5,0.5
+
+# Uneven split (e.g., 16 GB + 8 GB GPUs — give more to the bigger card)
+llama-server -m model.gguf -c 131072 -ngl 99 \
+  --tensor-split 0.65,0.35
+```
+
+The ratios control what fraction of layers each GPU gets. This lets you run models that don't fit on a single card, or spread the workload to increase throughput. Adjust the split based on each GPU's available VRAM.
+
 ## Example Configurations
 
 ### Maximum Context on Limited VRAM (24 GB)
@@ -181,6 +216,20 @@ llama-server \
 
 ```env
 LEAN_AI_OPENAI_CONTEXT_WINDOW=64
+```
+
+### Multi-GPU (AMD ROCm)
+
+Spread a large model across two AMD GPUs with KV cache quantization:
+
+```bash
+llama-server \
+  -m models/qwen3-coder-30b-a3b-q4_k_m.gguf \
+  -c 131072 \
+  -ngl 99 \
+  --tensor-split 0.5,0.5 \
+  --cache-type-k q8_0 \
+  --cache-type-v q4_0
 ```
 
 ### Remote Server
