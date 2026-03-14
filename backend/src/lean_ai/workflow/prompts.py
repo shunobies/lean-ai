@@ -4,20 +4,35 @@ from lean_ai.llm.plan_schema import PlanStep
 from lean_ai.llm.prompts import FIX_SYSTEM_PROMPT, STEP_EXECUTION_SYSTEM_PROMPT
 
 
-def build_fix_system_prompt(context: str) -> str:
-    """Build the system prompt for fix mode (no planning)."""
+def build_fix_system_prompt(
+    context: str,
+    test_command: str = "",
+) -> str:
+    """Build the system prompt for fix mode (no planning).
+
+    When *test_command* is provided, the LLM is instructed to write or
+    update tests alongside code changes.
+    """
+    base = FIX_SYSTEM_PROMPT
+
+    if test_command:
+        base += (
+            "\n\nTEST REQUIREMENT:\n"
+            "When you create new functionality or fix a bug, write or "
+            "update tests that verify your changes. Follow the project's "
+            "existing test patterns and conventions. Tests run with: "
+            f"{test_command}"
+        )
+
     if not context:
-        return FIX_SYSTEM_PROMPT
+        return base
 
     max_context = 3000
     ctx = context[:max_context]
     if len(context) > max_context:
         ctx += "\n... (condensed)"
 
-    return (
-        f"{FIX_SYSTEM_PROMPT}\n"
-        f"## Project Context\n\n{ctx}"
-    )
+    return f"{base}\n## Project Context\n\n{ctx}"
 
 
 def build_step_system_prompt(context: str) -> str:

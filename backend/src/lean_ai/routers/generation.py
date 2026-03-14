@@ -63,6 +63,17 @@ async def init_workspace(request: InitWorkspaceRequest):
         )
         index_status = "indexed"
 
+        # Auto-detect lint/test/format commands
+        from lean_ai.context.command_detection import (
+            detect_commands,
+            write_commands_json,
+        )
+
+        detected_commands = detect_commands(request.repo_root)
+        if any(detected_commands.values()):
+            write_commands_json(request.repo_root, detected_commands)
+            logger.info("Auto-detected commands: %s", detected_commands)
+
         # Background embedding generation
         if settings.enable_embeddings:
             async def _embed_background() -> None:
@@ -90,11 +101,16 @@ async def init_workspace(request: InitWorkspaceRequest):
     except Exception as e:
         logger.warning("Init workspace indexing failed: %s", e)
         index_status = "failed"
+        detected_commands = {}
 
     return InitWorkspaceResponse(
         index_status=index_status,
         index_file_count=file_count,
         index_chunk_count=chunk_count,
+        commands_detected=(
+            detected_commands if detected_commands and any(detected_commands.values())
+            else None
+        ),
     )
 
 

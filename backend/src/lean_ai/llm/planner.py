@@ -101,6 +101,7 @@ async def create_plan(
     revision_context: str | None = None,
     ws: WebSocket | None = None,
     refiner: "PromptRefiner | None" = None,
+    test_command: str = "",
 ) -> ExecutionPlan:
     """Create a plan using 5-phase decomposed planning.
 
@@ -112,6 +113,7 @@ async def create_plan(
         revision_context: If revising, the previous plan JSON + user feedback.
         ws: Optional WebSocket for streaming stage progress.
         refiner: Optional local refiner for privacy-stripping file summaries.
+        test_command: If set, planner includes test creation steps.
 
     Returns:
         Structured ExecutionPlan ready for per-step execution.
@@ -453,6 +455,14 @@ async def create_plan(
                     "- Steps are ordered so dependencies come first\n"
                     "- Verification steps (run_tests/run_lint) follow groups "
                     "of changes"
+                    + (
+                        "\n- For each new module or significant change, "
+                        "include a create_file or edit_file step for a "
+                        "corresponding test file following the project's "
+                        "existing test patterns. After test creation, add "
+                        f"a run_tests step with command: {test_command}"
+                        if test_command else ""
+                    )
                 ),
             },
         ],

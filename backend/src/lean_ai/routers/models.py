@@ -22,6 +22,7 @@ class InitWorkspaceResponse(BaseModel):
     index_status: str
     index_file_count: int | None = None
     index_chunk_count: int | None = None
+    commands_detected: dict[str, str] | None = None
 
 
 class GenerateProjectContextRequest(BaseModel):

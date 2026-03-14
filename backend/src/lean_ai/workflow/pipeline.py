@@ -90,6 +90,7 @@ async def run_workflow(
 
     # ── Phase 2: Plan ────────────────────────────────────────────
     await ws_send(ws, "stage_change", {"stage": "planning"})
+    plan_commands = _effective_post_commands(repo_root)
     plan = await create_plan(
         task=task_with_answers,
         repo_root=repo_root,
@@ -97,6 +98,7 @@ async def run_workflow(
         context=context,
         ws=ws,
         refiner=refiner,
+        test_command=plan_commands.get("test", ""),
     )
 
     # ── Phase 3: Approve ─────────────────────────────────────────
@@ -108,6 +110,7 @@ async def run_workflow(
         context=context,
         ws=ws,
         refiner=refiner,
+        test_command=plan_commands.get("test", ""),
     )
 
     # ── Phase 4: Execute per-step ────────────────────────────────
@@ -178,6 +181,7 @@ async def _wait_for_approval(
     context: str,
     ws: WebSocket,
     refiner: "PromptRefiner | None" = None,
+    test_command: str = "",
 ) -> ExecutionPlan:
     """Send the plan for user approval. Handle feedback/revision loop.
 
@@ -229,6 +233,7 @@ async def _wait_for_approval(
                 revision_context=revision_context,
                 ws=ws,
                 refiner=refiner,
+                test_command=test_command,
             )
             plan_md = plan_to_markdown(plan)
             await ws_send(ws, "plan_revision", {
@@ -478,29 +483,43 @@ async def _execute_plan(
 # ── Deterministic Post-Execution Validation ───────────────────────
 
 
+def _effective_post_commands(repo_root: str) -> dict[str, str]:
+    """Resolve post-validation commands: manual settings > auto-detected.
+
+    Returns dict with keys: ``format``, ``lint_fix``, ``lint``, ``test``.
+    Manual ``LEAN_AI_POST_*`` settings always take priority over
+    auto-detected commands from ``.lean_ai/commands.json``.
+    """
+    from lean_ai.context.command_detection import load_commands_json
+
+    auto = load_commands_json(repo_root)
+    return {
+        "format": settings.post_format_command or auto.get("format", ""),
+        "lint_fix": settings.post_lint_fix_command or auto.get("lint_fix", ""),
+        "lint": settings.post_lint_command or auto.get("lint", ""),
+        "test": settings.post_test_command or auto.get("test", ""),
+    }
+
+
 async def _run_post_validation(
     repo_root: str,
     ws: WebSocket,
 ) -> dict:
     """Run deterministic post-execution lint, test, and auto-fix commands.
 
-    Only runs commands that are configured in settings.  Auto-fix commands
-    (format, lint-fix) run first and silently succeed; lint and test commands
-    report pass/fail status via WebSocket.
+    Uses manually configured settings with auto-detected commands as
+    fallback.  Auto-fix commands (format, lint-fix) run first and
+    silently succeed; lint and test commands report pass/fail status
+    via WebSocket.
 
     Returns a dict of results keyed by step name.
     """
     from lean_ai.tools import shell
 
     results: dict[str, dict] = {}
-    any_configured = any([
-        settings.post_format_command,
-        settings.post_lint_fix_command,
-        settings.post_lint_command,
-        settings.post_test_command,
-    ])
+    commands = _effective_post_commands(repo_root)
 
-    if not any_configured:
+    if not any(commands.values()):
         return results
 
     await ws_send(ws, "stage_status", {
@@ -511,8 +530,8 @@ async def _run_post_validation(
 
     # ── Auto-fix passes (silent success, report failure) ──
     for label, command, runner in [
-        ("format", settings.post_format_command, shell.format_code),
-        ("lint_fix", settings.post_lint_fix_command, shell.run_lint),
+        ("format", commands["format"], shell.format_code),
+        ("lint_fix", commands["lint_fix"], shell.run_lint),
     ]:
         if not command:
             continue
@@ -533,8 +552,8 @@ async def _run_post_validation(
 
     # ── Reporting passes (always report status) ──
     for label, command, runner in [
-        ("lint", settings.post_lint_command, shell.run_lint),
-        ("test", settings.post_test_command, shell.run_tests),
+        ("lint", commands["lint"], shell.run_lint),
+        ("test", commands["test"], shell.run_tests),
     ]:
         if not command:
             continue
@@ -760,7 +779,10 @@ async def _run_fix(
     await ws_send(ws, "stage_change", {"stage": "implementing"})
 
     tool_executor = make_tool_executor(repo_root, ws, session_id)
-    system_prompt = build_fix_system_prompt(context)
+    commands = _effective_post_commands(repo_root)
+    system_prompt = build_fix_system_prompt(
+        context, test_command=commands.get("test", ""),
+    )
 
     # Callbacks — fire-and-forget (same rationale as plan mode callbacks)
     async def on_tool_call(name: str, args: dict) -> None:
@@ -833,7 +855,9 @@ async def _run_fix(
     def _build_context_refresh(current_messages: list[dict]) -> list[dict]:
         """Rebuild message list from fresh disk state."""
         fresh_context = load_full_context(repo_root)
-        fresh_system_prompt = build_fix_system_prompt(fresh_context)
+        fresh_system_prompt = build_fix_system_prompt(
+            fresh_context, test_command=commands.get("test", ""),
+        )
         pad = scratchpad.read_scratchpad(repo_root, session_id)
 
         new_messages: list[dict] = [
