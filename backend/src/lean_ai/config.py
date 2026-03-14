@@ -129,6 +129,7 @@ class Settings(BaseSettings):
     post_lint_fix_command: str = ""   # e.g. "ruff check --fix src/"
     post_lint_command: str = ""       # e.g. "ruff check src/"
     post_test_command: str = ""       # e.g. "pytest tests/ -x -q"
+    post_validation_max_retries: int = 2  # Max LLM fix attempts (0 = no retries)
 
     # ── Tool execution ──
     tool_timeout_seconds: int = 60

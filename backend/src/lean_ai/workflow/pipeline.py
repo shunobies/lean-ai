@@ -377,6 +377,18 @@ async def _execute_plan(
     if files_modified and settings.enable_post_validation:
         validation_results = await _run_post_validation(repo_root, ws)
 
+        # Attempt to fix validation failures via LLM
+        if (
+            validation_results
+            and any(not r["success"] for r in validation_results.values())
+            and settings.post_validation_max_retries > 0
+        ):
+            validation_results = await _run_validation_fix_loop(
+                repo_root, ws, llm_client, context,
+                validation_results, session_id,
+                conversation_logger=conversation_logger,
+            )
+
     # Check for incomplete.md
     incomplete_path = os.path.join(repo_root, ".lean_ai", "incomplete.md")
     incomplete_content = ""
@@ -564,6 +576,170 @@ async def _run_post_validation(
     return results
 
 
+# ── Validation-Resubmission Loop ──────────────────────────────────
+
+
+async def _run_validation_fix_loop(
+    repo_root: str,
+    ws: WebSocket,
+    llm_client: "LLMClient",
+    context: str,
+    validation_results: dict,
+    session_id: str = "",
+    conversation_logger: Callable | None = None,
+) -> dict:
+    """Attempt to fix post-validation failures by resubmitting to the LLM.
+
+    Runs up to ``post_validation_max_retries`` fix attempts.  Each attempt:
+
+    1. Builds a focused fix prompt from failure output
+    2. Runs ``chat_with_tools`` with a tight 15-turn budget
+    3. Re-runs ``_run_post_validation`` (including auto-fix passes)
+
+    Returns the final validation results dict.
+    """
+    max_retries = settings.post_validation_max_retries
+    if max_retries <= 0:
+        return validation_results
+
+    system_prompt = build_fix_system_prompt(context)
+
+    # Callbacks — same WebSocket progress reporting used by the main loop
+    async def on_tool_call(name: str, args: dict) -> None:
+        ws_send_nowait(ws, "tool_progress", {
+            "tool": name,
+            "status": "running",
+            "description": f"{name} {args.get('path', args.get('command', ''))}",
+        })
+        if conversation_logger:
+            asyncio.create_task(conversation_logger(
+                "tool_call",
+                f"{name} {args.get('path', args.get('command', ''))}",
+                tool_name=name, tool_args=json.dumps(args),
+            ))
+
+    async def on_tool_result(name: str, result: str) -> None:
+        is_error = result.startswith("ERROR:")
+        ws_send_nowait(ws, "tool_progress", {
+            "tool": name,
+            "status": "error" if is_error else "complete",
+            "output": result[:500],
+        })
+        if conversation_logger:
+            asyncio.create_task(conversation_logger(
+                "tool_result", result[:2000],
+                tool_name=name,
+            ))
+
+    async def on_content(text: str) -> None:
+        ws_send_nowait(ws, "assistant_content", {"content": text})
+        if conversation_logger:
+            asyncio.create_task(conversation_logger("assistant", text))
+
+    async def on_metrics(prompt_tokens: int, context_window: int) -> None:
+        context_pct = (
+            round((prompt_tokens / context_window) * 100) if context_window else 0
+        )
+        ws_send_nowait(ws, "metrics_update", {
+            "context_percent": context_pct,
+            "prompt_tokens": prompt_tokens,
+            "context_window": context_window,
+        })
+
+    attempts_used = 0
+    for attempt in range(max_retries):
+        # Check which validations failed
+        failures = {k: v for k, v in validation_results.items() if not v["success"]}
+        if not failures:
+            break  # All fixed
+
+        attempts_used = attempt + 1
+        logger.info(
+            "Validation fix attempt %d/%d: %d failure(s) — %s",
+            attempts_used, max_retries, len(failures),
+            ", ".join(failures.keys()),
+        )
+
+        await ws_send(ws, "stage_status", {
+            "stage": "validation_fix",
+            "status": "running",
+            "summary": (
+                f"Fix attempt {attempts_used}/{max_retries}: "
+                f"fixing {len(failures)} failure(s)..."
+            ),
+        })
+
+        # Build focused fix prompt with failure output
+        failure_parts: list[str] = []
+        for name, result in failures.items():
+            failure_parts.append(
+                f"### {name}\n```\n{result['output'][:1500]}\n```"
+            )
+        failure_text = "\n\n".join(failure_parts)
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": (
+                    "Post-execution validation detected the following failures. "
+                    "Read the relevant files, understand the errors, and fix them. "
+                    "Focus ONLY on fixing these specific issues — do not make "
+                    "unrelated changes.\n\n"
+                    + failure_text
+                ),
+            },
+        ]
+
+        # Run LLM with a tight turn budget
+        tool_executor = make_tool_executor(repo_root, ws, session_id)
+        executed, explanation = await llm_client.chat_with_tools(
+            messages=messages,
+            tools=IMPLEMENTATION_TOOLS,
+            tool_executor_fn=tool_executor,
+            max_turns=15,
+            max_tokens=settings.implementation_max_tokens,
+            on_tool_call=on_tool_call,
+            on_tool_result=on_tool_result,
+            on_content=on_content,
+            on_metrics=on_metrics,
+        )
+
+        logger.info(
+            "Validation fix attempt %d: %d tool calls, re-validating...",
+            attempts_used, len(executed),
+        )
+
+        # Re-run full validation (including auto-fix passes)
+        validation_results = await _run_post_validation(repo_root, ws)
+
+    # Report final status
+    final_failures = {
+        k: v for k, v in validation_results.items() if not v["success"]
+    }
+    if attempts_used > 0:
+        if final_failures:
+            fix_summary = (
+                f"Validation fix: {attempts_used} attempt(s), "
+                f"{len(final_failures)} failure(s) remain: "
+                f"{', '.join(final_failures.keys())}."
+            )
+        else:
+            fix_summary = (
+                f"Validation fix: all issues resolved after "
+                f"{attempts_used} attempt(s)."
+            )
+
+        await ws_send(ws, "stage_status", {
+            "stage": "validation_fix",
+            "status": "done",
+            "summary": fix_summary,
+        })
+        logger.info("Validation fix loop complete: %s", fix_summary)
+
+    return validation_results
+
+
 # ── Fix Mode (no planning) ─────────────────────────────────────────
 
 
@@ -716,6 +892,18 @@ async def _run_fix(
     validation_results: dict = {}
     if files_modified and settings.enable_post_validation:
         validation_results = await _run_post_validation(repo_root, ws)
+
+        # Attempt to fix validation failures via LLM
+        if (
+            validation_results
+            and any(not r["success"] for r in validation_results.values())
+            and settings.post_validation_max_retries > 0
+        ):
+            validation_results = await _run_validation_fix_loop(
+                repo_root, ws, llm_client, context,
+                validation_results, session_id,
+                conversation_logger=conversation_logger,
+            )
 
     summary = (
         f"Fix complete: {len(executed)} tool calls. "
