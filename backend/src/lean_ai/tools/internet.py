@@ -154,15 +154,23 @@ _last_search_time: float = 0.0
 async def _enforce_search_delay() -> None:
     """Wait if needed to respect the configured delay between searches.
 
-    Uses ``settings.search_delay`` with random jitter (0–100 % of base delay)
-    to avoid bursty request patterns.  Applied universally across all
-    search providers.
-    """
-    global _last_search_time
+    Measures time since the last search *completed* (not started) to
+    ensure a real gap between requests.  Uses ``settings.search_delay``
+    with random jitter (0–100 % of base delay).
 
+    Browser-based providers (Google, Bing) automatically use a 4×
+    multiplier (floor 8 s) because headless Chrome triggers anti-bot
+    detection much faster than API-based providers.
+    """
     base_delay = settings.search_delay
     if base_delay <= 0:
         return
+
+    # Browser-based providers (headless Chrome) trigger anti-bot
+    # detection much faster than API calls.  Apply a 4× multiplier
+    # with a floor of 8 s so Google/Bing get real breathing room.
+    if settings.search_provider in ("google", "bing"):
+        base_delay = max(base_delay * 4, 8.0)
 
     elapsed = time.monotonic() - _last_search_time
     target_delay = base_delay + random.uniform(0, base_delay)
@@ -170,8 +178,6 @@ async def _enforce_search_delay() -> None:
         wait = target_delay - elapsed
         logger.debug("Search rate-limit: sleeping %.1fs", wait)
         await asyncio.sleep(wait)
-
-    _last_search_time = time.monotonic()
 
 
 # ── Public API ──
@@ -181,6 +187,8 @@ async def search_internet(
     query: str, llm_client: LLMClient | None = None,
 ) -> ToolResult:
     """Search the web and return sanitized results."""
+    global _last_search_time
+
     provider_fn = _SEARCH_PROVIDERS.get(settings.search_provider)
     if provider_fn is None:
         return ToolResult(
@@ -190,16 +198,24 @@ async def search_internet(
 
     logger.info("Search [%s]: %r", settings.search_provider, query)
 
-    # Universal rate limiting — all providers respect search_delay
+    # Universal rate limiting — all providers respect search_delay.
+    # The delay is measured from when the PREVIOUS search completed,
+    # not when it started — so browser searches that take 10-30 s
+    # don't eat into the delay window.
     await _enforce_search_delay()
 
     try:
         raw_content = await provider_fn(query)
     except Exception as e:
+        _last_search_time = time.monotonic()
         logger.warning(
             "Search [%s]: %r failed: %s", settings.search_provider, query, e,
         )
         return ToolResult(success=False, error=f"Search failed: {e}")
+
+    # Record completion time AFTER the search finishes so the next
+    # delay is measured from end-to-start, not start-to-start.
+    _last_search_time = time.monotonic()
 
     sanitized = _strip_html(raw_content)
 
