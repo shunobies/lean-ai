@@ -45,7 +45,7 @@ cd extension && npm install && npm run build
 
 1. **LLM Client** (`llm/`) — Multi-provider LLM abstraction. `LLMProvider` ABC (`base.py`) with implementations for Ollama (`client.py`), OpenAI (`provider_openai.py`), and Anthropic (`provider_anthropic.py`). `LLMClient` facade (`facade.py`) handles the multi-turn `chat_with_tools()` orchestration loop, delegates single-turn calls to the active provider. Inline predictions (FIM) and embeddings always use Ollama. Context refresh at 70% threshold — drops old messages, re-reads context files from disk, injects scratchpad for continuity (no LLM summarization call).
 
-2. **Planning** (`llm/planner.py`) — 5-phase decomposed planning: scope -> file identification -> change design (with naming convention extraction) -> risk check -> plan assembly. Structured JSON output from Ollama. Plan template with worked examples (`llm/plan_template.md`).
+2. **Planning** (`llm/planner.py`) — 6-phase decomposed planning: scope → file identification (with tool-assisted codebase exploration) → change design (with naming convention extraction) → risk check → plan assembly → verification step generation. Phase 2 uses read-only tools (`read_file`, `grep_files`, `list_directory`, `directory_tree`) to trace all downstream consumers of modified entities and detect missing infrastructure. Phase 6 reviews the complete implementation plan and appends test file creation steps + a final `run_tests` step (only runs when a test command is available). Structured JSON output from Ollama. Plan template with worked examples (`llm/plan_template.md`).
 
 3. **Tools** (`tools/`) — `create_file`, `edit_file`, `read_file`, `run_tests`, `run_lint`, `format_code`, `list_directory`, `directory_tree`, `grep_files`, `update_scratchpad`. File ops produce diffs. Shell commands pass through a safety gate (`command_safety.py`). Internet search + URL fetching with HTML strip + LLM summary sanitization.
 
@@ -136,7 +136,7 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_DEBUG_PLANNING` | `false` | Save all planning phase outputs to `.lean_ai/plan_debug/{session_id}/` |
 | `LEAN_AI_PORT` | `8422` | Server port |
 
-**Post-validation auto-detection:** When `LEAN_AI_POST_*_COMMAND` variables are empty, the system falls back to commands auto-detected during `/init-workspace` (stored in `.lean_ai/commands.json`). Manual env vars always take priority. When a test command is available (manual or auto-detected), the LLM is instructed to write tests alongside code changes in both fix mode and plan mode.
+**Post-validation auto-detection:** When `LEAN_AI_POST_*_COMMAND` variables are empty, the system falls back to commands auto-detected during `/init-workspace` (stored in `.lean_ai/commands.json`). Manual env vars always take priority. In fix mode, the LLM is instructed to write tests alongside code changes when a test command is available. In plan mode, test creation is handled by Phase 6 (verification step generation) which appends test file steps and a final `run_tests` step after all implementation steps.
 
 ## WebSocket Protocol
 
@@ -154,7 +154,7 @@ All under `/api` prefix:
 - `POST /generate-project-context` — regenerate context
 - `POST /generate-framework-guide` — regenerate framework guide
 - `POST /index-knowledge` — index knowledge docs
-- `POST /chat` — lightweight conversational endpoint (no tools, read-only)
+- `POST /chat` — expert chat endpoint (prompt building mode: multi-turn conversation that gathers requirements, handles non-technical users by filling gaps with best practices, and produces a refined "Suggested Agent Prompt" for the planning pipeline)
 - `POST /predict` — inline predictions
 - `POST /scaffold/list` — list scaffold recipes
 - `POST /scaffold` — create project from scaffold
