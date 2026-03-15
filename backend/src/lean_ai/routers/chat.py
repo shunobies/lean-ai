@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import re
 import shutil
 
 from fastapi import APIRouter, HTTPException
@@ -36,6 +37,51 @@ from lean_ai.tools import internet
 logger = logging.getLogger(__name__)
 
 chat_router = APIRouter()
+
+# Words that carry no search value — conversational filler + English stop words
+_STOP_WORDS = frozenset(
+    "a about all also am an and any are as at be been being but by can could "
+    "did do does don doing doesn each for from get going got had has have he "
+    "her here him his how i if in into is it its just know let like make me "
+    "mine my no nor not of on or our out really set she should so some stuff "
+    "than that the their them then there these they thing things this those "
+    "to too up us use using very want was we well were what when where which "
+    "who will with would yeah yes you your".split()
+)
+
+# Short conversational replies that never need a web search
+_SKIP_PREFIXES = (
+    "that sounds good", "sounds good", "looks good", "that works",
+    "yes", "no", "ok", "okay", "sure", "thanks", "thank you",
+    "perfect", "great", "go ahead", "proceed", "let's do",
+    "i don't have", "i don't know", "i'm not sure", "whatever",
+)
+
+
+def _extract_search_query(message: str | None) -> str | None:
+    """Extract a search query from a chat message.
+
+    Returns a cleaned keyword string suitable for web search, or ``None``
+    if the message is a conversational follow-up / too short to search.
+    """
+    if not message or len(message) < 15:
+        return None
+
+    lower = message.lower().strip()
+
+    # Skip pure conversational follow-ups
+    if any(lower.startswith(p) for p in _SKIP_PREFIXES):
+        return None
+
+    # Tokenize — keep alphanumeric words 2+ chars, preserving hyphens
+    # inside words (e.g. "vue-router" stays as one token)
+    tokens = re.findall(r"\b[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\b", message)
+    keywords = [t for t in tokens if t.lower() not in _STOP_WORDS and len(t) > 1]
+
+    if len(keywords) < 2:
+        return None
+
+    return " ".join(keywords[:8])
 
 
 def _get_default_model_name() -> str:
@@ -252,11 +298,12 @@ async def chat(request: ChatRequest):
 
     async def _do_web_search():
         nonlocal web_search_text
-        if not request.message or len(request.message) < 10:
+        query = _extract_search_query(request.message)
+        if not query:
             return
         try:
             result = await internet.search_internet(
-                request.message, llm_client=llm_client,
+                query, llm_client=llm_client,
             )
             if result.success and result.output:
                 web_search_text = result.output
