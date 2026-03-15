@@ -3,7 +3,7 @@
 import pytest
 
 from lean_ai.tools.scratchpad import (
-    SCRATCHPAD_MAX_CHARS,
+    _max_scratchpad_chars,
     delete_scratchpad,
     read_scratchpad,
     scratchpad_path,
@@ -36,12 +36,13 @@ async def test_overwrite_replaces_content(tmp_repo):
 
 @pytest.mark.asyncio
 async def test_truncation_at_max_chars(tmp_repo):
-    long_content = "x" * (SCRATCHPAD_MAX_CHARS + 500)
+    max_chars = _max_scratchpad_chars()
+    long_content = "x" * (max_chars + 500)
     await update_scratchpad(long_content, tmp_repo, SESSION_ID)
     stored = read_scratchpad(tmp_repo, SESSION_ID)
     assert "[SCRATCHPAD TRUNCATED" in stored
-    # Original x's should be capped at SCRATCHPAD_MAX_CHARS
-    assert stored.startswith("x" * SCRATCHPAD_MAX_CHARS)
+    # Original x's should be capped at the dynamic max
+    assert stored.startswith("x" * max_chars)
 
 
 def test_read_missing_returns_empty(tmp_repo):

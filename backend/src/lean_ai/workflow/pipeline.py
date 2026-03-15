@@ -99,6 +99,7 @@ async def run_workflow(
         ws=ws,
         refiner=refiner,
         test_command=plan_commands.get("test", ""),
+        session_id=session_id,
     )
 
     # ── Phase 3: Approve ─────────────────────────────────────────
@@ -270,7 +271,10 @@ async def _execute_plan(
     completed_descriptions: list[str] = []
 
     # Build the system prompt once (shared across all steps)
-    system_prompt = build_step_system_prompt(context)
+    system_prompt = build_step_system_prompt(
+        context,
+        naming_conventions=getattr(plan, "naming_conventions", ""),
+    )
 
     # Callbacks for WebSocket progress + conversation logging.
     # Progress messages are fire-and-forget (non-blocking) since they are
@@ -540,6 +544,7 @@ async def _run_post_validation(
             results[label] = {
                 "success": result.success,
                 "output": result.output[:2000] if result.output else "",
+                "full_output": result.output or "",
             }
             if not result.success:
                 logger.warning(
@@ -548,7 +553,9 @@ async def _run_post_validation(
                 )
         except Exception as exc:
             logger.warning("Post-validation %s error: %s", label, exc)
-            results[label] = {"success": False, "output": str(exc)}
+            results[label] = {
+                "success": False, "output": str(exc), "full_output": str(exc),
+            }
 
     # ── Reporting passes (always report status) ──
     for label, command, runner in [
@@ -562,6 +569,7 @@ async def _run_post_validation(
             results[label] = {
                 "success": result.success,
                 "output": result.output[:2000] if result.output else "",
+                "full_output": result.output or "",
             }
             await ws_send(ws, "test_result", {
                 "command": command,
@@ -570,7 +578,9 @@ async def _run_post_validation(
             })
         except Exception as exc:
             logger.warning("Post-validation %s error: %s", label, exc)
-            results[label] = {"success": False, "output": str(exc)}
+            results[label] = {
+                "success": False, "output": str(exc), "full_output": str(exc),
+            }
             await ws_send(ws, "test_result", {
                 "command": command,
                 "passed": False,
@@ -688,11 +698,16 @@ async def _run_validation_fix_loop(
             ),
         })
 
-        # Build focused fix prompt with failure output
+        # Build focused fix prompt with full error output
         failure_parts: list[str] = []
         for name, result in failures.items():
+            raw = result.get("full_output", result["output"])
+            if len(raw) > 8000:
+                # Tail is where errors are — keep last 80 lines
+                lines = raw.splitlines()
+                raw = "\n".join(lines[-80:])
             failure_parts.append(
-                f"### {name}\n```\n{result['output'][:1500]}\n```"
+                f"### {name}\n```\n{raw}\n```"
             )
         failure_text = "\n\n".join(failure_parts)
 

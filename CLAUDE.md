@@ -45,7 +45,7 @@ cd extension && npm install && npm run build
 
 1. **LLM Client** (`llm/`) — Multi-provider LLM abstraction. `LLMProvider` ABC (`base.py`) with implementations for Ollama (`client.py`), OpenAI (`provider_openai.py`), and Anthropic (`provider_anthropic.py`). `LLMClient` facade (`facade.py`) handles the multi-turn `chat_with_tools()` orchestration loop, delegates single-turn calls to the active provider. Inline predictions (FIM) and embeddings always use Ollama. Context refresh at 70% threshold — drops old messages, re-reads context files from disk, injects scratchpad for continuity (no LLM summarization call).
 
-2. **Planning** (`llm/planner.py`) — 6-phase decomposed planning: scope -> file identification -> exploration compression -> change design -> risk check -> plan assembly. Structured JSON output from Ollama. Plan template with worked examples (`llm/plan_template.md`).
+2. **Planning** (`llm/planner.py`) — 5-phase decomposed planning: scope -> file identification -> change design (with naming convention extraction) -> risk check -> plan assembly. Structured JSON output from Ollama. Plan template with worked examples (`llm/plan_template.md`).
 
 3. **Tools** (`tools/`) — `create_file`, `edit_file`, `read_file`, `run_tests`, `run_lint`, `format_code`, `list_directory`, `directory_tree`, `grep_files`, `update_scratchpad`. File ops produce diffs. Shell commands pass through a safety gate (`command_safety.py`). Internet search + URL fetching with HTML strip + LLM summary sanitization.
 
@@ -72,6 +72,7 @@ cd extension && npm install && npm run build
 - **No implementation review loop** — plan -> execute -> done
 - **Tool naming**: `create_file` (not `write_file`) for clearer intent
 - **Structured JSON output** from Ollama replaces regex-based plan/output parsing
+- **Percentage-based token budgets** — internal limits (scratchpad, inline output, etc.) are computed as a percentage of the active context window, not hardcoded. This makes the system adaptive: smaller models get proportionally smaller budgets, larger models get more room. Convention: use `settings._active_context_window` and a named percentage constant (e.g. `SCRATCHPAD_CONTEXT_PERCENT = 0.05`)
 
 ## Technology Stack
 
@@ -132,6 +133,7 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_POST_LINT_COMMAND` | *(empty)* | Lint check (e.g. `ruff check src/`) |
 | `LEAN_AI_POST_TEST_COMMAND` | *(empty)* | Test check (e.g. `pytest tests/ -x -q`) |
 | `LEAN_AI_POST_VALIDATION_MAX_RETRIES` | `2` | Max LLM fix attempts for validation failures (`0` = no retries) |
+| `LEAN_AI_DEBUG_PLANNING` | `false` | Save all planning phase outputs to `.lean_ai/plan_debug/{session_id}/` |
 | `LEAN_AI_PORT` | `8422` | Server port |
 
 **Post-validation auto-detection:** When `LEAN_AI_POST_*_COMMAND` variables are empty, the system falls back to commands auto-detected during `/init-workspace` (stored in `.lean_ai/commands.json`). Manual env vars always take priority. When a test command is available (manual or auto-detected), the LLM is instructed to write tests alongside code changes in both fix mode and plan mode.

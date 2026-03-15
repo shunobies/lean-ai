@@ -8,11 +8,18 @@ Survives crashes and power outages for session recovery.
 import logging
 from pathlib import Path
 
+from lean_ai.config import settings
 from lean_ai.tools.executor import ToolResult
 
 logger = logging.getLogger(__name__)
 
-SCRATCHPAD_MAX_CHARS = 2000
+SCRATCHPAD_CONTEXT_PERCENT = 0.05  # 5% of context window
+
+
+def _max_scratchpad_chars() -> int:
+    """Scratchpad budget: 5% of context window, converted to chars."""
+    ctx = settings._active_context_window
+    return int(ctx * SCRATCHPAD_CONTEXT_PERCENT * 3.5)  # tokens -> chars approx
 
 
 def scratchpad_path(repo_root: str, session_id: str) -> Path:
@@ -30,20 +37,21 @@ async def update_scratchpad(content: str, repo_root: str, session_id: str) -> To
       ## Files Modified
       ## Next Step
 
-    Capped at SCRATCHPAD_MAX_CHARS to avoid bloating context.
+    Capped at 5% of context window (in chars) to avoid bloating context.
     """
-    if len(content) > SCRATCHPAD_MAX_CHARS:
-        content = content[:SCRATCHPAD_MAX_CHARS]
-        content += "\n\n[SCRATCHPAD TRUNCATED at 2000 chars — keep entries concise]"
+    max_chars = _max_scratchpad_chars()
+    if len(content) > max_chars:
+        content = content[:max_chars]
+        content += f"\n\n[SCRATCHPAD TRUNCATED at {max_chars} chars — keep entries concise]"
 
     path = scratchpad_path(repo_root, session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 
-    logger.info("Scratchpad updated (%d chars) at %s", len(content), path)
+    logger.info("Scratchpad updated (%d chars, limit %d) at %s", len(content), max_chars, path)
     return ToolResult(
         success=True,
-        output=f"Scratchpad updated ({len(content)} chars).",
+        output=f"Scratchpad updated ({len(content)} chars, limit {max_chars}).",
     )
 
 

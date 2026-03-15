@@ -35,21 +35,28 @@ def build_fix_system_prompt(
     return f"{base}\n## Project Context\n\n{ctx}"
 
 
-def build_step_system_prompt(context: str) -> str:
+def build_step_system_prompt(
+    context: str,
+    naming_conventions: str = "",
+) -> str:
     """Build the system prompt for per-step execution."""
-    if not context:
-        return STEP_EXECUTION_SYSTEM_PROMPT
+    prompt = STEP_EXECUTION_SYSTEM_PROMPT
 
-    # Include condensed project context so the executor knows patterns
-    max_context = 3000
-    ctx = context[:max_context]
-    if len(context) > max_context:
-        ctx += "\n... (condensed)"
+    if context:
+        # Include condensed project context so the executor knows patterns
+        max_context = 3000
+        ctx = context[:max_context]
+        if len(context) > max_context:
+            ctx += "\n... (condensed)"
+        prompt += f"\n## Project Context\n\n{ctx}"
 
-    return (
-        f"{STEP_EXECUTION_SYSTEM_PROMPT}\n"
-        f"## Project Context\n\n{ctx}"
-    )
+    if naming_conventions:
+        prompt += (
+            f"\n\n## Naming Conventions\n\n{naming_conventions}\n"
+            "All new code MUST follow these conventions."
+        )
+
+    return prompt
 
 
 def build_step_user_message(

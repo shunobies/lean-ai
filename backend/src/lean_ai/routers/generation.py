@@ -47,6 +47,20 @@ async def init_workspace(request: InitWorkspaceRequest):
     added = ensure_gitignore_entries(request.repo_root, _gitignore_entries)
     if added:
         logger.info("Added %d entries to .gitignore: %s", len(added), added)
+        # Commit immediately so branch switches don't lose .gitignore
+        from lean_ai.tools.git_ops import git_commit, git_is_repo
+        if await git_is_repo(request.repo_root):
+            commit_result = await git_commit(
+                message="chore: add lean-ai entries to .gitignore",
+                files=[".gitignore"],
+                repo_root=request.repo_root,
+            )
+            if commit_result.success:
+                logger.info("Committed .gitignore changes")
+            else:
+                logger.warning(
+                    "Failed to commit .gitignore: %s", commit_result.error,
+                )
 
     # Clean up stale tool output from previous sessions
     from lean_ai.workflow.tool_executor import cleanup_all_tool_output

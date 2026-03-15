@@ -131,6 +131,9 @@ class Settings(BaseSettings):
     post_test_command: str = ""       # e.g. "pytest tests/ -x -q"
     post_validation_max_retries: int = 2  # Max LLM fix attempts (0 = no retries)
 
+    # ── Debug / Testing ──
+    debug_planning: bool = False  # Save all planning phase outputs to disk
+
     # ── Tool execution ──
     tool_timeout_seconds: int = 60
 

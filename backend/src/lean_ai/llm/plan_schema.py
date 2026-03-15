@@ -56,6 +56,11 @@ class ExecutionPlan(BaseModel):
     scope: str
     """Brief summary of what the plan accomplishes and what is out of scope."""
 
+    naming_conventions: str = ""
+    """Naming conventions observed in existing code: variable casing,
+    function/method naming, class naming, file naming patterns,
+    import styles.  Extracted from files read during exploration."""
+
     steps: list[PlanStep]
     """Ordered list of steps to execute.  Each step is one tool call."""
 
@@ -71,6 +76,9 @@ def plan_to_markdown(plan: ExecutionPlan) -> str:
     parts: list[str] = []
 
     parts.append(f"## Scope\n\n{plan.scope}\n")
+
+    if plan.naming_conventions:
+        parts.append(f"## Naming Conventions\n\n{plan.naming_conventions}\n")
 
     parts.append("## Steps\n")
     for step in plan.steps:
