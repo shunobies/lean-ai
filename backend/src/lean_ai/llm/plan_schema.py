@@ -50,6 +50,12 @@ class PlanStep(BaseModel):
     """
 
 
+class VerificationPlan(BaseModel):
+    """Verification steps to append after implementation."""
+
+    steps: list[PlanStep]
+
+
 class ExecutionPlan(BaseModel):
     """Complete structured plan for task execution."""
 

@@ -1,14 +1,16 @@
-"""5-phase decomposed planning pipeline with structured output.
+"""6-phase decomposed planning pipeline with structured output.
 
 Phase 1: Scope analysis
 Phase 2: File identification + content reading (with codebase exploration via tools)
 Phase 3: Change design (specific changes per file, using exploration results)
 Phase 4: Risk assessment
 Phase 5: Structured plan assembly (produces ExecutionPlan via chat_structured)
+Phase 6: Verification step generation (test file creation + test execution)
 
 Each phase is a focused LLM call. The planner uses read-only tools
 (read_file, list_directory, directory_tree, grep_files) during Phase 2
 to explore the codebase and read every file it plans to modify.
+Phase 6 only runs when a test command is available.
 """
 
 import json
@@ -20,7 +22,11 @@ from typing import TYPE_CHECKING
 from fastapi import WebSocket
 
 from lean_ai.config import settings
-from lean_ai.llm.plan_schema import ExecutionPlan, PlanStep
+from lean_ai.llm.plan_schema import (
+    ExecutionPlan,
+    VerificationPlan,
+    plan_to_markdown,
+)
 from lean_ai.llm.prompts import CLARIFICATION_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT
 from lean_ai.llm.tool_definitions import PLANNING_TOOLS
 
@@ -546,13 +552,6 @@ async def create_plan(
                     "- If the task requires infrastructure that was identified as "
                     "missing during exploration (auth scaffolding, base templates, "
                     "etc.), those setup steps come FIRST in the plan"
-                    + (
-                        "\n- For each new module or significant change, "
-                        "include a create_file or edit_file step for a "
-                        "corresponding test file following the project's "
-                        "existing test patterns"
-                        if test_command else ""
-                    )
                 ),
             },
         ],
@@ -562,38 +561,17 @@ async def create_plan(
 
     phase_timings["phase_5_plan_assembly"] = time.monotonic() - t0
 
-    # Post-processing: strip any run_tests/run_lint steps the LLM
-    # included mid-plan and append verification at the end.
-    # In plan mode, tests should only run after all files are created
-    # because intermediate steps would fail on incomplete implementations.
+    # Safety: strip any run_tests/run_lint steps the LLM snuck into Phase 5
     verification_tools = {"run_tests", "run_lint", "format_code"}
     impl_steps = [s for s in plan.steps if s.tool not in verification_tools]
     stripped_count = len(plan.steps) - len(impl_steps)
     if stripped_count:
         logger.info("Stripped %d mid-plan verification steps", stripped_count)
+        for i, step in enumerate(impl_steps, 1):
+            step.step_number = i
+        plan.steps = impl_steps
 
-    # Re-number implementation steps
-    for i, step in enumerate(impl_steps, 1):
-        step.step_number = i
-
-    # Append verification steps at the end
-    next_num = len(impl_steps) + 1
-    if test_command:
-        impl_steps.append(PlanStep(
-            step_number=next_num,
-            tool="run_tests",
-            file_path="",
-            instruction=test_command,
-            context="",
-        ))
-        next_num += 1
-
-    plan.steps = impl_steps
-
-    phase_timings["total"] = time.monotonic() - plan_start
-
-    # Save Phase 5 outputs and meta.json
-    from lean_ai.llm.plan_schema import plan_to_markdown
+    # Save Phase 5 outputs
     _save_debug_phase(
         repo_root, session_id, "phase_5_plan",
         plan.model_dump_json(indent=2), phase_timings["phase_5_plan_assembly"],
@@ -602,6 +580,75 @@ async def create_plan(
         repo_root, session_id, "phase_5_plan_markdown",
         plan_to_markdown(plan), phase_timings["phase_5_plan_assembly"],
     )
+
+    # Phase 6: Verification (only when test_command is available)
+    # Reviews the complete implementation plan and appends test file
+    # creation + test execution steps at the end.  Tests should only
+    # run after all implementation files are created — running them
+    # mid-plan on an incomplete codebase would cause premature failures.
+    if test_command:
+        await _send_stage(ws, "Phase 6: Adding verification steps...")
+        logger.info("Planning Phase 6: Verification step generation")
+        t0 = time.monotonic()
+
+        impl_plan_md = plan_to_markdown(plan)
+        next_step = len(plan.steps) + 1
+
+        verification = await llm_client.chat_structured(
+            messages=[
+                {"role": "system", "content": PLAN_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": (
+                        f"TASK: {task}\n\n"
+                        f"IMPLEMENTATION PLAN:\n{impl_plan_md}\n\n"
+                        f"TEST COMMAND: {test_command}\n\n"
+                        f"FILE SUMMARY (existing test patterns):\n"
+                        f"{file_summary}\n\n"
+                        "Review the implementation plan above and produce "
+                        "ONLY the verification steps that should run AFTER "
+                        "all implementation is complete.\n\n"
+                        "RULES:\n"
+                        "- For each new module or significant feature, "
+                        "include a 'create_file' step for a test file "
+                        "following the project's existing test patterns\n"
+                        "- Include test file instruction with: what to "
+                        "import, what to test, assertion patterns from "
+                        "existing tests\n"
+                        "- End with a single 'run_tests' step using the "
+                        f"test command: {test_command}\n"
+                        f"- Start step numbering at {next_step}\n"
+                        "- Follow the naming conventions from the plan\n"
+                        "- Only create tests for NEW functionality — do "
+                        "not duplicate existing test coverage"
+                    ),
+                },
+            ],
+            schema=VerificationPlan,
+            max_tokens=settings.ollama_max_tokens,
+        )
+
+        # Append verification steps, re-number for safety
+        for i, step in enumerate(verification.steps, next_step):
+            step.step_number = i
+        plan.steps.extend(verification.steps)
+
+        # Update affected_files with any new test files
+        existing = set(plan.affected_files)
+        for step in verification.steps:
+            if step.file_path and step.file_path not in existing:
+                plan.affected_files.append(step.file_path)
+
+        phase_timings["phase_6_verification"] = time.monotonic() - t0
+        _save_debug_phase(
+            repo_root, session_id, "phase_6_verification",
+            verification.model_dump_json(indent=2),
+            phase_timings["phase_6_verification"],
+        )
+
+    phase_timings["total"] = time.monotonic() - plan_start
+
+    # Save meta.json
     if settings.debug_planning and session_id:
         meta = {
             "session_id": session_id,
