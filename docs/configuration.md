@@ -60,13 +60,27 @@ Switch providers at any time by changing this value and restarting the server (o
 
 Ollama is always required, even when using cloud providers — it handles inline predictions, embeddings, and the [local refiner](knowledge-base.md#local-refiner).
 
-## Expert Model (Ollama only)
+## Expert Model
 
-An optional second Ollama model for reasoning-heavy tasks. When configured, the expert model handles planning phases 3–6 (change design, risk assessment, plan assembly, verification) and the final validation fix retry. Phases 1–2 and all implementation turns always use the primary model.
+An optional second model for reasoning-heavy tasks. When configured, the expert model handles planning phases 3–6 (change design, risk assessment, plan assembly, verification) and the final validation fix retry. Phases 1–2 and all implementation turns always use the primary model.
+
+The expert model can be a different provider from the primary — for example, run a fast local Ollama model for exploration and implementation, then hand off to Claude or ChatGPT for planning and complex fixes.
+
+### Provider Selection
 
 | Variable | Default | Description |
 |---|---|---|
-| `LEAN_AI_OLLAMA_MODEL_EXPERT` | *(empty — disabled)* | Expert model name (e.g. `qwen3-coder:80b`) |
+| `LEAN_AI_EXPERT_LLM_PROVIDER` | *(empty)* | Provider for expert model: `ollama`, `openai`, or `anthropic`. Empty = auto-detect (Ollama expert when `OLLAMA_MODEL_EXPERT` is set and primary provider is Ollama) |
+| `LEAN_AI_OPENAI_EXPERT_MODEL` | *(falls back to OPENAI_MODEL)* | OpenAI model for expert phases (e.g. `gpt-4o`) |
+| `LEAN_AI_ANTHROPIC_EXPERT_MODEL` | *(falls back to ANTHROPIC_MODEL)* | Anthropic model for expert phases (e.g. `claude-opus-4-6`) |
+
+When using OpenAI or Anthropic as the expert provider, the existing API key, temperature, context window, and max tokens settings for that provider are used. The relevant API key must be set even if the primary provider is Ollama.
+
+### Ollama Expert Model
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEAN_AI_OLLAMA_MODEL_EXPERT` | *(empty — disabled)* | Ollama expert model name (e.g. `qwen3-coder:80b`) |
 | `LEAN_AI_OLLAMA_EXPERT_TEMPERATURE` | *(falls back to OLLAMA_TEMPERATURE)* | Expert model temperature |
 | `LEAN_AI_OLLAMA_EXPERT_TOP_P` | *(falls back to OLLAMA_TOP_P)* | Expert model top-p |
 | `LEAN_AI_OLLAMA_EXPERT_TOP_K` | *(falls back to OLLAMA_TOP_K)* | Expert model top-k |
@@ -74,7 +88,7 @@ An optional second Ollama model for reasoning-heavy tasks. When configured, the 
 | `LEAN_AI_OLLAMA_EXPERT_CONTEXT_WINDOW` | *(falls back to OLLAMA_CONTEXT_WINDOW)* | Expert model context window — [shorthand](#context-window-shorthand) accepted |
 | `LEAN_AI_OLLAMA_EXPERT_MAX_TOKENS` | *(derived: 25% of expert context window)* | Expert model max output tokens |
 
-Leave `LEAN_AI_OLLAMA_MODEL_EXPERT` empty to use the primary model for everything. The expert model only applies to the Ollama provider — OpenAI and Anthropic providers use their configured model for all phases.
+Leave all expert settings empty to use the primary model for everything.
 
 ## OpenAI
 

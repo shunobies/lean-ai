@@ -85,6 +85,15 @@ class Settings(BaseSettings):
     anthropic_context_window: int = 200000  # Accepts shorthand: 200 = 204800
     anthropic_max_tokens: int | None = None  # Derived: 25% of context window
 
+    # ── Expert model — provider selection ──
+    expert_llm_provider: str = ""  # "openai", "anthropic", "ollama", or "" (auto-detect from OLLAMA_MODEL_EXPERT)
+
+    # ── OpenAI — expert model ──
+    openai_expert_model: str = ""  # Model to use when expert_llm_provider=openai (falls back to openai_model)
+
+    # ── Anthropic — expert model ──
+    anthropic_expert_model: str = ""  # Model to use when expert_llm_provider=anthropic (falls back to anthropic_model)
+
     # ── Ollama — inline prediction model (always Ollama) ──
     inline_model: str = ""
     inline_max_tokens: int = 256

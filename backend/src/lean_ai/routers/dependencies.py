@@ -104,9 +104,51 @@ if (
         logger.warning("Could not create refiner — Ollama may be unavailable")
         refiner = None
 
-# Expert model client — active only when expert model is configured AND provider is Ollama
+# Expert model client — provider determined by LEAN_AI_EXPERT_LLM_PROVIDER
 expert_llm_client: LLMClient | None = None
-if settings.llm_provider.lower() == "ollama" and settings.ollama_model_expert:
+_expert_p = (settings.expert_llm_provider or "").lower()
+
+# Empty = backwards-compat: Ollama expert only when primary provider is also Ollama
+if not _expert_p:
+    if settings.llm_provider.lower() == "ollama" and settings.ollama_model_expert:
+        _expert_p = "ollama"
+
+if _expert_p == "openai":
+    _expert_model = settings.openai_expert_model or settings.openai_model
+    if _expert_model and settings.openai_api_key:
+        try:
+            from lean_ai.llm.provider_openai import OpenAIProvider as _OpenAIProvider
+            _expert_provider = _OpenAIProvider(
+                api_key=settings.openai_api_key,
+                model=_expert_model,
+                base_url=settings.openai_base_url or None,
+                temperature=settings.openai_temperature,
+                context_window=settings.openai_context_window,
+                max_tokens=settings.openai_max_tokens,
+            )
+            expert_llm_client = LLMClient(provider=_expert_provider)
+            logger.info("Expert model enabled (OpenAI): %s", _expert_model)
+        except Exception:
+            logger.warning("Could not create expert LLM client (OpenAI)")
+
+elif _expert_p == "anthropic":
+    _expert_model = settings.anthropic_expert_model or settings.anthropic_model
+    if _expert_model and settings.anthropic_api_key:
+        try:
+            from lean_ai.llm.provider_anthropic import AnthropicProvider as _AnthropicProvider
+            _expert_provider = _AnthropicProvider(
+                api_key=settings.anthropic_api_key,
+                model=_expert_model,
+                temperature=settings.anthropic_temperature,
+                context_window=settings.anthropic_context_window,
+                max_tokens=settings.anthropic_max_tokens,
+            )
+            expert_llm_client = LLMClient(provider=_expert_provider)
+            logger.info("Expert model enabled (Anthropic): %s", _expert_model)
+        except Exception:
+            logger.warning("Could not create expert LLM client (Anthropic)")
+
+elif _expert_p == "ollama" and settings.ollama_model_expert:
     try:
         _expert_provider = OllamaProvider(
             ollama_url=settings.ollama_url,
@@ -120,7 +162,7 @@ if settings.llm_provider.lower() == "ollama" and settings.ollama_model_expert:
         )
         expert_llm_client = LLMClient(provider=_expert_provider)
         logger.info(
-            "Expert model enabled: %s (ctx=%s, max_tokens=%s)",
+            "Expert model enabled (Ollama): %s (ctx=%s, max_tokens=%s)",
             settings.ollama_model_expert,
             settings.ollama_expert_context_window or settings.ollama_context_window,
             settings.ollama_expert_max_tokens,
