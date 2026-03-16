@@ -632,7 +632,7 @@ async def _run_validation_fix_loop(
     Runs up to ``post_validation_max_retries`` fix attempts.  Each attempt:
 
     1. Builds a focused fix prompt from failure output
-    2. Runs ``chat_with_tools`` with a tight 15-turn budget
+    2. Runs ``chat_with_tools`` with a 30-turn budget
     3. Re-runs ``_run_post_validation`` (including auto-fix passes)
 
     Returns the final validation results dict.
@@ -758,7 +758,7 @@ async def _run_validation_fix_loop(
             messages=messages,
             tools=IMPLEMENTATION_TOOLS,
             tool_executor_fn=tool_executor,
-            max_turns=15,
+            max_turns=30,
             max_tokens=settings.implementation_max_tokens,
             on_tool_call=on_tool_call,
             on_tool_result=on_tool_result,
