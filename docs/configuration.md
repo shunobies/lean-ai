@@ -90,6 +90,23 @@ When using OpenAI or Anthropic as the expert provider, the existing API key, tem
 
 Leave all expert settings empty to use the primary model for everything.
 
+### Example: local primary + cloud expert
+
+This is the recommended setup for saving cloud tokens while still getting strong reasoning for planning:
+
+```env
+# Primary: fast local model handles all exploration and implementation
+LEAN_AI_LLM_PROVIDER=ollama
+LEAN_AI_OLLAMA_MODEL=qwen3-coder:30b
+
+# Expert: Claude for planning phases 3-6 and final validation fix retry
+LEAN_AI_EXPERT_LLM_PROVIDER=anthropic
+LEAN_AI_ANTHROPIC_API_KEY=sk-ant-...
+LEAN_AI_ANTHROPIC_EXPERT_MODEL=claude-opus-4-6
+```
+
+With this configuration, cloud API calls only happen during planning (change design, risk assessment, plan assembly, verification steps) and on the final retry of any validation fix loop. All codebase exploration, code execution, and routine tool calls use the local model.
+
 ## OpenAI
 
 | Variable | Default | Description |

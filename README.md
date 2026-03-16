@@ -12,6 +12,7 @@ Run it fully local with [Ollama](https://ollama.com), or connect to OpenAI and A
 
 - **Plan first, then execute** — a 6-phase planning pipeline reads your codebase, traces data flow across files, and produces a structured plan before touching any code. You approve (or revise) before anything changes.
 - **Multi-provider flexibility** — Ollama for free local inference, OpenAI for GPT-4o, Anthropic for Claude. Switch from the dropdown without restarting. Use cheap local models for small fixes, cloud models for hard problems.
+- **Dual-model pipeline** — run a fast local model for codebase exploration and code execution, then automatically hand off to a cloud model (Claude, GPT-4o) for reasoning-heavy planning phases and complex fix attempts. Save cloud tokens for the decisions that matter.
 - **Local Refiner** — when using cloud providers, a local Ollama model pre-processes your prompts: enriches them with private knowledge base context, strips sensitive data, and structures vague requests into detailed specs. Your proprietary docs never leave your machine. [Learn more](docs/knowledge-base.md)
 - **Zero prompt engineering** — chat mode helps you refine ideas into detailed tasks. Project context and framework guides teach the LLM your codebase conventions automatically.
 - **Knowledge base** — drop your internal docs (PDF, EPUB, Word, Markdown) into `.lean_ai/knowledge/` and the agent uses them for better plans without leaking content to cloud APIs.
@@ -108,6 +109,31 @@ LEAN_AI_OLLAMA_CONTEXT_WINDOW=128      # 128k — shorthand for 131072
 LEAN_AI_OPENAI_API_KEY=sk-...
 LEAN_AI_ANTHROPIC_API_KEY=sk-ant-...
 ```
+
+### Dual-model setup (save cloud tokens)
+
+Use a local model for the bulk of the work and a cloud model only for planning and complex fixes:
+
+```env
+# Primary: fast local model for exploration and implementation
+LEAN_AI_LLM_PROVIDER=ollama
+LEAN_AI_OLLAMA_MODEL=qwen3-coder:30b
+
+# Expert: cloud model for planning phases (3-6) and final fix retry
+LEAN_AI_EXPERT_LLM_PROVIDER=anthropic
+LEAN_AI_ANTHROPIC_API_KEY=sk-ant-...
+LEAN_AI_ANTHROPIC_EXPERT_MODEL=claude-opus-4-6
+```
+
+Or with OpenAI:
+
+```env
+LEAN_AI_EXPERT_LLM_PROVIDER=openai
+LEAN_AI_OPENAI_API_KEY=sk-...
+LEAN_AI_OPENAI_EXPERT_MODEL=gpt-4o
+```
+
+The expert model only runs for planning phases 3–6 (change design, risk assessment, plan assembly, verification) and the final validation fix retry. All codebase exploration, implementation, and routine tool calls use the primary local model.
 
 See the [full configuration reference](docs/configuration.md) for all options.
 
