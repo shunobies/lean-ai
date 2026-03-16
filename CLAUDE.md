@@ -73,7 +73,7 @@ cd extension && npm install && npm run build
 - **Tool naming**: `create_file` (not `write_file`) for clearer intent
 - **Structured JSON output** from Ollama replaces regex-based plan/output parsing
 - **Percentage-based token budgets** — internal limits (scratchpad, inline output, etc.) are computed as a percentage of the active context window, not hardcoded. This makes the system adaptive: smaller models get proportionally smaller budgets, larger models get more room. Convention: use `settings._active_context_window` and a named percentage constant (e.g. `SCRATCHPAD_CONTEXT_PERCENT = 0.05`)
-- **Dual-model pipeline** — standard (fast) model for codebase exploration and implementation, expert (large) model for reasoning-heavy planning phases (3-6) and the final validation fix retry (escalation only on last attempt). When no expert model is configured, everything uses the standard model. Expert model only applies to Ollama provider. Phases communicate through structured text/JSON outputs, not shared conversation history, making model switching seamless.
+- **Dual-model pipeline** — standard (fast) model for codebase exploration and implementation, expert (large) model for reasoning-heavy planning phases (3-6) and the final validation fix retry (escalation only on last attempt). When no expert model is configured, everything uses the standard model. The expert model can be any provider (Ollama, OpenAI, or Anthropic) regardless of the primary provider — set `LEAN_AI_EXPERT_LLM_PROVIDER` to select. Phases communicate through structured text/JSON outputs, not shared conversation history, making model switching seamless.
 
 ## Technology Stack
 

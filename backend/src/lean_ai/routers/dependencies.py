@@ -128,8 +128,14 @@ if _expert_p == "openai":
             )
             expert_llm_client = LLMClient(provider=_expert_provider)
             logger.info("Expert model enabled (OpenAI): %s", _expert_model)
-        except Exception:
-            logger.warning("Could not create expert LLM client (OpenAI)")
+        except Exception as e:
+            logger.warning("Could not create expert LLM client (OpenAI): %s", e)
+    else:
+        logger.warning(
+            "Expert provider is 'openai' but %s — expert model disabled",
+            "OPENAI_API_KEY is not set" if not settings.openai_api_key
+            else "no model name resolved",
+        )
 
 elif _expert_p == "anthropic":
     _expert_model = settings.anthropic_expert_model or settings.anthropic_model
@@ -145,8 +151,14 @@ elif _expert_p == "anthropic":
             )
             expert_llm_client = LLMClient(provider=_expert_provider)
             logger.info("Expert model enabled (Anthropic): %s", _expert_model)
-        except Exception:
-            logger.warning("Could not create expert LLM client (Anthropic)")
+        except Exception as e:
+            logger.warning("Could not create expert LLM client (Anthropic): %s", e)
+    else:
+        logger.warning(
+            "Expert provider is 'anthropic' but %s — expert model disabled",
+            "ANTHROPIC_API_KEY is not set" if not settings.anthropic_api_key
+            else "no model name resolved",
+        )
 
 elif _expert_p == "ollama" and settings.ollama_model_expert:
     try:
@@ -167,6 +179,6 @@ elif _expert_p == "ollama" and settings.ollama_model_expert:
             settings.ollama_expert_context_window or settings.ollama_context_window,
             settings.ollama_expert_max_tokens,
         )
-    except Exception:
-        logger.warning("Could not create expert LLM client — Ollama may be unavailable")
+    except Exception as e:
+        logger.warning("Could not create expert LLM client (Ollama): %s", e)
         expert_llm_client = None

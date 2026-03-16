@@ -187,7 +187,7 @@ async def create_plan(
     # Expert client for reasoning-heavy phases (3-6), falls back to standard
     expert = expert_llm_client or llm_client
     expert_max_tokens = (
-        settings.ollama_expert_max_tokens
+        settings.effective_expert_max_tokens
         if expert_llm_client
         else phase_max_tokens
     )
@@ -745,7 +745,7 @@ async def _revise_plan(
     """
     expert = expert_llm_client or llm_client
     expert_max_tokens = (
-        settings.ollama_expert_max_tokens
+        settings.effective_expert_max_tokens
         if expert_llm_client
         else settings.ollama_max_tokens
     )
