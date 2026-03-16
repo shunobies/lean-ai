@@ -77,8 +77,18 @@ class ExecutionPlan(BaseModel):
     """How to verify the changes work (included in run_tests steps)."""
 
 
-def plan_to_markdown(plan: ExecutionPlan) -> str:
-    """Render an ExecutionPlan as human-readable markdown for the approval UI."""
+def plan_to_markdown(
+    plan: ExecutionPlan, *, include_context: bool = False
+) -> str:
+    """Render an ExecutionPlan as human-readable markdown.
+
+    Args:
+        plan: The execution plan to render.
+        include_context: If True, append each step's context field as a
+            fenced code block.  Used by Phase 6 so the verification model
+            can see design details.  The approval UI passes False (default)
+            to keep the output concise.
+    """
     parts: list[str] = []
 
     parts.append(f"## Scope\n\n{plan.scope}\n")
@@ -98,6 +108,8 @@ def plan_to_markdown(plan: ExecutionPlan) -> str:
             parts.append(
                 f"{step.step_number}. **{tool_label}** — {step.instruction}"
             )
+        if include_context and step.context:
+            parts.append(f"   ```\n{step.context}\n   ```")
     parts.append("")
 
     parts.append("## Affected Files\n")

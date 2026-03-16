@@ -24,6 +24,7 @@ from fastapi import WebSocket
 from lean_ai.config import settings
 from lean_ai.llm.plan_schema import (
     ExecutionPlan,
+    PlanStep,
     VerificationPlan,
     plan_to_markdown,
 )
@@ -518,7 +519,14 @@ async def create_plan(
                     "- For create_file steps: in the instruction field, describe "
                     "what the file should contain — imports, classes, functions, "
                     "their purpose, and patterns to follow. In the context field, "
-                    "include content from related files that show the pattern.\n"
+                    "include the SPECIFIC design from the change design above — "
+                    "exact column definitions, method signatures, relationship "
+                    "types, fillable arrays, validation rules, route definitions. "
+                    "Do NOT use generic template comments like "
+                    "'// Example migration structure'. The executor model is "
+                    "smaller and needs concrete details, not placeholders. Also "
+                    "include a short code snippet from an existing file showing "
+                    "the import/class structure pattern to follow.\n"
                     "- Order steps so dependencies come first\n\n"
                     "EXAMPLE STEP (edit_file):\n"
                     '{\n'
@@ -536,13 +544,19 @@ async def create_plan(
                     '{\n'
                     '  "step_number": 5,\n'
                     '  "tool": "create_file",\n'
-                    '  "file_path": "tests/test_config.py",\n'
-                    '  "instruction": "Create a test file for the Settings '
-                    "class. Import from lean_ai.config. Test that default "
-                    "debug is False and that it can be overridden. Follow the "
-                    'test pattern from tests/test_other.py.",\n'
-                    '  "context": "# Pattern from tests/test_other.py:\\n'
-                    "import pytest\\nfrom lean_ai.config import Settings\\n"
+                    '  "file_path": "app/Models/Review.php",\n'
+                    '  "instruction": "Create the Review model with fillable '
+                    "attributes and relationships to user and book. Use the "
+                    'same structure as app/Models/User.php.",\n'
+                    '  "context": "Design: fillable = [\'user_id\', '
+                    "'book_id', 'rating', 'review_text']. "
+                    "Relationships: user() -> belongsTo(User::class), "
+                    "book() -> belongsTo(Book::class). "
+                    "Cast rating as integer. "
+                    "Unique constraint (user_id, book_id) enforced at DB level.\\n\\n"
+                    "Pattern from app/Models/User.php:\\n"
+                    "<?php\\nnamespace App\\\\Models;\\n"
+                    "use Illuminate\\\\Database\\\\Eloquent\\\\Model;\\n"
                     '..."\n'
                     "}\n\n"
                     + (
@@ -593,6 +607,22 @@ async def create_plan(
             step.step_number = i
         plan.steps = impl_steps
 
+    # Dedup: if Phase 5 produces multiple steps for the same file path,
+    # keep only the first one (e.g. edit_file then create_file for same path)
+    seen_paths: set[str] = set()
+    deduped: list[PlanStep] = []
+    for step in plan.steps:
+        if step.file_path and step.file_path in seen_paths:
+            logger.info("Stripped duplicate step for %s", step.file_path)
+            continue
+        if step.file_path:
+            seen_paths.add(step.file_path)
+        deduped.append(step)
+    if len(deduped) < len(plan.steps):
+        for i, step in enumerate(deduped, 1):
+            step.step_number = i
+        plan.steps = deduped
+
     # Save Phase 5 outputs
     _save_debug_phase(
         repo_root, session_id, "phase_5_plan",
@@ -613,7 +643,7 @@ async def create_plan(
         logger.info("Planning Phase 6: Verification step generation")
         t0 = time.monotonic()
 
-        impl_plan_md = plan_to_markdown(plan)
+        impl_plan_md = plan_to_markdown(plan, include_context=True)
         next_step = len(plan.steps) + 1
 
         verification = await expert.chat_structured(
