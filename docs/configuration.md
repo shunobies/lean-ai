@@ -60,6 +60,22 @@ Switch providers at any time by changing this value and restarting the server (o
 
 Ollama is always required, even when using cloud providers — it handles inline predictions, embeddings, and the [local refiner](knowledge-base.md#local-refiner).
 
+## Expert Model (Ollama only)
+
+An optional second Ollama model for reasoning-heavy tasks. When configured, the expert model handles planning phases 3–6 (change design, risk assessment, plan assembly, verification) and the final validation fix retry. Phases 1–2 and all implementation turns always use the primary model.
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEAN_AI_OLLAMA_MODEL_EXPERT` | *(empty — disabled)* | Expert model name (e.g. `qwen3-coder:80b`) |
+| `LEAN_AI_OLLAMA_EXPERT_TEMPERATURE` | *(falls back to OLLAMA_TEMPERATURE)* | Expert model temperature |
+| `LEAN_AI_OLLAMA_EXPERT_TOP_P` | *(falls back to OLLAMA_TOP_P)* | Expert model top-p |
+| `LEAN_AI_OLLAMA_EXPERT_TOP_K` | *(falls back to OLLAMA_TOP_K)* | Expert model top-k |
+| `LEAN_AI_OLLAMA_EXPERT_REPEAT_PENALTY` | *(falls back to OLLAMA_REPEAT_PENALTY)* | Expert model repetition penalty |
+| `LEAN_AI_OLLAMA_EXPERT_CONTEXT_WINDOW` | *(falls back to OLLAMA_CONTEXT_WINDOW)* | Expert model context window — [shorthand](#context-window-shorthand) accepted |
+| `LEAN_AI_OLLAMA_EXPERT_MAX_TOKENS` | *(derived: 25% of expert context window)* | Expert model max output tokens |
+
+Leave `LEAN_AI_OLLAMA_MODEL_EXPERT` empty to use the primary model for everything. The expert model only applies to the Ollama provider — OpenAI and Anthropic providers use their configured model for all phases.
+
 ## OpenAI
 
 | Variable | Default | Description |
@@ -199,7 +215,7 @@ The pipeline runs in order:
 3. **Lint check** — runs the linter in check mode, reports pass/fail
 4. **Test** — runs the test suite, reports pass/fail
 
-If lint check or tests fail, the output is fed back to the LLM for self-correction (up to `POST_VALIDATION_MAX_RETRIES` attempts).
+If lint check or tests fail, the failure output is fed back to the LLM for self-correction (up to `POST_VALIDATION_MAX_RETRIES` attempts). Each attempt gives the LLM a **30-turn budget** to re-run the failing command, diagnose the root cause, apply a fix, and verify the result. On the **final attempt**, the expert model is used if configured.
 
 See [Architecture: Post-Execution Validation](architecture.md#post-execution-validation) for the full design.
 

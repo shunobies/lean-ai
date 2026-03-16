@@ -49,7 +49,7 @@ cd extension && npm install && npm run build
 
 3. **Tools** (`tools/`) — `create_file`, `edit_file`, `read_file`, `run_tests`, `run_lint`, `format_code`, `list_directory`, `directory_tree`, `grep_files`, `update_scratchpad`. File ops produce diffs. Shell commands pass through a safety gate (`command_safety.py`). Internet search + URL fetching with HTML strip + LLM summary sanitization.
 
-4. **Workflow** (`workflow/pipeline.py`) — Two modes: `plan` (clarify → plan → approve → execute) and `fix` (skip planning, direct tool execution). WebSocket-based progress streaming. No state machine library. Work branches always created from default branch (master/main).
+4. **Workflow** (`workflow/pipeline.py`) — Two modes: `plan` (clarify → plan → approve → execute) and `fix` (skip planning, direct tool execution). After execution (both modes), `_run_post_validation` runs deterministic lint/test/format passes. On failure, `_run_validation_fix_loop` retries up to `post_validation_max_retries` times — each attempt gives the LLM a 30-turn budget with a structured verify-first workflow (re-run failing command → diagnose → fix → re-run to confirm). The expert model takes over on the final retry if configured. WebSocket-based progress streaming. No state machine library. Work branches always created from default branch (master/main).
 
 5. **Persistence** (`db.py`) — Minimal SQLite via `aiosqlite`. Two tables: `sessions` and `tool_logs`. No ORM.
 
@@ -73,7 +73,7 @@ cd extension && npm install && npm run build
 - **Tool naming**: `create_file` (not `write_file`) for clearer intent
 - **Structured JSON output** from Ollama replaces regex-based plan/output parsing
 - **Percentage-based token budgets** — internal limits (scratchpad, inline output, etc.) are computed as a percentage of the active context window, not hardcoded. This makes the system adaptive: smaller models get proportionally smaller budgets, larger models get more room. Convention: use `settings._active_context_window` and a named percentage constant (e.g. `SCRATCHPAD_CONTEXT_PERCENT = 0.05`)
-- **Dual-model pipeline** — standard (fast) model for codebase exploration and implementation, expert (large) model for reasoning-heavy planning phases (3-6) and validation fix escalation. When no expert model is configured, everything uses the standard model. Expert model only applies to Ollama provider. Phases communicate through structured text/JSON outputs, not shared conversation history, making model switching seamless.
+- **Dual-model pipeline** — standard (fast) model for codebase exploration and implementation, expert (large) model for reasoning-heavy planning phases (3-6) and the final validation fix retry (escalation only on last attempt). When no expert model is configured, everything uses the standard model. Expert model only applies to Ollama provider. Phases communicate through structured text/JSON outputs, not shared conversation history, making model switching seamless.
 
 ## Technology Stack
 
@@ -144,7 +144,7 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_DEBUG_PLANNING` | `false` | Save all planning phase outputs to `.lean_ai/plan_debug/{session_id}/` |
 | `LEAN_AI_PORT` | `8422` | Server port |
 
-**Post-validation auto-detection:** When `LEAN_AI_POST_*_COMMAND` variables are empty, the system falls back to commands auto-detected during `/init-workspace` (stored in `.lean_ai/commands.json`). Manual env vars always take priority. In fix mode, the LLM is instructed to write tests alongside code changes when a test command is available. In plan mode, test creation is handled by Phase 6 (verification step generation) which appends test file steps and a final `run_tests` step after all implementation steps.
+**Post-validation auto-detection:** When `LEAN_AI_POST_*_COMMAND` variables are empty, the system falls back to commands auto-detected during `/init-workspace` (stored in `.lean_ai/commands.json`). Manual env vars always take priority. In fix mode, the LLM is instructed to write tests alongside code changes when a test command is available. In plan mode, test creation is handled by Phase 6 (verification step generation) which appends test file steps and a final `run_tests` step after all implementation steps. **Validation fix loop:** when `_run_post_validation` detects failures, `_run_validation_fix_loop` retries up to `LEAN_AI_POST_VALIDATION_MAX_RETRIES` times. Each attempt uses a **hardcoded 30-turn budget** (independent of `LEAN_AI_IMPLEMENTATION_MAX_TURNS`) and instructs the LLM to: (1) re-run the failing command to confirm the error, (2) read relevant files to find the root cause, (3) record diagnosis in scratchpad, (4) make the minimal fix, (5) re-run to verify. On the **final retry**, the expert model is used if configured.
 
 ## WebSocket Protocol
 

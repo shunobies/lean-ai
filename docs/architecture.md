@@ -186,7 +186,9 @@ The first two stages (format, lint fix) are auto-fix — they modify files silen
 
 ### 3. Validation-Resubmission Loop
 
-If lint or tests fail, the failure output is fed back to the LLM in a fresh conversation with a 15-turn budget. The LLM reads the errors, inspects files, and applies fixes. After each fix attempt, the full validation pipeline re-runs. This repeats up to `LEAN_AI_POST_VALIDATION_MAX_RETRIES` times (default 2).
+If lint or tests fail, the failure output is fed back to the LLM in a fresh conversation with a **30-turn budget**. The LLM follows a structured workflow: (1) re-run the failing command to confirm the error before touching code, (2) read relevant files to locate the root cause, (3) record the diagnosis in the scratchpad, (4) make the minimal fix, (5) re-run the command to verify. After each fix attempt, the full validation pipeline re-runs. This repeats up to `LEAN_AI_POST_VALIDATION_MAX_RETRIES` times (default 2).
+
+On the **final retry**, the expert model is used if configured — this escalates complex failures to a larger reasoning model.
 
 The resubmission loop uses a separate, minimal context (just the system prompt and failure output) so it cannot be interrupted by context window refreshes.
 
