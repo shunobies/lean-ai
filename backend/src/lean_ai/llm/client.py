@@ -92,6 +92,9 @@ class OllamaProvider(LLMProvider):
         max_tokens: int | None = None,
         context_window: int | None = None,
         temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        repeat_penalty: float | None = None,
     ):
         effective_url = ollama_url or settings.ollama_url
         self._url = effective_url
@@ -104,9 +107,12 @@ class OllamaProvider(LLMProvider):
         self._temperature = (
             temperature if temperature is not None else settings.ollama_temperature
         )
-        self._top_p = settings.ollama_top_p
-        self._top_k = settings.ollama_top_k
-        self._repeat_penalty = settings.ollama_repeat_penalty
+        self._top_p = top_p if top_p is not None else settings.ollama_top_p
+        self._top_k = top_k if top_k is not None else settings.ollama_top_k
+        self._repeat_penalty = (
+            repeat_penalty if repeat_penalty is not None
+            else settings.ollama_repeat_penalty
+        )
 
         effective_embed_url = embed_ollama_url or settings.effective_embedding_url
         if effective_embed_url != effective_url:

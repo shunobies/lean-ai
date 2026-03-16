@@ -190,50 +190,6 @@ export function getWebviewHtml(chatFontSize: number): string {
         background: var(--vscode-toolbar-hoverBackground);
     }
 
-    .model-select {
-        font-size: 11px;
-        padding: 1px 18px 1px 4px;
-        border-radius: 3px;
-        border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
-        background: var(--vscode-dropdown-background, var(--vscode-sideBar-background));
-        color: var(--vscode-dropdown-foreground, var(--vscode-foreground));
-        font-family: var(--vscode-font-family);
-        max-width: 180px;
-        cursor: pointer;
-        outline: none;
-        appearance: none;
-        -webkit-appearance: none;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8'%3E%3Cpath d='M0 2l4 4 4-4z' fill='%23888'/%3E%3C/svg%3E");
-        background-repeat: no-repeat;
-        background-position: right 4px center;
-    }
-    .model-select:hover {
-        border-color: var(--vscode-focusBorder);
-    }
-    .model-select:focus {
-        border-color: var(--vscode-focusBorder);
-    }
-
-    .ctx-window-input {
-        font-size: 10px;
-        width: 64px;
-        padding: 1px 3px;
-        border-radius: 3px;
-        border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
-        background: var(--vscode-input-background);
-        color: var(--vscode-input-foreground);
-        font-family: var(--vscode-font-family);
-        font-variant-numeric: tabular-nums;
-        outline: none;
-    }
-    .ctx-window-input:focus {
-        border-color: var(--vscode-focusBorder);
-    }
-    .ctx-window-label {
-        font-size: 10px;
-        opacity: 0.6;
-    }
-
     .search-bar {
         padding: 6px 12px;
         border-bottom: 1px solid var(--vscode-panel-border);
@@ -512,12 +468,6 @@ export function getWebviewHtml(chatFontSize: number): string {
 <div class="header">
     <div class="header-left">
         <span class="header-title">Lean AI</span>
-        <select class="model-select" id="modelSelect" title="Select chat model">
-            <option value="">Loading...</option>
-        </select>
-        <span class="ctx-window-label" id="ctxWindowLabel" style="display:none;">ctx</span>
-        <input type="number" class="ctx-window-input" id="ctxWindowInput" style="display:none;"
-               title="Context window size (tokens)" min="2048" step="1024" />
         <span class="stage-badge" id="stageBadge"></span>
         <span class="metrics-badge" id="ctxBadge" title="Context window usage"></span>
         <span class="metrics-badge" id="timeBadge" title="Elapsed time"></span>
@@ -567,9 +517,6 @@ export function getWebviewHtml(chatFontSize: number): string {
     const searchInput = document.getElementById('searchInput');
     const searchClearBtn = document.getElementById('searchClearBtn');
     const tabBar = document.getElementById('tabBar');
-    const modelSelect = document.getElementById('modelSelect');
-    const ctxWindowInput = document.getElementById('ctxWindowInput');
-    const ctxWindowLabel = document.getElementById('ctxWindowLabel');
     const ctxBadge = document.getElementById('ctxBadge');
     const timeBadge = document.getElementById('timeBadge');
 
@@ -919,60 +866,6 @@ export function getWebviewHtml(chatFontSize: number): string {
         vscode.postMessage({ type: 'approve' });
     });
 
-    // ── Model selector ──
-
-    // Track current model's provider for showing/hiding context window input
-    let currentModelProvider = '';
-    let currentModelName = '';
-    let contextWindowMap = {};
-
-    modelSelect.addEventListener('change', () => {
-        const val = modelSelect.value;
-        const sepIdx = val.indexOf('|');
-        if (sepIdx < 0) return;
-        const provider = val.substring(0, sepIdx);
-        const model = val.substring(sepIdx + 1);
-        currentModelProvider = provider;
-        currentModelName = model;
-
-        // Show/hide context window input for Ollama models
-        const isOllama = provider === 'ollama';
-        ctxWindowLabel.style.display = isOllama ? 'inline' : 'none';
-        ctxWindowInput.style.display = isOllama ? 'inline-block' : 'none';
-
-        // Restore saved context window for this model, or clear
-        if (isOllama) {
-            const saved = contextWindowMap[provider + '|' + model];
-            ctxWindowInput.value = saved || '';
-        }
-
-        vscode.postMessage({
-            type: 'modelChanged',
-            provider,
-            model,
-            contextWindow: ctxWindowInput.value ? Number(ctxWindowInput.value) : undefined,
-        });
-    });
-
-    function commitContextWindow() {
-        const val = Number(ctxWindowInput.value);
-        if (!val || val < 2048 || !currentModelProvider) return;
-        vscode.postMessage({
-            type: 'contextWindowChanged',
-            provider: currentModelProvider,
-            model: currentModelName,
-            contextWindow: val,
-        });
-    }
-
-    ctxWindowInput.addEventListener('blur', commitContextWindow);
-    ctxWindowInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            ctxWindowInput.blur();
-        }
-    });
-
     // ── Search UI ──
 
     function openSearch() {
@@ -1129,69 +1022,6 @@ export function getWebviewHtml(chatFontSize: number): string {
             case 'setFontSize':
                 document.documentElement.style.setProperty('--sai-chat-font-size', msg.size + 'px');
                 break;
-
-            case 'modelsAvailable': {
-                const models = msg.models || [];
-                contextWindowMap = msg.contextWindows || {};
-                modelSelect.innerHTML = '';
-
-                // Group by provider
-                const providers = {};
-                for (const m of models) {
-                    if (!providers[m.provider]) providers[m.provider] = [];
-                    providers[m.provider].push(m);
-                }
-
-                const providerCount = Object.keys(providers).length;
-                for (const [provider, providerModels] of Object.entries(providers)) {
-                    if (providerCount > 1) {
-                        const group = document.createElement('optgroup');
-                        group.label = provider.charAt(0).toUpperCase() + provider.slice(1);
-                        for (const m of providerModels) {
-                            const opt = document.createElement('option');
-                            opt.value = m.provider + '|' + m.model;
-                            opt.textContent = m.model;
-                            group.appendChild(opt);
-                        }
-                        modelSelect.appendChild(group);
-                    } else {
-                        for (const m of providerModels) {
-                            const opt = document.createElement('option');
-                            opt.value = m.provider + '|' + m.model;
-                            opt.textContent = m.display_name;
-                            modelSelect.appendChild(opt);
-                        }
-                    }
-                }
-
-                // Restore selection
-                const savedKey = msg.selectedProvider && msg.selectedModel
-                    ? msg.selectedProvider + '|' + msg.selectedModel
-                    : null;
-                const defaultKey = msg.defaultProvider + '|' + msg.defaultModel;
-
-                let activeKey = defaultKey;
-                if (savedKey) {
-                    const opt = modelSelect.querySelector('option[value="' + CSS.escape(savedKey) + '"]');
-                    if (opt) activeKey = savedKey;
-                }
-                modelSelect.value = activeKey;
-
-                // Parse the active key to set context window state
-                const sepIdx = activeKey.indexOf('|');
-                if (sepIdx >= 0) {
-                    currentModelProvider = activeKey.substring(0, sepIdx);
-                    currentModelName = activeKey.substring(sepIdx + 1);
-                    const isOllama = currentModelProvider === 'ollama';
-                    ctxWindowLabel.style.display = isOllama ? 'inline' : 'none';
-                    ctxWindowInput.style.display = isOllama ? 'inline-block' : 'none';
-                    if (isOllama) {
-                        const saved = contextWindowMap[activeKey];
-                        ctxWindowInput.value = saved || '';
-                    }
-                }
-                break;
-            }
 
             case 'searchResults': {
                 const results = msg.results || [];

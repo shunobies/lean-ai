@@ -158,6 +158,7 @@ async def create_plan(
     refiner: "PromptRefiner | None" = None,
     test_command: str = "",
     session_id: str = "",
+    expert_llm_client: "LLMClient | None" = None,
 ) -> ExecutionPlan:
     """Create a plan using 5-phase decomposed planning.
 
@@ -175,9 +176,20 @@ async def create_plan(
         Structured ExecutionPlan ready for per-step execution.
     """
     if revision_context:
-        return await _revise_plan(task, revision_context, llm_client, context, ws)
+        return await _revise_plan(
+            task, revision_context, llm_client, context, ws,
+            expert_llm_client=expert_llm_client,
+        )
 
     phase_max_tokens = settings.ollama_max_tokens
+
+    # Expert client for reasoning-heavy phases (3-6), falls back to standard
+    expert = expert_llm_client or llm_client
+    expert_max_tokens = (
+        settings.ollama_expert_max_tokens
+        if expert_llm_client
+        else phase_max_tokens
+    )
     plan_start = time.monotonic()
     phase_timings: dict[str, float] = {}
 
@@ -358,10 +370,20 @@ async def create_plan(
             )
 
     # Phase 3: Change Design
+    if expert_llm_client:
+        await _send_stage(
+            ws,
+            f"Switching to expert model ({expert_llm_client._provider.model_name}) "
+            f"for design phases...",
+        )
+        logger.info(
+            "Switching to expert model for phases 3-6: %s",
+            expert_llm_client._provider.model_name,
+        )
     await _send_stage(ws, "Phase 3: Designing specific changes...")
     logger.info("Planning Phase 3: Change design")
     t0 = time.monotonic()
-    change_design = await llm_client.chat_raw(
+    change_design = await expert.chat_raw(
         messages=[
             {"role": "system", "content": PLAN_SYSTEM_PROMPT},
             {
@@ -396,7 +418,7 @@ async def create_plan(
                 ),
             },
         ],
-        max_tokens=phase_max_tokens,
+        max_tokens=expert_max_tokens,
     )
 
     phase_timings["phase_3_change_design"] = time.monotonic() - t0
@@ -409,7 +431,7 @@ async def create_plan(
     await _send_stage(ws, "Phase 4: Assessing risks...")
     logger.info("Planning Phase 4: Risk assessment")
     t0 = time.monotonic()
-    risks = await llm_client.chat_raw(
+    risks = await expert.chat_raw(
         messages=[
             {"role": "system", "content": PLAN_SYSTEM_PROMPT},
             {
@@ -436,7 +458,7 @@ async def create_plan(
                 ),
             },
         ],
-        max_tokens=phase_max_tokens,
+        max_tokens=expert_max_tokens,
     )
 
     phase_timings["phase_4_risks"] = time.monotonic() - t0
@@ -446,7 +468,7 @@ async def create_plan(
     )
 
     # Extract missing files from Phase 4 for explicit injection into Phase 5
-    missing_files = await _extract_missing_files(risks, llm_client)
+    missing_files = await _extract_missing_files(risks, expert)
     if missing_files:
         logger.info("Extracted %d chars of missing files from Phase 4", len(missing_files))
 
@@ -454,7 +476,7 @@ async def create_plan(
     await _send_stage(ws, "Phase 5: Assembling structured plan...")
     logger.info("Planning Phase 5: Structured plan assembly")
     t0 = time.monotonic()
-    plan = await llm_client.chat_structured(
+    plan = await expert.chat_structured(
         messages=[
             {"role": "system", "content": PLAN_SYSTEM_PROMPT},
             {
@@ -556,7 +578,7 @@ async def create_plan(
             },
         ],
         schema=ExecutionPlan,
-        max_tokens=settings.ollama_max_tokens,
+        max_tokens=expert_max_tokens,
     )
 
     phase_timings["phase_5_plan_assembly"] = time.monotonic() - t0
@@ -594,7 +616,7 @@ async def create_plan(
         impl_plan_md = plan_to_markdown(plan)
         next_step = len(plan.steps) + 1
 
-        verification = await llm_client.chat_structured(
+        verification = await expert.chat_structured(
             messages=[
                 {"role": "system", "content": PLAN_SYSTEM_PROMPT},
                 {
@@ -625,7 +647,7 @@ async def create_plan(
                 },
             ],
             schema=VerificationPlan,
-            max_tokens=settings.ollama_max_tokens,
+            max_tokens=expert_max_tokens,
         )
 
         # Append verification steps, re-number for safety
@@ -676,6 +698,7 @@ async def _revise_plan(
     llm_client: "LLMClient",
     context: str = "",
     ws: WebSocket | None = None,
+    expert_llm_client: "LLMClient | None" = None,
 ) -> ExecutionPlan:
     """Revise an existing plan based on user feedback.
 
@@ -685,13 +708,20 @@ async def _revise_plan(
         llm_client: LLM client.
         context: Project context.
         ws: Optional WebSocket for progress.
+        expert_llm_client: Optional expert LLM client for reasoning-heavy work.
 
     Returns:
         Revised ExecutionPlan.
     """
+    expert = expert_llm_client or llm_client
+    expert_max_tokens = (
+        settings.ollama_expert_max_tokens
+        if expert_llm_client
+        else settings.ollama_max_tokens
+    )
     await _send_stage(ws, "Revising plan based on feedback...")
     logger.info("Plan revision")
-    plan = await llm_client.chat_structured(
+    plan = await expert.chat_structured(
         messages=[
             {"role": "system", "content": PLAN_SYSTEM_PROMPT},
             {
@@ -708,7 +738,7 @@ async def _revise_plan(
             },
         ],
         schema=ExecutionPlan,
-        max_tokens=settings.ollama_max_tokens,
+        max_tokens=expert_max_tokens,
     )
     logger.info(
         "Plan revised: %d steps, %d affected files",

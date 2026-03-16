@@ -103,3 +103,28 @@ if (
     except Exception:
         logger.warning("Could not create refiner — Ollama may be unavailable")
         refiner = None
+
+# Expert model client — active only when expert model is configured AND provider is Ollama
+expert_llm_client: LLMClient | None = None
+if settings.llm_provider.lower() == "ollama" and settings.ollama_model_expert:
+    try:
+        _expert_provider = OllamaProvider(
+            ollama_url=settings.ollama_url,
+            model=settings.ollama_model_expert,
+            max_tokens=settings.ollama_expert_max_tokens,
+            context_window=settings.ollama_expert_context_window or settings.ollama_context_window,
+            temperature=settings.effective_expert_temperature,
+            top_p=settings.effective_expert_top_p,
+            top_k=settings.effective_expert_top_k,
+            repeat_penalty=settings.effective_expert_repeat_penalty,
+        )
+        expert_llm_client = LLMClient(provider=_expert_provider)
+        logger.info(
+            "Expert model enabled: %s (ctx=%s, max_tokens=%s)",
+            settings.ollama_model_expert,
+            settings.ollama_expert_context_window or settings.ollama_context_window,
+            settings.ollama_expert_max_tokens,
+        )
+    except Exception:
+        logger.warning("Could not create expert LLM client — Ollama may be unavailable")
+        expert_llm_client = None

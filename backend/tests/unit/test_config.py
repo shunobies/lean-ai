@@ -87,3 +87,76 @@ class TestSettingsShorthand:
         assert s.ollama_context_window == 131072
         assert s.openai_context_window == 128000
         assert s.anthropic_context_window == 200000
+
+
+class TestExpertConfig:
+    """Tests for expert model configuration."""
+
+    def test_expert_defaults_empty(self):
+        """When expert model is not set, expert fields are empty/None."""
+        s = Settings()
+        assert s.ollama_model_expert == ""
+        assert s.ollama_expert_max_tokens is None
+        assert s.ollama_expert_context_window is None
+
+    def test_expert_context_window_shorthand(self):
+        """Expert context window accepts shorthand notation."""
+        s = Settings(ollama_model_expert="qwen3:72b", ollama_expert_context_window=64)
+        assert s.ollama_expert_context_window == 65536
+
+    def test_expert_max_tokens_derived(self):
+        """Expert max_tokens derives from expert context window."""
+        s = Settings(ollama_model_expert="qwen3:72b", ollama_expert_context_window=64)
+        assert s.ollama_expert_max_tokens == 65536 // 4
+
+    def test_expert_max_tokens_fallback(self):
+        """Expert context_window falls back to standard when not explicitly set."""
+        s = Settings(ollama_model_expert="qwen3:72b", ollama_context_window=128)
+        assert s.ollama_expert_context_window == 131072
+        assert s.ollama_expert_max_tokens == 131072 // 4
+
+    def test_expert_temperature_fallback(self):
+        """Expert temperature falls back to standard when not set."""
+        s = Settings(ollama_temperature=0.5)
+        assert s.effective_expert_temperature == 0.5
+
+    def test_expert_temperature_override(self):
+        """Expert temperature overrides when explicitly set."""
+        s = Settings(ollama_temperature=0.5, ollama_expert_temperature=0.3)
+        assert s.effective_expert_temperature == 0.3
+
+    def test_expert_top_p_fallback(self):
+        """Expert top_p falls back to standard when not set."""
+        s = Settings(ollama_top_p=0.9)
+        assert s.effective_expert_top_p == 0.9
+
+    def test_expert_top_p_override(self):
+        """Expert top_p overrides when explicitly set."""
+        s = Settings(ollama_top_p=0.9, ollama_expert_top_p=0.7)
+        assert s.effective_expert_top_p == 0.7
+
+    def test_expert_top_k_fallback(self):
+        """Expert top_k falls back to standard when not set."""
+        s = Settings(ollama_top_k=30)
+        assert s.effective_expert_top_k == 30
+
+    def test_expert_top_k_override(self):
+        """Expert top_k overrides when explicitly set."""
+        s = Settings(ollama_top_k=30, ollama_expert_top_k=15)
+        assert s.effective_expert_top_k == 15
+
+    def test_expert_repeat_penalty_fallback(self):
+        """Expert repeat_penalty falls back to standard when not set."""
+        s = Settings(ollama_repeat_penalty=1.1)
+        assert s.effective_expert_repeat_penalty == 1.1
+
+    def test_expert_repeat_penalty_override(self):
+        """Expert repeat_penalty overrides when explicitly set."""
+        s = Settings(ollama_repeat_penalty=1.1, ollama_expert_repeat_penalty=1.0)
+        assert s.effective_expert_repeat_penalty == 1.0
+
+    def test_expert_not_derived_when_empty(self):
+        """When expert model is empty, derived fields stay None."""
+        s = Settings(ollama_model_expert="")
+        assert s.ollama_expert_max_tokens is None
+        assert s.ollama_expert_context_window is None

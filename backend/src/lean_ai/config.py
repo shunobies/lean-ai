@@ -21,6 +21,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Fields that accept the k-shorthand notation.
 _CONTEXT_WINDOW_FIELDS = frozenset({
     "ollama_context_window",
+    "ollama_expert_context_window",
     "openai_context_window",
     "anthropic_context_window",
     "inline_context_window",
@@ -59,6 +60,15 @@ class Settings(BaseSettings):
     ollama_repeat_penalty: float = 1.05
     ollama_context_window: int = 131072  # Accepts shorthand: 128 = 128k = 131072
     ollama_max_tokens: int | None = None  # Derived: 25% of context window
+
+    # ── Ollama — expert model (reasoning-heavy phases) ──
+    ollama_model_expert: str = ""  # Empty = use standard model everywhere
+    ollama_expert_temperature: float | None = None  # Falls back to ollama_temperature
+    ollama_expert_top_p: float | None = None  # Falls back to ollama_top_p
+    ollama_expert_top_k: int | None = None  # Falls back to ollama_top_k
+    ollama_expert_repeat_penalty: float | None = None  # Falls back to ollama_repeat_penalty
+    ollama_expert_context_window: int | None = None  # Accepts shorthand; falls back
+    ollama_expert_max_tokens: int | None = None  # Derived: 25% of expert context window
 
     # ── OpenAI ──
     openai_api_key: str = ""
@@ -170,6 +180,11 @@ class Settings(BaseSettings):
             self.openai_max_tokens = self.openai_context_window // 4
         if self.anthropic_max_tokens is None:
             self.anthropic_max_tokens = self.anthropic_context_window // 4
+        if self.ollama_model_expert:
+            if self.ollama_expert_context_window is None:
+                self.ollama_expert_context_window = self.ollama_context_window
+            if self.ollama_expert_max_tokens is None:
+                self.ollama_expert_max_tokens = self.ollama_expert_context_window // 4
         if self.inline_context_window is None:
             self.inline_context_window = self.ollama_context_window // 8
         if self.implementation_max_tokens is None:
@@ -195,6 +210,26 @@ class Settings(BaseSettings):
     @property
     def effective_embedding_url(self) -> str:
         return self.embedding_ollama_url or self.ollama_url
+
+    @property
+    def effective_expert_temperature(self) -> float:
+        val = self.ollama_expert_temperature
+        return val if val is not None else self.ollama_temperature
+
+    @property
+    def effective_expert_top_p(self) -> float:
+        val = self.ollama_expert_top_p
+        return val if val is not None else self.ollama_top_p
+
+    @property
+    def effective_expert_top_k(self) -> int:
+        val = self.ollama_expert_top_k
+        return val if val is not None else self.ollama_top_k
+
+    @property
+    def effective_expert_repeat_penalty(self) -> float:
+        val = self.ollama_expert_repeat_penalty
+        return val if val is not None else self.ollama_repeat_penalty
 
     @property
     def effective_refiner_url(self) -> str:

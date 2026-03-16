@@ -189,34 +189,6 @@ export class BackendClient {
         return resp.json() as Promise<PredictionResult>;
     }
 
-    async getModels(): Promise<{
-        models: Array<{
-            provider: string;
-            model: string;
-            display_name: string;
-            is_default: boolean;
-        }>;
-        default_provider: string;
-        default_model: string;
-    }> {
-        const resp = await fetch(`${this.baseUrl}/api/models`, {
-            signal: AbortSignal.timeout(10_000),
-        });
-        if (!resp.ok) {
-            throw new Error(`Failed to fetch models: ${resp.statusText}`);
-        }
-        return resp.json() as Promise<{
-            models: Array<{
-                provider: string;
-                model: string;
-                display_name: string;
-                is_default: boolean;
-            }>;
-            default_provider: string;
-            default_model: string;
-        }>;
-    }
-
     async chat(
         message: string,
         history: Array<{ role: string; content: string }>,

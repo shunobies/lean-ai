@@ -13,7 +13,7 @@ from lean_ai.db import (
     update_session,
 )
 from lean_ai.routers.context_helpers import load_full_context
-from lean_ai.routers.dependencies import llm_client, refiner
+from lean_ai.routers.dependencies import expert_llm_client, llm_client, refiner
 from lean_ai.tools.git_ops import (
     git_add_and_commit,
     git_checkout,
@@ -195,6 +195,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                 mode=mode,
                                 session_id=session_id,
                                 refiner=refiner,
+                                expert_llm_client=expert_llm_client,
                             )
 
                             # --- Auto-commit agent changes ---
@@ -305,6 +306,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
                             conversation_logger=_log_conversation_resume,
                             mode="fix",
                             session_id=session_id,
+                            expert_llm_client=expert_llm_client,
                         )
 
                         # Auto-commit

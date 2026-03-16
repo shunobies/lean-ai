@@ -45,7 +45,7 @@ cd extension && npm install && npm run build
 
 1. **LLM Client** (`llm/`) — Multi-provider LLM abstraction. `LLMProvider` ABC (`base.py`) with implementations for Ollama (`client.py`), OpenAI (`provider_openai.py`), and Anthropic (`provider_anthropic.py`). `LLMClient` facade (`facade.py`) handles the multi-turn `chat_with_tools()` orchestration loop, delegates single-turn calls to the active provider. Inline predictions (FIM) and embeddings always use Ollama. Context refresh at 70% threshold — drops old messages, re-reads context files from disk, injects scratchpad for continuity (no LLM summarization call).
 
-2. **Planning** (`llm/planner.py`) — 6-phase decomposed planning: scope → file identification (with tool-assisted codebase exploration) → change design (with naming convention extraction) → risk check → plan assembly → verification step generation. Phase 2 uses read-only tools (`read_file`, `grep_files`, `list_directory`, `directory_tree`) to trace all downstream consumers of modified entities and detect missing infrastructure. Phase 6 reviews the complete implementation plan and appends test file creation steps + a final `run_tests` step (only runs when a test command is available). Structured JSON output from Ollama. Plan template with worked examples (`llm/plan_template.md`).
+2. **Planning** (`llm/planner.py`) — 6-phase decomposed planning: scope → file identification (with tool-assisted codebase exploration) → change design (with naming convention extraction) → risk check → plan assembly → verification step generation. Supports dual-model routing: phases 1-2 use the standard (fast) model for scope and codebase exploration, phases 3-6 use the expert model (if configured) for change design, risk assessment, plan assembly, and verification. Phase 2 uses read-only tools (`read_file`, `grep_files`, `list_directory`, `directory_tree`) to trace all downstream consumers of modified entities and detect missing infrastructure. Phase 6 reviews the complete implementation plan and appends test file creation steps + a final `run_tests` step (only runs when a test command is available). Structured JSON output from Ollama. Plan template with worked examples (`llm/plan_template.md`).
 
 3. **Tools** (`tools/`) — `create_file`, `edit_file`, `read_file`, `run_tests`, `run_lint`, `format_code`, `list_directory`, `directory_tree`, `grep_files`, `update_scratchpad`. File ops produce diffs. Shell commands pass through a safety gate (`command_safety.py`). Internet search + URL fetching with HTML strip + LLM summary sanitization.
 
@@ -73,6 +73,7 @@ cd extension && npm install && npm run build
 - **Tool naming**: `create_file` (not `write_file`) for clearer intent
 - **Structured JSON output** from Ollama replaces regex-based plan/output parsing
 - **Percentage-based token budgets** — internal limits (scratchpad, inline output, etc.) are computed as a percentage of the active context window, not hardcoded. This makes the system adaptive: smaller models get proportionally smaller budgets, larger models get more room. Convention: use `settings._active_context_window` and a named percentage constant (e.g. `SCRATCHPAD_CONTEXT_PERCENT = 0.05`)
+- **Dual-model pipeline** — standard (fast) model for codebase exploration and implementation, expert (large) model for reasoning-heavy planning phases (3-6) and validation fix escalation. When no expert model is configured, everything uses the standard model. Expert model only applies to Ollama provider. Phases communicate through structured text/JSON outputs, not shared conversation history, making model switching seamless.
 
 ## Technology Stack
 
@@ -104,6 +105,13 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_OLLAMA_REPEAT_PENALTY` | `1.05` | Repetition penalty |
 | `LEAN_AI_OLLAMA_CONTEXT_WINDOW` | `131072` | Context window — accepts shorthand: `128` = 128k = 131072 |
 | `LEAN_AI_OLLAMA_MAX_TOKENS` | *(derived: 25% of context window)* | Max output tokens |
+| `LEAN_AI_OLLAMA_MODEL_EXPERT` | *(empty)* | Expert model for reasoning-heavy phases (Ollama only) |
+| `LEAN_AI_OLLAMA_EXPERT_TEMPERATURE` | *(falls back to OLLAMA_TEMPERATURE)* | Expert model temperature |
+| `LEAN_AI_OLLAMA_EXPERT_TOP_P` | *(falls back to OLLAMA_TOP_P)* | Expert model top-p |
+| `LEAN_AI_OLLAMA_EXPERT_TOP_K` | *(falls back to OLLAMA_TOP_K)* | Expert model top-k |
+| `LEAN_AI_OLLAMA_EXPERT_REPEAT_PENALTY` | *(falls back to OLLAMA_REPEAT_PENALTY)* | Expert model repetition penalty |
+| `LEAN_AI_OLLAMA_EXPERT_CONTEXT_WINDOW` | *(falls back to OLLAMA_CONTEXT_WINDOW)* | Expert model context window (accepts shorthand) |
+| `LEAN_AI_OLLAMA_EXPERT_MAX_TOKENS` | *(derived: 25% of expert context window)* | Expert model max output tokens |
 | `LEAN_AI_OPENAI_API_KEY` | *(empty)* | OpenAI API key (required when provider=openai) |
 | `LEAN_AI_OPENAI_MODEL` | `gpt-4o` | OpenAI model name |
 | `LEAN_AI_OPENAI_BASE_URL` | *(empty)* | Custom base URL for OpenAI-compatible APIs (Together, Groq, vLLM) |

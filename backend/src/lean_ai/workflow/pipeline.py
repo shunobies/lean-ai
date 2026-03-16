@@ -59,6 +59,7 @@ async def run_workflow(
     mode: str = "plan",
     session_id: str = "",
     refiner: "PromptRefiner | None" = None,
+    expert_llm_client: "LLMClient | None" = None,
 ) -> str:
     """Run a workflow. Supports two modes:
 
@@ -83,6 +84,7 @@ async def run_workflow(
             branch_name=branch_name,
             conversation_logger=conversation_logger,
             session_id=session_id,
+            expert_llm_client=expert_llm_client,
         )
 
     # ── Phase 1: Clarify (optional) ──────────────────────────────
@@ -100,6 +102,7 @@ async def run_workflow(
         refiner=refiner,
         test_command=plan_commands.get("test", ""),
         session_id=session_id,
+        expert_llm_client=expert_llm_client,
     )
 
     # ── Phase 3: Approve ─────────────────────────────────────────
@@ -112,6 +115,7 @@ async def run_workflow(
         ws=ws,
         refiner=refiner,
         test_command=plan_commands.get("test", ""),
+        expert_llm_client=expert_llm_client,
     )
 
     # ── Phase 4: Execute per-step ────────────────────────────────
@@ -126,6 +130,7 @@ async def run_workflow(
         branch_name=branch_name,
         conversation_logger=conversation_logger,
         session_id=session_id,
+        expert_llm_client=expert_llm_client,
     )
 
 
@@ -183,6 +188,7 @@ async def _wait_for_approval(
     ws: WebSocket,
     refiner: "PromptRefiner | None" = None,
     test_command: str = "",
+    expert_llm_client: "LLMClient | None" = None,
 ) -> ExecutionPlan:
     """Send the plan for user approval. Handle feedback/revision loop.
 
@@ -235,6 +241,7 @@ async def _wait_for_approval(
                 ws=ws,
                 refiner=refiner,
                 test_command=test_command,
+                expert_llm_client=expert_llm_client,
             )
             plan_md = plan_to_markdown(plan)
             await ws_send(ws, "plan_revision", {
@@ -262,6 +269,7 @@ async def _execute_plan(
     branch_name: str,
     conversation_logger: Callable | None,
     session_id: str = "",
+    expert_llm_client: "LLMClient | None" = None,
 ) -> str:
     """Execute each plan step sequentially with a constrained LLM."""
     tool_executor = make_tool_executor(repo_root, ws, session_id)
@@ -396,6 +404,7 @@ async def _execute_plan(
                 repo_root, ws, llm_client, context,
                 validation_results, session_id,
                 conversation_logger=conversation_logger,
+                expert_llm_client=expert_llm_client,
             )
 
     # Check for incomplete.md
@@ -616,6 +625,7 @@ async def _run_validation_fix_loop(
     validation_results: dict,
     session_id: str = "",
     conversation_logger: Callable | None = None,
+    expert_llm_client: "LLMClient | None" = None,
 ) -> dict:
     """Attempt to fix post-validation failures by resubmitting to the LLM.
 
@@ -683,11 +693,27 @@ async def _run_validation_fix_loop(
             break  # All fixed
 
         attempts_used = attempt + 1
+
+        # Escalate to expert model on final attempt
+        is_final_attempt = (attempt == max_retries - 1)
+        active_client = (
+            expert_llm_client if is_final_attempt and expert_llm_client
+            else llm_client
+        )
+
         logger.info(
-            "Validation fix attempt %d/%d: %d failure(s) — %s",
+            "Validation fix attempt %d/%d: %d failure(s) — %s%s",
             attempts_used, max_retries, len(failures),
             ", ".join(failures.keys()),
+            " (escalating to expert model)" if is_final_attempt and expert_llm_client else "",
         )
+
+        escalation_note = ""
+        if is_final_attempt and expert_llm_client:
+            escalation_note = (
+                f" (escalating to expert model: "
+                f"{expert_llm_client._provider.model_name})"
+            )
 
         await ws_send(ws, "stage_status", {
             "stage": "validation_fix",
@@ -695,6 +721,7 @@ async def _run_validation_fix_loop(
             "summary": (
                 f"Fix attempt {attempts_used}/{max_retries}: "
                 f"fixing {len(failures)} failure(s)..."
+                f"{escalation_note}"
             ),
         })
 
@@ -727,7 +754,7 @@ async def _run_validation_fix_loop(
 
         # Run LLM with a tight turn budget
         tool_executor = make_tool_executor(repo_root, ws, session_id)
-        executed, explanation = await llm_client.chat_with_tools(
+        executed, explanation = await active_client.chat_with_tools(
             messages=messages,
             tools=IMPLEMENTATION_TOOLS,
             tool_executor_fn=tool_executor,
@@ -786,6 +813,7 @@ async def _run_fix(
     branch_name: str,
     conversation_logger: Callable | None,
     session_id: str = "",
+    expert_llm_client: "LLMClient | None" = None,
 ) -> str:
     """Execute a fix directly — no planning, no approval.
 
@@ -942,6 +970,7 @@ async def _run_fix(
                 repo_root, ws, llm_client, context,
                 validation_results, session_id,
                 conversation_logger=conversation_logger,
+                expert_llm_client=expert_llm_client,
             )
 
     summary = (
