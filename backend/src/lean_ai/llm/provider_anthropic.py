@@ -147,11 +147,16 @@ class AnthropicProvider(LLMProvider):
             kwargs["system"] = system_prompt
 
         async def _chat():
-            return await self._client.messages.create(**kwargs)
+            chunks: list[str] = []
+            async with self._client.messages.stream(**kwargs) as stream:
+                async for chunk in stream.text_stream:
+                    if chunk:
+                        chunks.append(chunk)
+                final_message = await stream.get_final_message()
+            return "".join(chunks), final_message
 
-        response = await self._retry_with_backoff(_chat, label="chat_raw")
-        text = _extract_text(response)
-        metrics = self._extract_metrics(response)
+        text, final_message = await self._retry_with_backoff(_chat, label="chat_raw")
+        metrics = self._extract_metrics(final_message)
 
         logger.info("Anthropic chat_raw response (%d chars): %s", len(text), text[:200])
         return text, metrics
@@ -189,15 +194,20 @@ class AnthropicProvider(LLMProvider):
         }
 
         async def _chat():
-            return await self._client.messages.create(**kwargs)
+            chunks: list[str] = []
+            async with self._client.messages.stream(**kwargs) as stream:
+                async for chunk in stream.text_stream:
+                    if chunk:
+                        chunks.append(chunk)
+                final_message = await stream.get_final_message()
+            return "".join(chunks), final_message
 
         last_error = None
         for attempt in range(2):
-            response = await self._retry_with_backoff(
+            raw, final_message = await self._retry_with_backoff(
                 _chat, label=f"structured({schema.__name__})",
             )
-            raw = _extract_text(response)
-            metrics = self._extract_metrics(response)
+            metrics = self._extract_metrics(final_message)
 
             # Strip markdown code fences if present
             cleaned = raw.strip()
@@ -248,7 +258,8 @@ class AnthropicProvider(LLMProvider):
             kwargs["system"] = system_prompt
 
         async def _chat():
-            return await self._client.messages.create(**kwargs)
+            async with self._client.messages.stream(**kwargs) as stream:
+                return await stream.get_final_message()
 
         response = await self._retry_with_backoff(
             _chat, label="chat_with_tools_single",
