@@ -19,8 +19,18 @@ def build_fix_system_prompt(
         base += (
             "\n\nTEST REQUIREMENT:\n"
             "When you create new functionality or fix a bug, write or "
-            "update tests that verify your changes. Follow the project's "
-            "existing test patterns and conventions. Tests run with: "
+            "update tests alongside your changes.\n"
+            "Cover all applicable categories:\n"
+            "  HAPPY PATH  — primary use case works end-to-end\n"
+            "  EDGE CASES  — None/empty/zero/boundary/unicode inputs\n"
+            "  ERROR PATHS — wrong inputs raise the correct exception "
+            "type; assert the message text, not just the type\n"
+            "  INTEGRATION — mock external I/O and verify caller contracts\n"
+            "  SECURITY    — if the code handles file paths, shell "
+            "commands, user-supplied strings, or auth: add one test per "
+            "attack surface (path traversal, injection, unauthed access)\n"
+            "Follow project test patterns (class-based, pytest.raises, "
+            "fixture reuse). Tests run with: "
             f"{test_command}"
         )
 
