@@ -527,6 +527,7 @@ export function getWebviewHtml(chatFontSize: number): string {
     let searchMode = false;
     let savedMessagesHtml = null;
     let searchDebounceTimer = null;
+    let currentStreamDiv = null; // AI bubble being filled during chat streaming
 
     // ── Tab management ──
 
@@ -962,10 +963,41 @@ export function getWebviewHtml(chatFontSize: number): string {
                 addMessage(formatMarkdown(msg.text), msg.cls || 'msg-ai');
                 break;
 
+            case 'chatToken': {
+                // First token: hide "Thinking...", create an empty AI bubble
+                if (msg.isFirst) {
+                    thinkingEl.classList.remove('visible');
+                    addTimestampDivider(new Date());
+                    currentStreamDiv = document.createElement('div');
+                    currentStreamDiv.className = 'msg msg-ai';
+                    messagesEl.appendChild(currentStreamDiv);
+                }
+                // Append raw text (markdown applied on chatDone)
+                if (currentStreamDiv) {
+                    currentStreamDiv.textContent += msg.content;
+                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                }
+                break;
+            }
+
+            case 'chatDone': {
+                // Re-render the streamed bubble with full markdown formatting
+                if (currentStreamDiv && msg.fullText) {
+                    currentStreamDiv.innerHTML = formatMarkdown(msg.fullText);
+                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                }
+                currentStreamDiv = null;
+                sending = false;
+                sendBtn.disabled = false;
+                if (sendTimeout) { clearTimeout(sendTimeout); sendTimeout = null; }
+                break;
+            }
+
             case 'error':
                 sending = false;
                 sendBtn.disabled = false;
                 if (sendTimeout) { clearTimeout(sendTimeout); sendTimeout = null; }
+                currentStreamDiv = null; // clean up any partial streaming bubble
                 addMessage(escapeHtml(msg.text), 'msg-error');
                 break;
 

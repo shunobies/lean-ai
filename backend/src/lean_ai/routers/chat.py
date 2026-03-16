@@ -1,12 +1,15 @@
 """Chat, inline prediction, scaffolding, knowledge, and health endpoints."""
 
 import asyncio
+import json
 import logging
 import os
 import re
 import shutil
+from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
 from lean_ai.config import settings
 from lean_ai.llm.refiner import RefinerResult
@@ -243,13 +246,13 @@ async def index_knowledge_endpoint(request: IndexKnowledgeRequest):
     )
 
 
-@chat_router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
-    """Lightweight read-only chat with workspace context.
+async def _build_chat_messages(
+    request: ChatRequest,
+) -> tuple[list[dict], RefinerResult | None]:
+    """Gather workspace context and build the LLM message list for a chat request.
 
-    Gathers workspace context (file tree, project architecture, active file,
-    search results, web search) and sends to the LLM. No FSM, no database,
-    no tool execution.
+    Shared by both the blocking ``/chat`` endpoint and the streaming
+    ``/chat/stream`` endpoint so context-gathering logic lives in one place.
     """
     workspace = request.workspace
     file_tree: list[str] = []
@@ -356,7 +359,7 @@ async def chat(request: ChatRequest):
         web_search_results=web_search_text,
         knowledge_context=knowledge_ctx,
     )
-    messages = [{"role": "system", "content": system_prompt}]
+    messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
     for msg in request.history[-20:]:
         messages.append({"role": msg["role"], "content": msg["content"]})
@@ -369,7 +372,19 @@ async def chat(request: ChatRequest):
         bool(refiner_result and refiner_result.was_refined),
     )
 
+    return messages, refiner_result
+
+
+@chat_router.post("/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest):
+    """Lightweight read-only chat with workspace context.
+
+    Gathers workspace context (file tree, project architecture, active file,
+    search results, web search) and sends to the LLM. No FSM, no database,
+    no tool execution.
+    """
     try:
+        messages, refiner_result = await _build_chat_messages(request)
         reply = await llm_client.chat_raw(
             messages,
             max_tokens=_get_active_max_tokens(),
@@ -388,6 +403,39 @@ async def chat(request: ChatRequest):
     except Exception as e:
         logger.exception("Chat call failed")
         return ChatResponse(reply=f"Error: {e}")
+
+
+@chat_router.post("/chat/stream")
+async def chat_stream_endpoint(request: ChatRequest):
+    """Chat with workspace context, streaming tokens via Server-Sent Events.
+
+    Identical context gathering to ``/chat`` but returns a text/event-stream
+    response so the client sees tokens as they arrive rather than waiting for
+    the full response.
+
+    Event format::
+
+        data: {"type": "token", "content": "..."}\n\n
+        data: {"type": "done"}\n\n
+        data: {"type": "error", "message": "..."}\n\n   # only on failure
+    """
+    async def generate() -> AsyncGenerator[str, None]:
+        try:
+            messages, _ = await _build_chat_messages(request)
+            async for token in llm_client.chat_stream(
+                messages, max_tokens=_get_active_max_tokens(),
+            ):
+                yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        except Exception as e:
+            logger.exception("Chat stream failed")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @chat_router.post("/predict")

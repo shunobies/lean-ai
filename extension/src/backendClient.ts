@@ -214,6 +214,97 @@ export class BackendClient {
         return data;
     }
 
+    /**
+     * Stream chat tokens from the backend via Server-Sent Events.
+     *
+     * Uses the raw http/https module (same as _postJsonNoTimeout) to avoid
+     * Node/undici's hardcoded 5-minute headersTimeout.
+     *
+     * @param onToken  Called for each token as it arrives. `isFirst` is true
+     *                 only for the very first token in the response.
+     * @returns        Promise that resolves when the stream is done, rejects on error.
+     */
+    chatStream(
+        message: string,
+        history: Array<{ role: string; content: string }>,
+        workspace: {
+            workspace_name?: string;
+            workspace_root?: string;
+            active_file?: string;
+            active_language?: string;
+            active_selection?: string;
+        } | undefined,
+        onToken: (token: string, isFirst: boolean) => void,
+    ): Promise<void> {
+        return new Promise((resolve, reject) => {
+            const fullUrl = new URL(`${this.baseUrl}/api/chat/stream`);
+            const isHttps = fullUrl.protocol === "https:";
+            const transport = isHttps ? https : http;
+
+            const body: Record<string, unknown> = { message, history };
+            if (workspace) { body.workspace = workspace; }
+            const postData = JSON.stringify(body);
+
+            const options: http.RequestOptions = {
+                hostname: fullUrl.hostname,
+                port: fullUrl.port || (isHttps ? "443" : "80"),
+                path: fullUrl.pathname,
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Content-Length": Buffer.byteLength(postData),
+                },
+                timeout: 0,
+            };
+
+            let buffer = "";
+            let isFirst = true;
+            let resolved = false;
+
+            const req = transport.request(options, (res) => {
+                if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
+                    reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+                    return;
+                }
+
+                res.on("data", (chunk: Buffer | string) => {
+                    buffer += chunk.toString();
+                    const lines = buffer.split("\n");
+                    buffer = lines.pop()!; // keep incomplete last line in buffer
+
+                    for (const line of lines) {
+                        if (!line.startsWith("data: ")) { continue; }
+                        try {
+                            const data = JSON.parse(line.slice(6)) as Record<string, unknown>;
+                            if (data["type"] === "token" && data["content"]) {
+                                onToken(data["content"] as string, isFirst);
+                                isFirst = false;
+                            } else if (data["type"] === "done") {
+                                resolved = true;
+                                resolve();
+                            } else if (data["type"] === "error") {
+                                reject(new Error((data["message"] as string) || "Stream error"));
+                            }
+                        } catch {
+                            // skip malformed SSE lines
+                        }
+                    }
+                });
+
+                res.on("end", () => {
+                    if (!resolved) { resolve(); }
+                });
+
+                res.on("error", (err) => { reject(err); });
+            });
+
+            req.on("socket", (socket) => { socket.setTimeout(0); });
+            req.on("error", (err) => { reject(err); });
+            req.write(postData);
+            req.end();
+        });
+    }
+
     // --- Session History Methods ---
 
     async listSessions(filters?: SessionFilters, limit?: number, offset?: number): Promise<SessionSummary[]> {

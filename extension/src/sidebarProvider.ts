@@ -402,7 +402,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    // ── Chat mode: direct LLM call with workspace context ────────────
+    // ── Chat mode: streaming LLM call with workspace context ─────────
 
     private async handleChatMessage(text: string): Promise<void> {
         const now = new Date().toISOString();
@@ -413,31 +413,28 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         // Gather workspace context from VSCode
         const workspace = this.getWorkspaceContext();
 
-        // Call the /api/chat endpoint — strip timestamps before sending
+        // Stream tokens from /api/chat/stream — strip timestamps before sending
         const historyForApi = this.chatHistory.slice(0, -1).map(({ role, content }) => ({ role, content }));
-        const result = await this.client.chat(text, historyForApi, workspace);
-        const { reply, tokens_per_second: tps, eval_count: evalCount } = result;
 
-        // Add assistant reply to history with timestamp
-        this.chatHistory.push({ role: "assistant", content: reply, timestamp: new Date().toISOString() });
+        let fullReply = "";
+        let isFirst = true;
+
+        await this.client.chatStream(text, historyForApi, workspace, (token) => {
+            fullReply += token;
+            this.postMessage({ type: "chatToken", content: token, isFirst });
+            isFirst = false;
+        });
+
+        // Stream completed — update history and notify webview
+        this.chatHistory.push({ role: "assistant", content: fullReply, timestamp: new Date().toISOString() });
 
         // Keep history manageable (last 40 messages = 20 exchanges)
         if (this.chatHistory.length > 40) {
             this.chatHistory = this.chatHistory.slice(-40);
         }
 
-        // Show the reply, then a small tok/s footer matching the agent workflow style
-        this.postMessage({ type: "thinking", show: false });
-        this.postMessage({ type: "reply", text: reply, cls: "msg-ai" });
-        if (tps != null) {
-            const countStr = evalCount != null ? ` · ${evalCount.toLocaleString()} tokens` : "";
-            this.postMessage({
-                type: "reply",
-                text: `*${tps} tok/s${countStr}*`,
-                cls: "msg-system",
-            });
-        }
-        this.postMessage({ type: "sendEnabled" });
+        // Send full text so the webview can apply markdown formatting
+        this.postMessage({ type: "chatDone", fullText: fullReply });
 
         // Persist conversation after each exchange
         await this.conversations.persistCurrentConversation(this.chatHistory);
