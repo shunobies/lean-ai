@@ -418,12 +418,21 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
 
         let fullReply = "";
         let isFirst = true;
+        let streamStartTime: number | null = null;
+        let tokenCount = 0;
 
         await this.client.chatStream(text, historyForApi, workspace, (token) => {
+            if (streamStartTime === null) { streamStartTime = Date.now(); }
+            tokenCount++;
             fullReply += token;
             this.postMessage({ type: "chatToken", content: token, isFirst });
             isFirst = false;
         });
+
+        // Compute tok/s from first-token to last-token (excludes context-gathering latency)
+        const tps = (streamStartTime !== null && tokenCount > 0)
+            ? Math.round(tokenCount / ((Date.now() - streamStartTime) / 1000) * 10) / 10
+            : null;
 
         // Stream completed — update history and notify webview
         this.chatHistory.push({ role: "assistant", content: fullReply, timestamp: new Date().toISOString() });
@@ -433,8 +442,8 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             this.chatHistory = this.chatHistory.slice(-40);
         }
 
-        // Send full text so the webview can apply markdown formatting
-        this.postMessage({ type: "chatDone", fullText: fullReply });
+        // Send full text so the webview can apply markdown formatting, plus tok/s metrics
+        this.postMessage({ type: "chatDone", fullText: fullReply, tps, evalCount: tokenCount });
 
         // Persist conversation after each exchange
         await this.conversations.persistCurrentConversation(this.chatHistory);

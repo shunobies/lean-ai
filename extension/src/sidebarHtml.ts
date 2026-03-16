@@ -987,6 +987,11 @@ export function getWebviewHtml(chatFontSize: number): string {
                     messagesEl.scrollTop = messagesEl.scrollHeight;
                 }
                 currentStreamDiv = null;
+                // tok/s footer (client-side computation — mirrors old blocking chat mode)
+                if (msg.tps != null) {
+                    const countStr = msg.evalCount != null ? ' · ' + msg.evalCount.toLocaleString() + ' tokens' : '';
+                    addMessage('*' + msg.tps + ' tok/s' + countStr + '*', 'msg-system');
+                }
                 sending = false;
                 sendBtn.disabled = false;
                 if (sendTimeout) { clearTimeout(sendTimeout); sendTimeout = null; }
