@@ -76,6 +76,13 @@ The expert model can be a different provider from the primary — for example, r
 
 When using OpenAI or Anthropic as the expert provider, the existing API key, temperature, context window, and max tokens settings for that provider are used. The relevant API key must be set even if the primary provider is Ollama.
 
+> **Package requirement:** The provider's Python SDK must be installed. If your primary provider is Ollama but you want Anthropic or OpenAI as the expert, install the matching extra:
+> ```bash
+> pip install -e ".[dev,anthropic]"   # for Anthropic expert
+> pip install -e ".[dev,openai]"      # for OpenAI expert
+> ```
+> Without this, the expert client will fail to initialise at startup and the server will log a warning.
+
 ### Ollama Expert Model
 
 | Variable | Default | Description |

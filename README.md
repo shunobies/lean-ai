@@ -135,6 +135,8 @@ LEAN_AI_OPENAI_EXPERT_MODEL=gpt-4o
 
 The expert model only runs for planning phases 3–6 (change design, risk assessment, plan assembly, verification) and the final validation fix retry. All codebase exploration, implementation, and routine tool calls use the primary local model.
 
+> **Note:** the cloud provider's Python SDK must be installed even when the primary provider is Ollama — run `pip install -e ".[dev,anthropic]"` or `pip install -e ".[dev,openai]"` as appropriate, then restart the server.
+
 See the [full configuration reference](docs/configuration.md) for all options.
 
 ## Documentation
