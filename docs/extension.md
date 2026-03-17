@@ -55,6 +55,52 @@ The Sessions view in the sidebar shows all workflow sessions with their status. 
 - **Abandon** — Discard the agent's branch
 - **Delete** — Remove the session entirely
 
+### Context Pills (Problems & Debug State)
+
+The chat input area shows two optional context pills that inject live IDE data into your messages before they are sent to the agent.
+
+**⚠ Problems (N)**
+
+Shows the total number of errors and warnings currently in the VSCode Problems tab. Click to toggle it on (highlighted). When active, every message you send — in chat mode or agent mode — has the full diagnostics list appended:
+
+```
+---
+Current Problems (VSCode diagnostics):
+Errors (2):
+  - src/api.ts:42:5 [typescript] Type 'string' is not assignable to type 'number'
+  - src/utils.ts:8:1 [eslint] Missing semicolon
+Warnings (1):
+  - src/app.ts:101:3 [typescript] 'any' type used
+---
+```
+
+The pill turns red when errors are present. The count updates live as diagnostics change.
+
+**● Debug State** (appears only during an active debug session)
+
+When a debug session is running, this pill becomes available. Toggle it on to include the current call stack (top 5 frames) and local variables from the top frame in your message:
+
+```
+---
+Active Debug Session: "Launch Program" (node)
+Stopped: exception — TypeError: Cannot read property 'foo' of undefined
+Call Stack:
+  [0] processData  src/utils.ts:42
+  [1] handleRequest  src/api.ts:15
+  [2] main  src/index.ts:8
+Local Variables (processData):
+  req = { method: 'GET', url: '/api/items' }
+  result = undefined
+  err = TypeError: Cannot read property 'foo' of undefined
+---
+```
+
+Variables are fetched via the Debug Adapter Protocol and truncated at 120 characters. The pill disappears when the debug session ends.
+
+**Automatic inclusion for `/fix`**
+
+The `/fix` command always appends errors and warnings from the **currently open file** regardless of the Problems pill state. This gives the agent concrete file:line data without requiring manual toggling.
+
 ### Model Switching
 
 The model dropdown in the chat panel lets you switch between configured providers and models at runtime. Ollama models are queried live, so pulling a new model makes it immediately available.
