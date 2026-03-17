@@ -538,9 +538,9 @@ export function getWebviewHtml(chatFontSize: number): string {
         <span class="metrics-badge" id="timeBadge" title="Elapsed time"></span>
     </div>
     <div class="header-right">
-        <button class="header-icon-btn" id="backBtn" title="Back to current chat" style="display:none;">&#8592;</button>
-        <button class="header-icon-btn" id="settingsBtn" title="Lean AI Settings">&#9881;</button>
-        <button class="header-icon-btn" id="searchBtn" title="Search conversations">&#128269;</button>
+        <button class="header-icon-btn" id="backBtn" title="Back to current chat" style="display:none;"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M7 1L1 8L7 15V10H15V6H7V1Z"/></svg></button>
+        <button class="header-icon-btn" id="settingsBtn" title="Lean AI Settings"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M9.1 4.4L8.6 2H7.4L6.9 4.4L6.2 4.7L4.2 3.4L3.4 4.2L4.7 6.2L4.4 6.9L2 7.4V8.6L4.4 9.1L4.7 9.8L3.4 11.8L4.2 12.6L6.2 11.3L6.9 11.6L7.4 14H8.6L9.1 11.6L9.8 11.3L11.8 12.6L12.6 11.8L11.3 9.8L11.6 9.1L14 8.6V7.4L11.6 6.9L11.3 6.2L12.6 4.2L11.8 3.4L9.8 4.7L9.1 4.4ZM8 10C6.9 10 6 9.1 6 8C6 6.9 6.9 6 8 6C9.1 6 10 6.9 10 8C10 9.1 9.1 10 8 10Z"/></svg></button>
+        <button class="header-icon-btn" id="searchBtn" title="Search conversations"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M11.7 10.3C12.5 9.3 13 8 13 6.5C13 2.9 10.1 0 6.5 0C2.9 0 0 2.9 0 6.5C0 10.1 2.9 13 6.5 13C8 13 9.3 12.5 10.3 11.7L14.3 15.7L15.7 14.3L11.7 10.3ZM6.5 11C4 11 2 9 2 6.5C2 4 4 2 6.5 2C9 2 11 4 11 6.5C11 9 9 11 6.5 11Z"/></svg></button>
         <button class="new-chat-btn" id="newChatBtn" title="New Chat">+</button>
     </div>
 </div>
