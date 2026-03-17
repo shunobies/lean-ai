@@ -195,7 +195,10 @@ async def _wait_for_approval(
     Returns the approved ExecutionPlan.
     """
     plan_md = plan_to_markdown(plan)
-    await ws_send(ws, "approval_required", {"plan": plan_md})
+    await ws_send(ws, "approval_required", {
+        "plan": plan_md,
+        "user_summary": plan.user_summary,
+    })
     revision_count = 0
 
     while True:
@@ -248,7 +251,10 @@ async def _wait_for_approval(
                 "review_feedback": feedback,
                 "revision_number": revision_count,
             })
-            await ws_send(ws, "approval_required", {"plan": plan_md})
+            await ws_send(ws, "approval_required", {
+                "plan": plan_md,
+                "user_summary": plan.user_summary,
+            })
             continue
 
         if msg.get("type") == "ping":

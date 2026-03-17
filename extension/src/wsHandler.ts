@@ -30,22 +30,34 @@ export function formatApprovalMessage(msg: Record<string, unknown>): string {
     const parts: string[] = [];
     parts.push("**Plan ready.** Approve to proceed, or type feedback to revise.\n");
 
+    const userSummary = msg.user_summary as string | undefined;
     const plan = msg.plan;
-    if (typeof plan === "string") {
-        // Backend sends plan as a markdown string
-        parts.push(plan);
-    } else if (plan && typeof plan === "object") {
-        // Legacy structured plan format
-        const p = plan as Record<string, unknown>;
-        if (p.steps && Array.isArray(p.steps)) {
-            parts.push("**Plan steps:**");
-            for (const step of p.steps) {
-                const s = step as Record<string, unknown>;
-                parts.push(`${s.order}. ${s.description}`);
-            }
+
+    if (userSummary) {
+        // Human-readable summary first, technical details in a toggle
+        parts.push(`<div class="plan-user-summary">${escapeHtml(userSummary)}</div>`);
+
+        let technicalContent = "";
+        if (typeof plan === "string") {
+            technicalContent = plan;
+        } else if (plan && typeof plan === "object") {
+            technicalContent = legacyPlanToText(plan as Record<string, unknown>);
         }
-        if (p.affected_files && Array.isArray(p.affected_files)) {
-            parts.push(`\n**Files:** ${(p.affected_files as string[]).join(", ")}`);
+
+        if (technicalContent) {
+            parts.push(
+                `<details class="plan-details">` +
+                `<summary>Show implementation steps</summary>` +
+                `<div class="plan-details-inner">${technicalContent}</div>` +
+                `</details>`,
+            );
+        }
+    } else {
+        // No summary — show full plan as before
+        if (typeof plan === "string") {
+            parts.push(plan);
+        } else if (plan && typeof plan === "object") {
+            parts.push(legacyPlanToText(plan as Record<string, unknown>));
         }
     }
 
@@ -54,6 +66,29 @@ export function formatApprovalMessage(msg: Record<string, unknown>): string {
     }
 
     return parts.join("\n");
+}
+
+function escapeHtml(text: string): string {
+    return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\n/g, "<br>");
+}
+
+function legacyPlanToText(p: Record<string, unknown>): string {
+    const lines: string[] = [];
+    if (p.steps && Array.isArray(p.steps)) {
+        lines.push("**Plan steps:**");
+        for (const step of p.steps) {
+            const s = step as Record<string, unknown>;
+            lines.push(`${s.order}. ${s.description}`);
+        }
+    }
+    if (p.affected_files && Array.isArray(p.affected_files)) {
+        lines.push(`\n**Files:** ${(p.affected_files as string[]).join(", ")}`);
+    }
+    return lines.join("\n");
 }
 
 export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
@@ -66,13 +101,17 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
             const stage = raw.stage as string;
             const status = raw.status as string;
             const summary = raw.summary as string | undefined;
+            const model = raw.model as string | undefined;
 
             if (status === "running") {
                 ctx.postMessage({ type: "stage", stage });
+                const thinkingText = model
+                    ? `${formatStageName(stage)}... (${model})`
+                    : `${formatStageName(stage)}...`;
                 ctx.postMessage({
                     type: "thinking",
                     show: true,
-                    text: `${formatStageName(stage)}...`,
+                    text: thinkingText,
                 });
                 // Hide approval buttons once implementation starts
                 if (stage === "IMPLEMENTATION" || stage === "FINALIZATION") {

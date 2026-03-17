@@ -340,6 +340,34 @@ export function getWebviewHtml(chatFontSize: number): string {
     }
     .tool-approval-card .btn-deny:hover { opacity: 0.85; }
 
+    /* Plan approval: human-readable summary + collapsible technical details */
+    .plan-user-summary {
+        line-height: 1.55;
+        margin-bottom: 10px;
+        white-space: pre-wrap;
+    }
+    .plan-details {
+        margin-top: 6px;
+        border-top: 1px solid var(--vscode-panel-border);
+        padding-top: 6px;
+    }
+    .plan-details > summary {
+        cursor: pointer;
+        font-size: 11px;
+        opacity: 0.65;
+        user-select: none;
+        padding: 2px 0;
+        list-style: disclosure-closed;
+    }
+    .plan-details[open] > summary {
+        list-style: disclosure-open;
+        margin-bottom: 6px;
+    }
+    .plan-details-inner {
+        font-size: 11px;
+        opacity: 0.75;
+    }
+
     .approval-bar {
         display: none;
         padding: 10px 12px;

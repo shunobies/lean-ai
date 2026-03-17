@@ -22,6 +22,12 @@ import type { WsHandlerContext } from "./wsHandler";
 import { SettingsPanel } from "./settingsPanel";
 import { BACKEND_SETTING_MAP, resolveEnvFilePath, writeEnvSetting } from "./settingsSync";
 import { restartBackend } from "./backendProcess";
+import {
+    notifyApprovalNeeded,
+    notifyComplete,
+    notifyError,
+    notifyToolApprovalNeeded,
+} from "./notifications";
 import WebSocket from "ws";
 
 export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
@@ -532,6 +538,27 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     }
 
     private handleWsMessage(msg: WSMessage): void {
+        // Trigger OS/badge notifications for key events before the handler runs
+        const raw = msg as unknown as Record<string, unknown>;
+        switch (raw.type) {
+            case "approval_required":
+                notifyApprovalNeeded();
+                break;
+            case "tool_approval_required":
+                notifyToolApprovalNeeded();
+                break;
+            case "complete": {
+                const summary = (raw.summary as string | undefined) ?? "Task complete";
+                notifyComplete(summary);
+                break;
+            }
+            case "error":
+                if (!(raw.recoverable as boolean | undefined)) {
+                    notifyError((raw.message as string | undefined) ?? "Unknown error");
+                }
+                break;
+        }
+
         const ctx: WsHandlerContext = {
             postMessage: (m) => this.postMessage(m),
             closeWebSocket: () => this.closeWebSocket(),

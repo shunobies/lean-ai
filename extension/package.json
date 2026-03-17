@@ -141,6 +141,11 @@
           "default": true,
           "markdownDescription": "Enable Copilot-style inline predictions powered by Ollama. Configure the model with `lean-ai.inlineModel`."
         },
+        "lean-ai.enableOsNotifications": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Send OS-level notifications when the plan is ready for review, a command needs approval, or a task completes. Requires `notify-send` on Linux, `osascript` on macOS, or `mshta` on Windows. Disable if these tools are unavailable."
+        },
         "lean-ai.autoStartBackend": {
           "type": "boolean",
           "default": true,

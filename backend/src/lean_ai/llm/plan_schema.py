@@ -62,6 +62,13 @@ class ExecutionPlan(BaseModel):
     scope: str
     """Brief summary of what the plan accomplishes and what is out of scope."""
 
+    user_summary: str = ""
+    """Plain-English description (up to ~1000 words) of what this plan will accomplish,
+    the key architectural decisions made, why specific structures are being changed,
+    and any design trade-offs. Written for the user to make an informed approval
+    decision — covers: problem being solved, approach taken, what load-bearing
+    structures are being touched and why."""
+
     naming_conventions: str = ""
     """Naming conventions observed in existing code: variable casing,
     function/method naming, class naming, file naming patterns,

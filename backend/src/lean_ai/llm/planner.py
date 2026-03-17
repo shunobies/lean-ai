@@ -56,16 +56,34 @@ def _save_debug_phase(
     )
 
 
-async def _send_stage(ws: WebSocket | None, summary: str) -> None:
-    """Send a planning stage_status message if WebSocket is available."""
+async def _send_stage(
+    ws: WebSocket | None,
+    summary: str,
+    model: str | None = None,
+) -> None:
+    """Send a planning stage_status running message if WebSocket is available."""
     if ws is None:
         return
     from lean_ai.workflow.ws_handler import ws_send
-    await ws_send(ws, "stage_status", {
-        "stage": "planning",
-        "status": "running",
-        "summary": summary,
-    })
+    payload: dict = {"stage": "planning", "status": "running", "summary": summary}
+    if model:
+        payload["model"] = model
+    await ws_send(ws, "stage_status", payload)
+
+
+async def _send_stage_done(
+    ws: WebSocket | None,
+    summary: str,
+    model: str | None = None,
+) -> None:
+    """Send a planning stage_status done message if WebSocket is available."""
+    if ws is None:
+        return
+    from lean_ai.workflow.ws_handler import ws_send
+    payload: dict = {"stage": "planning", "status": "done", "summary": summary}
+    if model:
+        payload["model"] = model
+    await ws_send(ws, "stage_status", payload)
 
 
 async def _extract_missing_files(
@@ -195,7 +213,7 @@ async def create_plan(
     phase_timings: dict[str, float] = {}
 
     # Phase 1: Scope Analysis
-    await _send_stage(ws, "Phase 1: Analyzing scope...")
+    await _send_stage(ws, "Phase 1: Analyzing scope...", model=llm_client.model_name)
     logger.info("Planning Phase 1: Scope analysis")
     t0 = time.monotonic()
     scope = await llm_client.chat_raw(
@@ -231,9 +249,13 @@ async def create_plan(
     _save_debug_phase(
         repo_root, session_id, "phase_1_scope", scope, phase_timings["phase_1_scope"],
     )
+    await _send_stage_done(ws, "Scope analysis complete", model=llm_client.model_name)
 
     # Phase 2: File Identification + Content Reading (with tool access)
-    await _send_stage(ws, "Phase 2: Exploring codebase and reading files...")
+    await _send_stage(
+        ws, "Phase 2: Exploring codebase and reading files...",
+        model=llm_client.model_name,
+    )
     logger.info("Planning Phase 2: File identification and reading")
     t0 = time.monotonic()
     phase2_messages = [
@@ -357,6 +379,9 @@ async def create_plan(
         repo_root, session_id, "phase_2_file_identification",
         file_identification, phase_timings["phase_2_file_identification"],
     )
+    await _send_stage_done(
+        ws, "Codebase exploration complete", model=llm_client.model_name,
+    )
 
     # Pass exploration results directly to downstream phases
     file_summary = file_identification
@@ -374,14 +399,17 @@ async def create_plan(
     if expert_llm_client:
         await _send_stage(
             ws,
-            f"Switching to expert model ({expert_llm_client._provider.model_name}) "
+            f"Switching to expert model ({expert_llm_client.model_name}) "
             f"for design phases...",
+            model=expert_llm_client.model_name,
         )
         logger.info(
             "Switching to expert model for phases 3-6: %s",
-            expert_llm_client._provider.model_name,
+            expert_llm_client.model_name,
         )
-    await _send_stage(ws, "Phase 3: Designing specific changes...")
+    await _send_stage(
+        ws, "Phase 3: Designing specific changes...", model=expert.model_name,
+    )
     logger.info("Planning Phase 3: Change design")
     t0 = time.monotonic()
     change_design = await expert.chat_raw(
@@ -427,9 +455,10 @@ async def create_plan(
         repo_root, session_id, "phase_3_change_design",
         change_design, phase_timings["phase_3_change_design"],
     )
+    await _send_stage_done(ws, "Change design complete", model=expert.model_name)
 
     # Phase 4: Risk Assessment
-    await _send_stage(ws, "Phase 4: Assessing risks...")
+    await _send_stage(ws, "Phase 4: Assessing risks...", model=expert.model_name)
     logger.info("Planning Phase 4: Risk assessment")
     t0 = time.monotonic()
     risks = await expert.chat_raw(
@@ -467,6 +496,7 @@ async def create_plan(
         repo_root, session_id, "phase_4_risks",
         risks, phase_timings["phase_4_risks"],
     )
+    await _send_stage_done(ws, "Risk assessment complete", model=expert.model_name)
 
     # Extract missing files from Phase 4 for explicit injection into Phase 5
     missing_files = await _extract_missing_files(risks, expert)
@@ -474,7 +504,9 @@ async def create_plan(
         logger.info("Extracted %d chars of missing files from Phase 4", len(missing_files))
 
     # Phase 5: Structured Plan Assembly
-    await _send_stage(ws, "Phase 5: Assembling structured plan...")
+    await _send_stage(
+        ws, "Phase 5: Assembling structured plan...", model=expert.model_name,
+    )
     logger.info("Planning Phase 5: Structured plan assembly")
     t0 = time.monotonic()
     plan = await expert.chat_structured(
@@ -587,7 +619,17 @@ async def create_plan(
                     "configuration or bootstrap file\n"
                     "- If the task requires infrastructure that was identified as "
                     "missing during exploration (auth scaffolding, base templates, "
-                    "etc.), those setup steps come FIRST in the plan"
+                    "etc.), those setup steps come FIRST in the plan\n\n"
+                    "USER SUMMARY — populate the `user_summary` field with up to "
+                    "1000 words of plain English explaining: (1) what problem this "
+                    "plan solves and the overall approach, (2) why specific "
+                    "architectural decisions were made — what existing structures "
+                    "are being extended and why, (3) any design trade-offs or "
+                    "assumptions the user should be aware of before approving. "
+                    "Write for a developer who may not know the codebase deeply but "
+                    "needs to understand what load-bearing walls are being touched "
+                    "and why. Do NOT list file paths or step numbers — describe "
+                    "intent and reasoning in prose."
                 ),
             },
         ],
@@ -633,13 +675,22 @@ async def create_plan(
         plan_to_markdown(plan), phase_timings["phase_5_plan_assembly"],
     )
 
+    await _send_stage_done(
+        ws,
+        f"Plan assembled — {len(plan.steps)} steps across "
+        f"{len(plan.affected_files)} file(s)",
+        model=expert.model_name,
+    )
+
     # Phase 6: Verification (only when test_command is available)
     # Reviews the complete implementation plan and appends test file
     # creation + test execution steps at the end.  Tests should only
     # run after all implementation files are created — running them
     # mid-plan on an incomplete codebase would cause premature failures.
     if test_command:
-        await _send_stage(ws, "Phase 6: Adding verification steps...")
+        await _send_stage(
+            ws, "Phase 6: Adding verification steps...", model=expert.model_name,
+        )
         logger.info("Planning Phase 6: Verification step generation")
         t0 = time.monotonic()
 
@@ -728,6 +779,12 @@ async def create_plan(
             verification.model_dump_json(indent=2),
             phase_timings["phase_6_verification"],
         )
+        test_steps = len(verification.steps)
+        await _send_stage_done(
+            ws,
+            f"Verification steps added — {test_steps} test step(s)",
+            model=expert.model_name,
+        )
 
     phase_timings["total"] = time.monotonic() - plan_start
 
@@ -780,7 +837,9 @@ async def _revise_plan(
         if expert_llm_client
         else settings.ollama_max_tokens
     )
-    await _send_stage(ws, "Revising plan based on feedback...")
+    await _send_stage(
+        ws, "Revising plan based on feedback...", model=expert.model_name,
+    )
     logger.info("Plan revision")
     plan = await expert.chat_structured(
         messages=[

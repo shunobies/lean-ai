@@ -17,6 +17,7 @@ import { SessionDetailProvider } from "./sessionDetailProvider";
 import { BackendClient } from "./backendClient";
 import { startBackend, stopBackend, restartBackend } from "./backendProcess";
 import { SettingsPanel } from "./settingsPanel";
+import { initNotifications } from "./notifications";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     console.log("Lean AI extension activating...");
@@ -59,9 +60,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // Register Session Tree View Provider
     const sessionTreeProvider = new SessionTreeProvider();
-    context.subscriptions.push(
-        vscode.window.registerTreeDataProvider("lean-ai.sessionsView", sessionTreeProvider),
-    );
+    const sessionsTreeView = vscode.window.createTreeView("lean-ai.sessionsView", {
+        treeDataProvider: sessionTreeProvider,
+    });
+    context.subscriptions.push(sessionsTreeView);
+    initNotifications(sessionsTreeView);
 
     // Session detail webview provider
     const sessionDetailProvider = new SessionDetailProvider();
