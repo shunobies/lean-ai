@@ -164,14 +164,24 @@ def make_tool_executor(repo_root: str, ws: WebSocket, session_id: str = ""):
             tail_lines = output.splitlines()[-40:]
             tail_block = "\n".join(tail_lines)
 
-            status = "PASSED" if result.success else "FAILED"
-            return (
-                f"{status} — full output saved to {out_path} "
-                f"({total_lines} lines)\n"
-                f"Use read_file to review the full output. "
-                f"Last {len(tail_lines)} lines:\n\n"
-                f"{tail_block}"
-            )
+            if result.success:
+                return (
+                    f"PASSED — full output saved to {out_path} "
+                    f"({total_lines} lines)\n"
+                    f"Last {len(tail_lines)} lines:\n\n"
+                    f"{tail_block}"
+                )
+            else:
+                return (
+                    f"FAILED — full output saved to {out_path} "
+                    f"({total_lines} lines)\n"
+                    f"REQUIRED: You MUST call read_file on '{out_path}' before "
+                    f"diagnosing or fixing this failure. "
+                    f"The tail preview below may omit stack traces and assertion "
+                    f"details that appear earlier in the output.\n"
+                    f"Last {len(tail_lines)} lines (preview only):\n\n"
+                    f"{tail_block}"
+                )
 
         elif name == "list_directory":
             target = Path(repo_root) / arguments.get("path", "")

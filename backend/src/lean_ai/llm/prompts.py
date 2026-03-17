@@ -73,7 +73,9 @@ surrounding context for uniqueness.
 If edit_file fails, re-read the file before retrying — the content changes \
 after each successful edit.
 5. For new files, use create_file with the complete file content.
-6. Verify when appropriate — run_tests or run_lint after significant changes.
+6. Verify when appropriate — run_tests or run_lint after significant changes. \
+If the result reports a saved output file path, call read_file on that path \
+before diagnosing or fixing the failure — the inline preview may omit details.
 7. Adapt to what you discover — if the codebase is structured differently \
 than expected, adjust your approach.
 
@@ -126,7 +128,8 @@ if needed.
 If edit_file fails, re-read the file before retrying.
 4. After making changes, run tests and/or lint if a command is known \
 to verify the fix.
-5. If tests or lint fail, read the output, fix the problem, and re-run.
+5. If tests or lint fail and the result references a saved output file, call \
+read_file on that file path first — then fix the problem and re-run.
 6. No stubs, no TODOs, no placeholder implementations.
 7. When done, call task_complete with a short summary of what you changed \
 and why. This is the only way to signal completion.
