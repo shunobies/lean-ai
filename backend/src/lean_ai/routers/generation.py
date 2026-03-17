@@ -147,6 +147,10 @@ async def generate_project_context_endpoint(request: GenerateProjectContextReque
             status_code=501,
             detail="Context generation module not yet available",
         )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @generation_router.post("/generate-framework-guide", response_model=GenerateFrameworkGuideResponse)

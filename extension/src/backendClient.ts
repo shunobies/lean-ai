@@ -78,10 +78,24 @@ export class BackendClient {
 
             const req = transport.request(options, (res) => {
                 let data = "";
+                let streamError: Error | null = null;
+
                 res.on("data", (chunk: Buffer | string) => {
                     data += chunk.toString();
                 });
+
+                res.on("error", (err: Error) => {
+                    // Capture the error — 'end' may still fire after this.
+                    // If 'end' never fires, we reject in the fallback below.
+                    streamError = err;
+                    reject(new Error(`Response stream error: ${err.message}`));
+                });
+
                 res.on("end", () => {
+                    if (streamError) {
+                        // Already rejected via the error handler above.
+                        return;
+                    }
                     if (
                         res.statusCode &&
                         res.statusCode >= 200 &&

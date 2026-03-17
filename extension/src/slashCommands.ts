@@ -114,17 +114,33 @@ export async function handleInitCommand(
     // Both are independent LLM-heavy operations — running them concurrently
     // leverages Ollama's parallel request support for significant speedup.
     const startTime = Date.now();
-    const ticker = setInterval(() => {
+    let ctxDone = false;
+    let guideDone = false;
+
+    const formatElapsed = (): string => {
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
         const mins = Math.floor(elapsed / 60);
         const secs = elapsed % 60;
-        const timeStr = mins > 0
+        return mins > 0
             ? `${mins}m ${secs.toString().padStart(2, "0")}s`
             : `${secs}s`;
+    };
+
+    const tickerStatus = (): string => {
+        if (ctxDone && !guideDone) {
+            return "Project context ✓ — generating framework guide";
+        }
+        if (!ctxDone && guideDone) {
+            return "Framework guide ✓ — generating project context";
+        }
+        return "Generating project context + framework guide";
+    };
+
+    const ticker = setInterval(() => {
         ctx.postMessage({
             type: "thinking",
             show: true,
-            text: `Generating project context + framework guide... (${timeStr})`,
+            text: `${tickerStatus()}... (${formatElapsed()})`,
         });
     }, 5_000);
 
@@ -134,9 +150,18 @@ export async function handleInitCommand(
         text: "Generating project context + framework guide...",
     });
 
+    // Wrap each promise to track completion for status updates.
+    const ctxPromise = ctx.client.generateProjectContext(repoRoot, force)
+        .then((result) => { ctxDone = true; return result; })
+        .catch((err) => { ctxDone = true; throw err; });
+
+    const guidePromise = ctx.client.generateFrameworkGuide(repoRoot, force)
+        .then((result) => { guideDone = true; return result; })
+        .catch((err) => { guideDone = true; throw err; });
+
     const [ctxSettled, guideSettled] = await Promise.allSettled([
-        ctx.client.generateProjectContext(repoRoot, force),
-        ctx.client.generateFrameworkGuide(repoRoot, force),
+        ctxPromise,
+        guidePromise,
     ]);
 
     clearInterval(ticker);
