@@ -9,7 +9,7 @@ setup:
   type: command
   # django-admin startproject creates the package inside the project dir.
   # Runner creates parent_dir/{project_name}/ first, then runs the command inside it.
-  command: 'python3 -m pip install django --quiet && python3 -m django startproject {package_name} .'
+  command: 'python3 -m venv .venv && .venv/bin/pip install django --quiet && .venv/bin/django-admin startproject {package_name} .'
   pre_create_project_dir: true
   requirements:
     - django-admin

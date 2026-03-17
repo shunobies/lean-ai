@@ -203,7 +203,10 @@ async def scaffold_project(request: ScaffoldRequest):
     result = await runner.run(template, request.project_name, request.parent_dir)
 
     if not result.success:
-        raise HTTPException(status_code=500, detail=result.error or "Scaffold failed")
+        error_msg = result.error or "Scaffold failed"
+        if result.command_output:
+            error_msg = f"{error_msg}\n\nCommand output:\n{result.command_output.strip()}"
+        raise HTTPException(status_code=500, detail=error_msg)
 
     return ScaffoldResponse(
         scaffold_name=result.scaffold_name,
