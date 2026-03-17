@@ -572,35 +572,52 @@ async def _run_post_validation(
                 "success": False, "output": str(exc), "full_output": str(exc),
             }
 
-    # ── Reporting passes (always report status) ──
-    for label, command, runner in [
-        ("lint", commands["lint"], shell.run_lint),
-        ("test", commands["test"], shell.run_tests),
-    ]:
-        if not command:
-            continue
-        try:
-            result = await runner(command=command, repo_root=repo_root)
-            results[label] = {
-                "success": result.success,
-                "output": result.output[:2000] if result.output else "",
-                "full_output": result.output or "",
-            }
-            await ws_send(ws, "test_result", {
-                "command": command,
-                "passed": result.success,
-                "output": result.output[:2000] if result.output else "",
-            })
-        except Exception as exc:
-            logger.warning("Post-validation %s error: %s", label, exc)
-            results[label] = {
-                "success": False, "output": str(exc), "full_output": str(exc),
-            }
-            await ws_send(ws, "test_result", {
-                "command": command,
-                "passed": False,
-                "output": str(exc),
-            })
+    # ── Reporting passes (lint + test in parallel — both read-only) ──
+    reporting_steps = [
+        (label, cmd, runner)
+        for label, cmd, runner in [
+            ("lint", commands["lint"], shell.run_lint),
+            ("test", commands["test"], shell.run_tests),
+        ]
+        if cmd
+    ]
+
+    if reporting_steps:
+        async def _run_report(label, command, runner):
+            try:
+                result = await runner(command=command, repo_root=repo_root)
+                return label, command, result, None
+            except Exception as exc:
+                return label, command, None, exc
+
+        report_results = await asyncio.gather(
+            *[_run_report(lbl, cmd, fn) for lbl, cmd, fn in reporting_steps],
+        )
+
+        for label, command, result, exc in report_results:
+            if exc is not None:
+                logger.warning("Post-validation %s error: %s", label, exc)
+                results[label] = {
+                    "success": False,
+                    "output": str(exc),
+                    "full_output": str(exc),
+                }
+                await ws_send(ws, "test_result", {
+                    "command": command,
+                    "passed": False,
+                    "output": str(exc),
+                })
+            else:
+                results[label] = {
+                    "success": result.success,
+                    "output": result.output[:2000] if result.output else "",
+                    "full_output": result.output or "",
+                }
+                await ws_send(ws, "test_result", {
+                    "command": command,
+                    "passed": result.success,
+                    "output": result.output[:2000] if result.output else "",
+                })
 
     # ── Summary ──
     passed = sum(1 for r in results.values() if r["success"])
