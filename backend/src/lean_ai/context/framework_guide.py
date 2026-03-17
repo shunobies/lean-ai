@@ -206,32 +206,19 @@ def _deduplicate_sections_mechanical(guide: str) -> str:
         return guide
 
 
-async def _deduplicate_sections(
-    guide: str,
-    llm_client: LLMClient,
-) -> str:
+def _deduplicate_sections(guide: str) -> str:
     """Remove duplicate or overlapping ``##`` sections.
 
     Two-pass approach:
-    1. LLM-based semantic dedup (catches near-duplicates with different
-       wording).
-    2. Mechanical dedup on the LLM result (catches exact heading matches
-       the LLM missed).
-
-    Always runs both passes — the LLM may remove some duplicates but
-    miss others, and the old conditional logic only ran mechanical dedup
-    when the LLM changed nothing at all.
+    1. Mechanical reorganization (merge same headings, drop exact-match
+       lines).
+    2. Mechanical heading-normalization dedup (catches parenthetical
+       qualifier variants like ``## Heading (Updated)``).
     """
-    from lean_ai.context.dedup import deduplicate_sections_llm
+    from lean_ai.context.dedup import reorganize_sections
 
-    result = await deduplicate_sections_llm(
-        guide, llm_client,
-        log_prefix="Framework guide",
-        protected_headings=_REQUIRED_HEADINGS,
-    )
+    result = reorganize_sections(guide, log_prefix="Framework guide")
 
-    # Always run mechanical dedup on the result — the LLM may have
-    # removed some duplicates but missed exact heading matches.
     mechanical = _deduplicate_sections_mechanical(result)
     if mechanical != result:
         return mechanical
@@ -1051,15 +1038,8 @@ async def generate_framework_guide(
     # Step 5a: Repair unfenced code blocks
     guide = _repair_code_blocks(guide)
 
-    # Step 5b: Two-pass dedup (LLM semantic + mechanical).
-    # Required headings are protected from removal to prevent false positives.
-    try:
-        guide = await _deduplicate_sections(guide, llm_client)
-    except Exception as exc:
-        logger.warning(
-            "Framework guide: dedup failed (non-blocking): %s", exc,
-        )
-        guide = _deduplicate_sections_mechanical(guide)
+    # Step 5b: Two-pass dedup (reorganize + mechanical heading normalization).
+    guide = _deduplicate_sections(guide)
 
     # Step 5c: Validate file references against project tree
     # (runs before renumber because LLM surgical fixes can change text)

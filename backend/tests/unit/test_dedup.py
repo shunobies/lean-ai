@@ -1,109 +1,109 @@
-"""Tests for shared LLM-based section deduplication."""
+"""Tests for mechanical section reorganization."""
 
-from unittest.mock import AsyncMock
-
-import pytest
-
-from lean_ai.context.dedup import deduplicate_sections_llm
+from lean_ai.context.dedup import reorganize_sections
 
 
-class TestDeduplicateSectionsLlm:
-    @pytest.mark.asyncio
-    async def test_removes_llm_identified_duplicates(self):
+class TestReorganizeSections:
+    def test_merges_duplicate_headings(self):
         text = (
             "## Architecture\n"
             "MVC pattern with controllers.\n\n"
             "## Data Flow\n"
             "Request flows through middleware.\n\n"
-            "## Architecture Overview\n"
+            "## Architecture\n"
             "The system uses MVC architecture."
         )
-        mock_llm = AsyncMock()
-        mock_llm.chat_raw = AsyncMock(return_value="3")
+        result = reorganize_sections(text)
+        # Only one Architecture heading
+        assert result.count("## Architecture") == 1
+        assert "MVC pattern with controllers." in result
+        assert "The system uses MVC architecture." in result
+        assert "## Data Flow" in result
 
-        result = await deduplicate_sections_llm(text, mock_llm)
-        assert "## Architecture\n" in result
-        assert "## Data Flow\n" in result
-        assert "## Architecture Overview" not in result
-
-    @pytest.mark.asyncio
-    async def test_none_response_preserves_all(self):
+    def test_drops_exact_duplicate_lines(self):
         text = (
-            "## Section A\n"
-            "Content A\n\n"
-            "## Section B\n"
-            "Content B"
+            "## Architecture\n"
+            "MVC pattern.\n"
+            "Uses controllers.\n\n"
+            "## Architecture\n"
+            "MVC pattern.\n"
+            "Has views too."
         )
-        mock_llm = AsyncMock()
-        mock_llm.chat_raw = AsyncMock(return_value="NONE")
+        result = reorganize_sections(text)
+        # "MVC pattern." appears only once
+        assert result.count("MVC pattern.") == 1
+        assert "Uses controllers." in result
+        assert "Has views too." in result
 
-        result = await deduplicate_sections_llm(text, mock_llm)
-        assert result == text
+    def test_preserves_preamble(self):
+        text = (
+            "# Project Context\n"
+            "Some intro text.\n\n"
+            "## Section A\n"
+            "Content A"
+        )
+        result = reorganize_sections(text)
+        assert result.startswith("# Project Context\n")
+        assert "Some intro text." in result
+        assert "## Section A" in result
 
-    @pytest.mark.asyncio
-    async def test_llm_failure_returns_unchanged(self):
-        text = "## Section\nContent"
-        mock_llm = AsyncMock()
-        mock_llm.chat_raw = AsyncMock(side_effect=Exception("LLM down"))
+    def test_preserves_first_occurrence_order(self):
+        text = (
+            "## Bravo\n"
+            "B content\n\n"
+            "## Alpha\n"
+            "A content\n\n"
+            "## Bravo\n"
+            "More B content"
+        )
+        result = reorganize_sections(text)
+        bravo_pos = result.index("## Bravo")
+        alpha_pos = result.index("## Alpha")
+        assert bravo_pos < alpha_pos
 
-        result = await deduplicate_sections_llm(text, mock_llm)
-        assert result == text
-
-    @pytest.mark.asyncio
-    async def test_single_section_skips_llm(self):
-        """Document with fewer than 2 sections should skip LLM call."""
+    def test_single_section_unchanged(self):
         text = "## Only Section\nContent here."
-        mock_llm = AsyncMock()
-        mock_llm.chat_raw = AsyncMock(return_value="NONE")
+        result = reorganize_sections(text)
+        assert "## Only Section" in result
+        assert "Content here." in result
 
-        result = await deduplicate_sections_llm(text, mock_llm)
-        assert result == text
-        mock_llm.chat_raw.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_custom_log_prefix(self):
-        """Ensure log_prefix parameter is accepted without error."""
-        text = "## A\nContent A\n\n## B\nContent B"
-        mock_llm = AsyncMock()
-        mock_llm.chat_raw = AsyncMock(return_value="NONE")
-
-        result = await deduplicate_sections_llm(
-            text, mock_llm, log_prefix="Project context",
-        )
+    def test_no_headings_unchanged(self):
+        text = "Just some text\nwith no headings."
+        result = reorganize_sections(text)
         assert result == text
 
-    @pytest.mark.asyncio
-    async def test_no_valid_numbers_returns_unchanged(self):
-        """LLM response with no parseable numbers returns original."""
-        text = (
-            "## Section A\n"
-            "Content A\n\n"
-            "## Section B\n"
-            "Content B"
-        )
-        mock_llm = AsyncMock()
-        mock_llm.chat_raw = AsyncMock(return_value="looks fine to me!")
-
-        result = await deduplicate_sections_llm(text, mock_llm)
-        assert result == text
-
-    @pytest.mark.asyncio
-    async def test_collapses_blank_lines(self):
-        """After removing a section, triple+ blank lines are collapsed."""
+    def test_collapses_blank_lines(self):
         text = (
             "## Keep\n"
             "Content\n\n\n\n"
-            "## Remove\n"
-            "Duplicate\n\n\n\n"
             "## Also Keep\n"
             "More content"
         )
-        mock_llm = AsyncMock()
-        mock_llm.chat_raw = AsyncMock(return_value="2")
-
-        result = await deduplicate_sections_llm(text, mock_llm)
-        assert "## Remove" not in result
+        result = reorganize_sections(text)
+        assert "\n\n\n\n" not in result
         assert "## Keep" in result
         assert "## Also Keep" in result
-        # No runs of 4+ newlines (3+ blank lines)
-        assert "\n\n\n\n" not in result
+
+    def test_custom_log_prefix(self):
+        """Ensure log_prefix parameter is accepted without error."""
+        text = "## A\nContent A\n\n## B\nContent B"
+        result = reorganize_sections(text, log_prefix="Project context")
+        assert result == text
+
+    def test_three_occurrences_merged(self):
+        text = (
+            "## X\n"
+            "First.\n\n"
+            "## Y\n"
+            "Middle.\n\n"
+            "## X\n"
+            "Second.\n\n"
+            "## X\n"
+            "Third."
+        )
+        result = reorganize_sections(text)
+        assert result.count("## X") == 1
+        assert "First." in result
+        assert "Second." in result
+        assert "Third." in result
+        assert "## Y" in result

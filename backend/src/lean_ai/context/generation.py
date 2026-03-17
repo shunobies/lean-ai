@@ -629,15 +629,11 @@ async def generate_project_context(
         except Exception as exc:
             logger.warning("Additive expansion failed (non-fatal): %s", exc)
 
-    # ── LLM-based semantic dedup (catches reformulated duplicates) ──
-    try:
-        from lean_ai.context.dedup import deduplicate_sections_llm
+    # ── Mechanical section reorganization (merge same headings, drop
+    #    exact-match lines) ──
+    from lean_ai.context.dedup import reorganize_sections
 
-        content = await deduplicate_sections_llm(
-            content, llm_client, log_prefix="Project context",
-        )
-    except Exception as exc:
-        logger.warning("LLM-based dedup failed (non-fatal): %s", exc)
+    content = reorganize_sections(content, log_prefix="Project context")
 
     logger.info("Project context generated: %d chars", len(content))
     return content

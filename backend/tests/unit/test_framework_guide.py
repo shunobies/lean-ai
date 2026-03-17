@@ -922,13 +922,12 @@ class TestDeduplicateSectionsMechanical:
 
 
 # ---------------------------------------------------------------------------
-# _deduplicate_sections (LLM-based)
+# _deduplicate_sections (mechanical reorganization + heading normalization)
 # ---------------------------------------------------------------------------
 
 
 class TestDeduplicateSections:
-    @pytest.mark.asyncio
-    async def test_llm_identifies_duplicates(self):
+    def test_merges_duplicate_headings(self):
         text = (
             "## Framework Architecture\n"
             "Laravel follows MVC with controllers and models.\n\n"
@@ -937,118 +936,71 @@ class TestDeduplicateSections:
             "## Framework Architecture\n"
             "The architecture is based on MVC pattern."
         )
-        mock_llm = AsyncMock()
-        mock_llm.chat_raw = AsyncMock(return_value="3")
-
-        result = await _deduplicate_sections(text, mock_llm)
+        result = _deduplicate_sections(text)
         assert result.count("## Framework Architecture") == 1
         assert "Laravel follows MVC" in result
         assert "## Component Relationships" in result
-        assert "The architecture is based on" not in result
+        # Merged content is kept (not dropped)
+        assert "MVC pattern" in result
 
-    @pytest.mark.asyncio
-    async def test_llm_returns_none(self):
+    def test_no_duplicates_unchanged(self):
         text = (
             "## Framework Architecture\n"
             "Content A\n\n"
             "## Component Relationships\n"
             "Content B"
         )
-        mock_llm = AsyncMock()
-        mock_llm.chat_raw = AsyncMock(return_value="NONE")
-
-        result = await _deduplicate_sections(text, mock_llm)
+        result = _deduplicate_sections(text)
         assert result == text
 
-    @pytest.mark.asyncio
-    async def test_llm_failure_falls_back_to_mechanical(self):
+    def test_exact_duplicate_lines_dropped(self):
         text = (
             "## Architecture\n"
             "First version\n\n"
             "## Architecture\n"
+            "First version\n"
             "Second version"
         )
-        mock_llm = AsyncMock()
-        mock_llm.chat_raw = AsyncMock(side_effect=Exception("LLM down"))
-
-        result = await _deduplicate_sections(text, mock_llm)
-        # Mechanical fallback catches exact heading match
+        result = _deduplicate_sections(text)
         assert result.count("## Architecture") == 1
-        assert "First version" in result
-        assert "Second version" not in result
+        assert result.count("First version") == 1
+        assert "Second version" in result
 
-    @pytest.mark.asyncio
-    async def test_llm_unparseable_falls_back(self):
-        text = (
-            "## Section A\n"
-            "Content A\n\n"
-            "## Section A\n"
-            "Content A again"
-        )
-        mock_llm = AsyncMock()
-        mock_llm.chat_raw = AsyncMock(
-            return_value="I think sections look fine",
-        )
-
-        result = await _deduplicate_sections(text, mock_llm)
-        # Unparseable → mechanical fallback catches exact match
-        assert result.count("## Section A") == 1
-
-    @pytest.mark.asyncio
-    async def test_fewer_than_two_sections_skips_llm(self):
+    def test_single_section_unchanged(self):
         text = "## Only One Section\nSome content here."
-        mock_llm = AsyncMock()
+        result = _deduplicate_sections(text)
+        assert "## Only One Section" in result
+        assert "Some content here." in result
 
-        result = await _deduplicate_sections(text, mock_llm)
-        assert result == text
-        mock_llm.chat_raw.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_protected_heading_first_instance_kept(self):
-        """First instance of a protected heading must survive LLM dedup."""
+    def test_duplicate_headings_merged_content_preserved(self):
         text = (
             "## Framework Architecture\n"
             "Original detailed architecture section.\n\n"
             "## Component Relationships\n"
             "Components connect via routes.\n\n"
             "## Framework Architecture\n"
-            "Duplicate shorter architecture section."
+            "Additional architecture details."
         )
-        # LLM says remove sections 1 and 3 (both Framework Architecture)
-        mock_llm = AsyncMock()
-        mock_llm.chat_raw = AsyncMock(return_value="1 3")
-
-        result = await _deduplicate_sections(text, mock_llm)
-        # First instance is protected — must survive
+        result = _deduplicate_sections(text)
         assert "Original detailed architecture" in result
-        # Duplicate is removed
-        assert "Duplicate shorter architecture" not in result
-        # Only one occurrence of the heading
+        assert "Additional architecture details" in result
         assert result.count("## Framework Architecture") == 1
 
-    @pytest.mark.asyncio
-    async def test_protected_heading_duplicate_removed(self):
-        """Duplicate instances of protected headings ARE removable."""
+    def test_multiple_duplicates_all_merged(self):
         text = (
             "## Framework Architecture\n"
             "First architecture content.\n\n"
             "## Component Relationships\n"
             "Component content here.\n\n"
             "## Framework Architecture\n"
-            "Second duplicate architecture.\n\n"
+            "Second architecture content.\n\n"
             "## Common CLI Commands\n"
             "CLI content here."
         )
-        # LLM says remove section 3 (duplicate Framework Architecture)
-        mock_llm = AsyncMock()
-        mock_llm.chat_raw = AsyncMock(return_value="3")
-
-        result = await _deduplicate_sections(text, mock_llm)
-        # First instance kept
+        result = _deduplicate_sections(text)
         assert "First architecture content" in result
-        # Duplicate removed
-        assert "Second duplicate architecture" not in result
-        # Other sections untouched
+        assert "Second architecture content" in result
+        assert result.count("## Framework Architecture") == 1
         assert "## Component Relationships" in result
         assert "## Common CLI Commands" in result
 

@@ -1,176 +1,104 @@
-"""Shared LLM-based section deduplication for Markdown documents.
+"""Mechanical section reorganization for Markdown documents.
 
 Used by both project context generation and framework guide generation
-to remove semantically duplicate ``##`` sections.
+to merge duplicate ``##`` sections and drop exact-match lines.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from lean_ai.llm.client import LLMClient
 
 logger = logging.getLogger(__name__)
 
 
-async def deduplicate_sections_llm(
-    doc: str,
-    llm_client: LLMClient,
-    *,
-    log_prefix: str = "Dedup",
-    protected_headings: set[str] | None = None,
-) -> str:
-    """Remove duplicate or overlapping ``##`` sections using the LLM.
+def reorganize_sections(doc: str, *, log_prefix: str = "Reorg") -> str:
+    """Merge duplicate ``##`` sections and drop exact-match lines.
 
-    Sends a compact summary (heading + first ~200 chars) of each section
-    to the LLM, which identifies redundant sections by number.  Python
-    then mechanically removes those sections.
-
-    *protected_headings* — heading texts whose *first* occurrence must
-    never be removed.  Duplicate instances of a protected heading ARE
-    eligible for removal — only the first occurrence is protected.
-
-    Falls back gracefully — returns the original document unchanged on
-    any failure.
+    1. Parse the document into sections delimited by ``## `` headings.
+    2. When the same heading appears more than once, merge content blocks
+       in document order under a single heading.
+    3. Within each merged section, drop lines that are exact duplicates
+       of an earlier line in the same section (first occurrence kept).
+    4. Preserve preamble (content before the first heading).
+    5. Preserve heading order (first-occurrence order).
+    6. Collapse triple+ blank lines to double.
     """
-    try:
-        lines = doc.split("\n")
+    lines = doc.split("\n")
 
-        # Build (heading, start_line, end_line) tuples
-        sections: list[tuple[str, int, int]] = []
-        for i, line in enumerate(lines):
-            if line.lstrip().startswith("## "):
-                sections.append((line.strip(), i, -1))
-                if len(sections) > 1:
-                    sections[-2] = (
-                        sections[-2][0],
-                        sections[-2][1],
-                        i,
-                    )
-        if sections:
-            sections[-1] = (
-                sections[-1][0],
-                sections[-1][1],
-                len(lines),
-            )
+    # ── Parse into sections: (heading, content_lines) ──
+    preamble: list[str] = []
+    # Ordered dict: heading → list of content-line lists (one per occurrence)
+    sections: dict[str, list[list[str]]] = {}
+    heading_order: list[str] = []
 
-        if len(sections) < 2:
-            return doc
+    current_heading: str | None = None
+    current_lines: list[str] = []
 
-        # Build numbered list with content previews
-        numbered: list[str] = []
-        for idx, (heading, start, end) in enumerate(sections, 1):
-            content_lines = lines[start + 1:end]
-            preview = " ".join(
-                ln.strip() for ln in content_lines if ln.strip()
-            )[:200]
-            numbered.append(f"{idx}. {heading}\n   \"{preview}\"")
-
-        # Build set of first-occurrence indices for protected headings.
-        # Only the FIRST instance of each protected heading is shielded
-        # from removal — duplicate instances are eligible for removal.
-        first_protected: set[int] = set()
-        if protected_headings:
-            seen_headings: set[str] = set()
-            for idx, (heading, _start, _end) in enumerate(sections, 1):
-                if heading in protected_headings and heading not in seen_headings:
-                    seen_headings.add(heading)
-                    first_protected.add(idx)
-
-        # Build protected-headings block for the prompt
-        protected_block = ""
-        if protected_headings:
-            protected_list = "\n".join(
-                f"- {h}" for h in sorted(protected_headings)
-            )
-            protected_block = (
-                "\n\nThe following headings are REQUIRED — keep the "
-                "FIRST (best) occurrence of each. If a heading appears "
-                "more than once, remove the duplicate:\n"
-                + protected_list + "\n"
-            )
-
-        prompt = (
-            f"The following Markdown document has {len(sections)} sections. "
-            "Review for duplicate or overlapping sections that cover the "
-            "same topic.\n\n"
-            "Sections:\n"
-            + "\n\n".join(numbered)
-            + "\n\n"
-            "For each group of duplicates, keep the BEST version (most "
-            "complete and accurate content). Return ONLY the section "
-            "numbers to REMOVE, one per line. If no duplicates exist, "
-            "respond with: NONE"
-            + protected_block
-        )
-
-        response = await llm_client.chat_raw(
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=64,
-        )
-
-        if "NONE" in response.upper().split():
-            logger.info("%s: LLM found no duplicate sections", log_prefix)
-            return doc
-
-        # Parse section numbers to remove
-        to_remove: list[int] = []
-        for token in response.split():
-            clean = token.strip(".,;:()[]")
-            if clean.isdigit():
-                idx = int(clean)
-                if 1 <= idx <= len(sections) and idx not in to_remove:
-                    # Only protect the FIRST instance of each
-                    # protected heading — duplicates are removable.
-                    if idx in first_protected:
-                        logger.info(
-                            "%s: skipping removal of protected "
-                            "heading (first instance): %s",
-                            log_prefix, sections[idx - 1][0],
-                        )
-                        continue
-                    to_remove.append(idx)
-
-        if not to_remove:
-            logger.info(
-                "%s: LLM dedup returned no valid numbers, "
-                "no sections removed",
-                log_prefix,
-            )
-            return doc
-
-        # Mechanically remove identified sections
-        remove_set = set(to_remove)
-        preamble_end = sections[0][1]
-        result_lines = list(lines[:preamble_end])
-        for idx, (_heading, start, end) in enumerate(sections, 1):
-            if idx not in remove_set:
-                result_lines.extend(lines[start:end])
-
-        # Collapse triple+ blank lines to double
-        cleaned: list[str] = []
-        blank_count = 0
-        for line in result_lines:
-            if not line.strip():
-                blank_count += 1
-                if blank_count <= 2:
-                    cleaned.append(line)
+    for line in lines:
+        if line.lstrip().startswith("## "):
+            # Flush previous
+            if current_heading is None:
+                preamble = current_lines
             else:
-                blank_count = 0
-                cleaned.append(line)
+                sections.setdefault(current_heading, []).append(current_lines)
+            heading = line.strip()
+            if heading not in sections:
+                heading_order.append(heading)
+                sections[heading] = []
+            current_heading = heading
+            current_lines = []
+        else:
+            current_lines.append(line)
 
-        logger.info(
-            "%s: LLM identified %d duplicate section(s) to remove: %s",
-            log_prefix,
-            len(to_remove),
-            ", ".join(str(n) for n in to_remove),
-        )
-        return "\n".join(cleaned)
-    except Exception as exc:
-        logger.info(
-            "%s: LLM dedup failed, no sections removed: %s",
-            log_prefix, exc,
-        )
+    # Flush last section
+    if current_heading is None:
+        # No headings at all — return unchanged
         return doc
+    sections.setdefault(current_heading, []).append(current_lines)
+
+    if not heading_order:
+        return doc
+
+    # ── Merge + deduplicate lines per section ──
+    merged_count = 0
+    result_lines: list[str] = list(preamble)
+
+    for heading in heading_order:
+        blocks = sections[heading]
+        if len(blocks) > 1:
+            merged_count += len(blocks) - 1
+
+        result_lines.append(heading)
+
+        # Collect all content lines across occurrences
+        seen: set[str] = set()
+        for block in blocks:
+            for line in block:
+                stripped = line.strip()
+                # Keep blank lines (don't deduplicate them)
+                # Deduplicate only non-empty lines
+                if not stripped:
+                    result_lines.append(line)
+                elif stripped not in seen:
+                    seen.add(stripped)
+                    result_lines.append(line)
+
+    # ── Collapse triple+ blank lines to double ──
+    cleaned: list[str] = []
+    blank_count = 0
+    for line in result_lines:
+        if not line.strip():
+            blank_count += 1
+            if blank_count <= 2:
+                cleaned.append(line)
+        else:
+            blank_count = 0
+            cleaned.append(line)
+
+    if merged_count:
+        logger.info(
+            "%s: merged %d duplicate section occurrence(s)",
+            log_prefix, merged_count,
+        )
+
+    return "\n".join(cleaned)
