@@ -36,6 +36,18 @@ Use the read_file, list_directory, and directory_tree tools to explore the \
 codebase before finalizing the plan.
 """
 
+DOCUMENTATION_GUIDANCE = """\
+
+Documentation (new code only):
+- For every new function or class you create, add a brief docstring using \
+the language's native format (Python: triple-quote, TypeScript: /** */).
+- Functions: 1 sentence max. If the name already explains everything, skip it. \
+Focus on WHY, not WHAT — "Returns None instead of raising — callers expect \
+optional" is useful; "Returns the user" is not.
+- Classes: up to 2 sentences — the responsibility and any important invariant.
+- Never add comments to variables or to existing code you are editing.
+"""
+
 IMPLEMENTATION_SYSTEM_PROMPT = """\
 Use your knowledge of programming and software development to complete the \
 task described by the user. You have full access to the codebase via tools.
@@ -73,7 +85,7 @@ it before starting work to avoid redoing completed tasks.
 - Track cross-file references (route names, middleware aliases, config keys, \
 model-table mappings) in the scratchpad so you can keep them consistent.
 - Items listed under "## Completed" are DONE. Do not revert or redo them.
-"""
+""" + DOCUMENTATION_GUIDANCE
 
 STEP_EXECUTION_SYSTEM_PROMPT = """\
 Execute the step below. Call EXACTLY the tool specified on the file specified.
@@ -100,7 +112,7 @@ found, unexpected structure), create or append to .lean_ai/incomplete.md \
 documenting what went wrong and what was intended, then stop.
 9. When done, call task_complete with a one-line summary of what you did. \
 This is the only way to signal step completion.
-"""
+""" + DOCUMENTATION_GUIDANCE
 
 FIX_SYSTEM_PROMPT = """\
 Fix a bug or make a small change. You have full tool access — use as many \
@@ -127,7 +139,7 @@ it before starting work to avoid redoing completed tasks.
 - Track cross-file references (route names, middleware aliases, config keys, \
 model-table mappings) in the scratchpad so you can keep them consistent.
 - Items listed under "## Completed" are DONE. Do not revert or redo them.
-"""
+""" + DOCUMENTATION_GUIDANCE
 
 CLARIFICATION_SYSTEM_PROMPT = """\
 Assess whether the following task description is specific enough to create a \
