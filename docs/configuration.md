@@ -171,12 +171,14 @@ Embeddings always use Ollama. The search index combines BM25F keyword search wit
 | Variable | Default | Description |
 |---|---|---|
 | `LEAN_AI_SEARCH_PROVIDER` | `duckduckgo` | Search provider: `duckduckgo`, `searxng`, `google`, or `bing` |
-| `LEAN_AI_SEARCH_API_URL` | *(empty)* | SearXNG instance URL (when using `searxng` provider) |
+| `LEAN_AI_SEARCH_API_URL` | *(empty)* | SearXNG instance URL — required when `SEARCH_PROVIDER=searxng` |
 | `LEAN_AI_SEARCH_API_KEY` | *(empty)* | API key for search provider (if applicable) |
 | `LEAN_AI_SEARCH_DELAY` | `2.0` | Min seconds between searches (random jitter adds 0-100%) |
 | `LEAN_AI_INTERNET_TIMEOUT_SECONDS` | `30` | Timeout for web fetches |
 
 Google search uses headless Chrome (requires Chrome installed) and auto-falls back to Bing on failure.
+
+SearXNG is a self-hosted meta-search engine with no rate limits. Set `LEAN_AI_SEARCH_API_URL` to your instance's search endpoint (e.g. `http://localhost:8888/search`). The extension settings panel shows a URL field automatically when SearXNG is selected as the provider.
 
 ## Project Context
 

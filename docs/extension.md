@@ -101,6 +101,38 @@ Variables are fetched via the Debug Adapter Protocol and truncated at 120 charac
 
 The `/fix` command always appends errors and warnings from the **currently open file** regardless of the Problems pill state. This gives the agent concrete file:line data without requiring manual toggling.
 
+### Planning Phase Status
+
+While the agent is planning, the chat panel shows a live status line for each planning phase as it executes. Each entry shows:
+
+- The phase name and a brief description (e.g. *"Phase 3 — Change design"*)
+- The model handling it in parentheses (e.g. `(qwen3-coder:30b)` or `(claude-opus-4-6)`)
+- A ✓ completion summary once the phase finishes (e.g. *"Plan assembled — 8 steps across 5 files"*)
+
+This makes it easy to see at a glance whether the standard or expert model is doing the work, and how far along planning is.
+
+### Plan Review (Dual Format)
+
+When the agent produces a plan it needs you to approve, the chat panel shows two views:
+
+1. **Plain-English summary** — up to ~1000 words explaining what the plan will do, the key architectural decisions made, which existing structures are being changed and why, and any design trade-offs. Written for human review, not execution.
+2. **Implementation steps** (collapsed by default) — the technical file-by-file steps (`CREATE`, `EDIT`, `RUN TESTS`, etc.) shown in a collapsible *Show implementation steps* toggle.
+
+Approve or reject using the buttons in the chat panel, or via `/approve` and `/reject` slash commands.
+
+### Notifications
+
+Three layers of attention signals fire automatically when the agent needs you:
+
+| Event | Activity Bar Badge | VSCode Toast | OS Notification |
+|---|---|---|---|
+| Plan ready for approval | ✓ (badge = 1) | ✓ with "Go to Lean AI" button | ✓ |
+| Command approval needed | ✓ (badge = 1) | ✓ | ✓ |
+| Task complete | cleared | ✓ with summary | ✓ |
+| Unrecoverable error | cleared | — | ✓ |
+
+OS notifications require: `notify-send` on Linux, `osascript` on macOS, or `mshta` on Windows. They are silently skipped if the command is unavailable. Disable them via `lean-ai.enableOsNotifications`.
+
 ### Model Switching
 
 The model dropdown in the chat panel lets you switch between configured providers and models at runtime. Ollama models are queried live, so pulling a new model makes it immediately available.
@@ -151,6 +183,14 @@ The panel is organised into sections:
 - **Expert Model** — Optional separate model for reasoning-heavy planning phases (phases 3–6). Can use a different provider than the main model — e.g. fast local Ollama for coding, cloud model for planning.
 - **Post-Validation** — Commands for format/lint/test to run automatically after agent changes.
 - **Advanced** — Inline prediction model, embedding model, search provider, context thresholds.
+
+**Ollama Model Dropdowns**
+
+All Ollama model fields (primary model, expert model, inline model, embedding model) are comboboxes: click the **▾** chevron to open a dropdown populated live from your Ollama instance's `/api/tags` endpoint. The list refreshes automatically when the panel loads and whenever you change the Ollama URL. You can also type a model name directly — useful for models not yet pulled.
+
+**Search Provider**
+
+The search provider field uses a custom dropdown (native `<select>` elements don't open in VSCode/VSCodium's Electron webview). When **SearXNG** is selected, a URL field appears for your self-hosted SearXNG instance.
 
 **API Key Security**
 
@@ -203,6 +243,7 @@ All settings are also available via VSCode's native settings UI (**Settings** > 
 | `lean-ai.embeddingModel` | `qwen3-embedding:0.6b` | Ollama model for semantic search |
 | `lean-ai.enableEmbeddings` | `true` | Enable embedding generation and RRF hybrid search |
 | `lean-ai.searchProvider` | `duckduckgo` | Web search provider: `duckduckgo`, `searxng`, `google`, `bing` |
+| `lean-ai.searchApiUrl` | *(empty)* | SearXNG instance URL (required when `searchProvider` is `searxng`) |
 | `lean-ai.searchDelay` | `2.0` | Minimum seconds between search requests |
 | `lean-ai.enablePostValidation` | `true` | Run lint/test passes after agent changes |
 | `lean-ai.postFormatCommand` | *(empty)* | Auto-format command (e.g. `ruff format src/`) |
@@ -214,6 +255,7 @@ All settings are also available via VSCode's native settings UI (**Settings** > 
 | `lean-ai.implementationMaxTurns` | `0` | Max tool-calling turns per session (`0` = unlimited) |
 | `lean-ai.refreshThreshold` | `0.7` | Refresh context at this fraction of the context window |
 | `lean-ai.debugPlanning` | `false` | Save planning phase outputs to `.lean_ai/plan_debug/` |
+| `lean-ai.enableOsNotifications` | `true` | Send OS-level notifications (notify-send / osascript / mshta) when the agent needs attention |
 
 ### Auto-Start Backend
 
