@@ -1,5 +1,6 @@
 """LLMClient facade — delegates to an LLMProvider for chat, keeps Ollama for FIM/embed."""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -24,11 +25,16 @@ class LLMClient:
     it is reused; otherwise a secondary ``OllamaProvider`` handles these.
     """
 
-    def __init__(self, provider: LLMProvider | None = None):
+    def __init__(
+        self,
+        provider: LLMProvider | None = None,
+        concurrency_semaphore: asyncio.Semaphore | None = None,
+    ):
         if provider is None:
             from lean_ai.llm.client import OllamaProvider
             provider = OllamaProvider()
         self._provider = provider
+        self._semaphore = concurrency_semaphore
 
         # For embed / generate_completion — always Ollama
         from lean_ai.llm.client import OllamaProvider
@@ -57,7 +63,15 @@ class LLMClient:
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> str:
-        text, metrics = await self._provider.chat_raw(messages, temperature, max_tokens)
+        if self._semaphore is not None:
+            async with self._semaphore:
+                text, metrics = await self._provider.chat_raw(
+                    messages, temperature, max_tokens,
+                )
+        else:
+            text, metrics = await self._provider.chat_raw(
+                messages, temperature, max_tokens,
+            )
         self.last_chat_metrics = _metrics_to_dict(metrics)
         return text
 

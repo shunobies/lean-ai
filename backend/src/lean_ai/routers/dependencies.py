@@ -1,5 +1,6 @@
 """Shared singletons for all router sub-modules."""
 
+import asyncio
 import logging
 
 from lean_ai.config import settings
@@ -59,7 +60,14 @@ def _create_provider() -> LLMProvider:
     )
 
 
-llm_client = LLMClient(provider=_create_provider())
+_llm_semaphore: asyncio.Semaphore | None = (
+    asyncio.Semaphore(settings.num_parallel) if settings.num_parallel > 1 else None
+)
+
+llm_client = LLMClient(
+    provider=_create_provider(),
+    concurrency_semaphore=_llm_semaphore,
+)
 
 # Inline prediction client — always Ollama-backed
 _inline_client: LLMClient = (

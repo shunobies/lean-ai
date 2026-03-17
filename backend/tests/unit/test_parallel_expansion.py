@@ -3,7 +3,8 @@
 Pure unit tests — no LLM, no network calls required.
 """
 
-from unittest.mock import AsyncMock, patch
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -13,9 +14,15 @@ from lean_ai.context.content import (
 )
 from lean_ai.context.generation import (
     _expand_project_context,
-    _expand_project_context_sequential,
     _merge_additions_into_doc,
 )
+from lean_ai.llm.base import LLMMetrics
+from lean_ai.llm.facade import LLMClient
+
+_DUMMY_METRICS = LLMMetrics(
+    tokens_per_second=0.0, completion_tokens=0, prompt_tokens=0,
+)
+
 
 # ---------------------------------------------------------------------------
 # extract_section_headings
@@ -147,39 +154,62 @@ class TestMergeAdditionsIntoDoc:
 
 
 # ---------------------------------------------------------------------------
-# _expand_project_context_sequential (basic sanity)
+# LLMClient.chat_raw semaphore
 # ---------------------------------------------------------------------------
 
 
-class TestExpandSequential:
+class TestChatRawSemaphore:
     @pytest.mark.asyncio
-    async def test_returns_updated_doc(self):
-        """Sequential expansion returns updated doc when LLM output is valid."""
-        base = "## Module Map\n- original\n"
-        updated = "## Module Map\n- original\n- added by llm\n"
+    async def test_semaphore_limits_concurrency(self):
+        """chat_raw respects the concurrency semaphore."""
+        max_concurrent = 0
+        current_concurrent = 0
 
-        mock_client = AsyncMock()
-        mock_client.chat_raw = AsyncMock(return_value=updated)
+        async def mock_chat_raw(messages, temperature=None, max_tokens=None):
+            nonlocal max_concurrent, current_concurrent
+            current_concurrent += 1
+            if current_concurrent > max_concurrent:
+                max_concurrent = current_concurrent
+            await asyncio.sleep(0.05)  # Simulate LLM latency
+            current_concurrent -= 1
+            return ("result", _DUMMY_METRICS)
 
-        result = await _expand_project_context_sequential(
-            base, mock_client, ["batch1"], max_out=4096,
-        )
-        assert "added by llm" in result
+        mock_provider = MagicMock()
+        mock_provider.chat_raw = AsyncMock(side_effect=mock_chat_raw)
+
+        semaphore = asyncio.Semaphore(2)
+        client = LLMClient(provider=mock_provider, concurrency_semaphore=semaphore)
+
+        # Fire 5 concurrent calls — semaphore should limit to 2 at a time.
+        tasks = [client.chat_raw([{"role": "user", "content": f"msg{i}"}]) for i in range(5)]
+        await asyncio.gather(*tasks)
+
+        assert max_concurrent <= 2
 
     @pytest.mark.asyncio
-    async def test_keeps_base_on_short_output(self):
-        """Sequential expansion keeps base when LLM returns too-short output."""
-        base = "## Module Map\n" + ("x" * 200) + "\n"
-        short = "tiny"
+    async def test_no_semaphore_allows_full_concurrency(self):
+        """Without semaphore, all calls run concurrently."""
+        max_concurrent = 0
+        current_concurrent = 0
 
-        mock_client = AsyncMock()
-        mock_client.chat_raw = AsyncMock(return_value=short)
+        async def mock_chat_raw(messages, temperature=None, max_tokens=None):
+            nonlocal max_concurrent, current_concurrent
+            current_concurrent += 1
+            if current_concurrent > max_concurrent:
+                max_concurrent = current_concurrent
+            await asyncio.sleep(0.05)
+            current_concurrent -= 1
+            return ("result", _DUMMY_METRICS)
 
-        result = await _expand_project_context_sequential(
-            base, mock_client, ["batch1"], max_out=4096,
-        )
-        # Should keep base since "tiny" is < 70% of base length.
-        assert result == base
+        mock_provider = MagicMock()
+        mock_provider.chat_raw = AsyncMock(side_effect=mock_chat_raw)
+
+        client = LLMClient(provider=mock_provider)  # No semaphore
+
+        tasks = [client.chat_raw([{"role": "user", "content": f"msg{i}"}]) for i in range(5)]
+        await asyncio.gather(*tasks)
+
+        assert max_concurrent == 5
 
 
 # ---------------------------------------------------------------------------
@@ -211,18 +241,13 @@ class TestExpandParallel:
         mock_client = AsyncMock()
         mock_client.chat_raw = AsyncMock(side_effect=mock_chat_raw)
 
-        # settings and list_repo_tree are local imports inside the function,
-        # so patch at source rather than on the generation module.
         with (
-            patch("lean_ai.config.settings") as mock_settings,
             patch("lean_ai.indexer.tree.list_repo_tree") as mock_tree,
             patch("lean_ai.context.generation.extract_metadata_cached") as mock_meta,
             patch("lean_ai.context.generation._collect_priority_file_contents") as mock_priority,
             patch("lean_ai.context.generation._collect_all_ranked_candidates") as mock_candidates,
             patch("lean_ai.context.generation._batch_file_contents") as mock_batch,
         ):
-            mock_settings.expansion_concurrency = 3
-
             # Minimal stubs for the tree/metadata pipeline.
             mock_tree.return_value = []
             mock_meta.return_value = type("M", (), {"fan_in": {}})()
@@ -242,34 +267,3 @@ class TestExpandParallel:
         assert "Worker" in result
         # Original content preserved.
         assert "- `App`: main class" in result
-
-    @pytest.mark.asyncio
-    async def test_sequential_fallback(self):
-        """expansion_concurrency=0 falls back to sequential."""
-        base = "## Module Map\n- original\n"
-        updated = "## Module Map\n- original\n- sequential addition\n"
-
-        mock_client = AsyncMock()
-        mock_client.chat_raw = AsyncMock(return_value=updated)
-
-        with (
-            patch("lean_ai.config.settings") as mock_settings,
-            patch("lean_ai.indexer.tree.list_repo_tree") as mock_tree,
-            patch("lean_ai.context.generation.extract_metadata_cached") as mock_meta,
-            patch("lean_ai.context.generation._collect_priority_file_contents") as mock_priority,
-            patch("lean_ai.context.generation._collect_all_ranked_candidates") as mock_candidates,
-            patch("lean_ai.context.generation._batch_file_contents") as mock_batch,
-        ):
-            mock_settings.expansion_concurrency = 0
-            mock_tree.return_value = []
-            mock_meta.return_value = type("M", (), {"fan_in": {}})()
-            mock_priority.return_value = ("", set())
-            mock_candidates.return_value = [("file1.py", "content1")]
-            mock_batch.return_value = ["batch1_content"]
-
-            result = await _expand_project_context(
-                base, "/fake/repo", mock_client,
-                caps={}, max_out=4096, context_window=131072,
-            )
-
-        assert "sequential addition" in result

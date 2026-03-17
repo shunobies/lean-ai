@@ -142,8 +142,8 @@ class Settings(BaseSettings):
     loop_detection_threshold: int = 3  # Consecutive identical tool calls before warning (0 = off)
     refresh_threshold: float = 0.7  # Refresh context at this % of context window
 
-    # ── Parallel expansion ──
-    expansion_concurrency: int = 3  # Max parallel LLM calls for expansion (0 = sequential)
+    # ── Parallel LLM requests ──
+    num_parallel: int = 1  # Max concurrent LLM calls (match OLLAMA_NUM_PARALLEL)
 
     # ── Post-execution validation ──
     enable_post_validation: bool = True  # Master switch

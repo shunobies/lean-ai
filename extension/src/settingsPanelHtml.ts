@@ -707,8 +707,8 @@ export function getSettingsPanelHtml(): string {
             <input type="number" id="refreshThreshold" min="0.3" max="0.95" step="0.05" placeholder="0.7">
         </div>
         <div class="field">
-            <label>Expansion concurrency <span class="hint">parallel LLM calls for /init, 0 = sequential</span></label>
-            <input type="number" id="expansionConcurrency" min="0" max="16" step="1" placeholder="3">
+            <label>Parallel LLM requests <span class="hint">match OLLAMA_NUM_PARALLEL, 1 = sequential</span></label>
+            <input type="number" id="numParallel" min="1" max="16" step="1" placeholder="1">
         </div>
     </div>
     <div class="field-check">
@@ -1081,7 +1081,7 @@ export function getSettingsPanelHtml(): string {
             searchDelay:           val('searchDelay'),
             implementationMaxTurns:val('implementationMaxTurns'),
             refreshThreshold:      val('refreshThreshold'),
-            expansionConcurrency:  val('expansionConcurrency'),
+            numParallel:           val('numParallel'),
             enableFrameworkGuide:  val('enableFrameworkGuide'),
             debugPlanning:         val('debugPlanning'),
         };
@@ -1179,7 +1179,7 @@ export function getSettingsPanelHtml(): string {
         setVal('searchDelay',           v.searchDelay);
         setVal('implementationMaxTurns',v.implementationMaxTurns);
         setVal('refreshThreshold',      v.refreshThreshold);
-        setVal('expansionConcurrency',  v.expansionConcurrency);
+        setVal('numParallel',           v.numParallel);
         setVal('enableFrameworkGuide',  v.enableFrameworkGuide);
         setVal('debugPlanning',         v.debugPlanning);
 
