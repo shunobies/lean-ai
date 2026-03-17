@@ -69,6 +69,7 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.postLintCommand":           "LEAN_AI_POST_LINT_COMMAND",
     "lean-ai.postTestCommand":           "LEAN_AI_POST_TEST_COMMAND",
     "lean-ai.postValidationMaxRetries":  "LEAN_AI_POST_VALIDATION_MAX_RETRIES",
+    "lean-ai.postValidationFixTurns":    "LEAN_AI_POST_VALIDATION_FIX_TURNS",
 
     // Advanced / misc
     "lean-ai.enableFrameworkGuide":      "LEAN_AI_ENABLE_FRAMEWORK_GUIDE",

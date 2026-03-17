@@ -346,7 +346,13 @@
           "type": "number",
           "default": 2,
           "minimum": 0,
-          "markdownDescription": "**Post-Validation** — Maximum LLM fix attempts when lint/tests fail. Each retry uses a 30-turn budget. The expert model is used on the final retry if configured. `0` = no retries. Default: `2`"
+          "markdownDescription": "**Post-Validation** — Maximum LLM fix attempts when lint/tests fail. The expert model is used on the final retry if configured. `0` = no retries. Default: `2`"
+        },
+        "lean-ai.postValidationFixTurns": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "markdownDescription": "**Post-Validation** — Tool-calling turns allowed per fix attempt. Increase for complex failures or fast cloud models; decrease for slow local models. Default: `30`"
         },
         "lean-ai.enableFrameworkGuide": {
           "type": "boolean",

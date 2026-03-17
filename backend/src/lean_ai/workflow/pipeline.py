@@ -773,7 +773,7 @@ async def _run_validation_fix_loop(
             messages=messages,
             tools=IMPLEMENTATION_TOOLS,
             tool_executor_fn=tool_executor,
-            max_turns=30,
+            max_turns=settings.post_validation_fix_turns,
             max_tokens=settings.implementation_max_tokens,
             on_tool_call=on_tool_call,
             on_tool_result=on_tool_result,

@@ -640,6 +640,10 @@ export function getSettingsPanelHtml(): string {
             <label>Max fix retries <span class="hint">0 = no retries</span></label>
             <input type="number" id="postValidationMaxRetries" min="0" max="10" step="1" placeholder="2">
         </div>
+        <div class="field" style="max-width: 160px;">
+            <label>Fix loop turns <span class="hint">turns per fix attempt</span></label>
+            <input type="number" id="postValidationFixTurns" min="5" max="200" step="1" placeholder="30">
+        </div>
     </div>
 </div>
 
@@ -906,7 +910,7 @@ export function getSettingsPanelHtml(): string {
 
     document.getElementById('openVscodeSettingsLink').addEventListener('click', e => {
         e.preventDefault();
-        vscode.postMessage({ type: 'openVscodeSettings', query: 'lean-ai.pythonPath' });
+        vscode.postMessage({ type: 'openVscodeSettings', query: '@id:lean-ai.pythonPath' });
     });
 
     // ── Search provider custom dropdown ───────────────────────────────────
@@ -1061,6 +1065,7 @@ export function getSettingsPanelHtml(): string {
             postLintCommand:       val('postLintCommand'),
             postTestCommand:       val('postTestCommand'),
             postValidationMaxRetries: val('postValidationMaxRetries'),
+            postValidationFixTurns:   val('postValidationFixTurns'),
 
             // Advanced
             inlineModel:           val('inlineModel'),
@@ -1157,6 +1162,7 @@ export function getSettingsPanelHtml(): string {
         setVal('postLintCommand',          v.postLintCommand);
         setVal('postTestCommand',          v.postTestCommand);
         setVal('postValidationMaxRetries', v.postValidationMaxRetries);
+        setVal('postValidationFixTurns',   v.postValidationFixTurns);
 
         // Advanced
         setVal('inlineModel',           v.inlineModel);
