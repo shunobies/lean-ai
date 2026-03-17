@@ -416,6 +416,8 @@ export function getSettingsPanelHtml(): string {
 <p class="subtitle">
     Changes are saved to <code>backend/.env</code> and take effect after a backend restart. &nbsp;
     <a href="#" class="github-link">View documentation on GitHub ↗</a>
+    &nbsp;·&nbsp;
+    <a href="#" id="openVscodeSettingsLink">Python path &amp; backend directory ↗ VSCode Settings</a>
 </p>
 
 <!-- ── Primary LLM Provider ── -->
@@ -898,6 +900,13 @@ export function getSettingsPanelHtml(): string {
             e.preventDefault();
             vscode.postMessage({ type: 'openExternal', url: 'https://github.com/shunobies/lean-ai/' });
         });
+    });
+
+    // ── VSCode Settings link (Python path, backend dir) ───────────────────
+
+    document.getElementById('openVscodeSettingsLink').addEventListener('click', e => {
+        e.preventDefault();
+        vscode.postMessage({ type: 'openVscodeSettings', query: 'lean-ai.pythonPath' });
     });
 
     // ── Search provider custom dropdown ───────────────────────────────────

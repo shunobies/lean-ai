@@ -162,6 +162,12 @@ export class SettingsPanel {
                 break;
             }
 
+            case "openVscodeSettings": {
+                const query = (msg.query as string) || "lean-ai";
+                await vscode.commands.executeCommand("workbench.action.openSettings", query);
+                break;
+            }
+
             case "openExternal": {
                 const url = msg.url as string;
                 if (url) {
