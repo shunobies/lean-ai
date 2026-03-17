@@ -733,6 +733,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             return;
         }
 
+        this.postMessage({ type: "hideApproval" });
         this.postMessage({ type: "thinking", show: true, text: "Approving plan..." });
         this.ws.send(JSON.stringify({ type: "approve" }));
     }

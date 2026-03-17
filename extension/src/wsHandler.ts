@@ -296,7 +296,10 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
         // --- Test result: show pass/fail ---
         case "test_result": {
             const passed = raw.passed as boolean;
-            const output = ((raw.output as string) || "").slice(0, 300);
+            const fullOutput = (raw.output as string) || "";
+            // Failures: show the tail where test runners print summaries and error details.
+            // Passes: show the head which lists the passing classes.
+            const output = passed ? fullOutput.slice(0, 300) : fullOutput.slice(-500);
             ctx.postMessage({
                 type: "reply",
                 text: `**Tests ${passed ? "PASSED" : "FAILED"}**\n\`\`\`\n${output}\n\`\`\``,
