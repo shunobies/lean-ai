@@ -59,6 +59,7 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
 
     // Search
     "lean-ai.searchProvider":            "LEAN_AI_SEARCH_PROVIDER",
+    "lean-ai.searchApiUrl":              "LEAN_AI_SEARCH_API_URL",
     "lean-ai.searchDelay":               "LEAN_AI_SEARCH_DELAY",
 
     // Post-validation

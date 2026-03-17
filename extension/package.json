@@ -295,6 +295,11 @@
           "default": true,
           "markdownDescription": "**Embeddings** — Enable embedding generation and RRF hybrid search in the workspace index. Disable if you don't want to run an embedding model. Default: `true`"
         },
+        "lean-ai.searchApiUrl": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Search** — API URL for a self-hosted SearXNG instance (e.g. `http://localhost:8888/search`). Only used when `lean-ai.searchProvider` is `searxng`."
+        },
         "lean-ai.searchProvider": {
           "type": "string",
           "default": "duckduckgo",

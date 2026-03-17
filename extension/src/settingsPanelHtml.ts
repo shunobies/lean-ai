@@ -152,6 +152,65 @@ export function getSettingsPanelHtml(): string {
         margin-bottom: 4px;
     }
 
+    /* Custom select dropdown (native <select> is unreliable in Electron webview panels) */
+    .custom-select {
+        position: relative;
+        width: 100%;
+    }
+    .custom-select-trigger {
+        padding: 6px 8px;
+        padding-right: 24px;
+        background: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        border: 1px solid var(--vscode-input-border);
+        border-radius: 4px;
+        font-family: inherit;
+        font-size: inherit;
+        cursor: pointer;
+        position: relative;
+        user-select: none;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .custom-select-trigger::after {
+        content: '▾';
+        position: absolute;
+        right: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        pointer-events: none;
+        opacity: 0.7;
+    }
+    .custom-select.open .custom-select-trigger {
+        border-color: var(--vscode-focusBorder);
+        border-radius: 4px 4px 0 0;
+    }
+    .custom-select-options {
+        display: none;
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: var(--vscode-input-background);
+        border: 1px solid var(--vscode-focusBorder);
+        border-top: none;
+        border-radius: 0 0 4px 4px;
+        z-index: 200;
+    }
+    .custom-select.open .custom-select-options { display: block; }
+    .custom-select-option {
+        padding: 6px 8px;
+        cursor: pointer;
+        color: var(--vscode-input-foreground);
+        font-size: inherit;
+    }
+    .custom-select-option:hover { background: var(--vscode-list-hoverBackground); }
+    .custom-select-option.selected {
+        background: var(--vscode-list-activeSelectionBackground);
+        color: var(--vscode-list-activeSelectionForeground);
+    }
+
     /* API Key status widget */
     .api-key-widget {
         display: flex;
@@ -535,13 +594,21 @@ export function getSettingsPanelHtml(): string {
         </div>
         <div class="field">
             <label>Search provider</label>
-            <select id="searchProvider">
-                <option value="duckduckgo">DuckDuckGo (default, no setup)</option>
-                <option value="searxng">SearXNG (self-hosted)</option>
-                <option value="google">Google (requires Chrome)</option>
-                <option value="bing">Bing (requires Chrome)</option>
-            </select>
+            <input type="hidden" id="searchProvider" value="duckduckgo">
+            <div class="custom-select" id="searchProviderDropdown">
+                <div class="custom-select-trigger" id="searchProviderTrigger">DuckDuckGo (default, no setup)</div>
+                <div class="custom-select-options" id="searchProviderOptions">
+                    <div class="custom-select-option selected" data-value="duckduckgo">DuckDuckGo (default, no setup)</div>
+                    <div class="custom-select-option" data-value="searxng">SearXNG (self-hosted)</div>
+                    <div class="custom-select-option" data-value="google">Google (requires Chrome)</div>
+                    <div class="custom-select-option" data-value="bing">Bing (requires Chrome)</div>
+                </div>
+            </div>
         </div>
+    </div>
+    <div class="field" id="searxngUrlField" style="display:none">
+        <label>SearXNG API URL</label>
+        <input type="text" id="searchApiUrl" placeholder="http://localhost:8888/search">
     </div>
     <div class="field-row">
         <div class="field">
@@ -758,6 +825,42 @@ export function getSettingsPanelHtml(): string {
         });
     });
 
+    // ── Search provider custom dropdown ───────────────────────────────────
+
+    const searchProviderOptions = [
+        { value: 'duckduckgo', label: 'DuckDuckGo (default, no setup)' },
+        { value: 'searxng',    label: 'SearXNG (self-hosted)' },
+        { value: 'google',     label: 'Google (requires Chrome)' },
+        { value: 'bing',       label: 'Bing (requires Chrome)' },
+    ];
+
+    function setSearchProvider(value) {
+        const opt = searchProviderOptions.find(o => o.value === value) || searchProviderOptions[0];
+        document.getElementById('searchProvider').value = opt.value;
+        document.getElementById('searchProviderTrigger').textContent = opt.label;
+        document.querySelectorAll('#searchProviderOptions .custom-select-option').forEach(el => {
+            el.classList.toggle('selected', el.dataset.value === opt.value);
+        });
+        document.getElementById('searxngUrlField').style.display =
+            opt.value === 'searxng' ? '' : 'none';
+    }
+
+    document.getElementById('searchProviderTrigger').addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.getElementById('searchProviderDropdown').classList.toggle('open');
+    });
+
+    document.querySelectorAll('#searchProviderOptions .custom-select-option').forEach(el => {
+        el.addEventListener('click', () => {
+            setSearchProvider(el.dataset.value);
+            document.getElementById('searchProviderDropdown').classList.remove('open');
+        });
+    });
+
+    document.addEventListener('click', () => {
+        document.getElementById('searchProviderDropdown').classList.remove('open');
+    });
+
     // ── Save ──────────────────────────────────────────────────────────────
 
     document.getElementById('saveBtn').addEventListener('click', () => {
@@ -818,6 +921,7 @@ export function getSettingsPanelHtml(): string {
             embeddingModel:        val('embeddingModel'),
             enableEmbeddings:      val('enableEmbeddings'),
             searchProvider:        val('searchProvider'),
+            searchApiUrl:          val('searchApiUrl'),
             searchDelay:           val('searchDelay'),
             implementationMaxTurns:val('implementationMaxTurns'),
             refreshThreshold:      val('refreshThreshold'),
@@ -908,7 +1012,8 @@ export function getSettingsPanelHtml(): string {
         setVal('inlineOllamaUrl',       v.inlineOllamaUrl);
         setVal('embeddingModel',        v.embeddingModel);
         setVal('enableEmbeddings',      v.enableEmbeddings);
-        setVal('searchProvider',        v.searchProvider);
+        setSearchProvider(v.searchProvider || 'duckduckgo');
+        setVal('searchApiUrl',          v.searchApiUrl);
         setVal('searchDelay',           v.searchDelay);
         setVal('implementationMaxTurns',v.implementationMaxTurns);
         setVal('refreshThreshold',      v.refreshThreshold);

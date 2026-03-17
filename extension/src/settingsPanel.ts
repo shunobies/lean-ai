@@ -153,6 +153,7 @@ export class SettingsPanel {
             embeddingModel:           "lean-ai.embeddingModel",
             enableEmbeddings:         "lean-ai.enableEmbeddings",
             searchProvider:           "lean-ai.searchProvider",
+            searchApiUrl:             "lean-ai.searchApiUrl",
             searchDelay:              "lean-ai.searchDelay",
             enablePostValidation:     "lean-ai.enablePostValidation",
             postFormatCommand:        "lean-ai.postFormatCommand",
@@ -280,6 +281,7 @@ export class SettingsPanel {
 
             // Search
             searchProvider:            config.get("lean-ai.searchProvider", "duckduckgo"),
+            searchApiUrl:              config.get("lean-ai.searchApiUrl", ""),
             searchDelay:               config.get("lean-ai.searchDelay", ""),
 
             // Post-validation
