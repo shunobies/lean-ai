@@ -845,22 +845,44 @@ async def generate_framework_guide(
         ", ".join(f"{n} {v}" for n, v in frameworks),
     )
 
-    # Step 1b: Detect training cutoff (cached per model)
-    cutoff = await get_training_cutoff(llm_client, repo_root)
+    # Step 1b + Step 3a: Run cutoff detection and LLM query generation
+    # in parallel — both are independent LLM calls.  The query builder
+    # loses the cutoff topic but we compensate by appending a manual
+    # post-cutoff query after both complete.
+    cutoff_task = asyncio.create_task(
+        get_training_cutoff(llm_client, repo_root),
+    )
+    queries_task = asyncio.create_task(
+        build_guide_search_queries_llm(
+            frameworks, runtimes, llm_client, cutoff=None,
+        ),
+    )
+
+    cutoff = await cutoff_task
+    llm_queries = await queries_task
+
+    # Compensate: the LLM query builder didn't have the cutoff, so
+    # append a manual post-cutoff changelog query for each framework.
+    if cutoff and llm_queries is not None:
+        from lean_ai.context.deprecations import _extract_major_minor
+
+        for name, version in frameworks:
+            v = _extract_major_minor(version)
+            canonical = canonicalize_name(name)
+            label = f"{canonical} {v}" if v else canonical
+            llm_queries.append(
+                f"{label} changelog breaking changes new features since {cutoff}",
+            )
+
+    queries = llm_queries or build_guide_search_queries(
+        frameworks, runtimes, cutoff=cutoff,
+    )
 
     # Step 2: Get project tree for project-specific guide
     project_tree = get_compact_tree(repo_root)
 
     # Step 3: Web search for current best practices (snippets)
     # Sequential — primp/lxml are not thread-safe for concurrent use.
-    # Try LLM-generated queries for more natural, varied searches.
-    # Falls back to static f-string queries if the LLM call fails.
-    llm_queries = await build_guide_search_queries_llm(
-        frameworks, runtimes, llm_client, cutoff=cutoff,
-    )
-    queries = llm_queries or build_guide_search_queries(
-        frameworks, runtimes, cutoff=cutoff,
-    )
     search_parts: list[str] = []
     query_results: list[list[tuple[str, str, str]]] = []
 

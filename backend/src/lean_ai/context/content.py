@@ -395,3 +395,34 @@ def build_additive_expansion_prompt(
         "files above. Return the complete updated document. "
         "ONLY reference names visible in the source files provided."
     )
+
+
+def extract_section_headings(doc: str) -> list[str]:
+    """Extract ``## `` headings from a Markdown document."""
+    return [
+        line.strip()
+        for line in doc.split("\n")
+        if line.strip().startswith("## ")
+    ]
+
+
+def build_parallel_expansion_prompt(
+    section_headings: list[str],
+    file_batch: str,
+) -> str:
+    """Build the user prompt for a parallel additions-only expansion round.
+
+    Instead of sending the full document, sends only the heading list
+    so the LLM knows where to place new entries.  This keeps the prompt
+    compact, leaving more budget for source files.
+    """
+    headings_list = "\n".join(f"- {h}" for h in section_headings)
+    return (
+        "=== EXISTING DOCUMENT HEADINGS ===\n"
+        f"{headings_list}\n\n"
+        "=== SOURCE FILES (not yet in the document) ===\n"
+        f"{file_batch}\n\n"
+        "Extract new entries from the source files above and place each "
+        "entry under the correct heading. Output ONLY the new entries, "
+        "organized by heading. Skip headings where the files add nothing new."
+    )

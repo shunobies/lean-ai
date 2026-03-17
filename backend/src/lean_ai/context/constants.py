@@ -139,6 +139,33 @@ Rules:
 """
 
 
+_PARALLEL_EXPANSION_PROMPT = """\
+Analyze these source files and extract NEW information to add to an existing \
+project context document.
+
+You are given:
+1. SECTION HEADINGS — the existing ## headings in the document
+2. SOURCE FILES — source files not yet covered in the document
+
+Your task: identify new classes, functions, endpoints, data flows, conventions, \
+and relationships from the source files and output ONLY the new entries, \
+organized under the correct existing ## headings.
+
+Rules:
+- Output ONLY new entries — do not repeat or summarize existing content.
+- Each entry must go under one of the existing ## headings listed above.
+- Use the heading text EXACTLY as given (e.g., "## Module Map", "## Key Abstractions").
+- Skip any heading for which the source files add nothing new.
+- Use EXACT class names, function names, and file paths from the source files.
+- Do not invent or generalize names not visible in the provided data.
+- Keep entries concise: one line per class/function, a short paragraph per module.
+- If a file reveals a new module, place it under ## Module Map.
+- If a file reveals new classes/functions, place them under ## Key Abstractions.
+- If a file reveals new API endpoints, place them under ## API Surface.
+- If a file reveals new integration points, place them under ## Integration Points.\
+"""
+
+
 _CONTEXT_GENERATION_SYSTEM_PROMPT = """\
 Use your knowledge of software architecture to analyze this codebase and produce \
 a factual project overview document. You are given:

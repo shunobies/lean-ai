@@ -6,7 +6,9 @@ repetition detection, section deduplication, and file output.
 No regex — all text processing uses simple string operations.
 """
 
+import asyncio
 import logging
+from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,6 +18,7 @@ from .constants import (
     _EXPANSION_SYSTEM_PROMPT,
     _MAX_DOC_FILE_CHARS,
     _MAX_FILE_CHARS,
+    _PARALLEL_EXPANSION_PROMPT,
     _scale_generation_caps,
 )
 from .content import (
@@ -25,6 +28,8 @@ from .content import (
     _collect_priority_file_contents,
     build_additive_expansion_prompt,
     build_generation_prompt,
+    build_parallel_expansion_prompt,
+    extract_section_headings,
 )
 from .metadata import extract_metadata_cached
 
@@ -372,6 +377,158 @@ async def _generate_project_context_multi_round(
     return current_doc
 
 
+def _merge_additions_into_doc(base_doc: str, additions_list: list[str]) -> str:
+    """Merge multiple additions-only outputs into the base document.
+
+    Each additions output contains ``## `` headings with new content.
+    For each heading found in the additions, the new content is appended
+    at the end of the corresponding section in the base document (just
+    before the next ``## `` heading, or at the document end).
+
+    Handles:
+    - Multiple additions referencing the same heading (all get appended).
+    - Headings in additions that don't exist in base (logged, skipped).
+    - Empty additions (skipped).
+    """
+    if not additions_list:
+        return base_doc
+
+    # Parse additions into heading → [content_blocks].
+    heading_additions: dict[str, list[str]] = defaultdict(list)
+    for additions_text in additions_list:
+        if not additions_text.strip():
+            continue
+        current_heading = ""
+        current_lines: list[str] = []
+        for line in additions_text.split("\n"):
+            if line.strip().startswith("## "):
+                if current_heading and current_lines:
+                    content = "\n".join(current_lines).strip()
+                    if content:
+                        heading_additions[current_heading].append(content)
+                current_heading = line.strip()
+                current_lines = []
+            elif current_heading:
+                current_lines.append(line)
+        # Flush last section.
+        if current_heading and current_lines:
+            content = "\n".join(current_lines).strip()
+            if content:
+                heading_additions[current_heading].append(content)
+
+    if not heading_additions:
+        return base_doc
+
+    # Parse base document into sections: (heading, start_line, end_line).
+    lines = base_doc.split("\n")
+    sections: list[tuple[str, int, int]] = []
+    for i, line in enumerate(lines):
+        if line.strip().startswith("## "):
+            sections.append((line.strip(), i, -1))
+            if len(sections) > 1:
+                sections[-2] = (sections[-2][0], sections[-2][1], i)
+    if sections:
+        sections[-1] = (sections[-1][0], sections[-1][1], len(lines))
+
+    # Build heading → section end line mapping.
+    heading_end: dict[str, int] = {}
+    for heading, _start, end in sections:
+        heading_end[heading] = end
+
+    # Insert additions at the end of each matching section.
+    # Process in reverse document order so line indices stay valid.
+    for heading in reversed(list(heading_end.keys())):
+        if heading not in heading_additions:
+            continue
+        end_line = heading_end[heading]
+        # Strip trailing blank lines from the section.
+        while end_line > 0 and not lines[end_line - 1].strip():
+            end_line -= 1
+        combined = "\n\n".join(heading_additions[heading])
+        insert_lines = ["", combined, ""]
+        lines[end_line:end_line] = insert_lines
+
+    # Log any unknown headings.
+    for heading in heading_additions:
+        if heading not in heading_end:
+            logger.info(
+                "merge: heading %r not in base document, skipping", heading,
+            )
+
+    return "\n".join(lines)
+
+
+async def _expand_project_context_sequential(
+    base_doc: str,
+    llm_client: "LLMClient",
+    batches: list[str],
+    max_out: int,
+) -> str:
+    """Sequential expansion fallback (original behaviour).
+
+    Each round sends the full growing document + one batch of new files
+    and receives the complete updated document back.
+    """
+    current_doc = base_doc
+
+    for i, batch_content in enumerate(batches):
+        round_num = i + 2  # Round 1 is the single-pass generation
+        logger.info(
+            "expansion (sequential): round %d (%d chars of new files)",
+            round_num, len(batch_content),
+        )
+
+        user_msg = build_additive_expansion_prompt(current_doc, batch_content)
+        messages = [
+            {"role": "system", "content": _ADDITIVE_EXPANSION_PROMPT},
+            {"role": "user", "content": user_msg},
+        ]
+
+        try:
+            additions = await llm_client.chat_raw(
+                messages=messages,
+                max_tokens=max_out,
+            )
+            additions = _truncate_repetition(additions)
+
+            if _appears_truncated(additions):
+                logger.warning(
+                    "Expansion round %d output appears truncated (%d chars).",
+                    round_num, len(additions),
+                )
+
+            if additions.strip():
+                if len(additions) >= len(current_doc) * 0.7:
+                    prev_len = len(current_doc)
+                    current_doc = additions
+                    current_doc = _deduplicate_subsections(current_doc)
+                    added = len(current_doc) - prev_len
+                    logger.info(
+                        "expansion (sequential): round %d updated "
+                        "(+%d chars, total %d chars)",
+                        round_num, added, len(current_doc),
+                    )
+                else:
+                    logger.warning(
+                        "expansion (sequential): round %d output too short "
+                        "(%d vs %d chars), keeping existing document",
+                        round_num, len(additions), len(current_doc),
+                    )
+            else:
+                logger.info(
+                    "expansion (sequential): round %d produced empty output, "
+                    "skipping",
+                    round_num,
+                )
+        except Exception as exc:
+            logger.warning(
+                "expansion (sequential): round %d failed (non-fatal): %s",
+                round_num, exc,
+            )
+
+    return current_doc
+
+
 async def _expand_project_context(
     base_doc: str,
     repo_root: str,
@@ -382,10 +539,13 @@ async def _expand_project_context(
 ) -> str:
     """Additive expansion: process remaining source files and merge findings.
 
-    Runs after single-pass generation to cover files that didn't fit in
-    the initial prompt.  Each round produces ONLY new entries (not a full
-    rewrite), which are programmatically merged into the document.
+    When ``expansion_concurrency > 0``, runs batches in parallel with a
+    semaphore limit.  Each batch independently analyses its files and
+    returns ONLY new entries.  Results are merged programmatically.
+
+    Falls back to sequential mode when ``expansion_concurrency == 0``.
     """
+    from lean_ai.config import settings
     from lean_ai.indexer.tree import list_repo_tree
 
     try:
@@ -425,71 +585,84 @@ async def _expand_project_context(
     if not batches:
         return base_doc
 
+    max_rounds = 20  # Safety cap for enormous repos
+    batches = batches[:max_rounds]
+
     logger.info(
-        "expansion: %d round(s) planned (%d remaining files, batch_budget=%d chars)",
+        "expansion: %d batch(es) planned (%d remaining files, "
+        "batch_budget=%d chars)",
         len(batches), len(remaining), batch_budget_chars,
     )
 
-    current_doc = base_doc
-    max_rounds = 20  # Safety cap for enormous repos
+    concurrency = settings.expansion_concurrency
 
-    for i, batch_content in enumerate(batches[:max_rounds]):
-        round_num = i + 2  # Round 1 is the single-pass generation
-        logger.info(
-            "expansion: round %d (%d chars of new files)",
-            round_num, len(batch_content),
+    if concurrency <= 0 or len(batches) <= 1:
+        # Sequential fallback (original behaviour).
+        return await _expand_project_context_sequential(
+            base_doc, llm_client, batches, max_out,
         )
 
-        user_msg = build_additive_expansion_prompt(current_doc, batch_content)
-        messages = [
-            {"role": "system", "content": _ADDITIVE_EXPANSION_PROMPT},
-            {"role": "user", "content": user_msg},
-        ]
+    # ── Parallel mode: additions-only prompt ──
+    section_headings = extract_section_headings(base_doc)
+    semaphore = asyncio.Semaphore(concurrency)
 
-        try:
-            additions = await llm_client.chat_raw(
-                messages=messages,
-                max_tokens=max_out,
+    logger.info(
+        "expansion: parallel mode — %d batch(es) with concurrency=%d",
+        len(batches), concurrency,
+    )
+
+    async def _process_batch(batch_idx: int, batch_content: str) -> str:
+        async with semaphore:
+            round_num = batch_idx + 2
+            logger.info(
+                "expansion: parallel batch %d (%d chars of new files)",
+                round_num, len(batch_content),
             )
-            additions = _truncate_repetition(additions)
-
-            if _appears_truncated(additions):
-                logger.warning(
-                    "Expansion round %d output appears truncated (%d chars).",
+            user_msg = build_parallel_expansion_prompt(
+                section_headings, batch_content,
+            )
+            messages = [
+                {"role": "system", "content": _PARALLEL_EXPANSION_PROMPT},
+                {"role": "user", "content": user_msg},
+            ]
+            try:
+                additions = await llm_client.chat_raw(
+                    messages=messages,
+                    max_tokens=max_out,
+                )
+                additions = _truncate_repetition(additions)
+                logger.info(
+                    "expansion: parallel batch %d complete (%d chars)",
                     round_num, len(additions),
                 )
+                return additions
+            except Exception as exc:
+                logger.warning(
+                    "expansion: parallel batch %d failed (non-fatal): %s",
+                    round_num, exc,
+                )
+                return ""
 
-            if additions.strip():
-                # The LLM returns the complete updated document.
-                # Sanity check: output should be at least 70% of current
-                # length — if much shorter, the LLM likely dropped content.
-                if len(additions) >= len(current_doc) * 0.7:
-                    prev_len = len(current_doc)
-                    current_doc = additions
-                    current_doc = _deduplicate_subsections(current_doc)
-                    added = len(current_doc) - prev_len
-                    logger.info(
-                        "expansion: round %d updated (+%d chars, total %d chars)",
-                        round_num, added, len(current_doc),
-                    )
-                else:
-                    logger.warning(
-                        "expansion: round %d output too short (%d vs %d chars), "
-                        "keeping existing document",
-                        round_num, len(additions), len(current_doc),
-                    )
-            else:
-                logger.info("expansion: round %d produced empty output, skipping", round_num)
-        except Exception as exc:
-            logger.warning("expansion: round %d failed (non-fatal): %s", round_num, exc)
+    tasks = [
+        _process_batch(i, batch_content)
+        for i, batch_content in enumerate(batches)
+    ]
+    results = await asyncio.gather(*tasks)
 
-    if len(batches) > max_rounds:
-        logger.warning(
-            "expansion: capped at %d rounds (%d batches remaining)",
-            max_rounds, len(batches) - max_rounds,
-        )
+    # Filter empty results.
+    valid_additions = [r for r in results if r.strip()]
+    if not valid_additions:
+        logger.warning("expansion: all parallel batches returned empty")
+        return base_doc
 
-    return current_doc
+    # Merge all additions into base document.
+    merged = _merge_additions_into_doc(base_doc, valid_additions)
+    logger.info(
+        "expansion: merged %d batch result(s) (%d → %d chars)",
+        len(valid_additions), len(base_doc), len(merged),
+    )
+
+    return merged
 
 
 async def generate_project_context(

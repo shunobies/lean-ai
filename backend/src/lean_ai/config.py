@@ -142,6 +142,9 @@ class Settings(BaseSettings):
     loop_detection_threshold: int = 3  # Consecutive identical tool calls before warning (0 = off)
     refresh_threshold: float = 0.7  # Refresh context at this % of context window
 
+    # ── Parallel expansion ──
+    expansion_concurrency: int = 3  # Max parallel LLM calls for expansion (0 = sequential)
+
     # ── Post-execution validation ──
     enable_post_validation: bool = True  # Master switch
     post_format_command: str = ""     # e.g. "ruff format src/"

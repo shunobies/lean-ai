@@ -372,6 +372,13 @@
           "maximum": 1.0,
           "markdownDescription": "**Advanced** — Refresh context when token usage reaches this fraction of the context window. Lower values refresh more aggressively; higher values keep more history. Default: `0.7`"
         },
+        "lean-ai.expansionConcurrency": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 16,
+          "markdownDescription": "**Context Generation** — Maximum parallel LLM calls during project context expansion. Higher values speed up `/init` but use more VRAM. Set to `0` for sequential mode. Default: `3`"
+        },
         "lean-ai.debugPlanning": {
           "type": "boolean",
           "default": false,

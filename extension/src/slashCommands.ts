@@ -110,8 +110,9 @@ export async function handleInitCommand(
         });
     }
 
-    // ── Step 2: Generate project context (slow — LLM call) ──
-    // Show elapsed time so the user knows it's still working
+    // ── Steps 2 + 3: Generate project context and framework guide in parallel ──
+    // Both are independent LLM-heavy operations — running them concurrently
+    // leverages Ollama's parallel request support for significant speedup.
     const startTime = Date.now();
     const ticker = setInterval(() => {
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
@@ -123,19 +124,26 @@ export async function handleInitCommand(
         ctx.postMessage({
             type: "thinking",
             show: true,
-            text: `Generating project context... (${timeStr})`,
+            text: `Generating project context + framework guide... (${timeStr})`,
         });
     }, 5_000);
 
     ctx.postMessage({
         type: "thinking",
         show: true,
-        text: "Generating project context...",
+        text: "Generating project context + framework guide...",
     });
 
-    try {
-        const ctxResult = await ctx.client.generateProjectContext(repoRoot, force);
-        clearInterval(ticker);
+    const [ctxSettled, guideSettled] = await Promise.allSettled([
+        ctx.client.generateProjectContext(repoRoot, force),
+        ctx.client.generateFrameworkGuide(repoRoot, force),
+    ]);
+
+    clearInterval(ticker);
+
+    // Handle project context result
+    if (ctxSettled.status === "fulfilled") {
+        const ctxResult = ctxSettled.value;
         if (ctxResult.skipped) {
             ctx.postMessage({
                 type: "reply",
@@ -149,10 +157,11 @@ export async function handleInitCommand(
                 cls: "msg-system",
             });
         }
-    } catch (e) {
-        clearInterval(ticker);
+    } else {
         anyFailure = true;
-        const error = e instanceof Error ? e.message : String(e);
+        const error = ctxSettled.reason instanceof Error
+            ? ctxSettled.reason.message
+            : String(ctxSettled.reason);
         ctx.postMessage({
             type: "reply",
             text: `Project context generation failed: ${error}`,
@@ -160,31 +169,9 @@ export async function handleInitCommand(
         });
     }
 
-    // ── Step 3: Generate framework guide (non-fatal) ──
-    const guideStart = Date.now();
-    const guideTicker = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - guideStart) / 1000);
-        const mins = Math.floor(elapsed / 60);
-        const secs = elapsed % 60;
-        const timeStr = mins > 0
-            ? `${mins}m ${secs.toString().padStart(2, "0")}s`
-            : `${secs}s`;
-        ctx.postMessage({
-            type: "thinking",
-            show: true,
-            text: `Generating framework guide... (${timeStr})`,
-        });
-    }, 5_000);
-
-    ctx.postMessage({
-        type: "thinking",
-        show: true,
-        text: "Generating framework guide...",
-    });
-
-    try {
-        const guideResult = await ctx.client.generateFrameworkGuide(repoRoot, force);
-        clearInterval(guideTicker);
+    // Handle framework guide result
+    if (guideSettled.status === "fulfilled") {
+        const guideResult = guideSettled.value;
         if (guideResult.skipped) {
             ctx.postMessage({
                 type: "reply",
@@ -198,10 +185,11 @@ export async function handleInitCommand(
                 cls: "msg-system",
             });
         }
-    } catch (e) {
-        clearInterval(guideTicker);
+    } else {
         // Non-fatal — 404 means no frameworks detected, anything else is an error
-        const error = e instanceof Error ? e.message : String(e);
+        const error = guideSettled.reason instanceof Error
+            ? guideSettled.reason.message
+            : String(guideSettled.reason);
         if (error.includes("404")) {
             ctx.postMessage({
                 type: "reply",
