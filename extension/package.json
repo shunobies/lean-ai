@@ -6,8 +6,9 @@
   "publisher": "lean-ai",
   "repository": {
     "type": "git",
-    "url": "https://github.com/lean-ai/lean-ai"
+    "url": "https://github.com/shunobies/lean-ai"
   },
+  "homepage": "https://github.com/shunobies/lean-ai",
   "engines": {
     "vscode": "^1.93.0"
   },
@@ -88,6 +89,11 @@
         "command": "lean-ai.deleteSession",
         "title": "Lean AI: Delete Session",
         "icon": "$(close)"
+      },
+      {
+        "command": "lean-ai.openSettings",
+        "title": "Lean AI: Open Settings",
+        "icon": "$(settings-gear)"
       }
     ],
     "menus": {
@@ -123,38 +129,237 @@
     },
     "configuration": {
       "title": "Lean AI",
+      "markdownDescription": "Configure Lean AI — a local agentic coding assistant. For a guided setup with mutual exclusion between providers, use the **⚙ button** in the Lean AI sidebar. [View documentation on GitHub](https://github.com/shunobies/lean-ai/)\n\nChanges here are written to `backend/.env` and require a backend restart.",
       "properties": {
         "lean-ai.backendUrl": {
           "type": "string",
           "default": "http://localhost:8422",
-          "description": "URL of the Lean AI backend server"
+          "markdownDescription": "URL of the Lean AI backend server. Change this to connect to a remote backend. Default: `http://localhost:8422`"
         },
         "lean-ai.enableInlinePredictions": {
           "type": "boolean",
           "default": true,
-          "description": "Enable Copilot-style inline predictions"
+          "markdownDescription": "Enable Copilot-style inline predictions powered by Ollama. Configure the model with `lean-ai.inlineModel`."
         },
         "lean-ai.autoStartBackend": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically start the Python backend server when the extension activates"
+          "markdownDescription": "Automatically start the Python backend server when the extension activates. Set `lean-ai.pythonPath` if using a virtualenv."
         },
         "lean-ai.pythonPath": {
           "type": "string",
           "default": "python",
-          "description": "Path to the Python interpreter (e.g. 'python', 'python3', or a full path to a virtualenv)"
+          "markdownDescription": "Path to the Python interpreter. Set this to a full virtualenv path if the backend is installed in one, e.g. `/home/user/Code/lean_ai/backend/.venv/bin/python`."
         },
         "lean-ai.backendDir": {
           "type": "string",
           "default": "",
-          "description": "Path to the backend directory containing pyproject.toml. If empty, auto-detects from workspace."
+          "markdownDescription": "Path to the `backend/` directory containing `pyproject.toml`. If empty, auto-detects from workspace."
         },
         "lean-ai.chatFontSize": {
           "type": "number",
           "default": 13,
           "minimum": 10,
           "maximum": 20,
-          "description": "Font size (px) for chat messages in the Lean AI sidebar. Adjusts live without restarting."
+          "markdownDescription": "Font size (px) for chat messages in the Lean AI sidebar. Adjusts live without restarting. Range: 10–20."
+        },
+        "lean-ai.llmProvider": {
+          "type": "string",
+          "default": "ollama",
+          "enum": ["ollama", "openai", "anthropic"],
+          "enumDescriptions": [
+            "Use a local Ollama instance (no API key required)",
+            "Use OpenAI API (requires API key stored in OS keychain)",
+            "Use Anthropic Claude API (requires API key stored in OS keychain)"
+          ],
+          "markdownDescription": "LLM provider for the main agent. API keys are stored securely in the OS keychain — use the ⚙ settings panel to configure them. Default: `ollama`"
+        },
+        "lean-ai.ollamaUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "markdownDescription": "**Ollama** — API endpoint URL. Default: `http://localhost:11434`"
+        },
+        "lean-ai.ollamaModel": {
+          "type": "string",
+          "default": "qwen3-coder:30b",
+          "markdownDescription": "**Ollama** — Primary model name. Must be pulled with `ollama pull <model>`. Default: `qwen3-coder:30b`"
+        },
+        "lean-ai.ollamaContextWindow": {
+          "type": "number",
+          "markdownDescription": "**Ollama** — Context window size in tokens. Accepts shorthand: `128` = 128k = 131072. Default: `131072`"
+        },
+        "lean-ai.ollamaTemperature": {
+          "type": "number",
+          "markdownDescription": "**Ollama** — Sampling temperature (0.0–2.0). Higher = more creative, lower = more deterministic. Default: `0.7`"
+        },
+        "lean-ai.ollamaTopP": {
+          "type": "number",
+          "markdownDescription": "**Ollama** — Nucleus sampling threshold (0.0–1.0). Keeps the top tokens whose cumulative probability reaches this value. Default: `0.8`"
+        },
+        "lean-ai.ollamaTopK": {
+          "type": "number",
+          "markdownDescription": "**Ollama** — Top-k sampling: only the top K tokens are considered at each step. Default: `20`"
+        },
+        "lean-ai.ollamaRepeatPenalty": {
+          "type": "number",
+          "markdownDescription": "**Ollama** — Penalty applied to repeated tokens to reduce repetition (1.0 = no penalty). Default: `1.05`"
+        },
+        "lean-ai.ollamaMaxTokens": {
+          "type": "number",
+          "markdownDescription": "**Ollama** — Maximum tokens to generate per response. Defaults to 25% of the context window."
+        },
+        "lean-ai.ollamaModelExpert": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Ollama Expert Model** — A larger/reasoning model used for planning phases 3–6. Leave empty to use the primary model for all phases. Example: `qwen3:32b`"
+        },
+        "lean-ai.ollamaExpertContextWindow": {
+          "type": "number",
+          "markdownDescription": "**Ollama Expert Model** — Context window for the expert model. Defaults to the primary model's context window."
+        },
+        "lean-ai.expertLlmProvider": {
+          "type": "string",
+          "default": "",
+          "enum": ["", "ollama", "openai", "anthropic"],
+          "enumDescriptions": [
+            "Auto-detect from ollamaModelExpert (empty = use primary provider)",
+            "Use Ollama for expert phases",
+            "Use OpenAI for expert phases (e.g. gpt-4o for planning)",
+            "Use Anthropic for expert phases (e.g. claude-opus-4-6 for planning)"
+          ],
+          "markdownDescription": "**Expert Model** — Provider for reasoning-heavy planning phases. Leave empty to auto-detect. Mix providers: use a fast Ollama model for coding and a cloud model for planning."
+        },
+        "lean-ai.openaiModel": {
+          "type": "string",
+          "default": "gpt-4o",
+          "markdownDescription": "**OpenAI** — Model name. Examples: `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`. Default: `gpt-4o`"
+        },
+        "lean-ai.openaiBaseUrl": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**OpenAI** — Custom base URL for OpenAI-compatible APIs (Groq, Together AI, vLLM, etc.). Leave empty to use `api.openai.com`."
+        },
+        "lean-ai.openaiTemperature": {
+          "type": "number",
+          "markdownDescription": "**OpenAI** — Sampling temperature. Default: `0.7`"
+        },
+        "lean-ai.openaiContextWindow": {
+          "type": "number",
+          "markdownDescription": "**OpenAI** — Context window size in tokens. Default: `128000`"
+        },
+        "lean-ai.openaiExpertModel": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**OpenAI Expert** — Override model for expert planning phases. Falls back to `lean-ai.openaiModel` if empty. Example: `gpt-4o`"
+        },
+        "lean-ai.anthropicModel": {
+          "type": "string",
+          "default": "claude-sonnet-4-20250514",
+          "markdownDescription": "**Anthropic** — Model name. Examples: `claude-sonnet-4-20250514`, `claude-opus-4-6`. Default: `claude-sonnet-4-20250514`"
+        },
+        "lean-ai.anthropicTemperature": {
+          "type": "number",
+          "markdownDescription": "**Anthropic** — Sampling temperature. Default: `0.7`"
+        },
+        "lean-ai.anthropicContextWindow": {
+          "type": "number",
+          "markdownDescription": "**Anthropic** — Context window size in tokens. Default: `200000`"
+        },
+        "lean-ai.anthropicExpertModel": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Anthropic Expert** — Override model for expert planning phases. Falls back to `lean-ai.anthropicModel` if empty. Example: `claude-opus-4-6`"
+        },
+        "lean-ai.inlineModel": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Inline Predictions** — Separate Ollama model for fill-in-the-middle completions. Uses a dedicated model for low-latency completions, independent of the main LLM provider. Example: `qwen2.5-coder:7b`"
+        },
+        "lean-ai.inlineOllamaUrl": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Inline Predictions** — Ollama instance for the inline model. Falls back to `lean-ai.ollamaUrl` if empty. Useful for running a separate Ollama on a different GPU."
+        },
+        "lean-ai.embeddingModel": {
+          "type": "string",
+          "default": "qwen3-embedding:0.6b",
+          "markdownDescription": "**Embeddings** — Ollama model for semantic search and RRF hybrid ranking. Default: `qwen3-embedding:0.6b`"
+        },
+        "lean-ai.enableEmbeddings": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "**Embeddings** — Enable embedding generation and RRF hybrid search in the workspace index. Disable if you don't want to run an embedding model. Default: `true`"
+        },
+        "lean-ai.searchProvider": {
+          "type": "string",
+          "default": "duckduckgo",
+          "enum": ["duckduckgo", "searxng", "google", "bing"],
+          "enumDescriptions": [
+            "DuckDuckGo (default, no setup required)",
+            "SearXNG (self-hosted, privacy-friendly)",
+            "Google (Selenium-based, requires Chrome; auto-falls back to Bing)",
+            "Bing (Selenium-based, requires Chrome)"
+          ],
+          "markdownDescription": "**Search** — Provider for web search used in context generation and agent tasks. Default: `duckduckgo`"
+        },
+        "lean-ai.searchDelay": {
+          "type": "number",
+          "default": 2.0,
+          "markdownDescription": "**Search** — Minimum seconds between search requests (with random jitter). Increase to avoid rate limiting. Default: `2.0`"
+        },
+        "lean-ai.enablePostValidation": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "**Post-Validation** — Run deterministic lint/format/test passes after the agent finishes. Automatically retries fixes up to `lean-ai.postValidationMaxRetries` times. Default: `true`"
+        },
+        "lean-ai.postFormatCommand": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Post-Validation** — Command to auto-format code after changes. Example: `ruff format src/`. Falls back to auto-detected command from `/init` if empty."
+        },
+        "lean-ai.postLintFixCommand": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Post-Validation** — Command to auto-fix lint issues after changes. Example: `ruff check --fix src/`. Falls back to auto-detected command from `/init` if empty."
+        },
+        "lean-ai.postLintCommand": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Post-Validation** — Command to check for lint errors (without auto-fix). Example: `ruff check src/`. Falls back to auto-detected command from `/init` if empty."
+        },
+        "lean-ai.postTestCommand": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Post-Validation** — Command to run tests after changes. Example: `pytest tests/ -x -q`. Falls back to auto-detected command from `/init` if empty."
+        },
+        "lean-ai.postValidationMaxRetries": {
+          "type": "number",
+          "default": 2,
+          "minimum": 0,
+          "markdownDescription": "**Post-Validation** — Maximum LLM fix attempts when lint/tests fail. Each retry uses a 30-turn budget. The expert model is used on the final retry if configured. `0` = no retries. Default: `2`"
+        },
+        "lean-ai.enableFrameworkGuide": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "**Advanced** — Generate a `.lean_ai/framework_guide.md` when running `/init`. Detects frameworks from dependency files and creates architecture/conventions guidance. Default: `true`"
+        },
+        "lean-ai.implementationMaxTurns": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "**Advanced** — Maximum tool-calling turns per agent session. `0` = unlimited. Increase only if agents are cutting off early. Default: `0`"
+        },
+        "lean-ai.refreshThreshold": {
+          "type": "number",
+          "default": 0.7,
+          "minimum": 0.1,
+          "maximum": 1.0,
+          "markdownDescription": "**Advanced** — Refresh context when token usage reaches this fraction of the context window. Lower values refresh more aggressively; higher values keep more history. Default: `0.7`"
+        },
+        "lean-ai.debugPlanning": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Advanced** — Save all planning phase outputs to `.lean_ai/plan_debug/{session_id}/` for debugging. Default: `false`"
         }
       }
     }

@@ -15,6 +15,7 @@ import * as fs from "fs";
 import * as vscode from "vscode";
 import { spawn, execSync, ChildProcess } from "child_process";
 import { DEFAULT_BACKEND_URL } from "./constants";
+import { buildBackendEnv, buildFullBackendEnv } from "./settingsSync";
 
 const HEALTH_POLL_INTERVAL_MS = 1000;
 const HEALTH_POLL_MAX_ATTEMPTS = 30; // 30 seconds max wait
@@ -23,6 +24,7 @@ const HEALTH_MONITOR_INTERVAL_MS = 20_000; // Check every 20 s
 let serverProcess: ChildProcess | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
 let managedPort: string | undefined;
+let _secrets: vscode.SecretStorage | undefined;
 
 // Health monitor state
 let healthMonitorInterval: NodeJS.Timeout | undefined;
@@ -297,7 +299,8 @@ export function stopHealthMonitor(): void {
  * Start the backend server if auto-start is enabled.
  * Returns true if the server is healthy (either already running or just started).
  */
-export async function startBackend(): Promise<boolean> {
+export async function startBackend(secrets?: vscode.SecretStorage): Promise<boolean> {
+    if (secrets) { _secrets = secrets; }
     const { autoStart, pythonPath, backendUrl } = getConfig();
     const channel = getOutputChannel();
     const { host, port } = parseHostPort(backendUrl);
@@ -368,7 +371,9 @@ export async function startBackend(): Promise<boolean> {
         {
             cwd: backendDir,
             stdio: ["ignore", "pipe", "pipe"],
-            env: undefined,
+            env: _secrets
+                ? { ...process.env, ...(await buildFullBackendEnv(_secrets)) }
+                : { ...process.env, ...buildBackendEnv() },
             // No shell: true — we want the actual uvicorn PID
         },
     );

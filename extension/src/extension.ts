@@ -16,12 +16,13 @@ import { SessionTreeProvider } from "./sessionTreeProvider";
 import { SessionDetailProvider } from "./sessionDetailProvider";
 import { BackendClient } from "./backendClient";
 import { startBackend, stopBackend, restartBackend } from "./backendProcess";
+import { SettingsPanel } from "./settingsPanel";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     console.log("Lean AI extension activating...");
 
     // Start backend server (checks if already running first)
-    await startBackend();
+    await startBackend(context.secrets);
 
     // Register Sidebar Webview Provider (Activity Bar chat panel)
     const sidebarProvider = new LeanAISidebarProvider(context.extensionUri, context);
@@ -96,6 +97,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand("lean-ai.stopBackend", () => {
             stopBackend();
             vscode.window.showInformationMessage("Lean AI backend stopped.");
+        }),
+        vscode.commands.registerCommand("lean-ai.openSettings", () => {
+            SettingsPanel.createOrShow(context);
         }),
     );
 

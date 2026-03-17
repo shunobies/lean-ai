@@ -511,6 +511,7 @@ export function getWebviewHtml(chatFontSize: number): string {
     </div>
     <div class="header-right">
         <button class="header-icon-btn" id="backBtn" title="Back to current chat" style="display:none;">&#8592;</button>
+        <button class="header-icon-btn" id="settingsBtn" title="Lean AI Settings">&#9881;</button>
         <button class="header-icon-btn" id="searchBtn" title="Search conversations">&#128269;</button>
         <button class="new-chat-btn" id="newChatBtn" title="New Chat">+</button>
     </div>
@@ -554,6 +555,7 @@ export function getWebviewHtml(chatFontSize: number): string {
     const approveBtn = document.getElementById('approveBtn');
     const stageBadge = document.getElementById('stageBadge');
     const searchBtn = document.getElementById('searchBtn');
+    const settingsBtn = document.getElementById('settingsBtn');
     const backBtn = document.getElementById('backBtn');
     const searchBar = document.getElementById('searchBar');
     const searchInput = document.getElementById('searchInput');
@@ -948,6 +950,10 @@ export function getWebviewHtml(chatFontSize: number): string {
             savedMessagesHtml = null;
         }
     }
+
+    settingsBtn.addEventListener('click', () => {
+        vscode.postMessage({ type: 'openSettings' });
+    });
 
     searchBtn.addEventListener('click', () => {
         if (searchMode) {

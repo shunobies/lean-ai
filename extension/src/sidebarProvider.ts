@@ -19,6 +19,9 @@ import type { SlashCommandContext } from "./slashCommands";
 import type { WSMessage } from "./types";
 import { handleWsMessage } from "./wsHandler";
 import type { WsHandlerContext } from "./wsHandler";
+import { SettingsPanel } from "./settingsPanel";
+import { BACKEND_SETTING_MAP, resolveEnvFilePath, writeEnvSetting } from "./settingsSync";
+import { restartBackend } from "./backendProcess";
 import WebSocket from "ws";
 
 export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
@@ -215,16 +218,44 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 case "toggleDebug":
                     this._includeDebug = msg.enabled as boolean;
                     break;
+                case "openSettings":
+                    SettingsPanel.createOrShow(this.context);
+                    break;
             }
         });
 
         // Live font-size updates when user changes the setting
-        vscode.workspace.onDidChangeConfiguration(e => {
+        vscode.workspace.onDidChangeConfiguration(async (e) => {
             if (e.affectsConfiguration("lean-ai.chatFontSize")) {
                 const newSize = vscode.workspace.getConfiguration("lean-ai").get<number>("chatFontSize", 13);
                 this.postMessage({ type: "setFontSize", size: newSize });
             }
-        });
+
+            // Sync any changed backend settings to .env and offer restart
+            const changedKeys = Object.keys(BACKEND_SETTING_MAP).filter(k => e.affectsConfiguration(k));
+            if (changedKeys.length > 0) {
+                const config = vscode.workspace.getConfiguration();
+                const backendDirSetting = config.get<string>("lean-ai.backendDir", "");
+                const envPath = resolveEnvFilePath(backendDirSetting || undefined);
+                if (envPath) {
+                    for (const key of changedKeys) {
+                        const envVar = BACKEND_SETTING_MAP[key];
+                        const val = config.get<unknown>(key);
+                        if (val !== undefined && val !== null && String(val) !== "") {
+                            writeEnvSetting(envPath, envVar, String(val));
+                        }
+                    }
+                }
+                const action = await vscode.window.showInformationMessage(
+                    "Lean AI settings changed. Restart the backend to apply.",
+                    "Restart Now",
+                    "Later",
+                );
+                if (action === "Restart Now") {
+                    await restartBackend();
+                }
+            }
+        }, null, this.context.subscriptions);
 
         // Live diagnostics count updates → Problems pill in webview
         vscode.languages.onDidChangeDiagnostics(() => {
