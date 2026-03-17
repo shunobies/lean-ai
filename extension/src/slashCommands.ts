@@ -25,6 +25,7 @@ export interface SlashCommandContext {
     setSessionId(id: string | undefined): void;
     setLastCompletedSessionId(id: string | undefined): void;
     extensionContext: vscode.ExtensionContext;
+    getFileDiagnostics(): string;
 }
 
 // ── Factory ──────────────────────────────────────────────────────────
@@ -581,8 +582,11 @@ export async function handleFixCommand(
     // Echo the prompt so it's visible in the conversation
     ctx.postMessage({ type: "reply", text: `🔧 ${prompt}`, cls: "msg-user" });
 
+    // Auto-include errors/warnings from the current file so the agent has concrete data
+    const diagCtx = ctx.getFileDiagnostics();
+
     // Send with /fix prefix so the backend skips planning
-    await ctx.handleAgentMessage(`/fix ${prompt}`);
+    await ctx.handleAgentMessage(`/fix ${prompt}${diagCtx}`);
 }
 
 // ── /reboot — restart the backend server ─────────────────────────────

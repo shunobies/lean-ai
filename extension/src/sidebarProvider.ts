@@ -45,6 +45,11 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     // Set by extension.ts when a scaffold was just created and this window is the new project
     private _pendingInit = false;
 
+    // Context pill state — whether to append diagnostics/debug data to outgoing messages
+    private _includeProblems = false;
+    private _includeDebug = false;
+    private _lastDebugStop?: { reason: string; text?: string; threadId?: number };
+
     constructor(
         private readonly extensionUri: vscode.Uri,
         private readonly context: vscode.ExtensionContext,
@@ -78,6 +83,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 this.lastCompletedSessionId = id;
             },
             extensionContext: this.context,
+            getFileDiagnostics: () => this.collectDiagnosticsContext('file'),
         };
         this.slashCommands = createSlashCommands(cmdCtx);
     }
@@ -186,6 +192,12 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                     if (this.chatHistory.length > 0) {
                         this.conversations.handleBackToCurrentChat(this.chatHistory);
                     }
+                    // Push current diagnostics count and debug session state
+                    this.sendDiagnosticsUpdate();
+                    {
+                        const dbgSession = vscode.debug.activeDebugSession;
+                        this.postMessage({ type: 'debugStateUpdate', active: !!dbgSession, name: dbgSession?.name });
+                    }
                     break;
                 case "approve_tool":
                 case "deny_tool":
@@ -197,6 +209,12 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                         }));
                     }
                     break;
+                case "toggleProblems":
+                    this._includeProblems = msg.enabled as boolean;
+                    break;
+                case "toggleDebug":
+                    this._includeDebug = msg.enabled as boolean;
+                    break;
             }
         });
 
@@ -207,6 +225,37 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 this.postMessage({ type: "setFontSize", size: newSize });
             }
         });
+
+        // Live diagnostics count updates → Problems pill in webview
+        vscode.languages.onDidChangeDiagnostics(() => {
+            this.sendDiagnosticsUpdate();
+        }, null, this.context.subscriptions);
+
+        // Debug session changes → show/hide Debug pill in webview
+        vscode.debug.onDidChangeActiveDebugSession((session) => {
+            this.postMessage({ type: 'debugStateUpdate', active: !!session, name: session?.name });
+            if (!session) {
+                this._lastDebugStop = undefined;
+            }
+        }, null, this.context.subscriptions);
+
+        // Capture stopped events (breakpoint hit, exception, etc.) for debug context
+        vscode.debug.onDidReceiveDebugSessionCustomEvent((e) => {
+            if (e.event === 'stopped') {
+                this._lastDebugStop = {
+                    reason: (e.body as { reason?: string })?.reason ?? 'unknown',
+                    text: (e.body as { text?: string })?.text,
+                    threadId: (e.body as { threadId?: number })?.threadId,
+                };
+                this.postMessage({
+                    type: 'debugStateUpdate',
+                    active: true,
+                    name: e.session.name,
+                    stopped: true,
+                    reason: this._lastDebugStop.reason,
+                });
+            }
+        }, null, this.context.subscriptions);
 
         // Persist conversation when view is disposed, but do NOT close the
         // WebSocket. If a workflow is running, closing the WS would kill it.
@@ -281,6 +330,128 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         }
 
         return ctx;
+    }
+
+    private sendDiagnosticsUpdate(): void {
+        const allDiags = vscode.languages.getDiagnostics();
+        let errorCount = 0;
+        let warningCount = 0;
+        for (const [, diags] of allDiags) {
+            for (const d of diags) {
+                if (d.severity === vscode.DiagnosticSeverity.Error) errorCount++;
+                else if (d.severity === vscode.DiagnosticSeverity.Warning) warningCount++;
+            }
+        }
+        this.postMessage({ type: 'diagnosticsUpdate', errorCount, warningCount });
+    }
+
+    collectDiagnosticsContext(scope: 'workspace' | 'file'): string {
+        const editor = vscode.window.activeTextEditor;
+        const folders = vscode.workspace.workspaceFolders;
+
+        let entries: [vscode.Uri, readonly vscode.Diagnostic[]][];
+        if (scope === 'file' && editor) {
+            entries = [[editor.document.uri, vscode.languages.getDiagnostics(editor.document.uri)]];
+        } else {
+            entries = vscode.languages.getDiagnostics();
+        }
+
+        const errors: string[] = [];
+        const warnings: string[] = [];
+        for (const [uri, diags] of entries) {
+            const rel = folders ? vscode.workspace.asRelativePath(uri, false) : uri.fsPath;
+            for (const d of diags) {
+                const loc = `${rel}:${d.range.start.line + 1}:${d.range.start.character + 1}`;
+                const src = d.source ? `[${d.source}] ` : '';
+                const line = `  - ${loc} ${src}${d.message}`;
+                if (d.severity === vscode.DiagnosticSeverity.Error) errors.push(line);
+                else if (d.severity === vscode.DiagnosticSeverity.Warning) warnings.push(line);
+            }
+        }
+
+        if (errors.length === 0 && warnings.length === 0) { return ''; }
+
+        const parts = ['', '---', 'Current Problems (VSCode diagnostics):'];
+        if (errors.length > 0) {
+            parts.push(`Errors (${errors.length}):`);
+            parts.push(...errors.slice(0, 40));
+        }
+        if (warnings.length > 0) {
+            parts.push(`Warnings (${warnings.length}):`);
+            parts.push(...warnings.slice(0, 20));
+        }
+        parts.push('---');
+        return parts.join('\n');
+    }
+
+    private async collectDebugContext(): Promise<string> {
+        const session = vscode.debug.activeDebugSession;
+        if (!session) { return ''; }
+
+        const parts: string[] = ['', '---', `Active Debug Session: "${session.name}" (${session.type})`];
+
+        if (this._lastDebugStop) {
+            const stopDesc = this._lastDebugStop.text
+                ? `${this._lastDebugStop.reason} — ${this._lastDebugStop.text}`
+                : this._lastDebugStop.reason;
+            parts.push(`Stopped: ${stopDesc}`);
+        }
+
+        try {
+            // Determine the thread to inspect
+            let threadId = this._lastDebugStop?.threadId;
+            if (threadId === undefined) {
+                const threadsResp = await session.customRequest('threads') as { threads: { id: number; name: string }[] };
+                if (threadsResp.threads.length > 0) {
+                    threadId = threadsResp.threads[0].id;
+                }
+            }
+
+            if (threadId !== undefined) {
+                // Get stack frames
+                const stackResp = await session.customRequest('stackTrace', { threadId, levels: 5 }) as {
+                    stackFrames: { id: number; name: string; source?: { path?: string }; line: number }[];
+                };
+                if (stackResp.stackFrames.length > 0) {
+                    parts.push('Call Stack:');
+                    for (let i = 0; i < stackResp.stackFrames.length; i++) {
+                        const f = stackResp.stackFrames[i];
+                        const src = f.source?.path
+                            ? (vscode.workspace.workspaceFolders
+                                ? vscode.workspace.asRelativePath(f.source.path, false)
+                                : f.source.path)
+                            : '<unknown>';
+                        parts.push(`  [${i}] ${f.name}  ${src}:${f.line}`);
+                    }
+
+                    // Get local variables from the top frame
+                    const topFrameId = stackResp.stackFrames[0].id;
+                    const scopesResp = await session.customRequest('scopes', { frameId: topFrameId }) as {
+                        scopes: { name: string; variablesReference: number; expensive: boolean }[];
+                    };
+                    const localScope = scopesResp.scopes.find(s => !s.expensive && s.variablesReference > 0);
+                    if (localScope) {
+                        const varsResp = await session.customRequest('variables', {
+                            variablesReference: localScope.variablesReference,
+                            count: 20,
+                        }) as { variables: { name: string; value: string }[] };
+                        if (varsResp.variables.length > 0) {
+                            parts.push(`Local Variables (${stackResp.stackFrames[0].name}):`);
+                            for (const v of varsResp.variables) {
+                                // Truncate very long values
+                                const val = v.value.length > 120 ? v.value.slice(0, 120) + '…' : v.value;
+                                parts.push(`  ${v.name} = ${val}`);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch {
+            // DAP queries can fail if the debugger is not paused — that's fine
+        }
+
+        parts.push('---');
+        return parts.join('\n');
     }
 
     private async ensureSession(): Promise<string> {
@@ -407,7 +578,16 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     private async handleChatMessage(text: string): Promise<void> {
         const now = new Date().toISOString();
 
-        // Add user message to history with timestamp
+        // Append any enabled context pills to the outgoing message
+        let chatText = text;
+        if (this._includeProblems) {
+            chatText += this.collectDiagnosticsContext('workspace');
+        }
+        if (this._includeDebug && vscode.debug.activeDebugSession) {
+            chatText += await this.collectDebugContext();
+        }
+
+        // Add user message to history with timestamp (store original text, not augmented)
         this.chatHistory.push({ role: "user", content: text, timestamp: now });
 
         // Gather workspace context from VSCode
@@ -421,7 +601,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         let streamStartTime: number | null = null;
         let tokenCount = 0;
 
-        await this.client.chatStream(text, historyForApi, workspace, (token) => {
+        await this.client.chatStream(chatText, historyForApi, workspace, (token) => {
             if (streamStartTime === null) { streamStartTime = Date.now(); }
             tokenCount++;
             fullReply += token;
@@ -476,8 +656,17 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             });
         }
 
+        // Append any enabled context pills before sending
+        let content = text;
+        if (this._includeProblems) {
+            content += this.collectDiagnosticsContext('workspace');
+        }
+        if (this._includeDebug && vscode.debug.activeDebugSession) {
+            content += await this.collectDebugContext();
+        }
+
         // Send message over WebSocket — the workflow runs server-side
-        ws.send(JSON.stringify({ type: "user_message", content: text, repo_root: this.getRepoRoot() }));
+        ws.send(JSON.stringify({ type: "user_message", content, repo_root: this.getRepoRoot() }));
     }
 
     private handleApprove(): void {

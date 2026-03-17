@@ -461,6 +461,43 @@ export function getWebviewHtml(chatFontSize: number): string {
         opacity: 0.5;
         cursor: not-allowed;
     }
+
+    .context-pills {
+        padding: 0 12px 6px;
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        flex-shrink: 0;
+    }
+    .context-pill {
+        padding: 2px 8px;
+        font-size: 11px;
+        border-radius: 10px;
+        border: 1px solid var(--vscode-input-border);
+        background: transparent;
+        color: var(--vscode-descriptionForeground);
+        cursor: pointer;
+        font-family: inherit;
+        user-select: none;
+        white-space: nowrap;
+    }
+    .context-pill:hover {
+        background: var(--vscode-toolbar-hoverBackground);
+        color: var(--vscode-foreground);
+    }
+    .context-pill.active {
+        background: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+        border-color: var(--vscode-button-background);
+    }
+    .context-pill.has-errors {
+        color: var(--vscode-errorForeground);
+        border-color: var(--vscode-errorForeground);
+    }
+    .context-pill.active.has-errors {
+        background: var(--vscode-errorForeground);
+        color: var(--vscode-button-foreground);
+    }
 </style>
 </head>
 <body>
@@ -496,6 +533,11 @@ export function getWebviewHtml(chatFontSize: number): string {
     <span class="approval-hint">or type feedback below to revise</span>
 </div>
 
+<div class="context-pills" id="contextPills">
+    <button class="context-pill" id="problemsPill" title="Include Problems tab (errors &amp; warnings) as context for the agent">&#9888; Problems (<span id="problemsCount">0</span>)</button>
+    <button class="context-pill" id="debugPill" title="Include active debug session state (call stack, variables) as context" style="display:none;">&#9679; Debug State</button>
+</div>
+
 <div class="input-area">
     <textarea id="input" rows="2" placeholder="Ask a question or describe a task..." autofocus></textarea>
     <button id="sendBtn">Send</button>
@@ -520,6 +562,10 @@ export function getWebviewHtml(chatFontSize: number): string {
     const ctxBadge = document.getElementById('ctxBadge');
     const timeBadge = document.getElementById('timeBadge');
 
+    const problemsPill = document.getElementById('problemsPill');
+    const debugPill = document.getElementById('debugPill');
+    const problemsCount = document.getElementById('problemsCount');
+
     let sending = false;
     let runtimeInterval = null;
     let runtimeStart = null;
@@ -528,6 +574,8 @@ export function getWebviewHtml(chatFontSize: number): string {
     let savedMessagesHtml = null;
     let searchDebounceTimer = null;
     let currentStreamDiv = null; // AI bubble being filled during chat streaming
+    let problemsActive = false;
+    let debugActive = false;
 
     // ── Tab management ──
 
@@ -825,6 +873,18 @@ export function getWebviewHtml(chatFontSize: number): string {
             }
         }, 120000);
     }
+
+    problemsPill.addEventListener('click', () => {
+        problemsActive = !problemsActive;
+        problemsPill.classList.toggle('active', problemsActive);
+        vscode.postMessage({ type: 'toggleProblems', enabled: problemsActive });
+    });
+
+    debugPill.addEventListener('click', () => {
+        debugActive = !debugActive;
+        debugPill.classList.toggle('active', debugActive);
+        vscode.postMessage({ type: 'toggleDebug', enabled: debugActive });
+    });
 
     sendBtn.addEventListener('click', send);
     inputEl.addEventListener('keydown', (e) => {
@@ -1172,6 +1232,26 @@ export function getWebviewHtml(chatFontSize: number): string {
                     '</div>';
                 messagesEl.appendChild(card);
                 messagesEl.scrollTop = messagesEl.scrollHeight;
+                break;
+            }
+
+            case 'diagnosticsUpdate': {
+                const total = (msg.errorCount || 0) + (msg.warningCount || 0);
+                problemsCount.textContent = String(total);
+                problemsPill.classList.toggle('has-errors', (msg.errorCount || 0) > 0);
+                break;
+            }
+
+            case 'debugStateUpdate': {
+                const isActive = !!msg.active;
+                debugPill.style.display = isActive ? 'inline-block' : 'none';
+                if (msg.name) {
+                    debugPill.title = 'Include debug state from "' + msg.name + '" as context';
+                }
+                if (!isActive && debugActive) {
+                    debugActive = false;
+                    debugPill.classList.remove('active');
+                }
                 break;
             }
 
