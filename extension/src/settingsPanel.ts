@@ -4,6 +4,10 @@
  * (OS keychain) for API keys. Never sends actual key values to the webview.
  */
 
+import * as http from "http";
+import * as https from "https";
+import { URL } from "url";
+
 import * as vscode from "vscode";
 import { getSettingsPanelHtml } from "./settingsPanelHtml";
 import {
@@ -12,6 +16,49 @@ import {
     resolveEnvFilePath,
     writeEnvSetting,
 } from "./settingsSync";
+
+/** Fetch available model names from Ollama's /api/tags endpoint. Returns [] on failure. */
+async function listOllamaModels(ollamaUrl: string): Promise<string[]> {
+    return new Promise((resolve) => {
+        try {
+            const fullUrl = new URL(`${ollamaUrl.replace(/\/$/, "")}/api/tags`);
+            const isHttps = fullUrl.protocol === "https:";
+            const transport = isHttps ? https : http;
+
+            const options: http.RequestOptions = {
+                hostname: fullUrl.hostname,
+                port: fullUrl.port || (isHttps ? "443" : "80"),
+                path: fullUrl.pathname,
+                method: "GET",
+                timeout: 5000,
+            };
+
+            const req = transport.request(options, (res) => {
+                let data = "";
+                res.on("data", (chunk: Buffer | string) => { data += chunk.toString(); });
+                res.on("end", () => {
+                    if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+                        try {
+                            const parsed = JSON.parse(data) as { models?: Array<{ name: string }> };
+                            const names = (parsed.models ?? []).map(m => m.name).sort();
+                            resolve(names);
+                        } catch {
+                            resolve([]);
+                        }
+                    } else {
+                        resolve([]);
+                    }
+                });
+            });
+
+            req.on("timeout", () => { req.destroy(); resolve([]); });
+            req.on("error", () => resolve([]));
+            req.end();
+        } catch {
+            resolve([]);
+        }
+    });
+}
 
 export class SettingsPanel {
     static currentPanel: SettingsPanel | undefined;
@@ -105,6 +152,13 @@ export class SettingsPanel {
                         : SECRET_KEYS.anthropicApiKey;
                 await this._context.secrets.delete(secretKey);
                 await this._sendCurrentSettings();
+                break;
+            }
+
+            case "requestOllamaModels": {
+                const ollamaUrl = (msg.ollamaUrl as string) || "http://localhost:11434";
+                const models = await listOllamaModels(ollamaUrl);
+                await this._panel.webview.postMessage({ type: "ollamaModelsLoaded", models });
                 break;
             }
 

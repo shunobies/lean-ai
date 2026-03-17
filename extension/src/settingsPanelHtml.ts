@@ -211,6 +211,65 @@ export function getSettingsPanelHtml(): string {
         color: var(--vscode-list-activeSelectionForeground);
     }
 
+    /* Model combobox — text input + chevron button + dropdown list */
+    .model-combobox {
+        position: relative;
+        display: flex;
+        align-items: stretch;
+    }
+    .model-combobox input[type="text"] {
+        flex: 1;
+        min-width: 0;
+        border-radius: 4px 0 0 4px !important;
+    }
+    .model-combobox.open input[type="text"],
+    .model-combobox input[type="text"]:focus {
+        border-color: var(--vscode-focusBorder);
+    }
+    .model-combobox-btn {
+        flex-shrink: 0;
+        padding: 0 8px;
+        background: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        border: 1px solid var(--vscode-input-border);
+        border-left: none;
+        border-radius: 0 4px 4px 0;
+        cursor: pointer;
+        font-size: 0.85em;
+        user-select: none;
+        line-height: 1;
+    }
+    .model-combobox-btn:hover { background: var(--vscode-toolbar-hoverBackground); }
+    .model-combobox.open .model-combobox-btn {
+        border-color: var(--vscode-focusBorder);
+        border-radius: 0 4px 0 0;
+    }
+    .model-combobox-options {
+        display: none;
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: var(--vscode-input-background);
+        border: 1px solid var(--vscode-focusBorder);
+        border-top: none;
+        border-radius: 0 0 4px 4px;
+        z-index: 200;
+        max-height: 200px;
+        overflow-y: auto;
+    }
+    .model-combobox.open .model-combobox-options { display: block; }
+    .model-combobox-option {
+        padding: 6px 8px;
+        cursor: pointer;
+        color: var(--vscode-input-foreground);
+        font-size: inherit;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .model-combobox-option:hover { background: var(--vscode-list-hoverBackground); }
+
     /* API Key status widget */
     .api-key-widget {
         display: flex;
@@ -395,7 +454,11 @@ export function getSettingsPanelHtml(): string {
             </div>
             <div class="field">
                 <label>Model <span class="hint">e.g. qwen3-coder:30b</span></label>
-                <input type="text" id="ollamaModel" placeholder="qwen3-coder:30b">
+                <div class="model-combobox" id="ollamaModelCombobox">
+                    <input type="text" id="ollamaModel" placeholder="qwen3-coder:30b">
+                    <button type="button" class="model-combobox-btn" tabindex="-1">&#9660;</button>
+                    <div class="model-combobox-options"></div>
+                </div>
             </div>
         </div>
         <div class="field-row">
@@ -514,7 +577,11 @@ export function getSettingsPanelHtml(): string {
                 <div class="field-row">
                     <div class="field">
                         <label>Expert Ollama Model <span class="hint">e.g. qwen3:72b</span></label>
-                        <input type="text" id="ollamaModelExpert" placeholder="qwen3:72b">
+                        <div class="model-combobox" id="ollamaModelExpertCombobox">
+                            <input type="text" id="ollamaModelExpert" placeholder="qwen3:72b">
+                            <button type="button" class="model-combobox-btn" tabindex="-1">&#9660;</button>
+                            <div class="model-combobox-options"></div>
+                        </div>
                     </div>
                     <div class="field">
                         <label>Expert Context Window <span class="hint">leave empty to inherit</span></label>
@@ -580,7 +647,11 @@ export function getSettingsPanelHtml(): string {
     <div class="field-row">
         <div class="field">
             <label>Inline predictions model <span class="hint">leave empty to share primary model</span></label>
-            <input type="text" id="inlineModel" placeholder="qwen2.5-coder:7b">
+            <div class="model-combobox" id="inlineModelCombobox">
+                <input type="text" id="inlineModel" placeholder="qwen2.5-coder:7b">
+                <button type="button" class="model-combobox-btn" tabindex="-1">&#9660;</button>
+                <div class="model-combobox-options"></div>
+            </div>
         </div>
         <div class="field">
             <label>Inline Ollama URL <span class="hint">leave empty to share primary URL</span></label>
@@ -590,7 +661,11 @@ export function getSettingsPanelHtml(): string {
     <div class="field-row">
         <div class="field">
             <label>Embedding model</label>
-            <input type="text" id="embeddingModel" placeholder="qwen3-embedding:0.6b">
+            <div class="model-combobox" id="embeddingModelCombobox">
+                <input type="text" id="embeddingModel" placeholder="qwen3-embedding:0.6b">
+                <button type="button" class="model-combobox-btn" tabindex="-1">&#9660;</button>
+                <div class="model-combobox-options"></div>
+            </div>
         </div>
         <div class="field">
             <label>Search provider</label>
@@ -857,9 +932,72 @@ export function getSettingsPanelHtml(): string {
         });
     });
 
-    document.addEventListener('click', () => {
+    document.addEventListener('click', (e) => {
         document.getElementById('searchProviderDropdown').classList.remove('open');
+        if (!e.target.closest('.model-combobox')) {
+            document.querySelectorAll('.model-combobox').forEach(b => b.classList.remove('open'));
+        }
     });
+
+    // ── Ollama model comboboxes ────────────────────────────────────────────
+
+    const MODEL_COMBOBOXES = [
+        { comboboxId: 'ollamaModelCombobox',       inputId: 'ollamaModel' },
+        { comboboxId: 'ollamaModelExpertCombobox', inputId: 'ollamaModelExpert' },
+        { comboboxId: 'inlineModelCombobox',       inputId: 'inlineModel' },
+        { comboboxId: 'embeddingModelCombobox',    inputId: 'embeddingModel' },
+    ];
+
+    function updateOllamaModelDropdown(models) {
+        MODEL_COMBOBOXES.forEach(function(item) {
+            var box = document.getElementById(item.comboboxId);
+            if (!box) return;
+            var optEl = box.querySelector('.model-combobox-options');
+            if (!optEl) return;
+            if (!models || models.length === 0) {
+                optEl.innerHTML = '<div class="model-combobox-option" style="color:var(--vscode-descriptionForeground);font-style:italic;cursor:default">No models found — is Ollama running?</div>';
+                return;
+            }
+            optEl.innerHTML = models.map(function(name) {
+                return '<div class="model-combobox-option" data-value="' + name + '">' + name + '</div>';
+            }).join('');
+            var inputId = item.inputId;
+            var comboboxId = item.comboboxId;
+            optEl.querySelectorAll('.model-combobox-option[data-value]').forEach(function(el) {
+                el.addEventListener('click', function() {
+                    var input = document.getElementById(inputId);
+                    if (input) { input.value = el.dataset.value; }
+                    document.getElementById(comboboxId).classList.remove('open');
+                });
+            });
+        });
+    }
+
+    function requestOllamaModels() {
+        var url = (document.getElementById('ollamaUrl') ? document.getElementById('ollamaUrl').value.trim() : '') || 'http://localhost:11434';
+        MODEL_COMBOBOXES.forEach(function(item) {
+            var box = document.getElementById(item.comboboxId);
+            if (!box) return;
+            var optEl = box.querySelector('.model-combobox-options');
+            if (optEl) { optEl.innerHTML = '<div class="model-combobox-option" style="color:var(--vscode-descriptionForeground);font-style:italic;cursor:default">Loading\u2026</div>'; }
+        });
+        vscode.postMessage({ type: 'requestOllamaModels', ollamaUrl: url });
+    }
+
+    // Toggle dropdown open/close on chevron button click
+    document.querySelectorAll('.model-combobox-btn').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var box = btn.closest('.model-combobox');
+            var isOpen = box.classList.contains('open');
+            document.querySelectorAll('.model-combobox').forEach(function(b) { b.classList.remove('open'); });
+            document.getElementById('searchProviderDropdown').classList.remove('open');
+            if (!isOpen) { box.classList.add('open'); }
+        });
+    });
+
+    // Re-fetch model list when Ollama URL changes
+    document.getElementById('ollamaUrl').addEventListener('change', requestOllamaModels);
 
     // ── Save ──────────────────────────────────────────────────────────────
 
@@ -940,6 +1078,10 @@ export function getSettingsPanelHtml(): string {
 
     window.addEventListener('message', event => {
         const msg = event.data;
+        if (msg.type === 'ollamaModelsLoaded') {
+            updateOllamaModelDropdown(msg.models || []);
+            return;
+        }
         if (msg.type !== 'loadSettings') return;
         const v = msg.values;
 
@@ -1019,6 +1161,9 @@ export function getSettingsPanelHtml(): string {
         setVal('refreshThreshold',      v.refreshThreshold);
         setVal('enableFrameworkGuide',  v.enableFrameworkGuide);
         setVal('debugPlanning',         v.debugPlanning);
+
+        // Populate Ollama model dropdowns
+        requestOllamaModels();
     });
 </script>
 </body>
