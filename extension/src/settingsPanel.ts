@@ -224,6 +224,7 @@ export class SettingsPanel {
             enableFrameworkGuide:     "lean-ai.enableFrameworkGuide",
             implementationMaxTurns:   "lean-ai.implementationMaxTurns",
             refreshThreshold:         "lean-ai.refreshThreshold",
+            expansionConcurrency:     "lean-ai.expansionConcurrency",
             debugPlanning:            "lean-ai.debugPlanning",
         };
 
@@ -231,7 +232,7 @@ export class SettingsPanel {
             "ollamaContextWindow", "ollamaMaxTokens", "ollamaExpertContextWindow",
             "openaiContextWindow", "anthropicContextWindow",
             "searchDelay", "postValidationMaxRetries",
-            "implementationMaxTurns", "refreshThreshold",
+            "implementationMaxTurns", "refreshThreshold", "expansionConcurrency",
             "ollamaTemperature", "ollamaTopP", "ollamaTopK", "ollamaRepeatPenalty",
             "openaiTemperature", "anthropicTemperature",
         ]);
@@ -356,6 +357,7 @@ export class SettingsPanel {
             enableFrameworkGuide:      config.get("lean-ai.enableFrameworkGuide", true),
             implementationMaxTurns:    config.get("lean-ai.implementationMaxTurns", ""),
             refreshThreshold:          config.get("lean-ai.refreshThreshold", ""),
+            expansionConcurrency:      config.get("lean-ai.expansionConcurrency", ""),
             debugPlanning:             config.get("lean-ai.debugPlanning", false),
         };
 

@@ -706,6 +706,10 @@ export function getSettingsPanelHtml(): string {
             <label>Context refresh threshold <span class="hint">0.3–0.95, refresh at this % full</span></label>
             <input type="number" id="refreshThreshold" min="0.3" max="0.95" step="0.05" placeholder="0.7">
         </div>
+        <div class="field">
+            <label>Expansion concurrency <span class="hint">parallel LLM calls for /init, 0 = sequential</span></label>
+            <input type="number" id="expansionConcurrency" min="0" max="16" step="1" placeholder="3">
+        </div>
     </div>
     <div class="field-check">
         <input type="checkbox" id="enableEmbeddings">
@@ -1077,6 +1081,7 @@ export function getSettingsPanelHtml(): string {
             searchDelay:           val('searchDelay'),
             implementationMaxTurns:val('implementationMaxTurns'),
             refreshThreshold:      val('refreshThreshold'),
+            expansionConcurrency:  val('expansionConcurrency'),
             enableFrameworkGuide:  val('enableFrameworkGuide'),
             debugPlanning:         val('debugPlanning'),
         };
@@ -1174,6 +1179,7 @@ export function getSettingsPanelHtml(): string {
         setVal('searchDelay',           v.searchDelay);
         setVal('implementationMaxTurns',v.implementationMaxTurns);
         setVal('refreshThreshold',      v.refreshThreshold);
+        setVal('expansionConcurrency',  v.expansionConcurrency);
         setVal('enableFrameworkGuide',  v.enableFrameworkGuide);
         setVal('debugPlanning',         v.debugPlanning);
 
