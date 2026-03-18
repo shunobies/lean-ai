@@ -57,6 +57,10 @@ Do not describe what you plan to do — do it by calling the appropriate tools. 
 If you have finished reading and understanding the code, immediately proceed \
 to make changes using edit_file or create_file.
 
+IMPORTANT: Call EXACTLY ONE tool per response, then stop. Do not predict, \
+simulate, or narrate the tool result — wait for the actual result before \
+continuing. Never generate more than one tool call in a single response.
+
 When ALL changes have been made and verified, call the task_complete tool with \
 a brief summary of what you accomplished. This is the ONLY way to signal that \
 you are done. Do NOT stop calling tools without calling task_complete first.
