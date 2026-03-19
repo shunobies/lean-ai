@@ -38,6 +38,7 @@ export function createSlashCommands(
     map.set("/scaffold", (args) => handleScaffoldCommand(ctx, args));
     map.set("/agent",    (args) => handleAgentCommand(ctx, args));
     map.set("/fix",      (args) => handleFixCommand(ctx, args));
+    map.set("/request",  (args) => handleRequestCommand(ctx, args));
     map.set("/guide",    (args) => handleGuideCommand(ctx, args));
     map.set("/style",    (args) => handleStyleCommand(ctx, args));
     map.set("/reboot",   (args) => handleRebootCommand(ctx, args));
@@ -600,6 +601,38 @@ export async function handleFixCommand(
 
     // Send with /fix prefix so the backend skips planning
     await ctx.handleAgentMessage(`/fix ${prompt}${diagCtx}`);
+}
+
+// ── /request — skip planning, neutral prompt with search ─────────────
+
+export async function handleRequestCommand(
+    ctx: SlashCommandContext,
+    args: string,
+): Promise<void> {
+    const prompt = args.trim();
+    if (!prompt) {
+        ctx.postMessage({
+            type: "error",
+            text: "Usage: `/request <description>`\nSkip planning and let the agent work directly on the task with internet search.\n\nExample: `/request Write a comprehensive guide on our authentication system`",
+        });
+        return;
+    }
+
+    // Guard: don't start a second workflow over an active WebSocket
+    const ws = ctx.getWs();
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ctx.postMessage({
+            type: "error",
+            text: "An agent workflow is already running. Wait for it to complete, or start a new chat first.",
+        });
+        return;
+    }
+
+    // Echo the prompt so it's visible in the conversation
+    ctx.postMessage({ type: "reply", text: prompt, cls: "msg-user" });
+
+    // Send with /request prefix so the backend uses neutral prompt + search tools
+    await ctx.handleAgentMessage(`/request ${prompt}`);
 }
 
 // ── /reboot — restart the backend server ─────────────────────────────

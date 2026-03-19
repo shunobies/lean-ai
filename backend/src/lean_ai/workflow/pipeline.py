@@ -24,6 +24,7 @@ from lean_ai.routers.context_helpers import load_full_context
 from lean_ai.tools import scratchpad
 from lean_ai.workflow.prompts import (
     build_fix_system_prompt,
+    build_request_system_prompt,
     build_step_system_prompt,
     build_step_user_message,
 )
@@ -61,10 +62,11 @@ async def run_workflow(
     refiner: "PromptRefiner | None" = None,
     expert_llm_client: "LLMClient | None" = None,
 ) -> str:
-    """Run a workflow. Supports two modes:
+    """Run a workflow. Supports three modes:
 
     - ``"plan"`` (default): clarify → plan → approve → execute
-    - ``"fix"``: skip planning, give the LLM tools and let it work
+    - ``"fix"``: skip planning, bug-fix prompt
+    - ``"request"``: skip planning, neutral prompt with internet search
 
     Returns a structured commit message summarising the actions taken.
     """
@@ -74,7 +76,7 @@ async def run_workflow(
     if conversation_logger:
         await conversation_logger("user", task)
 
-    if mode == "fix":
+    if mode in ("fix", "request"):
         return await _run_fix(
             task=task,
             repo_root=repo_root,
@@ -85,6 +87,7 @@ async def run_workflow(
             conversation_logger=conversation_logger,
             session_id=session_id,
             expert_llm_client=expert_llm_client,
+            mode=mode,
         )
 
     # ── Phase 1: Clarify (optional) ──────────────────────────────
@@ -278,7 +281,7 @@ async def _execute_plan(
     expert_llm_client: "LLMClient | None" = None,
 ) -> str:
     """Execute each plan step sequentially with a constrained LLM."""
-    tool_executor = make_tool_executor(repo_root, ws, session_id)
+    tool_executor = make_tool_executor(repo_root, ws, session_id, llm_client=llm_client)
     total_steps = len(plan.steps)
     all_executed = []
     step_explanations: list[str] = []
@@ -785,7 +788,9 @@ async def _run_validation_fix_loop(
         ]
 
         # Run LLM with a tight turn budget
-        tool_executor = make_tool_executor(repo_root, ws, session_id)
+        tool_executor = make_tool_executor(
+            repo_root, ws, session_id, llm_client=active_client,
+        )
         executed, explanation = await active_client.chat_with_tools(
             messages=messages,
             tools=IMPLEMENTATION_TOOLS,
@@ -846,18 +851,26 @@ async def _run_fix(
     conversation_logger: Callable | None,
     session_id: str = "",
     expert_llm_client: "LLMClient | None" = None,
+    mode: str = "fix",
 ) -> str:
-    """Execute a fix directly — no planning, no approval.
+    """Execute directly — no planning, no approval.
 
     The LLM gets the full tool set and runs until it decides it's done.
+    When *mode* is ``"request"``, uses a neutral prompt.
     """
     await ws_send(ws, "stage_change", {"stage": "implementing"})
 
-    tool_executor = make_tool_executor(repo_root, ws, session_id)
-    commands = _effective_post_commands(repo_root)
-    system_prompt = build_fix_system_prompt(
-        context, test_command=commands.get("test", ""),
+    is_request = mode == "request"
+    tool_executor = make_tool_executor(
+        repo_root, ws, session_id, llm_client=llm_client,
     )
+    commands = _effective_post_commands(repo_root)
+    if is_request:
+        system_prompt = build_request_system_prompt(context)
+    else:
+        system_prompt = build_fix_system_prompt(
+            context, test_command=commands.get("test", ""),
+        )
 
     # Callbacks — fire-and-forget (same rationale as plan mode callbacks)
     async def on_tool_call(name: str, args: dict) -> None:
@@ -930,9 +943,12 @@ async def _run_fix(
     def _build_context_refresh(current_messages: list[dict]) -> list[dict]:
         """Rebuild message list from fresh disk state."""
         fresh_context = load_full_context(repo_root)
-        fresh_system_prompt = build_fix_system_prompt(
-            fresh_context, test_command=commands.get("test", ""),
-        )
+        if is_request:
+            fresh_system_prompt = build_request_system_prompt(fresh_context)
+        else:
+            fresh_system_prompt = build_fix_system_prompt(
+                fresh_context, test_command=commands.get("test", ""),
+            )
         pad = scratchpad.read_scratchpad(repo_root, session_id)
 
         new_messages: list[dict] = [
@@ -1068,7 +1084,8 @@ async def _run_fix(
     )
 
     task_summary = task[:72].replace("\n", " ")
-    commit_msg = f"lean-ai(fix): {task_summary}"
+    prefix = "lean-ai(request)" if is_request else "lean-ai(fix)"
+    commit_msg = f"{prefix}: {task_summary}"
     if files_modified:
         commit_msg += f"\n\nFiles modified: {', '.join(files_modified)}"
     return commit_msg

@@ -279,6 +279,51 @@ IMPLEMENTATION_TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "search_internet",
+            "description": (
+                "Search the web for information on a topic. "
+                "Returns summarized search results. Use this to research "
+                "error messages, API documentation, library usage, "
+                "best practices, or any external information needed "
+                "to complete or unblock the task."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_url",
+            "description": (
+                "Fetch the content of a URL and return it as text. "
+                "Use this to read documentation pages, blog posts, "
+                "Stack Overflow answers, or other web resources found "
+                "via search_internet."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The URL to fetch",
+                    },
+                },
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "task_complete",
             "description": (
                 "Signal that you have finished all work for this task. "

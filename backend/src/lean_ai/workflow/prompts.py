@@ -1,7 +1,11 @@
-"""Prompt builders for workflow execution and fix mode."""
+"""Prompt builders for workflow execution, fix mode, and request mode."""
 
 from lean_ai.llm.plan_schema import PlanStep
-from lean_ai.llm.prompts import FIX_SYSTEM_PROMPT, STEP_EXECUTION_SYSTEM_PROMPT
+from lean_ai.llm.prompts import (
+    FIX_SYSTEM_PROMPT,
+    REQUEST_SYSTEM_PROMPT,
+    STEP_EXECUTION_SYSTEM_PROMPT,
+)
 
 
 def build_fix_system_prompt(
@@ -33,6 +37,23 @@ def build_fix_system_prompt(
             "fixture reuse). Tests run with: "
             f"{test_command}"
         )
+
+    if not context:
+        return base
+
+    max_context = 3000
+    ctx = context[:max_context]
+    if len(context) > max_context:
+        ctx += "\n... (condensed)"
+
+    return f"{base}\n## Project Context\n\n{ctx}"
+
+
+def build_request_system_prompt(
+    context: str,
+) -> str:
+    """Build the system prompt for request mode (neutral framing, no test requirement)."""
+    base = REQUEST_SYSTEM_PROMPT
 
     if not context:
         return base

@@ -2,12 +2,16 @@
 
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fastapi import WebSocket
 
 from lean_ai.tools import file_ops, scratchpad, shell
 from lean_ai.tools.command_safety import CommandRisk, check_command
 from lean_ai.workflow.ws_handler import safe_receive, ws_send
+
+if TYPE_CHECKING:
+    from lean_ai.llm.facade import LLMClient
 
 # Short output is returned inline; longer output is saved to a file
 # so the LLM can page through it with read_file.
@@ -73,7 +77,12 @@ def cleanup_all_tool_output(repo_root: str) -> int:
     return deleted
 
 
-def make_tool_executor(repo_root: str, ws: WebSocket, session_id: str = ""):
+def make_tool_executor(
+    repo_root: str,
+    ws: WebSocket,
+    session_id: str = "",
+    llm_client: "LLMClient | None" = None,
+):
     """Create a tool executor closure for the workflow."""
 
     async def execute(name: str, arguments: dict) -> str:
@@ -239,6 +248,22 @@ def make_tool_executor(repo_root: str, ws: WebSocket, session_id: str = ""):
                 pattern=arguments.get("pattern", ""),
                 repo_root=repo_root,
                 file_glob=arguments.get("file_glob"),
+            )
+            return result.output if result.success else f"ERROR: {result.error}"
+
+        elif name == "search_internet":
+            from lean_ai.tools.internet import search_internet
+            result = await search_internet(
+                query=arguments.get("query", ""),
+                llm_client=llm_client,
+            )
+            return result.output if result.success else f"ERROR: {result.error}"
+
+        elif name == "fetch_url":
+            from lean_ai.tools.internet import fetch_url
+            result = await fetch_url(
+                url=arguments.get("url", ""),
+                llm_client=llm_client,
             )
             return result.output if result.success else f"ERROR: {result.error}"
 

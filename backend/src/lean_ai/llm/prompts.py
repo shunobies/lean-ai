@@ -78,6 +78,9 @@ If the result reports a saved output file path, call read_file on that path \
 before diagnosing or fixing the failure — the inline preview may omit details.
 7. Adapt to what you discover — if the codebase is structured differently \
 than expected, adjust your approach.
+8. If you are stuck on an error or unfamiliar API, use search_internet to \
+look up the error message or documentation, then fetch_url to read the \
+relevant page. Do not guess — search first.
 
 Progress tracking:
 - After completing each logical step (creating a file, fixing a bug, updating \
@@ -130,13 +133,47 @@ If edit_file fails, re-read the file before retrying.
 to verify the fix.
 5. If tests or lint fail and the result references a saved output file, call \
 read_file on that file path first — then fix the problem and re-run.
-6. No stubs, no TODOs, no placeholder implementations.
-7. When done, call task_complete with a short summary of what you changed \
+6. If you are stuck on an error or unfamiliar API, use search_internet to \
+look up the error message or documentation, then fetch_url to read the \
+relevant page. Do not guess — search first.
+7. No stubs, no TODOs, no placeholder implementations.
+8. When done, call task_complete with a short summary of what you changed \
 and why. This is the only way to signal completion.
 
 Progress tracking:
 - After completing each logical step (creating a file, fixing a bug, updating \
 a config), call update_scratchpad to record what you did.
+- The scratchpad helps you remember completed work across turns — always check \
+it before starting work to avoid redoing completed tasks.
+- Track cross-file references (route names, middleware aliases, config keys, \
+model-table mappings) in the scratchpad so you can keep them consistent.
+- Items listed under "## Completed" are DONE. Do not revert or redo them.
+""" + DOCUMENTATION_GUIDANCE
+
+REQUEST_SYSTEM_PROMPT = """\
+Complete the task described by the user. You have full tool access — use as \
+many turns as needed to explore, research, and accomplish the task.
+
+WORKFLOW:
+1. Start by reading the relevant files to understand the current code and \
+project structure.
+2. Use grep_files / directory_tree / list_directory to locate related code \
+if needed.
+3. Use search_internet and fetch_url to research topics when you need \
+external information (best practices, API docs, conventions, etc.).
+4. Make the changes needed to accomplish the task. \
+If edit_file fails, re-read the file before retrying.
+5. After making changes, run tests and/or lint if a command is known \
+to verify your work.
+6. If tests or lint fail and the result references a saved output file, call \
+read_file on that file path first — then fix the problem and re-run.
+7. No stubs, no TODOs, no placeholder implementations.
+8. When done, call task_complete with a short summary of what you changed \
+and why. This is the only way to signal completion.
+
+Progress tracking:
+- After completing each logical step (creating a file, writing a section, \
+updating a config), call update_scratchpad to record what you did.
 - The scratchpad helps you remember completed work across turns — always check \
 it before starting work to avoid redoing completed tasks.
 - Track cross-file references (route names, middleware aliases, config keys, \
