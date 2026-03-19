@@ -89,6 +89,8 @@ export function getSettingsPanelHtml(): string {
     .provider-section.active { display: block; }
     .expert-section { display: none; margin-top: var(--gap); }
     .expert-section.active { display: block; }
+    .request-section { display: none; margin-top: var(--gap); }
+    .request-section.active { display: block; }
 
     /* Form fields */
     .field {
@@ -609,6 +611,61 @@ export function getSettingsPanelHtml(): string {
     </div>
 </div>
 
+<!-- ── Request Model ── -->
+<div class="section">
+    <h2>Request Model <span style="font-weight:normal;font-size:0.85em;color:var(--vscode-descriptionForeground)">— optional, for /request mode (open-ended tasks)</span></h2>
+    <div class="field-check">
+        <input type="checkbox" id="useRequestModel">
+        <div>
+            <label for="useRequestModel">Use a separate model for /request mode</label>
+            <span class="hint">If disabled, the primary model is used. A general-purpose model may handle open-ended tasks better than a coding model.</span>
+        </div>
+    </div>
+    <div class="request-section indent" id="request-section">
+        <div class="radio-group" id="requestProviderGroup">
+            <label class="radio-option" id="ropt-ollama">
+                <input type="radio" name="requestProvider" value="ollama">
+                <span><span class="radio-label">Ollama</span></span>
+            </label>
+            <label class="radio-option" id="ropt-openai">
+                <input type="radio" name="requestProvider" value="openai">
+                <span><span class="radio-label">OpenAI</span></span>
+            </label>
+            <label class="radio-option" id="ropt-anthropic">
+                <input type="radio" name="requestProvider" value="anthropic">
+                <span><span class="radio-label">Anthropic</span></span>
+            </label>
+        </div>
+        <div class="indent">
+            <!-- Request Ollama fields -->
+            <div class="provider-section" id="request-ollama-fields">
+                <div class="field">
+                    <label>Request Ollama Model <span class="hint">e.g. qwen3.5:27b</span></label>
+                    <div class="model-combobox" id="ollamaModelRequestCombobox">
+                        <input type="text" id="ollamaModelRequest" placeholder="qwen3.5:27b">
+                        <button type="button" class="model-combobox-btn" tabindex="-1">&#9660;</button>
+                        <div class="model-combobox-options"></div>
+                    </div>
+                </div>
+            </div>
+            <!-- Request OpenAI fields -->
+            <div class="provider-section" id="request-openai-fields">
+                <div class="field">
+                    <label>Request OpenAI Model <span class="hint">e.g. gpt-4o</span></label>
+                    <input type="text" id="openaiRequestModel" placeholder="gpt-4o">
+                </div>
+            </div>
+            <!-- Request Anthropic fields -->
+            <div class="provider-section" id="request-anthropic-fields">
+                <div class="field">
+                    <label>Request Anthropic Model <span class="hint">e.g. claude-sonnet-4-20250514</span></label>
+                    <input type="text" id="anthropicRequestModel" placeholder="claude-sonnet-4-20250514">
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- ── Post-Validation ── -->
 <div class="section">
     <h2>Post-Validation</h2>
@@ -863,7 +920,7 @@ export function getSettingsPanelHtml(): string {
         document.querySelectorAll('#providerGroup .radio-option').forEach(o => o.classList.remove('selected'));
         document.querySelectorAll('.provider-section').forEach(s => {
             // only top-level provider sections, not expert sub-sections
-            if (!s.closest('.expert-section')) s.classList.remove('active');
+            if (!s.closest('.expert-section') && !s.closest('.request-section')) s.classList.remove('active');
         });
         if (val) {
             const opt = document.getElementById('opt-' + val);
@@ -899,6 +956,33 @@ export function getSettingsPanelHtml(): string {
     // Expert model checkbox
     document.getElementById('useExpertModel').addEventListener('change', function() {
         document.getElementById('expert-section').classList.toggle('active', this.checked);
+    });
+
+    // Request model provider radio buttons
+    document.querySelectorAll('#requestProviderGroup .radio-option').forEach(opt => {
+        opt.addEventListener('click', () => {
+            const radio = opt.querySelector('input[type="radio"]');
+            if (radio) { radio.checked = true; updateRequestProvider(); }
+        });
+    });
+
+    function updateRequestProvider() {
+        const selected = document.querySelector('input[name="requestProvider"]:checked');
+        const val = selected ? selected.value : null;
+        document.querySelectorAll('#requestProviderGroup .radio-option').forEach(o => o.classList.remove('selected'));
+        document.querySelectorAll('#request-section .provider-section').forEach(s => s.classList.remove('active'));
+        if (val) {
+            const opt = document.getElementById('ropt-' + val);
+            if (opt) opt.classList.add('selected');
+            const sec = document.getElementById('request-' + val + '-fields');
+            if (sec) sec.classList.add('active');
+        }
+    }
+    document.querySelectorAll('input[name="requestProvider"]').forEach(r => r.addEventListener('change', updateRequestProvider));
+
+    // Request model checkbox
+    document.getElementById('useRequestModel').addEventListener('change', function() {
+        document.getElementById('request-section').classList.toggle('active', this.checked);
     });
 
     // ── GitHub link — route through extension to open external browser ─────
@@ -961,6 +1045,7 @@ export function getSettingsPanelHtml(): string {
     const MODEL_COMBOBOXES = [
         { comboboxId: 'ollamaModelCombobox',       inputId: 'ollamaModel' },
         { comboboxId: 'ollamaModelExpertCombobox', inputId: 'ollamaModelExpert' },
+        { comboboxId: 'ollamaModelRequestCombobox', inputId: 'ollamaModelRequest' },
         { comboboxId: 'inlineModelCombobox',       inputId: 'inlineModel' },
         { comboboxId: 'embeddingModelCombobox',    inputId: 'embeddingModel' },
     ];
@@ -1029,6 +1114,8 @@ export function getSettingsPanelHtml(): string {
         const provider = document.querySelector('input[name="provider"]:checked')?.value || 'ollama';
         const expertChecked = document.getElementById('useExpertModel').checked;
         const expertProvider = document.querySelector('input[name="expertProvider"]:checked')?.value || '';
+        const requestChecked = document.getElementById('useRequestModel').checked;
+        const requestProvider = (document.querySelector('input[name="requestProvider"]:checked') || {}).value || '';
 
         const values = {
             // Provider
@@ -1061,6 +1148,12 @@ export function getSettingsPanelHtml(): string {
             ollamaExpertContextWindow: expertChecked && expertProvider === 'ollama' ? val('ollamaExpertContextWindow') : '',
             openaiExpertModel:     expertChecked && expertProvider === 'openai' ? val('openaiExpertModel') : '',
             anthropicExpertModel:  expertChecked && expertProvider === 'anthropic' ? val('anthropicExpertModel') : '',
+
+            // Request model
+            requestLlmProvider:       requestChecked ? requestProvider : '',
+            ollamaModelRequest:       requestChecked && requestProvider === 'ollama' ? val('ollamaModelRequest') : '',
+            openaiRequestModel:       requestChecked && requestProvider === 'openai' ? val('openaiRequestModel') : '',
+            anthropicRequestModel:    requestChecked && requestProvider === 'anthropic' ? val('anthropicRequestModel') : '',
 
             // Post-validation
             enablePostValidation:  val('enablePostValidation'),
@@ -1159,6 +1252,21 @@ export function getSettingsPanelHtml(): string {
         setVal('ollamaExpertContextWindow',v.ollamaExpertContextWindow);
         setVal('openaiExpertModel',        v.openaiExpertModel);
         setVal('anthropicExpertModel',     v.anthropicExpertModel);
+
+        // Request model
+        const hasRequest = !!(v.requestLlmProvider || v.ollamaModelRequest);
+        document.getElementById('useRequestModel').checked = hasRequest;
+        document.getElementById('request-section').classList.toggle('active', hasRequest);
+
+        const requestProv = v.requestLlmProvider || (v.ollamaModelRequest ? 'ollama' : '');
+        if (requestProv) {
+            const rr = document.querySelector('input[name="requestProvider"][value="' + requestProv + '"]');
+            if (rr) { rr.checked = true; }
+            updateRequestProvider();
+        }
+        setVal('ollamaModelRequest',      v.ollamaModelRequest);
+        setVal('openaiRequestModel',      v.openaiRequestModel);
+        setVal('anthropicRequestModel',   v.anthropicRequestModel);
 
         // Post-validation
         setVal('enablePostValidation',     v.enablePostValidation);
