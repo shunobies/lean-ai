@@ -195,6 +195,15 @@ class LLMClient:
                         consecutive_text_only,
                     )
                     break
+                # Nudge: remind the LLM it must call tools, not just chat
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "You must call a tool now — do not respond with text "
+                        "only. If you have finished all work, call task_complete. "
+                        "Otherwise, call the next tool needed to make progress."
+                    ),
+                })
                 continue
 
             # Reset text-only counter when tools are called
