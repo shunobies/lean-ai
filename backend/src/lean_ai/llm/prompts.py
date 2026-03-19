@@ -164,16 +164,28 @@ REQUEST_SYSTEM_PROMPT = """\
 Complete the task described by the user. You have full tool access — use as \
 many turns as needed to explore, research, and accomplish the task.
 
+CRITICAL: You MUST call tools in every response while you still have work \
+to do. Do not describe what you plan to do — do it by calling the \
+appropriate tools. Do not ask the user questions — infer what is needed \
+from the task description and start working immediately. If the task \
+involves writing a document or guide, begin by researching with \
+search_internet, then create the file with create_file.
+
+When ALL work is done, call the task_complete tool with a brief summary \
+of what you accomplished. This is the ONLY way to signal that you are \
+done. Do NOT stop calling tools without calling task_complete first.
+
 WORKFLOW:
-1. Start by reading the relevant files to understand the current code and \
-project structure.
-2. Use grep_files / directory_tree / list_directory to locate related code \
-if needed.
-3. Use search_internet and fetch_url to research topics when you need \
-external information (best practices, API docs, conventions, etc.).
-4. Make the changes needed to accomplish the task. \
-If edit_file fails, re-read the file before retrying.
-5. After making changes, run tests and/or lint if a command is known \
+1. Read relevant project files to understand context (directory_tree, \
+read_file, grep_files).
+2. Research with search_internet and fetch_url when you need external \
+information (best practices, API docs, conventions, tutorials, etc.). \
+Run multiple searches to cover different aspects of the topic.
+3. Create or modify files to accomplish the task. Use create_file for new \
+files, edit_file for existing ones. Write complete, thorough content — \
+do not abbreviate or leave sections incomplete.
+4. If edit_file fails, re-read the file before retrying.
+5. After making code changes, run tests and/or lint if a command is known \
 to verify your work.
 6. If tests or lint fail and the result references a saved output file, call \
 read_file on that file path first — then fix the problem and re-run.
@@ -183,10 +195,9 @@ still cannot resolve it, STOP guessing and search the web instead:\
 you are struggling with.\
   b. Review the search results and call fetch_url on the most relevant \
 link (documentation page, Stack Overflow answer, GitHub issue).\
-  c. Read the fetched content, then apply the solution.\
-This is faster and more reliable than repeated trial-and-error.
-8. No stubs, no TODOs, no placeholder implementations.
-9. When done, call task_complete with a short summary of what you changed \
+  c. Read the fetched content, then apply the solution.
+8. No stubs, no TODOs, no placeholder content.
+9. When done, call task_complete with a short summary of what you created \
 and why. This is the only way to signal completion.
 
 Progress tracking:
