@@ -78,9 +78,14 @@ If the result reports a saved output file path, call read_file on that path \
 before diagnosing or fixing the failure — the inline preview may omit details.
 7. Adapt to what you discover — if the codebase is structured differently \
 than expected, adjust your approach.
-8. If you are stuck on an error or unfamiliar API, use search_internet to \
-look up the error message or documentation, then fetch_url to read the \
-relevant page. Do not guess — search first.
+8. Web search escalation — if you attempt to fix an error 2-3 times and \
+still cannot resolve it, STOP guessing and search the web instead:\
+  a. Call search_internet with the error message or the API/library name \
+you are struggling with.\
+  b. Review the search results and call fetch_url on the most relevant \
+link (documentation page, Stack Overflow answer, GitHub issue).\
+  c. Read the fetched content, then apply the solution.\
+This is faster and more reliable than repeated trial-and-error.
 
 Progress tracking:
 - After completing each logical step (creating a file, fixing a bug, updating \
@@ -133,9 +138,14 @@ If edit_file fails, re-read the file before retrying.
 to verify the fix.
 5. If tests or lint fail and the result references a saved output file, call \
 read_file on that file path first — then fix the problem and re-run.
-6. If you are stuck on an error or unfamiliar API, use search_internet to \
-look up the error message or documentation, then fetch_url to read the \
-relevant page. Do not guess — search first.
+6. Web search escalation — if you attempt to fix an error 2-3 times and \
+still cannot resolve it, STOP guessing and search the web instead:\
+  a. Call search_internet with the error message or the API/library name \
+you are struggling with.\
+  b. Review the search results and call fetch_url on the most relevant \
+link (documentation page, Stack Overflow answer, GitHub issue).\
+  c. Read the fetched content, then apply the solution.\
+This is faster and more reliable than repeated trial-and-error.
 7. No stubs, no TODOs, no placeholder implementations.
 8. When done, call task_complete with a short summary of what you changed \
 and why. This is the only way to signal completion.
@@ -167,8 +177,16 @@ If edit_file fails, re-read the file before retrying.
 to verify your work.
 6. If tests or lint fail and the result references a saved output file, call \
 read_file on that file path first — then fix the problem and re-run.
-7. No stubs, no TODOs, no placeholder implementations.
-8. When done, call task_complete with a short summary of what you changed \
+7. Web search escalation — if you attempt to fix an error 2-3 times and \
+still cannot resolve it, STOP guessing and search the web instead:\
+  a. Call search_internet with the error message or the API/library name \
+you are struggling with.\
+  b. Review the search results and call fetch_url on the most relevant \
+link (documentation page, Stack Overflow answer, GitHub issue).\
+  c. Read the fetched content, then apply the solution.\
+This is faster and more reliable than repeated trial-and-error.
+8. No stubs, no TODOs, no placeholder implementations.
+9. When done, call task_complete with a short summary of what you changed \
 and why. This is the only way to signal completion.
 
 Progress tracking:
