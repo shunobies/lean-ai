@@ -31,6 +31,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.window.registerWebviewViewProvider(
             LeanAISidebarProvider.viewType,
             sidebarProvider,
+            { webviewOptions: { retainContextWhenHidden: true } },
         ),
     );
 

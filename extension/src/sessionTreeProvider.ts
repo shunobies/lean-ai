@@ -21,11 +21,19 @@ import type { SessionSummary, CheckpointSummary, GitEventSummary } from "./types
 
 // ── Tree item types ─────────────────────────────────────────────
 
+class MessageItem extends vscode.TreeItem {
+    constructor(text: string) {
+        super(text, vscode.TreeItemCollapsibleState.None);
+        this.contextValue = "message";
+    }
+}
+
 type TreeElement =
     | SessionItem
     | GroupItem
     | CheckpointItem
-    | GitEventItem;
+    | GitEventItem
+    | MessageItem;
 
 class SessionItem extends vscode.TreeItem {
     constructor(public readonly session: SessionSummary) {
@@ -228,10 +236,8 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<TreeElement>
 
 // ── Helper functions ────────────────────────────────────────────
 
-function createMessageItem(text: string): vscode.TreeItem {
-    const item = new vscode.TreeItem(text, vscode.TreeItemCollapsibleState.None);
-    item.contextValue = "message";
-    return item;
+function createMessageItem(text: string): MessageItem {
+    return new MessageItem(text);
 }
 
 function formatSessionDescription(session: SessionSummary): string {

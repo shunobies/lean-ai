@@ -10,15 +10,17 @@ export interface IndexState {
 
 export class IndexingService {
   private backendClient: BackendClient;
+  private repoRoot: string;
 
-  constructor(backendClient: BackendClient) {
+  constructor(backendClient: BackendClient, repoRoot: string) {
     this.backendClient = backendClient;
+    this.repoRoot = repoRoot;
   }
 
   async isWorkspaceIndexed(): Promise<boolean> {
     try {
-      const response = await this.backendClient.checkIndexState();
-      return response.isIndexed;
+      const response = await this.backendClient.indexWorkspace(this.repoRoot);
+      return response.index_status === "ready";
     } catch (error) {
       console.error('Error checking index state:', error);
       return false;
@@ -27,7 +29,7 @@ export class IndexingService {
 
   async triggerIndexing(): Promise<void> {
     try {
-      await this.backendClient.triggerIndexUpdate();
+      await this.backendClient.indexWorkspace(this.repoRoot, true);
     } catch (error) {
       console.error('Error triggering indexing:', error);
       throw error;
@@ -36,8 +38,8 @@ export class IndexingService {
 
   async needsIndexUpdate(): Promise<boolean> {
     try {
-      const response = await this.backendClient.checkIndexState();
-      return response.needsUpdate;
+      const response = await this.backendClient.indexWorkspace(this.repoRoot);
+      return response.index_status !== "ready";
     } catch (error) {
       console.error('Error checking if index needs update:', error);
       return false;

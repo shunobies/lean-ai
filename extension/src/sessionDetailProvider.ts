@@ -56,12 +56,12 @@ export class SessionDetailProvider {
             try {
                 switch (msg.command) {
                     case "merge":
-                        await this.client.mergeSession(sessionId);
+                        await this.client.mergeSession(sessionId, this.getRepoRoot());
                         vscode.window.showInformationMessage("Session merged successfully.");
                         await this.updatePanel(panel, sessionId);
                         break;
                     case "abandon":
-                        await this.client.abandonSession(sessionId);
+                        await this.client.abandonSession(sessionId, this.getRepoRoot());
                         vscode.window.showInformationMessage("Session abandoned.");
                         await this.updatePanel(panel, sessionId);
                         break;

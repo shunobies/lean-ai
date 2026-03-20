@@ -512,7 +512,11 @@ export class BackendClient {
             if (!resp.ok) {
                 throw new Error(`Index workspace failed: ${resp.statusText}`);
             }
-            return resp.json();
+            return resp.json() as Promise<{
+                index_status: string;
+                index_file_count?: number;
+                index_chunk_count?: number;
+            }>;
         } finally {
             clearTimeout(timeout);
         }
