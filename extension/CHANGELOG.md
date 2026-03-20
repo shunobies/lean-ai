@@ -2,6 +2,16 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.3.1] - 2026-03-20
+
+### Added
+- **Thinking mode toggle** — new `LEAN_AI_ENABLE_THINKING` setting (default: on) passes `think=True` to Ollama so reasoning models like Qwen3 and Qwen3.5 properly separate thinking from content. Thinking traces now appear reliably in the collapsible "Thinking..." section. Toggle off in the settings panel for faster responses without deep reasoning.
+- **Large file creation guidance** — system prompts now instruct the LLM to build files over ~200 lines incrementally (create skeleton, then edit_file per section) to avoid output truncation.
+
+### Fixed
+- **Model appearing "hung"** — Qwen3.5 generates thousands of thinking tokens by default, but without `think=True` they were silently consumed. The model now surfaces its reasoning and responds visibly faster.
+- **Inline predictions unaffected** — inline completions always use `think=False` to stay fast regardless of the thinking mode setting.
+
 ## [0.3.0] - 2026-03-19
 
 ### Added
