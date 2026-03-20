@@ -368,6 +368,35 @@ export function getWebviewHtml(chatFontSize: number): string {
         opacity: 0.75;
     }
 
+    .thinking-details {
+        margin: 4px 0;
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 4px;
+        padding: 4px 8px;
+        opacity: 0.7;
+    }
+    .thinking-details > summary {
+        cursor: pointer;
+        font-size: 11px;
+        user-select: none;
+        padding: 2px 0;
+        list-style: disclosure-closed;
+        color: var(--vscode-descriptionForeground);
+    }
+    .thinking-details[open] > summary {
+        list-style: disclosure-open;
+        margin-bottom: 4px;
+    }
+    .thinking-pre {
+        font-size: 11px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        margin: 0;
+        max-height: 300px;
+        overflow-y: auto;
+        opacity: 0.75;
+    }
+
     .approval-bar {
         display: none;
         padding: 10px 12px;
@@ -1057,6 +1086,32 @@ export function getWebviewHtml(chatFontSize: number): string {
                 addMessage(formatMarkdown(msg.text), msg.cls || 'msg-ai');
                 break;
 
+            case 'llmThinking': {
+                // Collapsible thinking/reasoning trace from the LLM
+                const container = document.getElementById('messages');
+                const last = container.lastElementChild;
+                if (last && last.querySelector('.thinking-details')) {
+                    const pre = last.querySelector('.thinking-pre');
+                    if (pre) { pre.textContent += String.fromCharCode(10, 10) + msg.text; }
+                } else {
+                    const div = document.createElement('div');
+                    div.className = 'msg msg-system';
+                    const details = document.createElement('details');
+                    details.className = 'thinking-details';
+                    const summary = document.createElement('summary');
+                    summary.textContent = 'Thinking...';
+                    const pre = document.createElement('pre');
+                    pre.className = 'thinking-pre';
+                    pre.textContent = msg.text;
+                    details.appendChild(summary);
+                    details.appendChild(pre);
+                    div.appendChild(details);
+                    container.appendChild(div);
+                    container.scrollTop = container.scrollHeight;
+                }
+                break;
+            }
+
             case 'chatToken': {
                 // First token: hide "Thinking...", create an empty AI bubble
                 if (msg.isFirst) {
@@ -1135,7 +1190,7 @@ export function getWebviewHtml(chatFontSize: number): string {
                 activeTabId = 'current';
                 const curTab = tabs.get('current');
                 if (curTab) { curTab.messagesHtml = null; }
-                messagesEl.innerHTML = '<div class="msg msg-system">Describe what you\\'d like to build or change. I\\'ll help you refine it into a clear task for the agent.</div>';
+                messagesEl.innerHTML = '<div class="msg msg-system">Describe what you&#39;d like to build or change. I&#39;ll help you refine it into a clear task for the agent.</div>';
                 setStage(null);
                 resetMetrics();
                 approvalBar.classList.remove('visible');
@@ -1292,7 +1347,7 @@ export function getWebviewHtml(chatFontSize: number): string {
             case 'restoreCurrentChat': {
                 backBtn.style.display = 'none';
                 savedMessagesHtml = null;
-                messagesEl.innerHTML = '<div class="msg msg-system">Describe what you\\'d like to build or change. I\\'ll help you refine it into a clear task for the agent.</div>';
+                messagesEl.innerHTML = '<div class="msg msg-system">Describe what you&#39;d like to build or change. I&#39;ll help you refine it into a clear task for the agent.</div>';
                 lastTimestamp = null;
 
                 const msgs = msg.messages || [];

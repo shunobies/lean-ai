@@ -109,16 +109,12 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     ): void {
         this.webviewView = webviewView;
 
-        // Preserve JS/DOM state when the panel is hidden (e.g. Sessions expands to fill
-        // the sidebar, or user collapses Chat). Without this, VSCode destroys the webview
-        // context and all in-memory message history is lost.
-        webviewView.options = { retainContextWhenHidden: true };
-
         webviewView.webview.options = {
             enableScripts: true,
             localResourceRoots: [this.extensionUri],
         };
 
+        this.conversations.ensureStorageDir().catch(() => {});
         webviewView.webview.html = this.getHtml();
 
         // Check if a workflow completed while the panel was disposed

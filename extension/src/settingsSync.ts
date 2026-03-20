@@ -38,6 +38,12 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     // Expert model provider
     "lean-ai.expertLlmProvider":         "LEAN_AI_EXPERT_LLM_PROVIDER",
 
+    // Request model
+    "lean-ai.ollamaModelRequest":        "LEAN_AI_OLLAMA_MODEL_REQUEST",
+    "lean-ai.requestLlmProvider":        "LEAN_AI_REQUEST_LLM_PROVIDER",
+    "lean-ai.openaiRequestModel":        "LEAN_AI_OPENAI_REQUEST_MODEL",
+    "lean-ai.anthropicRequestModel":     "LEAN_AI_ANTHROPIC_REQUEST_MODEL",
+
     // OpenAI (no API key — stored in SecretStorage)
     "lean-ai.openaiModel":               "LEAN_AI_OPENAI_MODEL",
     "lean-ai.openaiBaseUrl":             "LEAN_AI_OPENAI_BASE_URL",

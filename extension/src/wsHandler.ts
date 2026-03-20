@@ -388,6 +388,15 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
             break;
         }
 
+        // --- LLM thinking/reasoning trace (collapsible in chat) ---
+        case "thinking_content": {
+            const content = (raw.content || "") as string;
+            if (content) {
+                ctx.postMessage({ type: "llmThinking", text: content });
+            }
+            break;
+        }
+
         // --- Metrics update: context window usage ---
         case "metrics_update": {
             ctx.postMessage({

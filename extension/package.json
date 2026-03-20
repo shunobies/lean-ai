@@ -2,8 +2,9 @@
   "name": "lean-ai",
   "displayName": "Lean AI",
   "description": "Single-Model Deterministic Agentic Architecture - Chat Agent & Inline Predictions",
-  "version": "0.1.5",
+  "version": "0.2.4",
   "publisher": "lean-ai",
+  "icon": "icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/shunobies/lean-ai"
@@ -233,6 +234,33 @@
             "Use Anthropic for expert phases (e.g. claude-opus-4-6 for planning)"
           ],
           "markdownDescription": "**Expert Model** — Provider for reasoning-heavy planning phases. Leave empty to auto-detect. Mix providers: use a fast Ollama model for coding and a cloud model for planning."
+        },
+        "lean-ai.ollamaModelRequest": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Ollama Request Model** — A general-purpose model used for `/request` mode. Leave empty to use the primary model. Example: `qwen3.5:27b`"
+        },
+        "lean-ai.requestLlmProvider": {
+          "type": "string",
+          "default": "",
+          "enum": ["", "ollama", "openai", "anthropic"],
+          "enumDescriptions": [
+            "Auto-detect (empty = use primary provider)",
+            "Use Ollama for /request mode",
+            "Use OpenAI for /request mode",
+            "Use Anthropic for /request mode"
+          ],
+          "markdownDescription": "**Request Model** — Provider for `/request` mode (open-ended tasks). Leave empty to auto-detect."
+        },
+        "lean-ai.openaiRequestModel": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**OpenAI Request Model** — Model for `/request` mode when using OpenAI provider."
+        },
+        "lean-ai.anthropicRequestModel": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Anthropic Request Model** — Model for `/request` mode when using Anthropic provider."
         },
         "lean-ai.openaiModel": {
           "type": "string",

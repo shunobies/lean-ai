@@ -199,6 +199,10 @@ export class SettingsPanel {
             ollamaModelExpert:        "lean-ai.ollamaModelExpert",
             ollamaExpertContextWindow:"lean-ai.ollamaExpertContextWindow",
             expertLlmProvider:        "lean-ai.expertLlmProvider",
+            ollamaModelRequest:       "lean-ai.ollamaModelRequest",
+            requestLlmProvider:       "lean-ai.requestLlmProvider",
+            openaiRequestModel:       "lean-ai.openaiRequestModel",
+            anthropicRequestModel:    "lean-ai.anthropicRequestModel",
             openaiModel:              "lean-ai.openaiModel",
             openaiBaseUrl:            "lean-ai.openaiBaseUrl",
             openaiTemperature:        "lean-ai.openaiTemperature",
@@ -318,6 +322,12 @@ export class SettingsPanel {
             ollamaModelExpert:         config.get("lean-ai.ollamaModelExpert", ""),
             ollamaExpertContextWindow: config.get("lean-ai.ollamaExpertContextWindow", ""),
             expertLlmProvider:         config.get("lean-ai.expertLlmProvider", ""),
+
+            // Request model
+            ollamaModelRequest:        config.get("lean-ai.ollamaModelRequest", ""),
+            requestLlmProvider:        config.get("lean-ai.requestLlmProvider", ""),
+            openaiRequestModel:        config.get("lean-ai.openaiRequestModel", ""),
+            anthropicRequestModel:     config.get("lean-ai.anthropicRequestModel", ""),
 
             // OpenAI (no key value — boolean only)
             openaiKeySet,
