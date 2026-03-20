@@ -83,6 +83,7 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.implementationMaxTurns":    "LEAN_AI_IMPLEMENTATION_MAX_TURNS",
     "lean-ai.refreshThreshold":          "LEAN_AI_REFRESH_THRESHOLD",
     "lean-ai.debugPlanning":             "LEAN_AI_DEBUG_PLANNING",
+    "lean-ai.enableThinking":            "LEAN_AI_ENABLE_THINKING",
 };
 
 // ── Env building helpers ─────────────────────────────────────────────────────

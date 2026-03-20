@@ -230,6 +230,7 @@ export class SettingsPanel {
             refreshThreshold:         "lean-ai.refreshThreshold",
             numParallel:              "lean-ai.numParallel",
             debugPlanning:            "lean-ai.debugPlanning",
+            enableThinking:           "lean-ai.enableThinking",
         };
 
         const numericFields = new Set([
@@ -243,7 +244,7 @@ export class SettingsPanel {
 
         const booleanFields = new Set([
             "enableEmbeddings", "enablePostValidation",
-            "enableFrameworkGuide", "debugPlanning",
+            "enableFrameworkGuide", "debugPlanning", "enableThinking",
         ]);
 
         for (const [field, settingKey] of Object.entries(fieldToSetting)) {
@@ -369,6 +370,7 @@ export class SettingsPanel {
             refreshThreshold:          config.get("lean-ai.refreshThreshold", ""),
             numParallel:               config.get("lean-ai.numParallel", ""),
             debugPlanning:             config.get("lean-ai.debugPlanning", false),
+            enableThinking:            config.get("lean-ai.enableThinking", true),
         };
 
         await this._panel.webview.postMessage({ type: "loadSettings", values });

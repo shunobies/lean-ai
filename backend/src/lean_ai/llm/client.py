@@ -214,11 +214,14 @@ class OllamaProvider(LLMProvider):
                 model=self._model,
                 messages=messages,
                 options=self._build_options(temperature=temp, max_tokens=tokens),
+                think=settings.enable_thinking,
             )
 
         response = await self._retry_with_backoff(_chat, label="chat_raw")
         text = response["message"]["content"]
+        thinking = response["message"].get("thinking") or None
         metrics = self._extract_metrics(response)
+        metrics.thinking = thinking
 
         logger.info("LLM chat_raw response (%d chars): %s", len(text), text[:200])
         return text, metrics
@@ -243,6 +246,7 @@ class OllamaProvider(LLMProvider):
                 messages=messages,
                 format=schema.model_json_schema(),
                 options=self._build_options(temperature=temp, max_tokens=tokens),
+                think=settings.enable_thinking,
             )
 
         last_error = None
@@ -283,6 +287,7 @@ class OllamaProvider(LLMProvider):
                 messages=messages,
                 tools=tools,
                 options=self._build_options(max_tokens=tokens),
+                think=settings.enable_thinking,
             )
 
         response = await self._retry_with_backoff(
@@ -321,6 +326,7 @@ class OllamaProvider(LLMProvider):
                 messages=messages,
                 stream=True,
                 options=self._build_options(temperature=temp, max_tokens=num_predict),
+                think=False,  # Inline predictions: no thinking overhead
             )
 
         stream = await self._retry_with_backoff(_chat, label="chat_stream")

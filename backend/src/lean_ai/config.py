@@ -100,6 +100,9 @@ class Settings(BaseSettings):
     openai_request_model: str = ""
     anthropic_request_model: str = ""
 
+    # ── Thinking mode ──
+    enable_thinking: bool = True  # Pass think=True to Ollama for reasoning models (Qwen3, Qwen3.5)
+
     # ── Ollama — inline prediction model (always Ollama) ──
     inline_model: str = ""
     inline_max_tokens: int = 256

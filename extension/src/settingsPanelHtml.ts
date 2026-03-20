@@ -783,6 +783,13 @@ export function getSettingsPanelHtml(): string {
         </div>
     </div>
     <div class="field-check">
+        <input type="checkbox" id="enableThinking">
+        <div>
+            <label for="enableThinking">Enable thinking mode</label>
+            <span class="hint">Show model reasoning in chat for Qwen3, Qwen3.5 and other thinking models. Disable for faster responses.</span>
+        </div>
+    </div>
+    <div class="field-check">
         <input type="checkbox" id="debugPlanning">
         <div>
             <label for="debugPlanning">Debug planning (save phase outputs to .lean_ai/plan_debug/)</label>
@@ -1177,6 +1184,7 @@ export function getSettingsPanelHtml(): string {
             numParallel:           val('numParallel'),
             enableFrameworkGuide:  val('enableFrameworkGuide'),
             debugPlanning:         val('debugPlanning'),
+            enableThinking:        val('enableThinking'),
         };
 
         vscode.postMessage({ type: 'saveSettings', values });
@@ -1290,6 +1298,7 @@ export function getSettingsPanelHtml(): string {
         setVal('numParallel',           v.numParallel);
         setVal('enableFrameworkGuide',  v.enableFrameworkGuide);
         setVal('debugPlanning',         v.debugPlanning);
+        setVal('enableThinking',        v.enableThinking);
 
         // Populate Ollama model dropdowns
         requestOllamaModels();

@@ -2,7 +2,7 @@
   "name": "lean-ai",
   "displayName": "Lean AI",
   "description": "Single-Model Deterministic Agentic Architecture - Chat Agent & Inline Predictions",
-  "version": "0.3.1",
+  "version": "0.3.0",
   "publisher": "lean-ai",
   "icon": "icon.png",
   "repository": {
@@ -434,6 +434,11 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "**Advanced** — Save all planning phase outputs to `.lean_ai/plan_debug/{session_id}/` for debugging. Default: `false`"
+        },
+        "lean-ai.enableThinking": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "**Ollama** — Enable thinking/reasoning mode for models that support it (Qwen3, Qwen3.5). Shows reasoning in chat. Disable for faster responses without deep reasoning. Default: `true`"
         }
       }
     }
