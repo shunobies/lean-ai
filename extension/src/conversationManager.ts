@@ -1,8 +1,9 @@
 /**
  * Conversation persistence and search for the Lean AI sidebar.
  *
- * Manages storing/loading chat conversations in VSCode globalState
- * and searching across both local conversations and backend sessions.
+ * Stores chat conversations as a JSON file on disk via globalStorageUri
+ * (not globalState, which has size limits). Includes one-time migration
+ * from the old globalState key on first load.
  */
 
 import * as vscode from "vscode";
@@ -11,9 +12,9 @@ import type { StoredConversation } from "./types";
 
 // ── Constants ────────────────────────────────────────────────────────
 
-const STORAGE_KEY = "lean-ai.chatConversations";
+const OLD_STORAGE_KEY = "lean-ai.chatConversations";
+const CONVERSATIONS_FILE = "conversations.json";
 const MAX_CONVERSATIONS = 200;
-const MAX_MESSAGES_PER_CONVERSATION = 100;
 
 // ── Manager class ────────────────────────────────────────────────────
 
@@ -21,22 +22,70 @@ export class ConversationManager {
     currentConversationId: string | undefined;
     viewingHistoricConversation = false;
 
+    private readonly storageUri: vscode.Uri;
+    private migrated = false;
+
     constructor(
         private readonly extensionContext: vscode.ExtensionContext,
         private readonly postMessage: (msg: Record<string, unknown>) => void,
         private readonly getRepoRoot: () => string,
-    ) {}
+    ) {
+        this.storageUri = vscode.Uri.joinPath(
+            extensionContext.globalStorageUri,
+            CONVERSATIONS_FILE,
+        );
+    }
+
+    /** Ensure the storage directory exists (call once during activation). */
+    async ensureStorageDir(): Promise<void> {
+        await vscode.workspace.fs.createDirectory(
+            this.extensionContext.globalStorageUri,
+        );
+    }
 
     loadConversations(): StoredConversation[] {
+        // Synchronous load from globalState — used as fallback only.
+        // After migration, the globalState key is cleared.
+        // For the async disk path, use loadConversationsAsync().
         return this.extensionContext.globalState.get<StoredConversation[]>(
-            STORAGE_KEY,
+            OLD_STORAGE_KEY,
             [],
         );
     }
 
+    async loadConversationsAsync(): Promise<StoredConversation[]> {
+        // Try disk first
+        try {
+            const data = await vscode.workspace.fs.readFile(this.storageUri);
+            const text = Buffer.from(data).toString("utf-8");
+            return JSON.parse(text) as StoredConversation[];
+        } catch {
+            // File doesn't exist yet — try one-time migration from globalState
+        }
+
+        if (!this.migrated) {
+            const old = this.extensionContext.globalState.get<StoredConversation[]>(
+                OLD_STORAGE_KEY,
+                [],
+            );
+            if (old.length > 0) {
+                await this.saveConversations(old);
+                await this.extensionContext.globalState.update(OLD_STORAGE_KEY, undefined);
+            }
+            this.migrated = true;
+            return old;
+        }
+
+        return [];
+    }
+
     async saveConversations(conversations: StoredConversation[]): Promise<void> {
         const trimmed = conversations.slice(-MAX_CONVERSATIONS);
-        await this.extensionContext.globalState.update(STORAGE_KEY, trimmed);
+        const json = JSON.stringify(trimmed);
+        await vscode.workspace.fs.writeFile(
+            this.storageUri,
+            Buffer.from(json, "utf-8"),
+        );
     }
 
     async persistCurrentConversation(
@@ -46,13 +95,15 @@ export class ConversationManager {
             return;
         }
 
-        const conversations = this.loadConversations();
+        const conversations = await this.loadConversationsAsync();
         const now = new Date().toISOString();
         const repoRoot = this.getRepoRoot();
 
-        const messages = chatHistory
-            .slice(-MAX_MESSAGES_PER_CONVERSATION)
-            .map((m) => ({ role: m.role, content: m.content, timestamp: m.timestamp }));
+        const messages = chatHistory.map((m) => ({
+            role: m.role,
+            content: m.content,
+            timestamp: m.timestamp,
+        }));
 
         const existing = conversations.findIndex((c) => c.id === this.currentConversationId);
 
@@ -91,7 +142,7 @@ export class ConversationManager {
         }
 
         // Search local chat conversations
-        const conversations = this.loadConversations();
+        const conversations = await this.loadConversationsAsync();
         const results: Array<{
             id: string;
             title: string;
@@ -162,18 +213,19 @@ export class ConversationManager {
             return;
         }
 
-        const conversations = this.loadConversations();
-        const conv = conversations.find((c) => c.id === convId);
-        if (conv) {
-            // Open chat conversations as read-only tabs too
-            this.postMessage({
-                type: "openSessionTab",
-                sessionId: convId,
-                tabId: `chat-${convId}`,
-                title: conv.title,
-                messages: conv.messages,
-            });
-        }
+        // Load from disk (async, but fire-and-forget for the UI callback)
+        this.loadConversationsAsync().then((conversations) => {
+            const conv = conversations.find((c) => c.id === convId);
+            if (conv) {
+                this.postMessage({
+                    type: "openSessionTab",
+                    sessionId: convId,
+                    tabId: `chat-${convId}`,
+                    title: conv.title,
+                    messages: conv.messages,
+                });
+            }
+        });
     }
 
     handleBackToCurrentChat(
