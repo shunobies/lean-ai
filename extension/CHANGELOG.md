@@ -2,6 +2,11 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.3.2] - 2026-03-20
+
+### Added
+- **Clickable files in completion summary** — the "Files modified" list at task completion now renders each file as a clickable link. Clicking opens a side-by-side git diff (base branch vs working copy) using VS Code's built-in diff viewer. New files diff against empty; falls back to opening the file directly when no branch info is available.
+
 ## [0.3.1] - 2026-03-20
 
 ### Added

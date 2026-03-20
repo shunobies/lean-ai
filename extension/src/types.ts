@@ -74,6 +74,7 @@ export interface CompleteMessage {
     bundle_id?: string;
     files_modified?: string[];
     plan_branch?: string;
+    base_branch?: string;
     merge_commit_sha?: string;
 }
 

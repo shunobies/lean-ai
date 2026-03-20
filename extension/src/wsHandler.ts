@@ -199,9 +199,6 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
             ctx.postMessage({ type: "hideApproval" });
             let completeText = (raw.summary as string) || "Workflow complete.";
             const filesModified = raw.files_modified as string[] | undefined;
-            if (filesModified && filesModified.length > 0) {
-                completeText += `\n\n**Files modified:** ${filesModified.join(", ")}`;
-            }
             const planBranch = raw.plan_branch as string | undefined;
             const mergeCommitSha = raw.merge_commit_sha as string | undefined;
             if (planBranch) {
@@ -221,6 +218,13 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
                 text: completeText,
                 cls: "msg-ai",
             });
+            if (filesModified && filesModified.length > 0) {
+                ctx.postMessage({
+                    type: "filesModifiedLinks",
+                    files: filesModified,
+                    baseBranch: (raw.base_branch as string) || "",
+                });
+            }
             ctx.postMessage({ type: "sendEnabled" });
             ctx.postMessage({ type: "metricsFinal" });
             // Close WS so user returns to chat mode automatically

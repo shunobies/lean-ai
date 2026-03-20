@@ -199,6 +199,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                 llm_client=llm_client,
                                 context=context,
                                 branch_name=branch_name,
+                                base_branch=base_branch,
                                 conversation_logger=_log_conversation,
                                 mode=mode,
                                 session_id=session_id,

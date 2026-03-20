@@ -56,6 +56,7 @@ async def run_workflow(
     llm_client: "LLMClient",
     context: str = "",
     branch_name: str = "",
+    base_branch: str = "",
     conversation_logger: Callable | None = None,
     mode: str = "plan",
     session_id: str = "",
@@ -85,6 +86,7 @@ async def run_workflow(
             llm_client=llm_client,
             context=context,
             branch_name=branch_name,
+            base_branch=base_branch,
             conversation_logger=conversation_logger,
             session_id=session_id,
             expert_llm_client=expert_llm_client,
@@ -133,6 +135,7 @@ async def run_workflow(
         llm_client=llm_client,
         context=context,
         branch_name=branch_name,
+        base_branch=base_branch,
         conversation_logger=conversation_logger,
         session_id=session_id,
         expert_llm_client=expert_llm_client,
@@ -278,7 +281,8 @@ async def _execute_plan(
     llm_client: "LLMClient",
     context: str,
     branch_name: str,
-    conversation_logger: Callable | None,
+    base_branch: str = "",
+    conversation_logger: Callable | None = None,
     session_id: str = "",
     expert_llm_client: "LLMClient | None" = None,
 ) -> str:
@@ -494,6 +498,8 @@ async def _execute_plan(
     complete_data: dict = {"summary": summary, "files_modified": files_modified}
     if branch_name:
         complete_data["plan_branch"] = branch_name
+    if base_branch:
+        complete_data["base_branch"] = base_branch
     await ws_send(ws, "complete", complete_data)
     logger.info(
         "Workflow complete: %d steps, %d tool calls, %d files",
@@ -854,7 +860,8 @@ async def _run_fix(
     llm_client: "LLMClient",
     context: str,
     branch_name: str,
-    conversation_logger: Callable | None,
+    base_branch: str = "",
+    conversation_logger: Callable | None = None,
     session_id: str = "",
     expert_llm_client: "LLMClient | None" = None,
     request_llm_client: "LLMClient | None" = None,
@@ -1102,6 +1109,8 @@ async def _run_fix(
     complete_data: dict = {"summary": summary, "files_modified": files_modified}
     if branch_name:
         complete_data["plan_branch"] = branch_name
+    if base_branch:
+        complete_data["base_branch"] = base_branch
     await ws_send(ws, "complete", complete_data)
     logger.info(
         "Fix complete: %d tool calls, %d files",

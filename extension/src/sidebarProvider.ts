@@ -10,6 +10,7 @@
  * automatically returns to chat mode.
  */
 
+import * as path from "path";
 import * as vscode from "vscode";
 import { BackendClient } from "./backendClient";
 import { ConversationManager } from "./conversationManager";
@@ -223,6 +224,12 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 case "openSettings":
                     SettingsPanel.createOrShow(this.context);
                     break;
+                case "openFileDiff":
+                    this.openFileDiff(
+                        msg.file as string,
+                        msg.baseBranch as string,
+                    );
+                    break;
             }
         });
 
@@ -319,6 +326,27 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             return folders[0].uri.fsPath;
         }
         return ".";
+    }
+
+    private async openFileDiff(filePath: string, baseBranch: string): Promise<void> {
+        const repoRoot = this.getRepoRoot();
+        const absolutePath = path.isAbsolute(filePath)
+            ? filePath
+            : path.join(repoRoot, filePath);
+        const rightUri = vscode.Uri.file(absolutePath);
+
+        if (!baseBranch) {
+            await vscode.commands.executeCommand("vscode.open", rightUri);
+            return;
+        }
+
+        // Use VS Code's built-in git extension URI scheme (same as Timeline/SCM)
+        const leftUri = rightUri.with({
+            scheme: "git",
+            query: JSON.stringify({ path: absolutePath, ref: baseBranch }),
+        });
+        const title = `${path.basename(filePath)} (${baseBranch} \u2194 working)`;
+        await vscode.commands.executeCommand("vscode.diff", leftUri, rightUri, title);
     }
 
     private getWorkspaceContext(): {

@@ -274,6 +274,15 @@ export function getWebviewHtml(chatFontSize: number): string {
         font-family: var(--vscode-editor-font-family);
         font-size: var(--vscode-editor-font-size);
     }
+    .file-diff-link {
+        color: var(--vscode-textLink-foreground);
+        cursor: pointer;
+        text-decoration: none;
+    }
+    .file-diff-link:hover {
+        text-decoration: underline;
+        color: var(--vscode-textLink-activeForeground);
+    }
 
     .thinking {
         display: none;
@@ -635,6 +644,19 @@ export function getWebviewHtml(chatFontSize: number): string {
     let currentStreamDiv = null; // AI bubble being filled during chat streaming
     let problemsActive = false;
     let debugActive = false;
+
+    // Delegated click handler for file-diff links in completion summary
+    messagesEl.addEventListener('click', function(e) {
+        var link = e.target.closest('.file-diff-link');
+        if (link) {
+            e.preventDefault();
+            vscode.postMessage({
+                type: 'openFileDiff',
+                file: link.dataset.file,
+                baseBranch: link.dataset.base,
+            });
+        }
+    });
 
     // ── Tab management ──
 
@@ -1085,6 +1107,17 @@ export function getWebviewHtml(chatFontSize: number): string {
                 if (sendTimeout) { clearTimeout(sendTimeout); sendTimeout = null; }
                 addMessage(formatMarkdown(msg.text), msg.cls || 'msg-ai');
                 break;
+
+            case 'filesModifiedLinks': {
+                var files = msg.files || [];
+                var baseBranch = msg.baseBranch || '';
+                var links = files.map(function(f) {
+                    return '<a href="#" class="file-diff-link" data-file="' + escapeHtml(f) +
+                        '" data-base="' + escapeHtml(baseBranch) + '">' + escapeHtml(f) + '</a>';
+                }).join(', ');
+                addMessage('<b>Files modified:</b> ' + links, 'msg-ai');
+                break;
+            }
 
             case 'llmThinking': {
                 // Collapsible thinking/reasoning trace from the LLM
