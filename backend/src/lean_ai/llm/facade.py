@@ -127,9 +127,11 @@ class LLMClient:
         task_reminder: str | Callable[[], str] | None = None,
         reminder_interval: int = 10,
         loop_detection_threshold: int | None = None,
+        text_only_nudge: str | None = None,
         on_tool_call: Callable | None = None,
         on_tool_result: Callable | None = None,
         on_content: Callable | None = None,
+        on_thinking: Callable | None = None,
         on_metrics: Callable | None = None,
         on_context_refresh: Callable | None = None,
     ) -> tuple[list[ToolCall], str]:
@@ -144,10 +146,12 @@ class LLMClient:
         from lean_ai.llm.client import _sanitize_messages
 
         max_text_only = 3
+        max_truncated = 5
         tokens = max_tokens or self._provider.max_tokens
         executed: list[ToolCall] = []
         explanation_parts: list[str] = []
         consecutive_text_only: int = 0
+        consecutive_truncated: int = 0
 
         # Loop detection state
         ld_threshold = (
@@ -180,6 +184,9 @@ class LLMClient:
             if on_metrics and last_prompt_tokens:
                 await on_metrics(last_prompt_tokens, self._provider.context_window)
 
+            if on_thinking and metrics.thinking:
+                await on_thinking(metrics.thinking)
+
             if content.strip():
                 explanation_parts.append(content.strip())
                 if on_content:
@@ -187,6 +194,38 @@ class LLMClient:
 
             if not tool_calls:
                 messages.append({"role": "assistant", "content": content})
+
+                # Detect truncation: response cut off before tool calls
+                is_truncated = metrics.stop_reason in ("length", "max_tokens")
+
+                if is_truncated:
+                    consecutive_truncated += 1
+                    logger.warning(
+                        "chat_with_tools: response truncated "
+                        "(stop_reason=%s, completion_tokens=%d, "
+                        "truncated_streak=%d)",
+                        metrics.stop_reason, metrics.completion_tokens,
+                        consecutive_truncated,
+                    )
+                    if consecutive_truncated >= max_truncated:
+                        logger.warning(
+                            "chat_with_tools: %d consecutive truncated "
+                            "responses — exiting",
+                            consecutive_truncated,
+                        )
+                        break
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "Your previous response was truncated before "
+                            "you could make a tool call. Respond with "
+                            "ONLY the tool call — no explanation, no "
+                            "reasoning, no preamble. Just the tool call."
+                        ),
+                    })
+                    continue
+
+                consecutive_truncated = 0
                 consecutive_text_only += 1
                 if consecutive_text_only >= max_text_only:
                     logger.warning(
@@ -196,18 +235,17 @@ class LLMClient:
                     )
                     break
                 # Nudge: remind the LLM it must call tools, not just chat
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "You must call a tool now — do not respond with text "
-                        "only. If you have finished all work, call task_complete. "
-                        "Otherwise, call the next tool needed to make progress."
-                    ),
-                })
+                nudge = text_only_nudge or (
+                    "You must call a tool now — do not respond with text "
+                    "only. If you have finished all work, call task_complete. "
+                    "Otherwise, call the next tool needed to make progress."
+                )
+                messages.append({"role": "user", "content": nudge})
                 continue
 
-            # Reset text-only counter when tools are called
+            # Reset counters when tools are called
             consecutive_text_only = 0
+            consecutive_truncated = 0
 
             # Check for task_complete signal
             completion_call: ToolCallInfo | None = None
@@ -383,4 +421,5 @@ def _metrics_to_dict(metrics: LLMMetrics) -> dict:
         "tokens_per_second": metrics.tokens_per_second,
         "eval_count": metrics.completion_tokens,
         "prompt_tokens": metrics.prompt_tokens,
+        "stop_reason": metrics.stop_reason,
     }

@@ -162,6 +162,7 @@ class OllamaProvider(LLMProvider):
                 prompt_tokens=prompt_tokens,
                 completion_tokens=eval_count,
                 tokens_per_second=tps,
+                stop_reason=response.get("done_reason"),
             )
         except Exception:
             return LLMMetrics()
@@ -291,7 +292,9 @@ class OllamaProvider(LLMProvider):
         msg = response["message"]
         content = msg.get("content") or ""
         raw_tool_calls = msg.get("tool_calls") or []
+        thinking = msg.get("thinking") or None
         metrics = self._extract_metrics(response)
+        metrics.thinking = thinking
 
         tool_calls = [
             ToolCallInfo(

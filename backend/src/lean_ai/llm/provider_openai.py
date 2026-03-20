@@ -86,15 +86,18 @@ class OpenAIProvider(LLMProvider):
                 )
                 await asyncio.sleep(delay)
 
-    def _extract_metrics(self, response) -> LLMMetrics:
+    def _extract_metrics(
+        self, response, *, stop_reason: str | None = None,
+    ) -> LLMMetrics:
         """Extract metrics from an OpenAI response."""
         usage = getattr(response, "usage", None)
         if usage:
             return LLMMetrics(
                 prompt_tokens=usage.prompt_tokens or 0,
                 completion_tokens=usage.completion_tokens or 0,
+                stop_reason=stop_reason,
             )
-        return LLMMetrics()
+        return LLMMetrics(stop_reason=stop_reason)
 
     async def chat_raw(
         self,
@@ -119,8 +122,11 @@ class OpenAIProvider(LLMProvider):
             )
 
         response = await self._retry_with_backoff(_chat, label="chat_raw")
-        text = response.choices[0].message.content or ""
-        metrics = self._extract_metrics(response)
+        choice = response.choices[0]
+        text = choice.message.content or ""
+        metrics = self._extract_metrics(
+            response, stop_reason=choice.finish_reason,
+        )
 
         logger.info("OpenAI chat_raw response (%d chars): %s", len(text), text[:200])
         return text, metrics
@@ -164,8 +170,11 @@ class OpenAIProvider(LLMProvider):
             response = await self._retry_with_backoff(
                 _chat, label=f"structured({schema.__name__})",
             )
-            raw = response.choices[0].message.content or ""
-            metrics = self._extract_metrics(response)
+            choice = response.choices[0]
+            raw = choice.message.content or ""
+            metrics = self._extract_metrics(
+                response, stop_reason=choice.finish_reason,
+            )
             try:
                 return schema.model_validate_json(raw), metrics
             except ValidationError as exc:
@@ -207,7 +216,9 @@ class OpenAIProvider(LLMProvider):
         choice = response.choices[0]
         content = choice.message.content or ""
         raw_tool_calls = choice.message.tool_calls or []
-        metrics = self._extract_metrics(response)
+        metrics = self._extract_metrics(
+            response, stop_reason=choice.finish_reason,
+        )
 
         tool_calls: list[ToolCallInfo] = []
         for tc in raw_tool_calls:

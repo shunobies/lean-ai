@@ -61,6 +61,7 @@ async def run_workflow(
     session_id: str = "",
     refiner: "PromptRefiner | None" = None,
     expert_llm_client: "LLMClient | None" = None,
+    request_llm_client: "LLMClient | None" = None,
 ) -> str:
     """Run a workflow. Supports three modes:
 
@@ -87,6 +88,7 @@ async def run_workflow(
             conversation_logger=conversation_logger,
             session_id=session_id,
             expert_llm_client=expert_llm_client,
+            request_llm_client=request_llm_client,
             mode=mode,
         )
 
@@ -327,6 +329,9 @@ async def _execute_plan(
         if conversation_logger:
             asyncio.create_task(conversation_logger("assistant", text))
 
+    async def on_thinking(text: str) -> None:
+        ws_send_nowait(ws, "thinking_content", {"content": text})
+
     async def on_metrics(prompt_tokens: int, context_window: int) -> None:
         context_pct = round((prompt_tokens / context_window) * 100) if context_window else 0
         ws_send_nowait(ws, "metrics_update", {
@@ -371,6 +376,7 @@ async def _execute_plan(
             on_tool_call=on_tool_call,
             on_tool_result=on_tool_result,
             on_content=on_content,
+            on_thinking=on_thinking,
             on_metrics=on_metrics,
         )
 
@@ -851,18 +857,24 @@ async def _run_fix(
     conversation_logger: Callable | None,
     session_id: str = "",
     expert_llm_client: "LLMClient | None" = None,
+    request_llm_client: "LLMClient | None" = None,
     mode: str = "fix",
 ) -> str:
     """Execute directly — no planning, no approval.
 
     The LLM gets the full tool set and runs until it decides it's done.
-    When *mode* is ``"request"``, uses a neutral prompt.
+    When *mode* is ``"request"``, uses a neutral prompt and optionally
+    a separate request model.
     """
     await ws_send(ws, "stage_change", {"stage": "implementing"})
 
     is_request = mode == "request"
+    # Use dedicated request model when available for /request mode
+    active_client = (
+        request_llm_client if is_request and request_llm_client else llm_client
+    )
     tool_executor = make_tool_executor(
-        repo_root, ws, session_id, llm_client=llm_client,
+        repo_root, ws, session_id, llm_client=active_client,
     )
     commands = _effective_post_commands(repo_root)
     if is_request:
@@ -903,6 +915,9 @@ async def _run_fix(
         ws_send_nowait(ws, "assistant_content", {"content": text})
         if conversation_logger:
             asyncio.create_task(conversation_logger("assistant", text))
+
+    async def on_thinking(text: str) -> None:
+        ws_send_nowait(ws, "thinking_content", {"content": text})
 
     async def on_metrics(prompt_tokens: int, context_window: int) -> None:
         context_pct = round((prompt_tokens / context_window) * 100) if context_window else 0
@@ -980,7 +995,15 @@ async def _run_fix(
         })
         return new_messages
 
-    executed, explanation = await llm_client.chat_with_tools(
+    # Request mode: stronger nudge that suggests specific tools for open-ended tasks
+    request_nudge = (
+        "STOP generating text. You MUST call a tool now. "
+        "Based on the task, call search_internet to research the topic, "
+        "or call directory_tree to explore the project. "
+        "Do not explain — act."
+    ) if is_request else None
+
+    executed, explanation = await active_client.chat_with_tools(
         messages=messages,
         tools=IMPLEMENTATION_TOOLS,
         tool_executor_fn=tool_executor,
@@ -988,9 +1011,11 @@ async def _run_fix(
         max_tokens=settings.implementation_max_tokens,
         task_reminder=_build_fix_reminder,
         reminder_interval=settings.reminder_interval,
+        text_only_nudge=request_nudge,
         on_tool_call=on_tool_call,
         on_tool_result=on_tool_result,
         on_content=on_content,
+        on_thinking=on_thinking,
         on_metrics=on_metrics,
         on_context_refresh=_build_context_refresh,
     )

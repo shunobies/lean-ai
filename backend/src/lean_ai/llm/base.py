@@ -41,6 +41,8 @@ class LLMMetrics:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     tokens_per_second: float | None = None
+    stop_reason: str | None = None
+    thinking: str | None = None
 
 
 class LLMProvider(ABC):

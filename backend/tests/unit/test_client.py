@@ -64,9 +64,10 @@ def _make_tool_call_response(
 
 def _make_text_response(
     content: str = "Done.",
+    stop_reason: str | None = None,
 ) -> tuple[str, list[ToolCallInfo], LLMMetrics]:
     """Build a fake provider response with text only (no tool calls)."""
-    return content, [], LLMMetrics()
+    return content, [], LLMMetrics(stop_reason=stop_reason)
 
 
 def _make_task_complete_response(
@@ -775,3 +776,208 @@ async def test_context_refresh_callback_exception_handled():
 
     assert result is False
     assert len(messages) == original_len
+
+
+# ── Custom nudge tests ──
+
+
+@pytest.mark.asyncio
+async def test_custom_nudge_used_on_text_only():
+    """When text_only_nudge is provided, it replaces the default nudge."""
+    custom_nudge = "STOP. Call search_internet now."
+    responses = [
+        _make_text_response("Let me plan..."),
+        _make_task_complete_response("Done."),
+    ]
+
+    client, _fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=10,
+        text_only_nudge=custom_nudge,
+    )
+
+    nudge_msgs = [
+        m for m in messages
+        if m["role"] == "user" and m.get("content") == custom_nudge
+    ]
+    assert len(nudge_msgs) == 1
+
+
+@pytest.mark.asyncio
+async def test_default_nudge_when_no_custom():
+    """Without text_only_nudge, the default generic nudge is used."""
+    responses = [
+        _make_text_response("Let me plan..."),
+        _make_task_complete_response("Done."),
+    ]
+
+    client, _fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=10,
+    )
+
+    nudge_msgs = [
+        m for m in messages
+        if m["role"] == "user" and "You must call a tool now" in m.get("content", "")
+    ]
+    assert len(nudge_msgs) == 1
+
+
+# ── Truncation handling tests ──
+
+
+@pytest.mark.asyncio
+async def test_truncated_response_not_counted_as_text_only():
+    """Truncated responses should not count toward text-only exit limit."""
+    responses = [
+        # 3 truncated responses — would exit if counted as text-only
+        _make_text_response("I'll help...", stop_reason="length"),
+        _make_text_response("Let me...", stop_reason="length"),
+        _make_text_response("Starting...", stop_reason="length"),
+        # 4th turn: model calls a tool
+        _make_tool_call_response("read_file", {"path": "f.py"}),
+        _make_task_complete_response("Done."),
+    ]
+
+    client, fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    executed, _explanation = await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=10,
+    )
+
+    # Should NOT have exited after 3 truncated responses
+    assert fake.call_count == 5
+    assert len(executed) == 1
+    assert executed[0].tool_name == "read_file"
+
+
+@pytest.mark.asyncio
+async def test_truncated_response_injects_truncation_nudge():
+    """Truncated response should inject truncation-specific nudge."""
+    responses = [
+        _make_text_response("I'll help...", stop_reason="length"),
+        _make_task_complete_response("Done."),
+    ]
+
+    client, _fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=10,
+    )
+
+    truncation_nudges = [
+        m for m in messages
+        if m["role"] == "user" and "truncated" in m.get("content", "")
+    ]
+    assert len(truncation_nudges) == 1
+    assert "ONLY the tool call" in truncation_nudges[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_normal_text_only_still_exits_at_limit():
+    """Non-truncated text-only responses still exit after 3 (regression test)."""
+    responses = [
+        _make_text_response("Thinking..."),
+        _make_text_response("Still thinking..."),
+        _make_text_response("Almost done..."),
+        # Should never reach this
+        _make_task_complete_response("Done."),
+    ]
+
+    client, fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=10,
+    )
+
+    # Should exit after 3 text-only responses
+    assert fake.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_consecutive_truncation_cap():
+    """Repeated truncation should exit at the safety cap (5)."""
+    responses = [
+        _make_text_response(f"Truncated {i}...", stop_reason="length")
+        for i in range(7)
+    ] + [_make_task_complete_response("Done.")]
+
+    client, fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=20,
+    )
+
+    # Should exit after 5 truncated responses, not continue to 7
+    assert fake.call_count == 5
+
+
+@pytest.mark.asyncio
+async def test_anthropic_max_tokens_treated_as_truncation():
+    """Anthropic's 'max_tokens' stop_reason should be treated as truncation."""
+    responses = [
+        _make_text_response("Truncated...", stop_reason="max_tokens"),
+        _make_tool_call_response("read_file", {"path": "f.py"}),
+        _make_task_complete_response("Done."),
+    ]
+
+    client, fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    executed, _explanation = await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=10,
+    )
+
+    # Should have continued past the truncated response
+    assert fake.call_count == 3
+    assert len(executed) == 1

@@ -112,15 +112,18 @@ class AnthropicProvider(LLMProvider):
                 )
                 await asyncio.sleep(delay)
 
-    def _extract_metrics(self, response) -> LLMMetrics:
+    def _extract_metrics(
+        self, response, *, stop_reason: str | None = None,
+    ) -> LLMMetrics:
         """Extract metrics from an Anthropic response."""
         usage = getattr(response, "usage", None)
         if usage:
             return LLMMetrics(
                 prompt_tokens=getattr(usage, "input_tokens", 0) or 0,
                 completion_tokens=getattr(usage, "output_tokens", 0) or 0,
+                stop_reason=stop_reason,
             )
-        return LLMMetrics()
+        return LLMMetrics(stop_reason=stop_reason)
 
     async def chat_raw(
         self,
@@ -156,7 +159,9 @@ class AnthropicProvider(LLMProvider):
             return "".join(chunks), final_message
 
         text, final_message = await self._retry_with_backoff(_chat, label="chat_raw")
-        metrics = self._extract_metrics(final_message)
+        metrics = self._extract_metrics(
+            final_message, stop_reason=getattr(final_message, "stop_reason", None),
+        )
 
         logger.info("Anthropic chat_raw response (%d chars): %s", len(text), text[:200])
         return text, metrics
@@ -207,7 +212,10 @@ class AnthropicProvider(LLMProvider):
             raw, final_message = await self._retry_with_backoff(
                 _chat, label=f"structured({schema.__name__})",
             )
-            metrics = self._extract_metrics(final_message)
+            metrics = self._extract_metrics(
+                final_message,
+                stop_reason=getattr(final_message, "stop_reason", None),
+            )
 
             # Strip markdown code fences if present
             cleaned = raw.strip()
@@ -265,7 +273,9 @@ class AnthropicProvider(LLMProvider):
             _chat, label="chat_with_tools_single",
         )
 
-        metrics = self._extract_metrics(response)
+        metrics = self._extract_metrics(
+            response, stop_reason=getattr(response, "stop_reason", None),
+        )
 
         # Parse response content blocks
         content_parts: list[str] = []

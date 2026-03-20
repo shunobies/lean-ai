@@ -307,7 +307,9 @@ IMPLEMENTATION_TOOLS: list[dict] = [
                 "Fetch the content of a URL and return it as text. "
                 "Use this to read documentation pages, blog posts, "
                 "Stack Overflow answers, or other web resources found "
-                "via search_internet."
+                "via search_internet. Long pages (over 500 lines) are "
+                "saved to a file — the output will include the first "
+                "500 lines and a read_file command to continue reading."
             ),
             "parameters": {
                 "type": "object",
