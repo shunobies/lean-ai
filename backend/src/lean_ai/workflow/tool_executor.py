@@ -263,6 +263,7 @@ def make_tool_executor(
             from lean_ai.tools.internet import fetch_url
             result = await fetch_url(
                 url=arguments.get("url", ""),
+                repo_root=repo_root,
                 llm_client=llm_client,
             )
             return result.output if result.success else f"ERROR: {result.error}"
