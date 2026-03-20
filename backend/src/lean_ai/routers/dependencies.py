@@ -190,3 +190,89 @@ elif _expert_p == "ollama" and settings.ollama_model_expert:
     except Exception as e:
         logger.warning("Could not create expert LLM client (Ollama): %s", e)
         expert_llm_client = None
+
+# Request model client — for /request mode (open-ended tasks)
+request_llm_client: LLMClient | None = None
+_request_p = (settings.request_llm_provider or "").lower()
+
+# Empty = auto-detect: Ollama request only when primary provider is also Ollama
+if not _request_p:
+    if settings.llm_provider.lower() == "ollama" and settings.ollama_model_request:
+        _request_p = "ollama"
+
+if _request_p == "openai":
+    _request_model = settings.openai_request_model or settings.openai_model
+    if _request_model and settings.openai_api_key:
+        try:
+            from lean_ai.llm.provider_openai import OpenAIProvider as _ReqOpenAI
+            _request_provider = _ReqOpenAI(
+                api_key=settings.openai_api_key,
+                model=_request_model,
+                base_url=settings.openai_base_url or None,
+                temperature=settings.openai_temperature,
+                context_window=settings.openai_context_window,
+                max_tokens=settings.openai_max_tokens,
+            )
+            request_llm_client = LLMClient(
+                provider=_request_provider,
+                concurrency_semaphore=_llm_semaphore,
+            )
+            logger.info("Request model enabled (OpenAI): %s", _request_model)
+        except Exception as e:
+            logger.warning("Could not create request LLM client (OpenAI): %s", e)
+    else:
+        logger.warning(
+            "Request provider is 'openai' but %s — request model disabled",
+            "OPENAI_API_KEY is not set" if not settings.openai_api_key
+            else "no model name resolved",
+        )
+
+elif _request_p == "anthropic":
+    _request_model = settings.anthropic_request_model or settings.anthropic_model
+    if _request_model and settings.anthropic_api_key:
+        try:
+            from lean_ai.llm.provider_anthropic import AnthropicProvider as _ReqAnthropic
+            _request_provider = _ReqAnthropic(
+                api_key=settings.anthropic_api_key,
+                model=_request_model,
+                temperature=settings.anthropic_temperature,
+                context_window=settings.anthropic_context_window,
+                max_tokens=settings.anthropic_max_tokens,
+            )
+            request_llm_client = LLMClient(
+                provider=_request_provider,
+                concurrency_semaphore=_llm_semaphore,
+            )
+            logger.info("Request model enabled (Anthropic): %s", _request_model)
+        except Exception as e:
+            logger.warning("Could not create request LLM client (Anthropic): %s", e)
+    else:
+        logger.warning(
+            "Request provider is 'anthropic' but %s — request model disabled",
+            "ANTHROPIC_API_KEY is not set" if not settings.anthropic_api_key
+            else "no model name resolved",
+        )
+
+elif _request_p == "ollama" and settings.ollama_model_request:
+    try:
+        _request_provider = OllamaProvider(
+            ollama_url=settings.ollama_url,
+            model=settings.ollama_model_request,
+            max_tokens=settings.ollama_max_tokens,
+            context_window=settings.ollama_context_window,
+            temperature=settings.ollama_temperature,
+            top_p=settings.ollama_top_p,
+            top_k=settings.ollama_top_k,
+            repeat_penalty=settings.ollama_repeat_penalty,
+        )
+        request_llm_client = LLMClient(
+            provider=_request_provider,
+            concurrency_semaphore=_llm_semaphore,
+        )
+        logger.info(
+            "Request model enabled (Ollama): %s",
+            settings.ollama_model_request,
+        )
+    except Exception as e:
+        logger.warning("Could not create request LLM client (Ollama): %s", e)
+        request_llm_client = None

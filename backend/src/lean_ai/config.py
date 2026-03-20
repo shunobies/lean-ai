@@ -94,6 +94,12 @@ class Settings(BaseSettings):
     # ── Anthropic — expert model ──
     anthropic_expert_model: str = ""  # Model to use when expert_llm_provider=anthropic (falls back to anthropic_model)
 
+    # ── Request model — for /request mode ──
+    request_llm_provider: str = ""  # "ollama", "openai", "anthropic", or "" (auto-detect)
+    ollama_model_request: str = ""  # e.g. "qwen3.5:27b"
+    openai_request_model: str = ""
+    anthropic_request_model: str = ""
+
     # ── Ollama — inline prediction model (always Ollama) ──
     inline_model: str = ""
     inline_max_tokens: int = 256
