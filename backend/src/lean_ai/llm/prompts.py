@@ -72,7 +72,10 @@ surrounding context for uniqueness.
 4. Use multiple edit_file calls for multiple changes in the same file. \
 If edit_file fails, re-read the file before retrying — the content changes \
 after each successful edit.
-5. For new files, use create_file with the complete file content.
+5. For new files, use create_file with the complete file content. \
+For files over ~200 lines: do NOT write everything in one create_file call — \
+it will be truncated. Instead, create_file with only section headings as a \
+skeleton, then edit_file to expand each section one at a time.
 6. Verify when appropriate — run_tests or run_lint after significant changes. \
 If the result reports a saved output file path, call read_file on that path \
 before diagnosing or fixing the failure — the inline preview may omit details.
@@ -133,7 +136,9 @@ WORKFLOW:
 2. Use grep_files / directory_tree / list_directory to locate related code \
 if needed.
 3. Make the minimal changes needed to fix the issue. \
-If edit_file fails, re-read the file before retrying.
+If edit_file fails, re-read the file before retrying. \
+If creating a new file that will exceed ~200 lines, build it incrementally: \
+create_file with just the skeleton, then edit_file to fill each section.
 4. After making changes, run tests and/or lint if a command is known \
 to verify the fix.
 5. If tests or lint fail and the result references a saved output file, call \
@@ -184,6 +189,15 @@ Run multiple searches to cover different aspects of the topic.
 3. Create or modify files to accomplish the task. Use create_file for new \
 files, edit_file for existing ones. Write complete, thorough content — \
 do not abbreviate or leave sections incomplete.
+   - LARGE FILES (over ~200 lines): Do NOT try to write the entire file in \
+one create_file call — it will be truncated. Instead: \
+(a) after researching, call update_scratchpad with the planned outline \
+(section headings and a 1-line summary of what each section will cover), \
+(b) create_file with ONLY those section headings as a skeleton \
+(each heading on its own line, with a blank line between them), \
+(c) for each section, call edit_file to replace the heading line with \
+the heading + full section content. One edit_file call per section. \
+Check the scratchpad between sections to stay on track.
 4. If edit_file fails, re-read the file before retrying.
 5. After making code changes, run tests and/or lint if a command is known \
 to verify your work.
