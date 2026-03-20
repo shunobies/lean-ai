@@ -1,0 +1,495 @@
+/**
+ * Managed backend installation — creates a venv in globalStorageUri,
+ * pip-installs the bundled Python backend, verifies core imports, and
+ * offers optional extras (openai, anthropic, knowledge).
+ *
+ * Manual mode: when the user explicitly sets `lean-ai.backendDir` or
+ * `lean-ai.pythonPath` (non-default), all auto-install logic is skipped.
+ */
+
+import * as fs from "fs";
+import * as path from "path";
+import * as vscode from "vscode";
+import { execSync, execFile } from "child_process";
+import { SECRET_KEYS } from "./settingsSync";
+
+// ── Constants ────────────────────────────────────────────────────────────────
+
+const VENV_DIR = "backend-venv";
+const VERSION_KEY = "lean-ai.installedBackendVersion";
+const EXTRAS_KEY = "lean-ai.installedExtras";
+const EXTRAS_PROMPTED_KEY = "lean-ai.extrasPrompted";
+const MIN_PYTHON: [number, number] = [3, 10];
+const VERIFY_IMPORTS = ["lean_ai", "tree_sitter", "fastapi", "uvicorn", "ollama"];
+
+export interface BackendInstallResult {
+    pythonPath: string;
+    backendDir: string; // globalStorageUri path — used for .env placement
+    freshInstall: boolean;
+}
+
+// ── Public API ───────────────────────────────────────────────────────────────
+
+/**
+ * Ensure the managed backend is installed and up-to-date.
+ *
+ * Returns the venv Python path and backendDir on success, or `null` when the
+ * user is in manual mode (explicit settings override managed installation).
+ */
+export async function ensureBackendInstalled(
+    context: vscode.ExtensionContext,
+): Promise<BackendInstallResult | null> {
+    // ── Manual mode detection ────────────────────────────────────────────
+    const config = vscode.workspace.getConfiguration("lean-ai");
+    const explicitBackendDir = config.get<string>("backendDir", "");
+    const explicitPythonPath = config.get<string>("pythonPath", "python");
+
+    if (explicitBackendDir || explicitPythonPath !== "python") {
+        // User has made explicit choices — skip managed installation
+        return null;
+    }
+
+    const channel = getOutputChannel();
+    const globalDir = context.globalStorageUri.fsPath;
+    const venvPath = path.join(globalDir, VENV_DIR);
+    const venvPython = getVenvPythonPath(venvPath);
+    const extensionVersion = context.extension.packageJSON.version as string;
+    const installedVersion = context.globalState.get<string>(VERSION_KEY);
+
+    // ── Already installed and up-to-date ─────────────────────────────────
+    if (
+        installedVersion === extensionVersion &&
+        fs.existsSync(venvPython)
+    ) {
+        return { pythonPath: venvPython, backendDir: globalDir, freshInstall: false };
+    }
+
+    // ── Install or upgrade ───────────────────────────────────────────────
+    const isUpgrade = installedVersion !== undefined && installedVersion !== extensionVersion;
+    const label = isUpgrade
+        ? `Lean AI: Updating backend to v${extensionVersion}...`
+        : "Lean AI: Setting up backend (one-time setup)...";
+
+    return vscode.window.withProgress(
+        {
+            location: vscode.ProgressLocation.Notification,
+            title: label,
+            cancellable: false,
+        },
+        async (progress) => {
+            try {
+                // Step 1: Resolve system Python (for venv creation)
+                if (!fs.existsSync(venvPython)) {
+                    progress.report({ message: "Locating Python..." });
+                    const systemPython = resolveSystemPython();
+                    if (!systemPython) {
+                        showNoPythonError();
+                        throw new Error("Python not found");
+                    }
+
+                    const versionCheck = checkPythonVersion(systemPython);
+                    if (!versionCheck.ok) {
+                        showPythonVersionError(versionCheck.version);
+                        throw new Error(`Python ${versionCheck.version} < ${MIN_PYTHON.join(".")}`);
+                    }
+
+                    channel.appendLine(`[Lean AI] System Python: ${systemPython} (${versionCheck.version})`);
+
+                    // Step 2: Create venv
+                    progress.report({ message: "Creating virtual environment..." });
+                    fs.mkdirSync(globalDir, { recursive: true });
+                    await createVenv(systemPython, venvPath, channel);
+                }
+
+                // Step 3: Install / upgrade backend
+                progress.report({ message: isUpgrade ? "Upgrading backend..." : "Installing backend (this may take a minute)..." });
+                const bundledBackend = getBundledBackendPath(context);
+                const extras = await detectExtras(context);
+                await installBackend(venvPython, bundledBackend, extras, isUpgrade, channel);
+
+                // Step 4: Verify core imports
+                progress.report({ message: "Verifying installation..." });
+                const verify = verifyInstallation(venvPython, channel);
+                if (!verify.ok) {
+                    const msg = `Backend installation incomplete — missing: ${verify.missing.join(", ")}`;
+                    channel.appendLine(`[Lean AI] ${msg}`);
+                    const choice = await vscode.window.showErrorMessage(
+                        `Lean AI: ${msg}`,
+                        "Reinstall",
+                        "View Output",
+                    );
+                    if (choice === "Reinstall") {
+                        await deleteVenv(venvPath, channel);
+                        // Recursive retry
+                        return ensureBackendInstalled(context);
+                    }
+                    if (choice === "View Output") {
+                        channel.show();
+                    }
+                    throw new Error(msg);
+                }
+
+                // Step 5: Store version
+                await context.globalState.update(VERSION_KEY, extensionVersion);
+                channel.appendLine(`[Lean AI] Backend v${extensionVersion} installed successfully.`);
+
+                // Step 6: Prompt for optional extras (only on first install, non-blocking)
+                if (!isUpgrade) {
+                    // Fire and forget — don't block server startup
+                    promptOptionalExtras(context).catch(() => {});
+                }
+
+                return {
+                    pythonPath: venvPython,
+                    backendDir: globalDir,
+                    freshInstall: !isUpgrade,
+                };
+            } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                channel.appendLine(`[Lean AI] Installation failed: ${message}`);
+                // Don't re-show if we already showed a specific error
+                if (!message.includes("Python not found") && !message.includes("Python ")) {
+                    const choice = await vscode.window.showErrorMessage(
+                        `Lean AI: Backend installation failed. ${message}`,
+                        "Retry",
+                        "View Output",
+                    );
+                    if (choice === "Retry") {
+                        return ensureBackendInstalled(context);
+                    }
+                    if (choice === "View Output") {
+                        channel.show();
+                    }
+                }
+                return null;
+            }
+        },
+    );
+}
+
+/**
+ * Delete the managed venv and clear stored version.
+ * Used by the "Reinstall Backend" command.
+ */
+export async function resetBackend(context: vscode.ExtensionContext): Promise<void> {
+    const venvPath = path.join(context.globalStorageUri.fsPath, VENV_DIR);
+    const channel = getOutputChannel();
+    await deleteVenv(venvPath, channel);
+    await context.globalState.update(VERSION_KEY, undefined);
+    await context.globalState.update(EXTRAS_KEY, undefined);
+    await context.globalState.update(EXTRAS_PROMPTED_KEY, undefined);
+    channel.appendLine("[Lean AI] Backend reset complete. Will reinstall on next activation.");
+}
+
+// ── Internal helpers ─────────────────────────────────────────────────────────
+
+let _outputChannel: vscode.OutputChannel | undefined;
+
+function getOutputChannel(): vscode.OutputChannel {
+    if (!_outputChannel) {
+        _outputChannel = vscode.window.createOutputChannel("Lean AI Backend");
+    }
+    return _outputChannel;
+}
+
+/** Platform-aware path to the Python executable inside a venv. */
+function getVenvPythonPath(venvPath: string): string {
+    return process.platform === "win32"
+        ? path.join(venvPath, "Scripts", "python.exe")
+        : path.join(venvPath, "bin", "python");
+}
+
+/** Path to the bundled backend source within the extension. */
+function getBundledBackendPath(context: vscode.ExtensionContext): string {
+    return path.join(context.extensionPath, "backend");
+}
+
+/**
+ * Probe PATH for a working Python interpreter.
+ * Preference order: python3 → python (Unix), python → py → python3 (Windows).
+ */
+function resolveSystemPython(): string | null {
+    const candidates =
+        process.platform === "win32"
+            ? ["python", "py", "python3"]
+            : ["python3", "python"];
+
+    for (const candidate of candidates) {
+        try {
+            const probe =
+                process.platform === "win32"
+                    ? `where ${candidate}`
+                    : `which ${candidate}`;
+            execSync(probe, { timeout: 3000, stdio: "pipe" });
+            return candidate;
+        } catch {
+            // Not on PATH
+        }
+    }
+    return null;
+}
+
+/** Run `python --version` and parse the output. */
+function checkPythonVersion(pythonPath: string): { ok: boolean; version: string } {
+    try {
+        const output = execSync(`${pythonPath} --version`, {
+            timeout: 5000,
+            stdio: "pipe",
+            encoding: "utf-8",
+        }).trim();
+        // "Python 3.12.1" → "3.12.1"
+        const match = output.match(/Python\s+(\d+)\.(\d+)/);
+        if (!match) {
+            return { ok: false, version: output };
+        }
+        const major = parseInt(match[1], 10);
+        const minor = parseInt(match[2], 10);
+        const version = output.replace("Python ", "");
+        const ok = major > MIN_PYTHON[0] || (major === MIN_PYTHON[0] && minor >= MIN_PYTHON[1]);
+        return { ok, version };
+    } catch {
+        return { ok: false, version: "unknown" };
+    }
+}
+
+/** Create a Python virtual environment. */
+function createVenv(
+    systemPython: string,
+    venvPath: string,
+    channel: vscode.OutputChannel,
+): Promise<void> {
+    return new Promise((resolve, reject) => {
+        channel.appendLine(`[Lean AI] Creating venv at ${venvPath}`);
+        const proc = execFile(
+            systemPython,
+            ["-m", "venv", venvPath],
+            { timeout: 60_000 },
+            (err) => {
+                if (err) {
+                    channel.appendLine(`[Lean AI] venv creation failed: ${err.message}`);
+                    reject(err);
+                    return;
+                }
+                // Verify the venv python exists
+                const venvPython = getVenvPythonPath(venvPath);
+                if (!fs.existsSync(venvPython)) {
+                    const msg = `venv created but Python not found at ${venvPython}`;
+                    channel.appendLine(`[Lean AI] ${msg}`);
+                    reject(new Error(msg));
+                    return;
+                }
+                channel.appendLine("[Lean AI] venv created successfully.");
+                resolve();
+            },
+        );
+        proc.stdout?.on("data", (d: Buffer) => channel.append(d.toString()));
+        proc.stderr?.on("data", (d: Buffer) => channel.append(d.toString()));
+    });
+}
+
+/** pip install the backend from the bundled source. */
+function installBackend(
+    venvPython: string,
+    backendPath: string,
+    extras: string[],
+    upgrade: boolean,
+    channel: vscode.OutputChannel,
+): Promise<void> {
+    const target = extras.length > 0
+        ? `${backendPath}[${extras.join(",")}]`
+        : backendPath;
+
+    const args = ["-m", "pip", "install"];
+    if (upgrade) {
+        args.push("--upgrade");
+    }
+    args.push(target);
+
+    channel.appendLine(`[Lean AI] Running: ${venvPython} ${args.join(" ")}`);
+
+    return new Promise((resolve, reject) => {
+        const proc = execFile(
+            venvPython,
+            args,
+            { timeout: 300_000 }, // 5 min for slow networks
+            (err) => {
+                if (err) {
+                    channel.appendLine(`[Lean AI] pip install failed: ${err.message}`);
+                    reject(err);
+                    return;
+                }
+                channel.appendLine("[Lean AI] pip install completed.");
+                resolve();
+            },
+        );
+        proc.stdout?.on("data", (d: Buffer) => channel.append(d.toString()));
+        proc.stderr?.on("data", (d: Buffer) => channel.append(d.toString()));
+    });
+}
+
+/** Verify core packages are importable. */
+function verifyInstallation(
+    venvPython: string,
+    channel: vscode.OutputChannel,
+): { ok: boolean; missing: string[] } {
+    const missing: string[] = [];
+    for (const mod of VERIFY_IMPORTS) {
+        try {
+            execSync(`${venvPython} -c "import ${mod}"`, {
+                timeout: 10_000,
+                stdio: "pipe",
+            });
+        } catch {
+            missing.push(mod);
+        }
+    }
+    if (missing.length > 0) {
+        channel.appendLine(`[Lean AI] Verification failed — missing: ${missing.join(", ")}`);
+    } else {
+        channel.appendLine("[Lean AI] All core imports verified.");
+    }
+    return { ok: missing.length === 0, missing };
+}
+
+/** Delete the venv directory. */
+async function deleteVenv(venvPath: string, channel: vscode.OutputChannel): Promise<void> {
+    if (fs.existsSync(venvPath)) {
+        channel.appendLine(`[Lean AI] Removing venv at ${venvPath}`);
+        fs.rmSync(venvPath, { recursive: true, force: true });
+        channel.appendLine("[Lean AI] venv removed.");
+    }
+}
+
+/**
+ * Auto-detect which optional extras to install based on current config.
+ * For example, if the user has an OpenAI API key stored, include "openai".
+ */
+async function detectExtras(context: vscode.ExtensionContext): Promise<string[]> {
+    const extras: string[] = [];
+    const config = vscode.workspace.getConfiguration("lean-ai");
+    const provider = config.get<string>("llmProvider", "ollama");
+    const expertProvider = config.get<string>("expertLlmProvider", "");
+    const requestProvider = config.get<string>("requestLlmProvider", "");
+
+    // Check API keys in SecretStorage
+    const openaiKey = await context.secrets.get(SECRET_KEYS.openaiApiKey);
+    const anthropicKey = await context.secrets.get(SECRET_KEYS.anthropicApiKey);
+
+    if (openaiKey || provider === "openai" || expertProvider === "openai" || requestProvider === "openai") {
+        extras.push("openai");
+    }
+    if (anthropicKey || provider === "anthropic" || expertProvider === "anthropic" || requestProvider === "anthropic") {
+        extras.push("anthropic");
+    }
+
+    return extras;
+}
+
+/**
+ * After first install, prompt the user about optional extras they might want.
+ * Non-blocking — runs asynchronously after server startup.
+ */
+async function promptOptionalExtras(context: vscode.ExtensionContext): Promise<void> {
+    // Don't prompt again if we already asked
+    if (context.globalState.get<boolean>(EXTRAS_PROMPTED_KEY)) {
+        return;
+    }
+    await context.globalState.update(EXTRAS_PROMPTED_KEY, true);
+
+    // Small delay so the server startup notification clears first
+    await new Promise((r) => setTimeout(r, 3000));
+
+    const choice = await vscode.window.showInformationMessage(
+        "Lean AI is ready! Want to add cloud LLM support or document indexing?",
+        "Configure Extras",
+        "Not Now",
+    );
+
+    if (choice !== "Configure Extras") {
+        return;
+    }
+
+    const items: vscode.QuickPickItem[] = [
+        {
+            label: "openai",
+            description: "OpenAI API support (GPT-4o, etc.)",
+            picked: false,
+        },
+        {
+            label: "anthropic",
+            description: "Anthropic API support (Claude, etc.)",
+            picked: false,
+        },
+        {
+            label: "knowledge",
+            description: "Document indexing (EPUB, PDF, Word)",
+            picked: false,
+        },
+    ];
+
+    const selected = await vscode.window.showQuickPick(items, {
+        canPickMany: true,
+        title: "Select optional features to install",
+        placeHolder: "Pick extras to install (or press Escape to skip)",
+    });
+
+    if (!selected || selected.length === 0) {
+        return;
+    }
+
+    const extras = selected.map((s) => s.label);
+    const venvPath = path.join(context.globalStorageUri.fsPath, VENV_DIR);
+    const venvPython = getVenvPythonPath(venvPath);
+    const bundledBackend = getBundledBackendPath(context);
+
+    await vscode.window.withProgress(
+        {
+            location: vscode.ProgressLocation.Notification,
+            title: `Lean AI: Installing extras (${extras.join(", ")})...`,
+            cancellable: false,
+        },
+        async () => {
+            const channel = getOutputChannel();
+            try {
+                await installBackend(venvPython, bundledBackend, extras, false, channel);
+                await context.globalState.update(EXTRAS_KEY, extras);
+                vscode.window.showInformationMessage(
+                    `Lean AI: Installed extras: ${extras.join(", ")}. Restart the backend to use them.`,
+                );
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                vscode.window.showErrorMessage(
+                    `Lean AI: Failed to install extras. ${msg}`,
+                );
+                channel.show();
+            }
+        },
+    );
+}
+
+/** Show an error when no Python is found on PATH. */
+function showNoPythonError(): void {
+    vscode.window.showErrorMessage(
+        "Lean AI: Python not found. Install Python 3.10+ or set 'lean-ai.pythonPath' in settings.",
+        "Install Python",
+        "Open Settings",
+    ).then((choice) => {
+        if (choice === "Install Python") {
+            vscode.env.openExternal(vscode.Uri.parse("https://www.python.org/downloads/"));
+        } else if (choice === "Open Settings") {
+            vscode.commands.executeCommand("workbench.action.openSettings", "lean-ai.pythonPath");
+        }
+    });
+}
+
+/** Show an error when Python version is too old. */
+function showPythonVersionError(found: string): void {
+    vscode.window.showErrorMessage(
+        `Lean AI: Python ${MIN_PYTHON.join(".")}+ required, found ${found}. Update Python or set 'lean-ai.pythonPath'.`,
+        "Open Settings",
+    ).then((choice) => {
+        if (choice === "Open Settings") {
+            vscode.commands.executeCommand("workbench.action.openSettings", "lean-ai.pythonPath");
+        }
+    });
+}

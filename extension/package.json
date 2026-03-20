@@ -2,7 +2,7 @@
   "name": "lean-ai",
   "displayName": "Lean AI",
   "description": "Single-Model Deterministic Agentic Architecture - Chat Agent & Inline Predictions",
-  "version": "0.2.4",
+  "version": "0.3.1",
   "publisher": "lean-ai",
   "icon": "icon.png",
   "repository": {
@@ -95,6 +95,10 @@
         "command": "lean-ai.openSettings",
         "title": "Lean AI: Open Settings",
         "icon": "$(settings-gear)"
+      },
+      {
+        "command": "lean-ai.reinstallBackend",
+        "title": "Lean AI: Reinstall Backend"
       }
     ],
     "menus": {
@@ -172,7 +176,11 @@
         "lean-ai.llmProvider": {
           "type": "string",
           "default": "ollama",
-          "enum": ["ollama", "openai", "anthropic"],
+          "enum": [
+            "ollama",
+            "openai",
+            "anthropic"
+          ],
           "enumDescriptions": [
             "Use a local Ollama instance (no API key required)",
             "Use OpenAI API (requires API key stored in OS keychain)",
@@ -226,7 +234,12 @@
         "lean-ai.expertLlmProvider": {
           "type": "string",
           "default": "",
-          "enum": ["", "ollama", "openai", "anthropic"],
+          "enum": [
+            "",
+            "ollama",
+            "openai",
+            "anthropic"
+          ],
           "enumDescriptions": [
             "Auto-detect from ollamaModelExpert (empty = use primary provider)",
             "Use Ollama for expert phases",
@@ -243,7 +256,12 @@
         "lean-ai.requestLlmProvider": {
           "type": "string",
           "default": "",
-          "enum": ["", "ollama", "openai", "anthropic"],
+          "enum": [
+            "",
+            "ollama",
+            "openai",
+            "anthropic"
+          ],
           "enumDescriptions": [
             "Auto-detect (empty = use primary provider)",
             "Use Ollama for /request mode",
@@ -331,7 +349,12 @@
         "lean-ai.searchProvider": {
           "type": "string",
           "default": "duckduckgo",
-          "enum": ["duckduckgo", "searxng", "google", "bing"],
+          "enum": [
+            "duckduckgo",
+            "searxng",
+            "google",
+            "bing"
+          ],
           "enumDescriptions": [
             "DuckDuckGo (default, no setup required)",
             "SearXNG (self-hosted, privacy-friendly)",
@@ -342,7 +365,7 @@
         },
         "lean-ai.searchDelay": {
           "type": "number",
-          "default": 2.0,
+          "default": 2,
           "markdownDescription": "**Search** — Minimum seconds between search requests (with random jitter). Increase to avoid rate limiting. Default: `2.0`"
         },
         "lean-ai.enablePostValidation": {
@@ -397,7 +420,7 @@
           "type": "number",
           "default": 0.7,
           "minimum": 0.1,
-          "maximum": 1.0,
+          "maximum": 1,
           "markdownDescription": "**Advanced** — Refresh context when token usage reaches this fraction of the context window. Lower values refresh more aggressively; higher values keep more history. Default: `0.7`"
         },
         "lean-ai.numParallel": {
@@ -419,7 +442,8 @@
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
     "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
     "lint": "eslint src --ext ts",
-    "package": "npm run build && vsce package"
+    "copy-backend": "node scripts/copy-backend.js",
+    "package": "npm run copy-backend && npm run build && vsce package"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

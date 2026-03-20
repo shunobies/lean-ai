@@ -272,7 +272,7 @@ export class SettingsPanel {
         // Also write to .env immediately (onDidChangeConfiguration may be
         // slightly delayed, so we do it here too for responsiveness)
         const backendDir = config.get<string>("lean-ai.backendDir", "");
-        const envPath = resolveEnvFilePath(backendDir || undefined);
+        const envPath = resolveEnvFilePath(backendDir || undefined, this._context.globalStorageUri.fsPath);
         if (envPath) {
             for (const [field, settingKey] of Object.entries(fieldToSetting)) {
                 if (!(field in values)) { continue; }

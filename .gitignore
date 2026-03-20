@@ -26,6 +26,7 @@ venv/
 node_modules/
 extension/out/
 extension/dist/
+extension/backend/
 extension/*.vsix
 package-lock.json
 

@@ -16,6 +16,7 @@ import * as vscode from "vscode";
 import { spawn, execSync, ChildProcess } from "child_process";
 import { DEFAULT_BACKEND_URL } from "./constants";
 import { buildBackendEnv, buildFullBackendEnv } from "./settingsSync";
+import { ensureBackendInstalled, type BackendInstallResult } from "./backendInstaller";
 
 const HEALTH_POLL_INTERVAL_MS = 1000;
 const HEALTH_POLL_MAX_ATTEMPTS = 30; // 30 seconds max wait
@@ -25,6 +26,8 @@ let serverProcess: ChildProcess | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
 let managedPort: string | undefined;
 let _secrets: vscode.SecretStorage | undefined;
+let _context: vscode.ExtensionContext | undefined;
+let _managedInstall: BackendInstallResult | null | undefined;
 
 // Health monitor state
 let healthMonitorInterval: NodeJS.Timeout | undefined;
@@ -298,9 +301,18 @@ export function stopHealthMonitor(): void {
 /**
  * Start the backend server if auto-start is enabled.
  * Returns true if the server is healthy (either already running or just started).
+ *
+ * When `context` is provided, attempts managed installation first: creates a
+ * venv in globalStorageUri, pip-installs the bundled backend, and uses that
+ * venv Python to spawn uvicorn. Falls through to manual mode when the user
+ * has explicit `backendDir` or `pythonPath` settings.
  */
-export async function startBackend(secrets?: vscode.SecretStorage): Promise<boolean> {
+export async function startBackend(
+    secrets?: vscode.SecretStorage,
+    context?: vscode.ExtensionContext,
+): Promise<boolean> {
     if (secrets) { _secrets = secrets; }
+    if (context) { _context = context; }
     const { autoStart, pythonPath, backendUrl } = getConfig();
     const channel = getOutputChannel();
     const { host, port } = parseHostPort(backendUrl);
@@ -333,15 +345,35 @@ export async function startBackend(secrets?: vscode.SecretStorage): Promise<bool
         return false;
     }
 
-    const backendDir = resolveBackendDir();
-    if (!backendDir) {
-        channel.appendLine(
-            "[Lean AI] Cannot detect backend directory. Set lean-ai.backendDir in settings.",
-        );
-        vscode.window.showWarningMessage(
-            "Lean AI: Cannot find backend directory. Set 'lean-ai.backendDir' in settings, or start the server manually.",
-        );
-        return false;
+    // ── Managed install: venv in globalStorageUri ─────────────────────────
+    // Try managed installation first (if context is available). This creates
+    // a venv, pip-installs the bundled backend, and returns the venv Python.
+    // Returns null when the user has explicit settings (manual mode).
+    if (_context && _managedInstall === undefined) {
+        _managedInstall = await ensureBackendInstalled(_context);
+    }
+
+    let resolvedPython: string;
+    let resolvedCwd: string;
+
+    if (_managedInstall) {
+        // Managed mode — use the venv Python, cwd is globalStorageUri
+        resolvedPython = _managedInstall.pythonPath;
+        resolvedCwd = _managedInstall.backendDir;
+    } else {
+        // Manual mode — resolve backend directory from settings / workspace
+        const backendDir = resolveBackendDir();
+        if (!backendDir) {
+            channel.appendLine(
+                "[Lean AI] Cannot detect backend directory. Set lean-ai.backendDir in settings.",
+            );
+            vscode.window.showWarningMessage(
+                "Lean AI: Cannot find backend directory. Set 'lean-ai.backendDir' in settings, or start the server manually.",
+            );
+            return false;
+        }
+        resolvedPython = resolvePythonPath(pythonPath);
+        resolvedCwd = backendDir;
     }
 
     // Kill any zombie process on the port from a previous session
@@ -351,8 +383,7 @@ export async function startBackend(secrets?: vscode.SecretStorage): Promise<bool
     // Brief pause to let the port fully release
     await new Promise((r) => setTimeout(r, 500));
 
-    const resolvedPython = resolvePythonPath(pythonPath);
-    channel.appendLine(`[Lean AI] Starting backend in: ${backendDir}`);
+    channel.appendLine(`[Lean AI] Starting backend in: ${resolvedCwd}`);
     channel.appendLine(`[Lean AI] Python: ${resolvedPython}`);
     channel.show(true);
 
@@ -369,7 +400,7 @@ export async function startBackend(secrets?: vscode.SecretStorage): Promise<bool
             port,
         ],
         {
-            cwd: backendDir,
+            cwd: resolvedCwd,
             stdio: ["ignore", "pipe", "pipe"],
             env: _secrets
                 ? { ...process.env, ...(await buildFullBackendEnv(_secrets)) }
@@ -478,7 +509,16 @@ export async function restartBackend(): Promise<boolean> {
     stopBackend();
     // Wait for port to be fully released
     await new Promise((r) => setTimeout(r, 1000));
+    // Re-use cached install result (don't re-run pip install on restart)
     return startBackend();
+}
+
+/**
+ * Clear the cached managed install result so the next startBackend re-checks.
+ * Called by the "Reinstall Backend" command after resetting the venv.
+ */
+export function clearManagedInstallCache(): void {
+    _managedInstall = undefined;
 }
 
 /**

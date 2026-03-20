@@ -1,5 +1,14 @@
 src/**
 test/**
 node_modules/**
+scripts/**
 tsconfig.json
 .eslintrc*
+
+# Bundled backend — exclude dev artifacts
+backend/tests/**
+backend/**/__pycache__/**
+backend/**/*.egg-info/**
+backend/.ruff_cache/**
+backend/.pytest_cache/**
+backend/.env

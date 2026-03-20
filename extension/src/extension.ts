@@ -15,15 +15,16 @@ import { LeanAIInlineProvider } from "./inlineProvider";
 import { SessionTreeProvider } from "./sessionTreeProvider";
 import { SessionDetailProvider } from "./sessionDetailProvider";
 import { BackendClient } from "./backendClient";
-import { startBackend, stopBackend, restartBackend } from "./backendProcess";
+import { startBackend, stopBackend, restartBackend, clearManagedInstallCache } from "./backendProcess";
+import { resetBackend } from "./backendInstaller";
 import { SettingsPanel } from "./settingsPanel";
 import { initNotifications } from "./notifications";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     console.log("Lean AI extension activating...");
 
-    // Start backend server (checks if already running first)
-    await startBackend(context.secrets);
+    // Start backend server (managed install + auto-start)
+    await startBackend(context.secrets, context);
 
     // Register Sidebar Webview Provider (Activity Bar chat panel)
     const sidebarProvider = new LeanAISidebarProvider(context.extensionUri, context);
@@ -101,6 +102,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand("lean-ai.stopBackend", () => {
             stopBackend();
             vscode.window.showInformationMessage("Lean AI backend stopped.");
+        }),
+        vscode.commands.registerCommand("lean-ai.reinstallBackend", async () => {
+            stopBackend();
+            await resetBackend(context);
+            clearManagedInstallCache();
+            const success = await startBackend(context.secrets, context);
+            if (success) {
+                vscode.window.showInformationMessage("Lean AI: Backend reinstalled successfully.");
+            }
         }),
         vscode.commands.registerCommand("lean-ai.openSettings", () => {
             SettingsPanel.createOrShow(context);

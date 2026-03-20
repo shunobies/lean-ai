@@ -159,15 +159,21 @@ export function writeEnvSetting(
 
 /**
  * Resolve the backend .env file path.
- * Uses backendDir if provided, otherwise looks for backend/ in the workspace.
+ * Priority: explicit backendDir → workspace backend/ → globalStorageDir (managed mode).
  */
-export function resolveEnvFilePath(backendDir?: string): string | null {
+export function resolveEnvFilePath(backendDir?: string, globalStorageDir?: string): string | null {
     if (backendDir) {
         return path.join(backendDir, ".env");
     }
     const folders = vscode.workspace.workspaceFolders;
     if (folders && folders.length > 0) {
-        return path.join(folders[0].uri.fsPath, "backend", ".env");
+        const candidate = path.join(folders[0].uri.fsPath, "backend");
+        if (fs.existsSync(candidate)) {
+            return path.join(candidate, ".env");
+        }
+    }
+    if (globalStorageDir) {
+        return path.join(globalStorageDir, ".env");
     }
     return null;
 }

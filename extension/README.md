@@ -19,21 +19,25 @@ Run it fully local with [Ollama](https://ollama.com), or connect to OpenAI and A
 
 ## Quick Start
 
-### 1. Install the backend
+### 1. Install the extension
+
+Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=lean-ai.lean-ai) or [OpenVSX](https://open-vsx.org/extension/lean-ai/lean-ai). On first activation, the extension automatically creates a Python virtual environment and installs the backend server — no manual setup required.
+
+### 2. Install Ollama
+
+Download [Ollama](https://ollama.com) and pull a model:
 
 ```bash
-cd backend && pip install -e ".[dev]"
-```
-
-### 2. Start the server
-
-```bash
-uvicorn lean_ai.main:app --reload --port 8422
+ollama pull qwen3-coder:30b
 ```
 
 ### 3. Open a project and run `/init`
 
 Type `/init` in the chat panel to index your workspace and generate project context. Then describe what you want built.
+
+### Manual backend setup (advanced)
+
+If you prefer to manage the backend yourself, set `lean-ai.backendDir` or `lean-ai.pythonPath` in settings. The automatic installer is skipped when either setting is explicitly configured. See the [GitHub repository](https://github.com/shunobies/lean-ai) for details.
 
 ## Slash Commands
 
@@ -63,9 +67,8 @@ API keys for OpenAI and Anthropic are stored securely in your OS keychain.
 
 ## Requirements
 
-- Python 3.10+
-- [Ollama](https://ollama.com) with a capable model (e.g., `qwen3-coder:30b`)
-- The Lean AI backend server — see the [GitHub repository](https://github.com/shunobies/lean-ai) for installation instructions
+- Python 3.10+ (for the backend server, installed automatically)
+- [Ollama](https://ollama.com) with a capable model (e.g., `qwen3-coder:30b`) — or an OpenAI/Anthropic API key
 
 ## Links
 

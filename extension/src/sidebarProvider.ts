@@ -238,7 +238,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             if (changedKeys.length > 0) {
                 const config = vscode.workspace.getConfiguration();
                 const backendDirSetting = config.get<string>("lean-ai.backendDir", "");
-                const envPath = resolveEnvFilePath(backendDirSetting || undefined);
+                const envPath = resolveEnvFilePath(backendDirSetting || undefined, this.context.globalStorageUri.fsPath);
                 if (envPath) {
                     for (const key of changedKeys) {
                         const envVar = BACKEND_SETTING_MAP[key];
