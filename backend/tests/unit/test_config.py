@@ -228,21 +228,23 @@ class TestThinkingConfig:
     def test_thinking_defaults(self):
         s = Settings()
         assert s.enable_thinking is True
-        assert s.enable_thinking_expert is None
-        assert s.enable_thinking_request is None
+        assert s.enable_thinking_expert is True
+        assert s.enable_thinking_request is True
 
-    def test_effective_thinking_expert_inherit(self):
-        s = Settings(enable_thinking=False)
-        assert s.effective_thinking_expert is False
+    def test_thinking_expert_independent(self):
+        """Expert thinking is independent from primary."""
+        s = Settings(enable_thinking=False, enable_thinking_expert=True)
+        assert s.enable_thinking is False
+        assert s.enable_thinking_expert is True
 
-    def test_effective_thinking_expert_override(self):
-        s = Settings(enable_thinking=True, enable_thinking_expert=False)
-        assert s.effective_thinking_expert is False
-
-    def test_effective_thinking_request_inherit(self):
-        s = Settings(enable_thinking=True)
-        assert s.effective_thinking_request is True
-
-    def test_effective_thinking_request_override(self):
+    def test_thinking_request_independent(self):
+        """Request thinking is independent from primary."""
         s = Settings(enable_thinking=True, enable_thinking_request=False)
-        assert s.effective_thinking_request is False
+        assert s.enable_thinking is True
+        assert s.enable_thinking_request is False
+
+    def test_thinking_all_disabled(self):
+        s = Settings(enable_thinking=False, enable_thinking_expert=False, enable_thinking_request=False)
+        assert s.enable_thinking is False
+        assert s.enable_thinking_expert is False
+        assert s.enable_thinking_request is False

@@ -182,7 +182,7 @@ elif _expert_p == "ollama" and settings.ollama_model_expert:
             top_p=settings.effective_expert_top_p,
             top_k=settings.effective_expert_top_k,
             repeat_penalty=settings.effective_expert_repeat_penalty,
-            enable_thinking=settings.effective_thinking_expert,
+            enable_thinking=settings.enable_thinking_expert,
         )
         expert_llm_client = LLMClient(provider=_expert_provider)
         logger.info(
@@ -268,7 +268,7 @@ elif _request_p == "ollama" and settings.ollama_model_request:
             top_p=settings.effective_request_top_p,
             top_k=settings.effective_request_top_k,
             repeat_penalty=settings.effective_request_repeat_penalty,
-            enable_thinking=settings.effective_thinking_request,
+            enable_thinking=settings.enable_thinking_request,
         )
         request_llm_client = LLMClient(
             provider=_request_provider,

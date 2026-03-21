@@ -618,12 +618,13 @@ export function getSettingsPanelHtml(): string {
                         <input type="number" id="ollamaExpertMaxTokens" min="0" step="256" placeholder="">
                     </div>
                     <div class="field">
-                        <label>Enable Thinking <span class="hint">inherit = use primary setting</span></label>
-                        <select id="enableThinkingExpert">
-                            <option value="">Inherit from primary</option>
-                            <option value="true">Enabled</option>
-                            <option value="false">Disabled</option>
-                        </select>
+                    </div>
+                </div>
+                <div class="field-check">
+                    <input type="checkbox" id="enableThinkingExpert" checked>
+                    <div>
+                        <label for="enableThinkingExpert">Enable thinking mode</label>
+                        <span class="hint">Enable for reasoning models (Qwen3, Qwen3.5). Disable for models that don't support thinking.</span>
                     </div>
                 </div>
             </div>
@@ -713,12 +714,13 @@ export function getSettingsPanelHtml(): string {
                         <input type="number" id="ollamaRequestMaxTokens" min="0" step="256" placeholder="">
                     </div>
                     <div class="field">
-                        <label>Enable Thinking <span class="hint">inherit = use primary setting</span></label>
-                        <select id="enableThinkingRequest">
-                            <option value="">Inherit from primary</option>
-                            <option value="true">Enabled</option>
-                            <option value="false">Disabled</option>
-                        </select>
+                    </div>
+                </div>
+                <div class="field-check">
+                    <input type="checkbox" id="enableThinkingRequest" checked>
+                    <div>
+                        <label for="enableThinkingRequest">Enable thinking mode</label>
+                        <span class="hint">Enable for reasoning models (Qwen3, Qwen3.5). Disable for models that don't support thinking.</span>
                     </div>
                 </div>
             </div>

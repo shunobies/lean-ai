@@ -147,10 +147,10 @@ Controls whether the LLM uses reasoning/thinking mode (relevant for models like 
 | Variable | Default | Description |
 |---|---|---|
 | `LEAN_AI_ENABLE_THINKING` | `true` | Enable thinking mode for the primary Ollama model |
-| `LEAN_AI_ENABLE_THINKING_EXPERT` | *(inherits from ENABLE_THINKING)* | Override thinking mode for the expert model |
-| `LEAN_AI_ENABLE_THINKING_REQUEST` | *(inherits from ENABLE_THINKING)* | Override thinking mode for the request model |
+| `LEAN_AI_ENABLE_THINKING_EXPERT` | `true` | Enable thinking mode for the expert model |
+| `LEAN_AI_ENABLE_THINKING_REQUEST` | `true` | Enable thinking mode for the request model |
 
-Per-model overrides let you use thinking on models that support it (e.g. Qwen3) while disabling it on models that don't. When not set, the expert and request models inherit the primary setting.
+Each model has its own independent thinking toggle. Enable thinking for models that support it (e.g. Qwen3, Qwen3.5) and disable it for models that don't.
 
 ## OpenAI
 

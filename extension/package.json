@@ -441,16 +441,14 @@
           "markdownDescription": "**Ollama** — Enable thinking/reasoning mode for models that support it (Qwen3, Qwen3.5). Shows reasoning in chat. Disable for faster responses without deep reasoning. Default: `true`"
         },
         "lean-ai.enableThinkingExpert": {
-          "type": "string",
-          "default": "",
-          "enum": ["", "true", "false"],
-          "markdownDescription": "**Ollama Expert Model** — Override thinking mode for the expert model. Empty = inherit from primary `enableThinking` setting."
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "**Ollama Expert Model** — Enable thinking/reasoning mode for the expert model. Default: `true`"
         },
         "lean-ai.enableThinkingRequest": {
-          "type": "string",
-          "default": "",
-          "enum": ["", "true", "false"],
-          "markdownDescription": "**Ollama Request Model** — Override thinking mode for the request model. Empty = inherit from primary `enableThinking` setting."
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "**Ollama Request Model** — Enable thinking/reasoning mode for the request model. Default: `true`"
         },
         "lean-ai.ollamaExpertTemperature": {
           "type": "number",

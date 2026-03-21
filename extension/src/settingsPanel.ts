@@ -263,6 +263,7 @@ export class SettingsPanel {
         const booleanFields = new Set([
             "enableEmbeddings", "enablePostValidation",
             "enableFrameworkGuide", "debugPlanning", "enableThinking",
+            "enableThinkingExpert", "enableThinkingRequest",
         ]);
 
         for (const [field, settingKey] of Object.entries(fieldToSetting)) {
@@ -345,7 +346,7 @@ export class SettingsPanel {
             ollamaExpertTopK:          config.get("lean-ai.ollamaExpertTopK", ""),
             ollamaExpertRepeatPenalty: config.get("lean-ai.ollamaExpertRepeatPenalty", ""),
             ollamaExpertMaxTokens:     config.get("lean-ai.ollamaExpertMaxTokens", ""),
-            enableThinkingExpert:      config.get("lean-ai.enableThinkingExpert", ""),
+            enableThinkingExpert:      config.get("lean-ai.enableThinkingExpert", true),
             expertLlmProvider:         config.get("lean-ai.expertLlmProvider", ""),
 
             // Request model
@@ -356,7 +357,7 @@ export class SettingsPanel {
             ollamaRequestTopK:         config.get("lean-ai.ollamaRequestTopK", ""),
             ollamaRequestRepeatPenalty:config.get("lean-ai.ollamaRequestRepeatPenalty", ""),
             ollamaRequestMaxTokens:    config.get("lean-ai.ollamaRequestMaxTokens", ""),
-            enableThinkingRequest:     config.get("lean-ai.enableThinkingRequest", ""),
+            enableThinkingRequest:     config.get("lean-ai.enableThinkingRequest", true),
             requestLlmProvider:        config.get("lean-ai.requestLlmProvider", ""),
             openaiRequestModel:        config.get("lean-ai.openaiRequestModel", ""),
             anthropicRequestModel:     config.get("lean-ai.anthropicRequestModel", ""),

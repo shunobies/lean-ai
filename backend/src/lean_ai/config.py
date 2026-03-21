@@ -109,8 +109,8 @@ class Settings(BaseSettings):
 
     # ── Thinking mode ──
     enable_thinking: bool = True  # Pass think=True to Ollama for reasoning models (Qwen3, Qwen3.5)
-    enable_thinking_expert: bool | None = None  # None = inherit from enable_thinking
-    enable_thinking_request: bool | None = None  # None = inherit from enable_thinking
+    enable_thinking_expert: bool = True  # Independent per-model thinking toggle
+    enable_thinking_request: bool = True  # Independent per-model thinking toggle
 
     # ── Ollama — inline prediction model (always Ollama) ──
     inline_model: str = ""
@@ -308,16 +308,6 @@ class Settings(BaseSettings):
             return self.anthropic_max_tokens or (self.anthropic_context_window // 4)
         else:  # ollama
             return self.ollama_request_max_tokens or (self.ollama_context_window // 4)
-
-    @property
-    def effective_thinking_expert(self) -> bool:
-        val = self.enable_thinking_expert
-        return val if val is not None else self.enable_thinking
-
-    @property
-    def effective_thinking_request(self) -> bool:
-        val = self.enable_thinking_request
-        return val if val is not None else self.enable_thinking
 
     @property
     def effective_refiner_url(self) -> str:

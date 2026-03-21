@@ -157,8 +157,8 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_POST_VALIDATION_MAX_RETRIES` | `2` | Max LLM fix attempts for validation failures (`0` = no retries) |
 | `LEAN_AI_POST_VALIDATION_FIX_TURNS` | `30` | Tool-calling turns per fix attempt |
 | `LEAN_AI_ENABLE_THINKING` | `true` | Pass `think=True` to Ollama for reasoning models (Qwen3, Qwen3.5). Disable for faster responses without deep reasoning |
-| `LEAN_AI_ENABLE_THINKING_EXPERT` | *(inherits from ENABLE_THINKING)* | Per-model thinking override for expert model |
-| `LEAN_AI_ENABLE_THINKING_REQUEST` | *(inherits from ENABLE_THINKING)* | Per-model thinking override for request model |
+| `LEAN_AI_ENABLE_THINKING_EXPERT` | `true` | Enable thinking mode for expert model |
+| `LEAN_AI_ENABLE_THINKING_REQUEST` | `true` | Enable thinking mode for request model |
 | `LEAN_AI_DEBUG_PLANNING` | `false` | Save all planning phase outputs to `.lean_ai/plan_debug/{session_id}/` |
 | `LEAN_AI_PORT` | `8422` | Server port |
 
