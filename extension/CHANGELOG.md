@@ -2,6 +2,27 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.3.13] - 2026-03-21
+
+### Added
+- **Fix-mode investigation phase** — `/fix` now enforces a read-only investigation phase before the LLM can edit files. The LLM reads code, reproduces errors, traces references, and records a diagnosis in the scratchpad before gaining write access. Controlled by `LEAN_AI_ENABLE_FIX_INVESTIGATION` (default: `true`).
+
+## [0.3.12] - 2026-03-21
+
+### Added
+- **Stop button** — a red "Stop" button appears next to Send while a workflow is running. Clicking it immediately cancels the workflow at the next turn boundary, closing the WebSocket and resetting the UI. Works in plan mode, fix mode, and resume.
+- **Mid-workflow message injection** — you can now type a message while the LLM is executing. The message is injected into the conversation as a `[USER INTERRUPT]` before the next LLM turn, allowing you to course-correct the agent without waiting for it to finish.
+- **WebSocket message dispatcher** — new `WSMessageDispatcher` centralizes all WebSocket message routing during workflow execution, replacing direct `safe_receive()` calls. Enables concurrent handling of cancel, user interrupt, and tool approval messages.
+
+## [0.3.11] - 2026-03-21
+
+### Changed
+- **Expert model for /fix mode** — bug-fix workflows now use the expert model (when configured) since diagnosis is reasoning-heavy. Previously only planning phases 3-6 and the final validation retry used the expert model.
+
+### Fixed
+- **Custom steering docs truncated** — `.lean_ai/context/` steering documents were being cut short during execution due to condensed context loading. Now loads full context for steering docs.
+- **Completion nudge improvement** — the text-only response nudge is now completion-aware: when the LLM's response looks like a summary, it's nudged to call `task_complete` instead of being pushed into unnecessary extra work.
+
 ## [0.3.10] - 2026-03-20
 
 ### Fixed

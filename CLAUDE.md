@@ -149,6 +149,7 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_IMPLEMENTATION_MAX_TURNS` | `0` | Max tool-calling turns per session (`0` = unlimited) |
 | `LEAN_AI_IMPLEMENTATION_MAX_TOKENS` | *(derived: 25% of context window)* | Max tokens per LLM turn |
 | `LEAN_AI_REFRESH_THRESHOLD` | `0.7` | Refresh context at this % of context window |
+| `LEAN_AI_ENABLE_FIX_INVESTIGATION` | `true` | Enforce read-only investigation phase in /fix mode before editing |
 | `LEAN_AI_ENABLE_POST_VALIDATION` | `true` | Run deterministic lint/test after execution |
 | `LEAN_AI_POST_FORMAT_COMMAND` | *(empty)* | Auto-fix formatting (e.g. `ruff format src/`) |
 | `LEAN_AI_POST_LINT_FIX_COMMAND` | *(empty)* | Auto-fix lint issues (e.g. `ruff check --fix src/`) |
@@ -166,9 +167,13 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 
 ## WebSocket Protocol
 
-Message types: `token`, `stage_change`, `approval_required`, `tool_progress`, `tool_approval_required`, `diff`, `test_result`, `error`, `complete`, `index_status`, `stage_status`, `clarification_needed`, `plan_rejected`, `pong`, `branch_created`, `checkpoint`, `merge_complete`, `context_refreshed`, `assistant_content`, `thinking_content`, `metrics_update`.
+Client → server: `user_message` (start workflow or mid-workflow interrupt), `cancel` (stop running workflow), `approve` (approve plan), `approve_tool` / `deny_tool` (shell command gate), `ping`, `resume`.
+
+Server → client: `token`, `stage_change`, `approval_required`, `tool_progress`, `tool_approval_required`, `diff`, `test_result`, `error`, `complete`, `cancelled`, `index_status`, `stage_status`, `clarification_needed`, `plan_rejected`, `pong`, `branch_created`, `checkpoint`, `merge_complete`, `context_refreshed`, `assistant_content`, `thinking_content`, `metrics_update`.
 
 `assistant_content` and `thinking_content` support optional `streaming` (boolean, token-level updates during planning) and `done` (boolean, signals content finalization with full text for markdown formatting) fields.
+
+**Workflow cancellation:** A `WSMessageDispatcher` (`workflow/ws_dispatcher.py`) runs a background listener on the WebSocket during workflow execution, routing messages to typed async queues. This enables receiving `cancel` and `user_message` (interrupt) messages while the pipeline is actively running. The dispatcher has two routing modes: during clarification/approval phases, `user_message` goes to the approval queue (responses); after `enter_execution_mode()`, they go to the interrupt queue (consumed by `chat_with_tools` between turns). Cancellation raises `WorkflowCancelledError`, caught in `routers/workflow.py` which sends `{"type": "cancelled"}` back to the client.
 
 ## API Endpoints
 

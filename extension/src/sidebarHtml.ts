@@ -527,6 +527,17 @@ export function getWebviewHtml(chatFontSize: number): string {
         opacity: 0.5;
         cursor: not-allowed;
     }
+    .input-area .stop-btn {
+        background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+        border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+        color: var(--vscode-errorForeground, #f48771);
+        padding: 6px 10px;
+        display: none;
+    }
+    .input-area .stop-btn:hover {
+        background: var(--vscode-inputValidation-errorBorder, #be1100);
+        color: #fff;
+    }
 
     .context-pills {
         padding: 0 12px 6px;
@@ -607,6 +618,7 @@ export function getWebviewHtml(chatFontSize: number): string {
 
 <div class="input-area">
     <textarea id="input" rows="2" placeholder="Ask a question or describe a task..." autofocus></textarea>
+    <button id="stopBtn" class="stop-btn" title="Stop the running workflow">Stop</button>
     <button id="sendBtn">Send</button>
 </div>
 
@@ -615,6 +627,7 @@ export function getWebviewHtml(chatFontSize: number): string {
     const messagesEl = document.getElementById('messages');
     const inputEl = document.getElementById('input');
     const sendBtn = document.getElementById('sendBtn');
+    const stopBtn = document.getElementById('stopBtn');
     const thinkingEl = document.getElementById('thinking');
     const newChatBtn = document.getElementById('newChatBtn');
     const approvalBar = document.getElementById('approvalBar');
@@ -887,8 +900,10 @@ export function getWebviewHtml(chatFontSize: number): string {
         if (stage) {
             stageBadge.textContent = stage.replace(/_/g, ' ');
             stageBadge.classList.add('visible');
+            stopBtn.style.display = 'inline-block';
         } else {
             stageBadge.classList.remove('visible');
+            stopBtn.style.display = 'none';
         }
     }
 
@@ -969,6 +984,10 @@ export function getWebviewHtml(chatFontSize: number): string {
     });
 
     sendBtn.addEventListener('click', send);
+    stopBtn.addEventListener('click', () => {
+        vscode.postMessage({ type: 'stopWorkflow' });
+        stopBtn.style.display = 'none';
+    });
     inputEl.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -1231,10 +1250,25 @@ export function getWebviewHtml(chatFontSize: number): string {
             case 'error':
                 sending = false;
                 sendBtn.disabled = false;
+                stopBtn.style.display = 'none';
                 if (sendTimeout) { clearTimeout(sendTimeout); sendTimeout = null; }
                 currentStreamDiv = null; // clean up any partial streaming bubble
                 currentPlanningDiv = null; // clean up any partial planning bubble
                 addMessage(escapeHtml(msg.text), 'msg-error');
+                break;
+
+            case 'cancelled':
+                sending = false;
+                sendBtn.disabled = false;
+                stopBtn.style.display = 'none';
+                if (sendTimeout) { clearTimeout(sendTimeout); sendTimeout = null; }
+                currentStreamDiv = null;
+                currentPlanningDiv = null;
+                setStage(null);
+                resetMetrics();
+                thinkingEl.classList.remove('visible');
+                approvalBar.classList.remove('visible');
+                addMessage('Workflow stopped by user.', 'msg-system');
                 break;
 
             case 'showApproval':
@@ -1248,6 +1282,7 @@ export function getWebviewHtml(chatFontSize: number): string {
             case 'sendEnabled':
                 sending = false;
                 sendBtn.disabled = false;
+                stopBtn.style.display = 'none';
                 if (sendTimeout) { clearTimeout(sendTimeout); sendTimeout = null; }
                 break;
 

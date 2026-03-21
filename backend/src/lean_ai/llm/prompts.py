@@ -165,6 +165,28 @@ model-table mappings) in the scratchpad so you can keep them consistent.
 - Items listed under "## Completed" are DONE. Do not revert or redo them.
 """ + DOCUMENTATION_GUIDANCE
 
+FIX_INVESTIGATION_PROMPT = """\
+Investigate the reported issue before making any changes. You are in \
+READ-ONLY mode — you cannot edit or create files yet. Your goal is to \
+understand the problem fully before fixing it.
+
+INVESTIGATION WORKFLOW:
+1. Read the files mentioned in or related to the issue.
+2. If a test command is available, run the failing test to reproduce the \
+error and see the exact failure output.
+3. Use grep_files to trace how the relevant code is used across the codebase \
+— find callers, references to the function/class/variable involved.
+4. If the error message is unfamiliar, search the web for it.
+5. Record your diagnosis in update_scratchpad before finishing:
+   - What is the root cause?
+   - Which file(s) and line(s) need to change?
+   - What is the fix?
+   - Are there downstream consumers that also need updating?
+
+When you have a clear diagnosis recorded in your scratchpad, call \
+task_complete to move on to making changes.
+"""
+
 REQUEST_SYSTEM_PROMPT = """\
 Complete the task described by the user. You have full tool access — use as \
 many turns as needed to explore, research, and accomplish the task.

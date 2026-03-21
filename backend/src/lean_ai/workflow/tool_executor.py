@@ -8,10 +8,11 @@ from fastapi import WebSocket
 
 from lean_ai.tools import file_ops, scratchpad, shell
 from lean_ai.tools.command_safety import CommandRisk, check_command
-from lean_ai.workflow.ws_handler import safe_receive, ws_send
+from lean_ai.workflow.ws_handler import ws_send
 
 if TYPE_CHECKING:
     from lean_ai.llm.facade import LLMClient
+    from lean_ai.workflow.ws_dispatcher import WSMessageDispatcher
 
 # Short output is returned inline; longer output is saved to a file
 # so the LLM can page through it with read_file.
@@ -82,6 +83,7 @@ def make_tool_executor(
     ws: WebSocket,
     session_id: str = "",
     llm_client: "LLMClient | None" = None,
+    dispatcher: "WSMessageDispatcher | None" = None,
 ):
     """Create a tool executor closure for the workflow."""
 
@@ -129,7 +131,15 @@ def make_tool_executor(
                 await ws_send(ws, "tool_approval_required", {
                     "tool": name, "command": command, "reason": reason,
                 })
-                approval_msg = await safe_receive(ws)
+                if dispatcher:
+                    from lean_ai.workflow.ws_dispatcher import WorkflowCancelledError
+                    try:
+                        approval_msg = await dispatcher.wait_for_approval()
+                    except WorkflowCancelledError:
+                        return "ERROR: Workflow cancelled by user"
+                else:
+                    from lean_ai.workflow.ws_handler import safe_receive
+                    approval_msg = await safe_receive(ws)
                 if approval_msg is None:
                     return "ERROR: WebSocket disconnected — command skipped (requires approval)"
                 if approval_msg.get("type") != "approve_tool":

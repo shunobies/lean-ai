@@ -5,11 +5,15 @@ import hashlib
 import json
 import logging
 from collections.abc import AsyncIterator, Callable
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
 from lean_ai.config import settings
 from lean_ai.llm.base import LLMMetrics, LLMProvider, ToolCall, ToolCallInfo
+
+if TYPE_CHECKING:
+    from lean_ai.workflow.ws_dispatcher import WSMessageDispatcher
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +164,7 @@ class LLMClient:
         on_thinking: Callable | None = None,
         on_metrics: Callable | None = None,
         on_context_refresh: Callable | None = None,
+        dispatcher: "WSMessageDispatcher | None" = None,
     ) -> tuple[list[ToolCall], str]:
         """Multi-turn tool calling loop.
 
@@ -194,6 +199,24 @@ class LLMClient:
         messages[:] = _sanitize_messages(messages)
 
         for turn in range(effective_max):
+            # ── Check for cancel / user interrupt ─────────────────
+            if dispatcher:
+                dispatcher.check_cancelled()
+                pending = dispatcher.get_pending_message()
+                if pending:
+                    logger.info(
+                        "chat_with_tools: injecting user interrupt (%d chars)",
+                        len(pending),
+                    )
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "[USER INTERRUPT] The user has sent you new "
+                            "instructions. Read carefully and adjust your "
+                            "approach:\n\n" + pending
+                        ),
+                    })
+
             logger.info(
                 "chat_with_tools turn %d/%s: %d messages",
                 turn + 1,

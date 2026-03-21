@@ -19,17 +19,19 @@ from fastapi import WebSocket, WebSocketDisconnect
 from lean_ai.config import settings
 from lean_ai.llm.plan_schema import ExecutionPlan, plan_to_markdown
 from lean_ai.llm.planner import assess_clarity, create_plan
-from lean_ai.llm.tool_definitions import IMPLEMENTATION_TOOLS
+from lean_ai.llm.tool_definitions import IMPLEMENTATION_TOOLS, INVESTIGATION_TOOLS
 from lean_ai.routers.context_helpers import load_condensed_context
 from lean_ai.tools import scratchpad
 from lean_ai.workflow.prompts import (
+    build_fix_investigation_prompt,
     build_fix_system_prompt,
     build_request_system_prompt,
     build_step_system_prompt,
     build_step_user_message,
 )
 from lean_ai.workflow.tool_executor import make_tool_executor
-from lean_ai.workflow.ws_handler import safe_receive, ws_send, ws_send_nowait
+from lean_ai.workflow.ws_dispatcher import WSMessageDispatcher
+from lean_ai.workflow.ws_handler import ws_send, ws_send_nowait
 
 if TYPE_CHECKING:
     from lean_ai.llm.client import LLMClient
@@ -63,6 +65,7 @@ async def run_workflow(
     refiner: "PromptRefiner | None" = None,
     expert_llm_client: "LLMClient | None" = None,
     request_llm_client: "LLMClient | None" = None,
+    dispatcher: WSMessageDispatcher | None = None,
 ) -> str:
     """Run a workflow. Supports three modes:
 
@@ -92,10 +95,11 @@ async def run_workflow(
             expert_llm_client=expert_llm_client,
             request_llm_client=request_llm_client,
             mode=mode,
+            dispatcher=dispatcher,
         )
 
     # ── Phase 1: Clarify (optional) ──────────────────────────────
-    task_with_answers = await _clarify_task(task, ws, llm_client, context)
+    task_with_answers = await _clarify_task(task, ws, llm_client, context, dispatcher=dispatcher)
 
     # ── Phase 2: Plan ────────────────────────────────────────────
     await ws_send(ws, "stage_change", {"stage": "planning"})
@@ -167,6 +171,7 @@ async def run_workflow(
         refiner=refiner,
         test_command=plan_commands.get("test", ""),
         expert_llm_client=expert_llm_client,
+        dispatcher=dispatcher,
     )
 
     # ── Phase 4: Execute per-step ────────────────────────────────
@@ -183,6 +188,7 @@ async def run_workflow(
         conversation_logger=conversation_logger,
         session_id=session_id,
         expert_llm_client=expert_llm_client,
+        dispatcher=dispatcher,
     )
 
 
@@ -194,6 +200,7 @@ async def _clarify_task(
     ws: WebSocket,
     llm_client: "LLMClient",
     context: str,
+    dispatcher: WSMessageDispatcher | None = None,
 ) -> str:
     """Optionally ask clarifying questions before planning.
 
@@ -210,7 +217,7 @@ async def _clarify_task(
 
     # Wait for user to respond
     while True:
-        msg = await safe_receive(ws)
+        msg = await dispatcher.wait_for_approval() if dispatcher else None
         if msg is None:
             raise WebSocketDisconnect()
 
@@ -222,10 +229,6 @@ async def _clarify_task(
             )
             logger.info("Received clarification answer (%d chars)", len(answer))
             return augmented
-
-        if msg.get("type") == "ping":
-            await ws_send(ws, "pong")
-            continue
 
 
 # ── Phase 3: Approval ──────────────────────────────────────────────
@@ -241,6 +244,7 @@ async def _wait_for_approval(
     refiner: "PromptRefiner | None" = None,
     test_command: str = "",
     expert_llm_client: "LLMClient | None" = None,
+    dispatcher: WSMessageDispatcher | None = None,
 ) -> ExecutionPlan:
     """Send the plan for user approval. Handle feedback/revision loop.
 
@@ -254,7 +258,7 @@ async def _wait_for_approval(
     revision_count = 0
 
     while True:
-        msg = await safe_receive(ws)
+        msg = await dispatcher.wait_for_approval() if dispatcher else None
         if msg is None:
             raise WebSocketDisconnect()
 
@@ -309,10 +313,6 @@ async def _wait_for_approval(
             })
             continue
 
-        if msg.get("type") == "ping":
-            await ws_send(ws, "pong")
-            continue
-
 
 # ── Phase 4: Per-Step Execution ────────────────────────────────────
 
@@ -329,9 +329,15 @@ async def _execute_plan(
     conversation_logger: Callable | None = None,
     session_id: str = "",
     expert_llm_client: "LLMClient | None" = None,
+    dispatcher: WSMessageDispatcher | None = None,
 ) -> str:
     """Execute each plan step sequentially with a constrained LLM."""
-    tool_executor = make_tool_executor(repo_root, ws, session_id, llm_client=llm_client)
+    if dispatcher:
+        dispatcher.enter_execution_mode()
+    tool_executor = make_tool_executor(
+        repo_root, ws, session_id, llm_client=llm_client,
+        dispatcher=dispatcher,
+    )
     total_steps = len(plan.steps)
     all_executed = []
     step_explanations: list[str] = []
@@ -426,6 +432,7 @@ async def _execute_plan(
             on_content=on_content,
             on_thinking=on_thinking,
             on_metrics=on_metrics,
+            dispatcher=dispatcher,
         )
 
         all_executed.extend(executed)
@@ -468,6 +475,7 @@ async def _execute_plan(
                 validation_results, session_id,
                 conversation_logger=conversation_logger,
                 expert_llm_client=expert_llm_client,
+                dispatcher=dispatcher,
             )
 
     # Check for incomplete.md
@@ -708,6 +716,7 @@ async def _run_validation_fix_loop(
     session_id: str = "",
     conversation_logger: Callable | None = None,
     expert_llm_client: "LLMClient | None" = None,
+    dispatcher: WSMessageDispatcher | None = None,
 ) -> dict:
     """Attempt to fix post-validation failures by resubmitting to the LLM.
 
@@ -846,6 +855,7 @@ async def _run_validation_fix_loop(
         # Run LLM with a tight turn budget
         tool_executor = make_tool_executor(
             repo_root, ws, session_id, llm_client=active_client,
+            dispatcher=dispatcher,
         )
         executed, explanation = await active_client.chat_with_tools(
             messages=messages,
@@ -857,6 +867,7 @@ async def _run_validation_fix_loop(
             on_tool_result=on_tool_result,
             on_content=on_content,
             on_metrics=on_metrics,
+            dispatcher=dispatcher,
         )
 
         logger.info(
@@ -910,6 +921,7 @@ async def _run_fix(
     expert_llm_client: "LLMClient | None" = None,
     request_llm_client: "LLMClient | None" = None,
     mode: str = "fix",
+    dispatcher: WSMessageDispatcher | None = None,
 ) -> str:
     """Execute directly — no planning, no approval.
 
@@ -917,7 +929,8 @@ async def _run_fix(
     When *mode* is ``"request"``, uses a neutral prompt and optionally
     a separate request model.
     """
-    await ws_send(ws, "stage_change", {"stage": "implementing"})
+    if dispatcher:
+        dispatcher.enter_execution_mode()
 
     is_request = mode == "request"
     # Use dedicated model when available: request model for /request,
@@ -928,6 +941,7 @@ async def _run_fix(
         active_client = expert_llm_client or llm_client
     tool_executor = make_tool_executor(
         repo_root, ws, session_id, llm_client=active_client,
+        dispatcher=dispatcher,
     )
     commands = _effective_post_commands(repo_root)
     execution_context = load_condensed_context(repo_root)
@@ -981,22 +995,75 @@ async def _run_fix(
             "context_window": context_window,
         })
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": task},
-    ]
+    # ── Investigation phase (fix mode only) ───────────────────────
+    # Run read-only tools first so the LLM gathers context before editing.
+    executed_investigation: list = []
+    if not is_request and settings.enable_fix_investigation:
+        await ws_send(ws, "stage_change", {"stage": "investigating"})
 
-    # Inject existing scratchpad for session recovery (resume after crash)
-    if session_id:
-        existing_pad = scratchpad.read_scratchpad(repo_root, session_id)
-        if existing_pad:
-            messages.append({
-                "role": "user",
-                "content": (
-                    "[SCRATCHPAD FROM PREVIOUS EXECUTION — resume from here]\n"
-                    f"{existing_pad}"
-                ),
-            })
+        investigation_prompt = build_fix_investigation_prompt(
+            execution_context, test_command=commands.get("test", ""),
+        )
+
+        messages = [
+            {"role": "system", "content": investigation_prompt},
+            {"role": "user", "content": task},
+        ]
+
+        # Inject existing scratchpad for session recovery
+        if session_id:
+            existing_pad = scratchpad.read_scratchpad(repo_root, session_id)
+            if existing_pad:
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "[SCRATCHPAD FROM PREVIOUS EXECUTION — resume from here]\n"
+                        f"{existing_pad}"
+                    ),
+                })
+
+        executed_investigation, _ = await active_client.chat_with_tools(
+            messages=messages,
+            tools=INVESTIGATION_TOOLS,
+            tool_executor_fn=tool_executor,
+            max_turns=20,
+            max_tokens=settings.implementation_max_tokens,
+            on_tool_call=on_tool_call,
+            on_tool_result=on_tool_result,
+            on_content=on_content,
+            on_thinking=on_thinking,
+            on_metrics=on_metrics,
+            dispatcher=dispatcher,
+        )
+
+        # Transition: swap system prompt, nudge LLM to start fixing
+        messages[0] = {"role": "system", "content": system_prompt}
+        messages.append({
+            "role": "user",
+            "content": (
+                "Investigation complete. You now have full tool access "
+                "including edit_file and create_file. Review your diagnosis "
+                "in the scratchpad and make the minimal changes needed to "
+                "fix the issue."
+            ),
+        })
+    else:
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": task},
+        ]
+
+        # Inject existing scratchpad for session recovery (resume after crash)
+        if session_id:
+            existing_pad = scratchpad.read_scratchpad(repo_root, session_id)
+            if existing_pad:
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "[SCRATCHPAD FROM PREVIOUS EXECUTION — resume from here]\n"
+                        f"{existing_pad}"
+                    ),
+                })
 
     def _build_fix_reminder() -> str:
         parts = [f"REMINDER — Your task: {task}"]
@@ -1057,6 +1124,9 @@ async def _run_fix(
         "Do not explain — act."
     ) if is_request else None
 
+    # ── Implementation phase ──────────────────────────────────────
+    await ws_send(ws, "stage_change", {"stage": "implementing"})
+
     executed, explanation = await active_client.chat_with_tools(
         messages=messages,
         tools=IMPLEMENTATION_TOOLS,
@@ -1072,6 +1142,7 @@ async def _run_fix(
         on_thinking=on_thinking,
         on_metrics=on_metrics,
         on_context_refresh=_build_context_refresh,
+        dispatcher=dispatcher,
     )
 
     # ── Completion ────────────────────────────────────────────────
@@ -1098,10 +1169,12 @@ async def _run_fix(
                 validation_results, session_id,
                 conversation_logger=conversation_logger,
                 expert_llm_client=expert_llm_client,
+                dispatcher=dispatcher,
             )
 
+    all_executed = executed_investigation + executed
     summary = (
-        f"Fix complete: {len(executed)} tool calls. "
+        f"Fix complete: {len(all_executed)} tool calls. "
         f"Files modified: {', '.join(files_modified) if files_modified else 'none'}."
     )
     if explanation.strip():
@@ -1161,7 +1234,7 @@ async def _run_fix(
     await ws_send(ws, "complete", complete_data)
     logger.info(
         "Fix complete: %d tool calls, %d files",
-        len(executed), len(files_modified),
+        len(all_executed), len(files_modified),
     )
 
     task_summary = task[:72].replace("\n", " ")

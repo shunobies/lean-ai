@@ -217,6 +217,11 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                         }));
                     }
                     break;
+                case "stopWorkflow":
+                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                        this.ws.send(JSON.stringify({ type: "cancel" }));
+                    }
+                    break;
                 case "toggleProblems":
                     this._includeProblems = msg.enabled as boolean;
                     break;

@@ -163,6 +163,9 @@ class Settings(BaseSettings):
     # ── Parallel LLM requests ──
     num_parallel: int = 1  # Max concurrent LLM calls (match OLLAMA_NUM_PARALLEL)
 
+    # ── Fix-mode investigation phase ──
+    enable_fix_investigation: bool = True  # Read-only investigation before editing
+
     # ── Post-execution validation ──
     enable_post_validation: bool = True  # Master switch
     post_format_command: str = ""     # e.g. "ruff format src/"

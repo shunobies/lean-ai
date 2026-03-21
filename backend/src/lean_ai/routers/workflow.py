@@ -32,6 +32,7 @@ from lean_ai.tools.git_ops import (
     git_stash_push,
 )
 from lean_ai.workflow.pipeline import run_workflow
+from lean_ai.workflow.ws_dispatcher import WorkflowCancelledError, WSMessageDispatcher
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,13 @@ async def session_stream(websocket: WebSocket, session_id: str):
     Client messages:
       - {"type": "user_message", "content": "...", "repo_root": "..."}
         Start the agentic workflow with a task.
+      - {"type": "cancel"} — stop the running workflow
       - {"type": "approve_tool", ...} — approve a pending shell command
       - {"type": "ping"} — keepalive
+
+    During workflow execution, additional ``user_message`` messages are
+    treated as mid-workflow interrupts — the LLM reads them before its
+    next turn.
 
     Server messages:
       - {"type": "stage_change", "stage": "..."}
@@ -54,6 +60,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
       - {"type": "diff", "file": "...", "diff": "..."}
       - {"type": "test_result", ...}
       - {"type": "complete", "summary": "...", ...}
+      - {"type": "cancelled"} — workflow was stopped by user
       - {"type": "error", "message": "...", "recoverable": bool}
       - {"type": "pong"}
     """
@@ -192,21 +199,42 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                         "summary": f"Refinement skipped: {e}",
                                     })
 
-                            commit_msg = await run_workflow(
-                                task=task,
-                                repo_root=repo_root,
-                                ws=websocket,
-                                llm_client=llm_client,
-                                context=context,
-                                branch_name=branch_name,
-                                base_branch=base_branch,
-                                conversation_logger=_log_conversation,
-                                mode=mode,
-                                session_id=session_id,
-                                refiner=refiner,
-                                expert_llm_client=expert_llm_client,
-                                request_llm_client=request_llm_client,
-                            )
+                            # Start the dispatcher so cancel / mid-workflow
+                            # messages can be received during execution.
+                            dispatcher = WSMessageDispatcher(websocket)
+                            await dispatcher.start()
+                            try:
+                                commit_msg = await run_workflow(
+                                    task=task,
+                                    repo_root=repo_root,
+                                    ws=websocket,
+                                    llm_client=llm_client,
+                                    context=context,
+                                    branch_name=branch_name,
+                                    base_branch=base_branch,
+                                    conversation_logger=_log_conversation,
+                                    mode=mode,
+                                    session_id=session_id,
+                                    refiner=refiner,
+                                    expert_llm_client=expert_llm_client,
+                                    request_llm_client=request_llm_client,
+                                    dispatcher=dispatcher,
+                                )
+                            except WorkflowCancelledError:
+                                logger.info(
+                                    "Workflow cancelled by user for session %s",
+                                    session_id,
+                                )
+                                try:
+                                    await websocket.send_json({"type": "cancelled"})
+                                except Exception:
+                                    pass
+                                await update_session(
+                                    db, session_id, status="cancelled",
+                                )
+                                continue
+                            finally:
+                                await dispatcher.stop()
 
                             # --- Auto-commit agent changes ---
                             if branch_name:
@@ -306,18 +334,37 @@ async def session_stream(websocket: WebSocket, session_id: str):
                             resume_task = original_task
 
                         # Resume in fix mode (direct tool calling, no re-planning)
-                        commit_msg = await run_workflow(
-                            task=resume_task,
-                            repo_root=repo_root,
-                            ws=websocket,
-                            llm_client=llm_client,
-                            context=context,
-                            branch_name=branch_name,
-                            conversation_logger=_log_conversation_resume,
-                            mode="fix",
-                            session_id=session_id,
-                            expert_llm_client=expert_llm_client,
-                        )
+                        dispatcher = WSMessageDispatcher(websocket)
+                        await dispatcher.start()
+                        try:
+                            commit_msg = await run_workflow(
+                                task=resume_task,
+                                repo_root=repo_root,
+                                ws=websocket,
+                                llm_client=llm_client,
+                                context=context,
+                                branch_name=branch_name,
+                                conversation_logger=_log_conversation_resume,
+                                mode="fix",
+                                session_id=session_id,
+                                expert_llm_client=expert_llm_client,
+                                dispatcher=dispatcher,
+                            )
+                        except WorkflowCancelledError:
+                            logger.info(
+                                "Resume cancelled by user for session %s",
+                                session_id,
+                            )
+                            try:
+                                await websocket.send_json({"type": "cancelled"})
+                            except Exception:
+                                pass
+                            await update_session(
+                                db, session_id, status="cancelled",
+                            )
+                            continue
+                        finally:
+                            await dispatcher.stop()
 
                         # Auto-commit
                         if branch_name:
@@ -351,10 +398,12 @@ async def session_stream(websocket: WebSocket, session_id: str):
             elif msg_type == "ping":
                 await websocket.send_json({"type": "pong"})
 
-            # approve_tool is handled within run_workflow's tool executor
+            # approve_tool / cancel handled by WSMessageDispatcher during workflow
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected for session %s", session_id)
+    except WorkflowCancelledError:
+        logger.info("WebSocket workflow cancelled for session %s", session_id)
     except Exception:
         logger.exception("WebSocket error for session %s", session_id)
 

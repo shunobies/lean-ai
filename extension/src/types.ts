@@ -13,6 +13,7 @@ export type WSMessage =
     | TestResultMessage
     | ErrorMessage
     | CompleteMessage
+    | CancelledMessage
     | IndexStatusMessage
     | StageStatusMessage
     | ClarificationNeededMessage
@@ -76,6 +77,10 @@ export interface CompleteMessage {
     plan_branch?: string;
     base_branch?: string;
     merge_commit_sha?: string;
+}
+
+export interface CancelledMessage {
+    type: "cancelled";
 }
 
 export interface IndexStatusMessage {

@@ -2,6 +2,7 @@
 
 from lean_ai.llm.plan_schema import PlanStep
 from lean_ai.llm.prompts import (
+    FIX_INVESTIGATION_PROMPT,
     FIX_SYSTEM_PROMPT,
     REQUEST_SYSTEM_PROMPT,
     STEP_EXECUTION_SYSTEM_PROMPT,
@@ -37,6 +38,22 @@ def build_fix_system_prompt(
             "fixture reuse). Tests run with: "
             f"{test_command}"
         )
+
+    if not context:
+        return base
+
+    return f"{base}\n## Project Context\n\n{context}"
+
+
+def build_fix_investigation_prompt(
+    context: str,
+    test_command: str = "",
+) -> str:
+    """Build the system prompt for the investigation phase of fix mode."""
+    base = FIX_INVESTIGATION_PROMPT
+
+    if test_command:
+        base += f"\n\nAvailable test command: {test_command}"
 
     if not context:
         return base

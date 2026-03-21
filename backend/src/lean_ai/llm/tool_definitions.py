@@ -356,3 +356,15 @@ PLANNING_TOOLS: list[dict] = [
         "read_file", "list_directory", "directory_tree", "grep_files", "task_complete",
     )
 ]
+
+# Read-only + diagnostic tools for fix-mode investigation phase
+INVESTIGATION_TOOLS: list[dict] = [
+    tool
+    for tool in IMPLEMENTATION_TOOLS
+    if tool["function"]["name"] in (
+        "read_file", "list_directory", "directory_tree", "grep_files",
+        "run_tests", "run_lint",
+        "search_internet", "fetch_url",
+        "update_scratchpad", "task_complete",
+    )
+]

@@ -236,6 +236,17 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
             break;
         }
 
+        // --- Cancelled: user pressed stop ---
+        case "cancelled": {
+            ctx.postMessage({ type: "thinking", show: false });
+            ctx.postMessage({ type: "cancelled" });
+            ctx.postMessage({ type: "metricsFinal" });
+            ctx.closeWebSocket();
+            ctx.clearSession();
+            ctx.postMessage({ type: "stage", stage: null });
+            break;
+        }
+
         // --- Error (terminal if non-recoverable) ---
         case "error": {
             ctx.postMessage({ type: "thinking", show: false });
