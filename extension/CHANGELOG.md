@@ -2,6 +2,11 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.3.10] - 2026-03-20
+
+### Fixed
+- **Settings save overwriting inherit params** — expert/request model fields (temperature, top_p, top_k, repeat penalty, context window, max tokens) no longer persist `0` to `.env` when left empty. `0` is now treated as "inherit from primary model" for these fields, matching the "leave empty to inherit" UI hints. Stale `.env` entries are commented out when a setting is reset to default.
+
 ## [0.3.9] - 2026-03-20
 
 ### Added
