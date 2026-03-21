@@ -13,7 +13,7 @@ Context window values accept compact notation — enter `128` instead of `131072
 | `256` | 262144 |
 | `131072` | 131072 (values > 10000 are used as-is) |
 
-This applies to `OLLAMA_CONTEXT_WINDOW`, `OPENAI_CONTEXT_WINDOW`, `ANTHROPIC_CONTEXT_WINDOW`, and `INLINE_CONTEXT_WINDOW`.
+This applies to `OLLAMA_CONTEXT_WINDOW`, `OLLAMA_EXPERT_CONTEXT_WINDOW`, `OLLAMA_REQUEST_CONTEXT_WINDOW`, `OPENAI_CONTEXT_WINDOW`, `ANTHROPIC_CONTEXT_WINDOW`, and `INLINE_CONTEXT_WINDOW`.
 
 ## Installation Extras
 
@@ -113,6 +113,44 @@ LEAN_AI_ANTHROPIC_EXPERT_MODEL=claude-opus-4-6
 ```
 
 With this configuration, cloud API calls only happen during planning (change design, risk assessment, plan assembly, verification steps) and on the final retry of any validation fix loop. All codebase exploration, code execution, and routine tool calls use the local model.
+
+## Request Model
+
+An optional separate model for `/request` mode (open-ended tasks like writing guides, research, documentation). If not configured, the primary model is used.
+
+### Provider Selection
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEAN_AI_REQUEST_LLM_PROVIDER` | *(empty)* | Provider for request model: `ollama`, `openai`, or `anthropic`. Empty = auto-detect |
+| `LEAN_AI_OPENAI_REQUEST_MODEL` | *(falls back to OPENAI_MODEL)* | OpenAI model for /request mode |
+| `LEAN_AI_ANTHROPIC_REQUEST_MODEL` | *(falls back to ANTHROPIC_MODEL)* | Anthropic model for /request mode |
+
+### Ollama Request Model
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEAN_AI_OLLAMA_MODEL_REQUEST` | *(empty — disabled)* | Ollama request model name (e.g. `qwen3.5:27b`) |
+| `LEAN_AI_OLLAMA_REQUEST_TEMPERATURE` | *(falls back to OLLAMA_TEMPERATURE)* | Request model temperature |
+| `LEAN_AI_OLLAMA_REQUEST_TOP_P` | *(falls back to OLLAMA_TOP_P)* | Request model top-p |
+| `LEAN_AI_OLLAMA_REQUEST_TOP_K` | *(falls back to OLLAMA_TOP_K)* | Request model top-k |
+| `LEAN_AI_OLLAMA_REQUEST_REPEAT_PENALTY` | *(falls back to OLLAMA_REPEAT_PENALTY)* | Request model repetition penalty |
+| `LEAN_AI_OLLAMA_REQUEST_CONTEXT_WINDOW` | *(falls back to OLLAMA_CONTEXT_WINDOW)* | Request model context window — [shorthand](#context-window-shorthand) accepted |
+| `LEAN_AI_OLLAMA_REQUEST_MAX_TOKENS` | *(derived: 25% of request context window)* | Request model max output tokens |
+
+All Ollama request settings inherit from the primary model when not explicitly set.
+
+## Thinking Mode
+
+Controls whether the LLM uses reasoning/thinking mode (relevant for models like Qwen3, Qwen3.5 that support `think=True`).
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEAN_AI_ENABLE_THINKING` | `true` | Enable thinking mode for the primary Ollama model |
+| `LEAN_AI_ENABLE_THINKING_EXPERT` | *(inherits from ENABLE_THINKING)* | Override thinking mode for the expert model |
+| `LEAN_AI_ENABLE_THINKING_REQUEST` | *(inherits from ENABLE_THINKING)* | Override thinking mode for the request model |
+
+Per-model overrides let you use thinking on models that support it (e.g. Qwen3) while disabling it on models that don't. When not set, the expert and request models inherit the primary setting.
 
 ## OpenAI
 

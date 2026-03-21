@@ -34,12 +34,23 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     // Ollama expert model
     "lean-ai.ollamaModelExpert":         "LEAN_AI_OLLAMA_MODEL_EXPERT",
     "lean-ai.ollamaExpertContextWindow": "LEAN_AI_OLLAMA_EXPERT_CONTEXT_WINDOW",
+    "lean-ai.ollamaExpertTemperature":   "LEAN_AI_OLLAMA_EXPERT_TEMPERATURE",
+    "lean-ai.ollamaExpertTopP":          "LEAN_AI_OLLAMA_EXPERT_TOP_P",
+    "lean-ai.ollamaExpertTopK":          "LEAN_AI_OLLAMA_EXPERT_TOP_K",
+    "lean-ai.ollamaExpertRepeatPenalty": "LEAN_AI_OLLAMA_EXPERT_REPEAT_PENALTY",
+    "lean-ai.ollamaExpertMaxTokens":     "LEAN_AI_OLLAMA_EXPERT_MAX_TOKENS",
 
     // Expert model provider
     "lean-ai.expertLlmProvider":         "LEAN_AI_EXPERT_LLM_PROVIDER",
 
     // Request model
     "lean-ai.ollamaModelRequest":        "LEAN_AI_OLLAMA_MODEL_REQUEST",
+    "lean-ai.ollamaRequestContextWindow":"LEAN_AI_OLLAMA_REQUEST_CONTEXT_WINDOW",
+    "lean-ai.ollamaRequestTemperature":  "LEAN_AI_OLLAMA_REQUEST_TEMPERATURE",
+    "lean-ai.ollamaRequestTopP":         "LEAN_AI_OLLAMA_REQUEST_TOP_P",
+    "lean-ai.ollamaRequestTopK":         "LEAN_AI_OLLAMA_REQUEST_TOP_K",
+    "lean-ai.ollamaRequestRepeatPenalty":"LEAN_AI_OLLAMA_REQUEST_REPEAT_PENALTY",
+    "lean-ai.ollamaRequestMaxTokens":    "LEAN_AI_OLLAMA_REQUEST_MAX_TOKENS",
     "lean-ai.requestLlmProvider":        "LEAN_AI_REQUEST_LLM_PROVIDER",
     "lean-ai.openaiRequestModel":        "LEAN_AI_OPENAI_REQUEST_MODEL",
     "lean-ai.anthropicRequestModel":     "LEAN_AI_ANTHROPIC_REQUEST_MODEL",
@@ -84,6 +95,8 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.refreshThreshold":          "LEAN_AI_REFRESH_THRESHOLD",
     "lean-ai.debugPlanning":             "LEAN_AI_DEBUG_PLANNING",
     "lean-ai.enableThinking":            "LEAN_AI_ENABLE_THINKING",
+    "lean-ai.enableThinkingExpert":      "LEAN_AI_ENABLE_THINKING_EXPERT",
+    "lean-ai.enableThinkingRequest":     "LEAN_AI_ENABLE_THINKING_REQUEST",
 };
 
 // ── Env building helpers ─────────────────────────────────────────────────────

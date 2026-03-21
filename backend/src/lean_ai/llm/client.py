@@ -95,6 +95,7 @@ class OllamaProvider(LLMProvider):
         top_p: float | None = None,
         top_k: int | None = None,
         repeat_penalty: float | None = None,
+        enable_thinking: bool | None = None,
     ):
         effective_url = ollama_url or settings.ollama_url
         self._url = effective_url
@@ -112,6 +113,10 @@ class OllamaProvider(LLMProvider):
         self._repeat_penalty = (
             repeat_penalty if repeat_penalty is not None
             else settings.ollama_repeat_penalty
+        )
+        self._enable_thinking = (
+            enable_thinking if enable_thinking is not None
+            else settings.enable_thinking
         )
 
         effective_embed_url = embed_ollama_url or settings.effective_embedding_url
@@ -214,7 +219,7 @@ class OllamaProvider(LLMProvider):
                 model=self._model,
                 messages=messages,
                 options=self._build_options(temperature=temp, max_tokens=tokens),
-                think=settings.enable_thinking,
+                think=self._enable_thinking,
             )
 
         response = await self._retry_with_backoff(_chat, label="chat_raw")
@@ -246,7 +251,7 @@ class OllamaProvider(LLMProvider):
                 messages=messages,
                 format=schema.model_json_schema(),
                 options=self._build_options(temperature=temp, max_tokens=tokens),
-                think=settings.enable_thinking,
+                think=self._enable_thinking,
             )
 
         last_error = None
@@ -287,7 +292,7 @@ class OllamaProvider(LLMProvider):
                 messages=messages,
                 tools=tools,
                 options=self._build_options(max_tokens=tokens),
-                think=settings.enable_thinking,
+                think=self._enable_thinking,
             )
 
         response = await self._retry_with_backoff(

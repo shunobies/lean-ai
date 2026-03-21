@@ -23,6 +23,7 @@ def _create_provider() -> LLMProvider:
             max_tokens=settings.ollama_max_tokens,
             context_window=settings.ollama_context_window,
             temperature=settings.ollama_temperature,
+            enable_thinking=settings.enable_thinking,
         )
 
     if provider == "openai":
@@ -76,6 +77,7 @@ _inline_client: LLMClient = (
         model=settings.inline_model,
         max_tokens=settings.inline_max_tokens,
         context_window=settings.inline_context_window,
+        enable_thinking=False,
     ))
     if settings.inline_model
     else llm_client
@@ -94,6 +96,7 @@ if (
             max_tokens=settings.ollama_max_tokens,
             context_window=settings.ollama_context_window,
             temperature=settings.ollama_temperature,
+            enable_thinking=settings.enable_thinking,
         )
         refiner = PromptRefiner(
             ollama_provider=_refiner_provider,
@@ -179,6 +182,7 @@ elif _expert_p == "ollama" and settings.ollama_model_expert:
             top_p=settings.effective_expert_top_p,
             top_k=settings.effective_expert_top_k,
             repeat_penalty=settings.effective_expert_repeat_penalty,
+            enable_thinking=settings.effective_thinking_expert,
         )
         expert_llm_client = LLMClient(provider=_expert_provider)
         logger.info(
@@ -258,20 +262,23 @@ elif _request_p == "ollama" and settings.ollama_model_request:
         _request_provider = OllamaProvider(
             ollama_url=settings.ollama_url,
             model=settings.ollama_model_request,
-            max_tokens=settings.ollama_max_tokens,
-            context_window=settings.ollama_context_window,
-            temperature=settings.ollama_temperature,
-            top_p=settings.ollama_top_p,
-            top_k=settings.ollama_top_k,
-            repeat_penalty=settings.ollama_repeat_penalty,
+            max_tokens=settings.ollama_request_max_tokens,
+            context_window=settings.ollama_request_context_window or settings.ollama_context_window,
+            temperature=settings.effective_request_temperature,
+            top_p=settings.effective_request_top_p,
+            top_k=settings.effective_request_top_k,
+            repeat_penalty=settings.effective_request_repeat_penalty,
+            enable_thinking=settings.effective_thinking_request,
         )
         request_llm_client = LLMClient(
             provider=_request_provider,
             concurrency_semaphore=_llm_semaphore,
         )
         logger.info(
-            "Request model enabled (Ollama): %s",
+            "Request model enabled (Ollama): %s (ctx=%s, max_tokens=%s)",
             settings.ollama_model_request,
+            settings.ollama_request_context_window or settings.ollama_context_window,
+            settings.ollama_request_max_tokens,
         )
     except Exception as e:
         logger.warning("Could not create request LLM client (Ollama): %s", e)

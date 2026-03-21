@@ -22,6 +22,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _CONTEXT_WINDOW_FIELDS = frozenset({
     "ollama_context_window",
     "ollama_expert_context_window",
+    "ollama_request_context_window",
     "openai_context_window",
     "anthropic_context_window",
     "inline_context_window",
@@ -97,11 +98,19 @@ class Settings(BaseSettings):
     # ── Request model — for /request mode ──
     request_llm_provider: str = ""  # "ollama", "openai", "anthropic", or "" (auto-detect)
     ollama_model_request: str = ""  # e.g. "qwen3.5:27b"
+    ollama_request_temperature: float | None = None  # Falls back to ollama_temperature
+    ollama_request_top_p: float | None = None  # Falls back to ollama_top_p
+    ollama_request_top_k: int | None = None  # Falls back to ollama_top_k
+    ollama_request_repeat_penalty: float | None = None  # Falls back to ollama_repeat_penalty
+    ollama_request_context_window: int | None = None  # Accepts shorthand; falls back
+    ollama_request_max_tokens: int | None = None  # Derived: 25% of request context window
     openai_request_model: str = ""
     anthropic_request_model: str = ""
 
     # ── Thinking mode ──
     enable_thinking: bool = True  # Pass think=True to Ollama for reasoning models (Qwen3, Qwen3.5)
+    enable_thinking_expert: bool | None = None  # None = inherit from enable_thinking
+    enable_thinking_request: bool | None = None  # None = inherit from enable_thinking
 
     # ── Ollama — inline prediction model (always Ollama) ──
     inline_model: str = ""
@@ -207,6 +216,11 @@ class Settings(BaseSettings):
                 self.ollama_expert_context_window = self.ollama_context_window
             if self.ollama_expert_max_tokens is None:
                 self.ollama_expert_max_tokens = self.ollama_expert_context_window // 4
+        if self.ollama_model_request:
+            if self.ollama_request_context_window is None:
+                self.ollama_request_context_window = self.ollama_context_window
+            if self.ollama_request_max_tokens is None:
+                self.ollama_request_max_tokens = self.ollama_request_context_window // 4
         if self.inline_context_window is None:
             self.inline_context_window = self.ollama_context_window // 8
         if self.implementation_max_tokens is None:
@@ -263,6 +277,47 @@ class Settings(BaseSettings):
             return self.anthropic_max_tokens or (self.anthropic_context_window // 4)
         else:  # ollama (default / backwards-compat)
             return self.ollama_expert_max_tokens or (self.ollama_context_window // 4)
+
+    @property
+    def effective_request_temperature(self) -> float:
+        val = self.ollama_request_temperature
+        return val if val is not None else self.ollama_temperature
+
+    @property
+    def effective_request_top_p(self) -> float:
+        val = self.ollama_request_top_p
+        return val if val is not None else self.ollama_top_p
+
+    @property
+    def effective_request_top_k(self) -> int:
+        val = self.ollama_request_top_k
+        return val if val is not None else self.ollama_top_k
+
+    @property
+    def effective_request_repeat_penalty(self) -> float:
+        val = self.ollama_request_repeat_penalty
+        return val if val is not None else self.ollama_repeat_penalty
+
+    @property
+    def effective_request_max_tokens(self) -> int:
+        """Max tokens for request model — derived from the request provider's settings."""
+        rp = (self.request_llm_provider or "").lower()
+        if rp == "openai":
+            return self.openai_max_tokens or (self.openai_context_window // 4)
+        elif rp == "anthropic":
+            return self.anthropic_max_tokens or (self.anthropic_context_window // 4)
+        else:  # ollama
+            return self.ollama_request_max_tokens or (self.ollama_context_window // 4)
+
+    @property
+    def effective_thinking_expert(self) -> bool:
+        val = self.enable_thinking_expert
+        return val if val is not None else self.enable_thinking
+
+    @property
+    def effective_thinking_request(self) -> bool:
+        val = self.enable_thinking_request
+        return val if val is not None else self.enable_thinking
 
     @property
     def effective_refiner_url(self) -> str:

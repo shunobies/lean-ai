@@ -439,6 +439,62 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "**Ollama** — Enable thinking/reasoning mode for models that support it (Qwen3, Qwen3.5). Shows reasoning in chat. Disable for faster responses without deep reasoning. Default: `true`"
+        },
+        "lean-ai.enableThinkingExpert": {
+          "type": "string",
+          "default": "",
+          "enum": ["", "true", "false"],
+          "markdownDescription": "**Ollama Expert Model** — Override thinking mode for the expert model. Empty = inherit from primary `enableThinking` setting."
+        },
+        "lean-ai.enableThinkingRequest": {
+          "type": "string",
+          "default": "",
+          "enum": ["", "true", "false"],
+          "markdownDescription": "**Ollama Request Model** — Override thinking mode for the request model. Empty = inherit from primary `enableThinking` setting."
+        },
+        "lean-ai.ollamaExpertTemperature": {
+          "type": "number",
+          "markdownDescription": "**Ollama Expert Model** — Sampling temperature. Leave empty to inherit from the primary model."
+        },
+        "lean-ai.ollamaExpertTopP": {
+          "type": "number",
+          "markdownDescription": "**Ollama Expert Model** — Nucleus sampling threshold (top-p). Leave empty to inherit from the primary model."
+        },
+        "lean-ai.ollamaExpertTopK": {
+          "type": "number",
+          "markdownDescription": "**Ollama Expert Model** — Top-k sampling. Leave empty to inherit from the primary model."
+        },
+        "lean-ai.ollamaExpertRepeatPenalty": {
+          "type": "number",
+          "markdownDescription": "**Ollama Expert Model** — Repeat penalty. Leave empty to inherit from the primary model."
+        },
+        "lean-ai.ollamaExpertMaxTokens": {
+          "type": "number",
+          "markdownDescription": "**Ollama Expert Model** — Maximum output tokens. Defaults to 25% of expert context window."
+        },
+        "lean-ai.ollamaRequestContextWindow": {
+          "type": "number",
+          "markdownDescription": "**Ollama Request Model** — Context window. Accepts shorthand notation (e.g. `128` = 128k). Leave empty to inherit from the primary model."
+        },
+        "lean-ai.ollamaRequestTemperature": {
+          "type": "number",
+          "markdownDescription": "**Ollama Request Model** — Sampling temperature. Leave empty to inherit from the primary model."
+        },
+        "lean-ai.ollamaRequestTopP": {
+          "type": "number",
+          "markdownDescription": "**Ollama Request Model** — Nucleus sampling threshold (top-p). Leave empty to inherit from the primary model."
+        },
+        "lean-ai.ollamaRequestTopK": {
+          "type": "number",
+          "markdownDescription": "**Ollama Request Model** — Top-k sampling. Leave empty to inherit from the primary model."
+        },
+        "lean-ai.ollamaRequestRepeatPenalty": {
+          "type": "number",
+          "markdownDescription": "**Ollama Request Model** — Repeat penalty. Leave empty to inherit from the primary model."
+        },
+        "lean-ai.ollamaRequestMaxTokens": {
+          "type": "number",
+          "markdownDescription": "**Ollama Request Model** — Maximum output tokens. Defaults to 25% of request context window."
         }
       }
     }

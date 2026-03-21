@@ -117,6 +117,12 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_ANTHROPIC_EXPERT_MODEL` | *(falls back to ANTHROPIC_MODEL)* | Anthropic model for expert phases (e.g. `claude-opus-4-6`) |
 | `LEAN_AI_REQUEST_LLM_PROVIDER` | *(empty)* | Provider for `/request` mode: `ollama`, `openai`, or `anthropic`. Empty = auto-detect |
 | `LEAN_AI_OLLAMA_MODEL_REQUEST` | *(empty)* | Ollama model for `/request` mode (e.g. `qwen3.5:27b`). Empty = use primary model |
+| `LEAN_AI_OLLAMA_REQUEST_TEMPERATURE` | *(falls back to OLLAMA_TEMPERATURE)* | Request model temperature |
+| `LEAN_AI_OLLAMA_REQUEST_TOP_P` | *(falls back to OLLAMA_TOP_P)* | Request model top-p |
+| `LEAN_AI_OLLAMA_REQUEST_TOP_K` | *(falls back to OLLAMA_TOP_K)* | Request model top-k |
+| `LEAN_AI_OLLAMA_REQUEST_REPEAT_PENALTY` | *(falls back to OLLAMA_REPEAT_PENALTY)* | Request model repetition penalty |
+| `LEAN_AI_OLLAMA_REQUEST_CONTEXT_WINDOW` | *(falls back to OLLAMA_CONTEXT_WINDOW)* | Request model context window (accepts shorthand) |
+| `LEAN_AI_OLLAMA_REQUEST_MAX_TOKENS` | *(derived: 25% of request context window)* | Request model max output tokens |
 | `LEAN_AI_OPENAI_REQUEST_MODEL` | *(empty)* | OpenAI model for `/request` mode |
 | `LEAN_AI_ANTHROPIC_REQUEST_MODEL` | *(empty)* | Anthropic model for `/request` mode |
 | `LEAN_AI_OPENAI_API_KEY` | *(empty)* | OpenAI API key (required when provider=openai) |
@@ -151,6 +157,8 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_POST_VALIDATION_MAX_RETRIES` | `2` | Max LLM fix attempts for validation failures (`0` = no retries) |
 | `LEAN_AI_POST_VALIDATION_FIX_TURNS` | `30` | Tool-calling turns per fix attempt |
 | `LEAN_AI_ENABLE_THINKING` | `true` | Pass `think=True` to Ollama for reasoning models (Qwen3, Qwen3.5). Disable for faster responses without deep reasoning |
+| `LEAN_AI_ENABLE_THINKING_EXPERT` | *(inherits from ENABLE_THINKING)* | Per-model thinking override for expert model |
+| `LEAN_AI_ENABLE_THINKING_REQUEST` | *(inherits from ENABLE_THINKING)* | Per-model thinking override for request model |
 | `LEAN_AI_DEBUG_PLANNING` | `false` | Save all planning phase outputs to `.lean_ai/plan_debug/{session_id}/` |
 | `LEAN_AI_PORT` | `8422` | Server port |
 

@@ -59,8 +59,7 @@ If you prefer to manage the backend yourself, set `lean-ai.backendDir` or `lean-
 Open the settings panel (gear icon in the chat header) to configure:
 
 - **LLM Provider** — Ollama, OpenAI, or Anthropic
-- **Model selection** — primary, expert, and request models
-- **Sampling parameters** — temperature, top-p, top-k, context window
+- **Model selection** — primary, expert, and request models with independent sampling parameters (temperature, top-p, top-k, repeat penalty, context window, max tokens) and thinking mode per model
 - **Post-validation** — lint, test, and format commands
 - **Search provider** — DuckDuckGo, SearXNG, Google, or Bing
 

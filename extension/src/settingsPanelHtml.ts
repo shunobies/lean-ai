@@ -588,8 +588,42 @@ export function getSettingsPanelHtml(): string {
                         </div>
                     </div>
                     <div class="field">
-                        <label>Expert Context Window <span class="hint">leave empty to inherit</span></label>
+                        <label>Context Window <span class="hint">leave empty to inherit</span></label>
                         <input type="text" id="ollamaExpertContextWindow" placeholder="">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Temperature <span class="hint">leave empty to inherit</span></label>
+                        <input type="number" id="ollamaExpertTemperature" min="0" max="2" step="0.05" placeholder="">
+                    </div>
+                    <div class="field">
+                        <label>Top P <span class="hint">leave empty to inherit</span></label>
+                        <input type="number" id="ollamaExpertTopP" min="0" max="1" step="0.05" placeholder="">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Top K <span class="hint">leave empty to inherit</span></label>
+                        <input type="number" id="ollamaExpertTopK" min="0" step="1" placeholder="">
+                    </div>
+                    <div class="field">
+                        <label>Repeat Penalty <span class="hint">leave empty to inherit</span></label>
+                        <input type="number" id="ollamaExpertRepeatPenalty" min="0" step="0.01" placeholder="">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Max Tokens <span class="hint">0 = auto (25% of context window)</span></label>
+                        <input type="number" id="ollamaExpertMaxTokens" min="0" step="256" placeholder="">
+                    </div>
+                    <div class="field">
+                        <label>Enable Thinking <span class="hint">inherit = use primary setting</span></label>
+                        <select id="enableThinkingExpert">
+                            <option value="">Inherit from primary</option>
+                            <option value="true">Enabled</option>
+                            <option value="false">Disabled</option>
+                        </select>
                     </div>
                 </div>
             </div>
@@ -639,12 +673,52 @@ export function getSettingsPanelHtml(): string {
         <div class="indent">
             <!-- Request Ollama fields -->
             <div class="provider-section" id="request-ollama-fields">
-                <div class="field">
-                    <label>Request Ollama Model <span class="hint">e.g. qwen3.5:27b</span></label>
-                    <div class="model-combobox" id="ollamaModelRequestCombobox">
-                        <input type="text" id="ollamaModelRequest" placeholder="qwen3.5:27b">
-                        <button type="button" class="model-combobox-btn" tabindex="-1">&#9660;</button>
-                        <div class="model-combobox-options"></div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Request Ollama Model <span class="hint">e.g. qwen3.5:27b</span></label>
+                        <div class="model-combobox" id="ollamaModelRequestCombobox">
+                            <input type="text" id="ollamaModelRequest" placeholder="qwen3.5:27b">
+                            <button type="button" class="model-combobox-btn" tabindex="-1">&#9660;</button>
+                            <div class="model-combobox-options"></div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label>Context Window <span class="hint">leave empty to inherit</span></label>
+                        <input type="text" id="ollamaRequestContextWindow" placeholder="">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Temperature <span class="hint">leave empty to inherit</span></label>
+                        <input type="number" id="ollamaRequestTemperature" min="0" max="2" step="0.05" placeholder="">
+                    </div>
+                    <div class="field">
+                        <label>Top P <span class="hint">leave empty to inherit</span></label>
+                        <input type="number" id="ollamaRequestTopP" min="0" max="1" step="0.05" placeholder="">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Top K <span class="hint">leave empty to inherit</span></label>
+                        <input type="number" id="ollamaRequestTopK" min="0" step="1" placeholder="">
+                    </div>
+                    <div class="field">
+                        <label>Repeat Penalty <span class="hint">leave empty to inherit</span></label>
+                        <input type="number" id="ollamaRequestRepeatPenalty" min="0" step="0.01" placeholder="">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Max Tokens <span class="hint">0 = auto (25% of context window)</span></label>
+                        <input type="number" id="ollamaRequestMaxTokens" min="0" step="256" placeholder="">
+                    </div>
+                    <div class="field">
+                        <label>Enable Thinking <span class="hint">inherit = use primary setting</span></label>
+                        <select id="enableThinkingRequest">
+                            <option value="">Inherit from primary</option>
+                            <option value="true">Enabled</option>
+                            <option value="false">Disabled</option>
+                        </select>
                     </div>
                 </div>
             </div>
@@ -1153,12 +1227,25 @@ export function getSettingsPanelHtml(): string {
             expertLlmProvider:     expertChecked ? expertProvider : '',
             ollamaModelExpert:     expertChecked && expertProvider === 'ollama' ? val('ollamaModelExpert') : '',
             ollamaExpertContextWindow: expertChecked && expertProvider === 'ollama' ? val('ollamaExpertContextWindow') : '',
+            ollamaExpertTemperature:   expertChecked && expertProvider === 'ollama' ? val('ollamaExpertTemperature') : '',
+            ollamaExpertTopP:          expertChecked && expertProvider === 'ollama' ? val('ollamaExpertTopP') : '',
+            ollamaExpertTopK:          expertChecked && expertProvider === 'ollama' ? val('ollamaExpertTopK') : '',
+            ollamaExpertRepeatPenalty: expertChecked && expertProvider === 'ollama' ? val('ollamaExpertRepeatPenalty') : '',
+            ollamaExpertMaxTokens:     expertChecked && expertProvider === 'ollama' ? val('ollamaExpertMaxTokens') : '',
+            enableThinkingExpert:      expertChecked && expertProvider === 'ollama' ? val('enableThinkingExpert') : '',
             openaiExpertModel:     expertChecked && expertProvider === 'openai' ? val('openaiExpertModel') : '',
             anthropicExpertModel:  expertChecked && expertProvider === 'anthropic' ? val('anthropicExpertModel') : '',
 
             // Request model
             requestLlmProvider:       requestChecked ? requestProvider : '',
             ollamaModelRequest:       requestChecked && requestProvider === 'ollama' ? val('ollamaModelRequest') : '',
+            ollamaRequestContextWindow: requestChecked && requestProvider === 'ollama' ? val('ollamaRequestContextWindow') : '',
+            ollamaRequestTemperature:   requestChecked && requestProvider === 'ollama' ? val('ollamaRequestTemperature') : '',
+            ollamaRequestTopP:          requestChecked && requestProvider === 'ollama' ? val('ollamaRequestTopP') : '',
+            ollamaRequestTopK:          requestChecked && requestProvider === 'ollama' ? val('ollamaRequestTopK') : '',
+            ollamaRequestRepeatPenalty: requestChecked && requestProvider === 'ollama' ? val('ollamaRequestRepeatPenalty') : '',
+            ollamaRequestMaxTokens:     requestChecked && requestProvider === 'ollama' ? val('ollamaRequestMaxTokens') : '',
+            enableThinkingRequest:      requestChecked && requestProvider === 'ollama' ? val('enableThinkingRequest') : '',
             openaiRequestModel:       requestChecked && requestProvider === 'openai' ? val('openaiRequestModel') : '',
             anthropicRequestModel:    requestChecked && requestProvider === 'anthropic' ? val('anthropicRequestModel') : '',
 
@@ -1258,6 +1345,12 @@ export function getSettingsPanelHtml(): string {
         }
         setVal('ollamaModelExpert',        v.ollamaModelExpert);
         setVal('ollamaExpertContextWindow',v.ollamaExpertContextWindow);
+        setVal('ollamaExpertTemperature',  v.ollamaExpertTemperature);
+        setVal('ollamaExpertTopP',         v.ollamaExpertTopP);
+        setVal('ollamaExpertTopK',         v.ollamaExpertTopK);
+        setVal('ollamaExpertRepeatPenalty',v.ollamaExpertRepeatPenalty);
+        setVal('ollamaExpertMaxTokens',    v.ollamaExpertMaxTokens);
+        setVal('enableThinkingExpert',     v.enableThinkingExpert);
         setVal('openaiExpertModel',        v.openaiExpertModel);
         setVal('anthropicExpertModel',     v.anthropicExpertModel);
 
@@ -1273,6 +1366,13 @@ export function getSettingsPanelHtml(): string {
             updateRequestProvider();
         }
         setVal('ollamaModelRequest',      v.ollamaModelRequest);
+        setVal('ollamaRequestContextWindow', v.ollamaRequestContextWindow);
+        setVal('ollamaRequestTemperature',v.ollamaRequestTemperature);
+        setVal('ollamaRequestTopP',       v.ollamaRequestTopP);
+        setVal('ollamaRequestTopK',       v.ollamaRequestTopK);
+        setVal('ollamaRequestRepeatPenalty',v.ollamaRequestRepeatPenalty);
+        setVal('ollamaRequestMaxTokens',  v.ollamaRequestMaxTokens);
+        setVal('enableThinkingRequest',   v.enableThinkingRequest);
         setVal('openaiRequestModel',      v.openaiRequestModel);
         setVal('anthropicRequestModel',   v.anthropicRequestModel);
 

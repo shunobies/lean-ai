@@ -160,3 +160,89 @@ class TestExpertConfig:
         s = Settings(ollama_model_expert="")
         assert s.ollama_expert_max_tokens is None
         assert s.ollama_expert_context_window is None
+
+
+class TestRequestConfig:
+    """Tests for request model configuration."""
+
+    def test_request_defaults_empty(self):
+        s = Settings()
+        assert s.ollama_model_request == ""
+        assert s.ollama_request_max_tokens is None
+        assert s.ollama_request_context_window is None
+
+    def test_request_context_window_shorthand(self):
+        s = Settings(ollama_model_request="qwen3.5:27b", ollama_request_context_window=64)
+        assert s.ollama_request_context_window == 65536
+
+    def test_request_max_tokens_derived(self):
+        s = Settings(ollama_model_request="qwen3.5:27b", ollama_request_context_window=64)
+        assert s.ollama_request_max_tokens == 65536 // 4
+
+    def test_request_max_tokens_fallback(self):
+        s = Settings(ollama_model_request="qwen3.5:27b", ollama_context_window=128)
+        assert s.ollama_request_context_window == 131072
+        assert s.ollama_request_max_tokens == 131072 // 4
+
+    def test_request_temperature_fallback(self):
+        s = Settings(ollama_temperature=0.5)
+        assert s.effective_request_temperature == 0.5
+
+    def test_request_temperature_override(self):
+        s = Settings(ollama_temperature=0.5, ollama_request_temperature=0.3)
+        assert s.effective_request_temperature == 0.3
+
+    def test_request_top_p_fallback(self):
+        s = Settings(ollama_top_p=0.9)
+        assert s.effective_request_top_p == 0.9
+
+    def test_request_top_p_override(self):
+        s = Settings(ollama_top_p=0.9, ollama_request_top_p=0.7)
+        assert s.effective_request_top_p == 0.7
+
+    def test_request_top_k_fallback(self):
+        s = Settings(ollama_top_k=30)
+        assert s.effective_request_top_k == 30
+
+    def test_request_top_k_override(self):
+        s = Settings(ollama_top_k=30, ollama_request_top_k=15)
+        assert s.effective_request_top_k == 15
+
+    def test_request_repeat_penalty_fallback(self):
+        s = Settings(ollama_repeat_penalty=1.1)
+        assert s.effective_request_repeat_penalty == 1.1
+
+    def test_request_repeat_penalty_override(self):
+        s = Settings(ollama_repeat_penalty=1.1, ollama_request_repeat_penalty=1.0)
+        assert s.effective_request_repeat_penalty == 1.0
+
+    def test_request_not_derived_when_empty(self):
+        s = Settings(ollama_model_request="")
+        assert s.ollama_request_max_tokens is None
+        assert s.ollama_request_context_window is None
+
+
+class TestThinkingConfig:
+    """Tests for per-model enable_thinking configuration."""
+
+    def test_thinking_defaults(self):
+        s = Settings()
+        assert s.enable_thinking is True
+        assert s.enable_thinking_expert is None
+        assert s.enable_thinking_request is None
+
+    def test_effective_thinking_expert_inherit(self):
+        s = Settings(enable_thinking=False)
+        assert s.effective_thinking_expert is False
+
+    def test_effective_thinking_expert_override(self):
+        s = Settings(enable_thinking=True, enable_thinking_expert=False)
+        assert s.effective_thinking_expert is False
+
+    def test_effective_thinking_request_inherit(self):
+        s = Settings(enable_thinking=True)
+        assert s.effective_thinking_request is True
+
+    def test_effective_thinking_request_override(self):
+        s = Settings(enable_thinking=True, enable_thinking_request=False)
+        assert s.effective_thinking_request is False
