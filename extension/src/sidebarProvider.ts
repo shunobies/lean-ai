@@ -21,7 +21,7 @@ import type { WSMessage } from "./types";
 import { handleWsMessage } from "./wsHandler";
 import type { WsHandlerContext } from "./wsHandler";
 import { SettingsPanel } from "./settingsPanel";
-import { BACKEND_SETTING_MAP, resolveEnvFilePath, writeEnvSetting } from "./settingsSync";
+import { BACKEND_SETTING_MAP, clearEnvSetting, resolveEnvFilePath, writeEnvSetting } from "./settingsSync";
 import { restartBackend } from "./backendProcess";
 import {
     notifyApprovalNeeded,
@@ -254,6 +254,8 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                         const val = config.get<unknown>(key);
                         if (val !== undefined && val !== null && String(val) !== "") {
                             writeEnvSetting(envPath, envVar, String(val));
+                        } else {
+                            clearEnvSetting(envPath, envVar);
                         }
                     }
                 }

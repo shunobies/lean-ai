@@ -13,6 +13,7 @@ import { getSettingsPanelHtml } from "./settingsPanelHtml";
 import {
     BACKEND_SETTING_MAP,
     SECRET_KEYS,
+    clearEnvSetting,
     resolveEnvFilePath,
     writeEnvSetting,
 } from "./settingsSync";
@@ -260,12 +261,24 @@ export class SettingsPanel {
             "openaiTemperature", "anthropicTemperature",
         ]);
 
+        // Numeric fields where 0 means "inherit/auto-derive" — treat 0 as unset
+        // so the backend receives None and falls back to the primary model's value.
+        const zeroMeansInherit = new Set([
+            "ollamaExpertTemperature", "ollamaExpertTopP", "ollamaExpertTopK",
+            "ollamaExpertRepeatPenalty", "ollamaExpertContextWindow", "ollamaExpertMaxTokens",
+            "ollamaRequestTemperature", "ollamaRequestTopP", "ollamaRequestTopK",
+            "ollamaRequestRepeatPenalty", "ollamaRequestContextWindow", "ollamaRequestMaxTokens",
+            "ollamaMaxTokens", "ollamaContextWindow",
+            "openaiContextWindow", "anthropicContextWindow",
+        ]);
+
         const booleanFields = new Set([
             "enableEmbeddings", "enablePostValidation",
             "enableFrameworkGuide", "debugPlanning", "enableThinking",
             "enableThinkingExpert", "enableThinkingRequest",
         ]);
 
+        const coercedMap = new Map<string, unknown>();
         for (const [field, settingKey] of Object.entries(fieldToSetting)) {
             if (!(field in values)) { continue; }
             const raw = values[field];
@@ -276,11 +289,15 @@ export class SettingsPanel {
             } else if (numericFields.has(field)) {
                 const n = parseFloat(String(raw));
                 coerced = isNaN(n) ? undefined : n;
+                if (coerced === 0 && zeroMeansInherit.has(field)) {
+                    coerced = undefined;
+                }
             } else {
                 // String — omit empty strings (revert to default)
                 coerced = String(raw ?? "").trim() || undefined;
             }
 
+            coercedMap.set(field, coerced);
             if (coerced !== undefined) {
                 await config.update(settingKey, coerced, vscode.ConfigurationTarget.Global);
             } else {
@@ -289,8 +306,8 @@ export class SettingsPanel {
             }
         }
 
-        // Also write to .env immediately (onDidChangeConfiguration may be
-        // slightly delayed, so we do it here too for responsiveness)
+        // Write to .env using the coerced values directly (not from config)
+        // so manually-set .env values aren't overwritten with stale config.
         const backendDir = config.get<string>("lean-ai.backendDir", "");
         const envPath = resolveEnvFilePath(backendDir || undefined, this._context.globalStorageUri.fsPath);
         if (envPath) {
@@ -298,9 +315,12 @@ export class SettingsPanel {
                 if (!(field in values)) { continue; }
                 const envVar = BACKEND_SETTING_MAP[settingKey];
                 if (!envVar) { continue; }
-                const val = config.get<unknown>(settingKey);
+                const val = coercedMap.get(field);
                 if (val !== undefined && val !== null && String(val) !== "") {
                     writeEnvSetting(envPath, envVar, String(val));
+                } else {
+                    // Clear stale .env entry so backend uses its default
+                    clearEnvSetting(envPath, envVar);
                 }
             }
         }

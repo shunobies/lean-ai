@@ -172,6 +172,20 @@ export function writeEnvSetting(
 }
 
 /**
+ * Comment out a LEAN_AI_* key in the backend .env file, preserving the old
+ * value for reference.  No-op if the key is already absent or commented.
+ */
+export function clearEnvSetting(envFilePath: string, envKey: string): void {
+    if (!fs.existsSync(envFilePath)) { return; }
+    const lines = fs.readFileSync(envFilePath, "utf-8").split("\n");
+    const prefix = `${envKey}=`;
+    const idx = lines.findIndex((l) => l.startsWith(prefix));
+    if (idx < 0) { return; } // not present or already commented
+    lines[idx] = `#${lines[idx]}`;
+    fs.writeFileSync(envFilePath, lines.join("\n"), "utf-8");
+}
+
+/**
  * Resolve the backend .env file path.
  * Priority: explicit backendDir → workspace backend/ → globalStorageDir (managed mode).
  */
