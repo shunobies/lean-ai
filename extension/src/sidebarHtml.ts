@@ -1214,7 +1214,8 @@ export function getWebviewHtml(chatFontSize: number): string {
                 // tok/s footer (client-side computation — mirrors old blocking chat mode)
                 if (msg.tps != null) {
                     const countStr = msg.evalCount != null ? ' · ' + msg.evalCount.toLocaleString() + ' tokens' : '';
-                    addMessage('*' + msg.tps + ' tok/s' + countStr + '*', 'msg-system');
+                    const truncStr = msg.truncated ? ' · (truncated)' : '';
+                    addMessage('*' + msg.tps + ' tok/s' + countStr + truncStr + '*', 'msg-system');
                 }
                 sending = false;
                 sendBtn.disabled = false;

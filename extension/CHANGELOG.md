@@ -2,6 +2,16 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.3.9] - 2026-03-20
+
+### Added
+- **Chat stream diagnostics** — backend now logs Ollama `done_reason` and token count after each chat stream, and warns when output is truncated due to context window overflow. Prompt size (estimated tokens vs `num_ctx`) is logged before streaming begins.
+- **Truncation indicator** — the chat UI shows "(truncated)" in the metrics footer when the server stream ends without a proper completion signal, making silent truncation visible.
+- **Session tree pause/resume** — session list auto-refresh is paused during active chat streaming to avoid unnecessary backend polling.
+
+### Changed
+- **Session tree refresh interval** — reduced from 30 seconds to 120 seconds to decrease output panel noise.
+
 ## [0.3.7] - 2026-03-20
 
 ### Added

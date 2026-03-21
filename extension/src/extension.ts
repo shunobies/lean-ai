@@ -62,6 +62,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // Register Session Tree View Provider
     const sessionTreeProvider = new SessionTreeProvider();
+    sidebarProvider.setSessionTreeProvider(sessionTreeProvider);
     const sessionsTreeView = vscode.window.createTreeView("lean-ai.sessionsView", {
         treeDataProvider: sessionTreeProvider,
     });

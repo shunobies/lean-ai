@@ -425,6 +425,11 @@ async def chat_stream_endpoint(request: ChatRequest):
     async def generate() -> AsyncGenerator[str, None]:
         try:
             messages, _ = await _build_chat_messages(request)
+            prompt_chars = sum(len(m.get("content", "")) for m in messages)
+            logger.info(
+                "Chat stream: prompt ~%d chars (~%d tokens), num_ctx=%d",
+                prompt_chars, prompt_chars // 4, settings._active_context_window,
+            )
             async for token in llm_client.chat_stream(
                 messages, max_tokens=_get_active_max_tokens(),
             ):

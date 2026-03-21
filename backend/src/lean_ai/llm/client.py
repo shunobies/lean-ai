@@ -443,15 +443,27 @@ class OllamaProvider(LLMProvider):
                 messages=messages,
                 stream=True,
                 options=self._build_options(temperature=temp, max_tokens=num_predict),
-                think=False,  # Inline predictions: no thinking overhead
+                think=False,
             )
 
         stream = await self._retry_with_backoff(_chat, label="chat_stream")
 
+        token_count = 0
+        done_reason = None
         async for chunk in stream:
+            if chunk.get("done"):
+                done_reason = chunk.get("done_reason", "unknown")
             token = chunk["message"]["content"]
             if token:
+                token_count += 1
                 yield token
+
+        logger.info("chat_stream: tokens=%d done_reason=%s", token_count, done_reason)
+        if done_reason == "length":
+            logger.warning(
+                "chat_stream truncated (done_reason=length) — "
+                "context window may be too small for prompt + output"
+            )
 
     async def check_health(self) -> bool:
         try:

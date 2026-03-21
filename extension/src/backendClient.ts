@@ -236,7 +236,7 @@ export class BackendClient {
      *
      * @param onToken  Called for each token as it arrives. `isFirst` is true
      *                 only for the very first token in the response.
-     * @returns        Promise that resolves when the stream is done, rejects on error.
+     * @returns        Promise that resolves with `{ receivedDone }` when the stream ends.
      */
     chatStream(
         message: string,
@@ -249,7 +249,7 @@ export class BackendClient {
             active_selection?: string;
         } | undefined,
         onToken: (token: string, isFirst: boolean) => void,
-    ): Promise<void> {
+    ): Promise<{ receivedDone: boolean }> {
         return new Promise((resolve, reject) => {
             const fullUrl = new URL(`${this.baseUrl}/api/chat/stream`);
             const isHttps = fullUrl.protocol === "https:";
@@ -295,7 +295,7 @@ export class BackendClient {
                                 isFirst = false;
                             } else if (data["type"] === "done") {
                                 resolved = true;
-                                resolve();
+                                resolve({ receivedDone: true });
                             } else if (data["type"] === "error") {
                                 reject(new Error((data["message"] as string) || "Stream error"));
                             }
@@ -306,7 +306,10 @@ export class BackendClient {
                 });
 
                 res.on("end", () => {
-                    if (!resolved) { resolve(); }
+                    if (!resolved) {
+                        console.warn("[Lean AI] Chat stream ended without 'done' event — response may be truncated");
+                        resolve({ receivedDone: false });
+                    }
                 });
 
                 res.on("error", (err) => { reject(err); });

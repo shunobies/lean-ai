@@ -30,12 +30,14 @@ import {
     notifyToolApprovalNeeded,
 } from "./notifications";
 import WebSocket from "ws";
+import type { SessionTreeProvider } from "./sessionTreeProvider";
 
 export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = "lean-ai.chatView";
 
     private webviewView?: vscode.WebviewView;
     private client: BackendClient;
+    private sessionTreeProvider?: SessionTreeProvider;
     private sessionId: string | undefined;
     private ws: WebSocket | undefined;
 
@@ -683,13 +685,19 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         let streamStartTime: number | null = null;
         let tokenCount = 0;
 
-        await this.client.chatStream(chatText, historyForApi, workspace, (token) => {
-            if (streamStartTime === null) { streamStartTime = Date.now(); }
-            tokenCount++;
-            fullReply += token;
-            this.postMessage({ type: "chatToken", content: token, isFirst });
-            isFirst = false;
-        });
+        this.sessionTreeProvider?.pauseRefresh();
+        let receivedDone = false;
+        try {
+            ({ receivedDone } = await this.client.chatStream(chatText, historyForApi, workspace, (token) => {
+                if (streamStartTime === null) { streamStartTime = Date.now(); }
+                tokenCount++;
+                fullReply += token;
+                this.postMessage({ type: "chatToken", content: token, isFirst });
+                isFirst = false;
+            }));
+        } finally {
+            this.sessionTreeProvider?.resumeRefresh();
+        }
 
         // Compute tok/s from first-token to last-token (excludes context-gathering latency)
         const tps = (streamStartTime !== null && tokenCount > 0)
@@ -705,7 +713,8 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         }
 
         // Send full text so the webview can apply markdown formatting, plus tok/s metrics
-        this.postMessage({ type: "chatDone", fullText: fullReply, tps, evalCount: tokenCount });
+        const truncated = !receivedDone && tokenCount > 0;
+        this.postMessage({ type: "chatDone", fullText: fullReply, tps, evalCount: tokenCount, truncated });
 
         // Persist conversation after each exchange
         await this.conversations.persistCurrentConversation(this.chatHistory);
@@ -770,6 +779,11 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     /** Called by extension.ts when this window was opened for a freshly scaffolded project */
     setPendingInit(): void {
         this._pendingInit = true;
+    }
+
+    /** Called by extension.ts to allow pausing session tree refresh during chat. */
+    setSessionTreeProvider(provider: SessionTreeProvider): void {
+        this.sessionTreeProvider = provider;
     }
 
     private getHtml(): string {

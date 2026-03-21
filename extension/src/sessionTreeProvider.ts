@@ -107,15 +107,19 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<TreeElement>
     private repoRoot: string;
     private refreshTimer: ReturnType<typeof setInterval> | undefined;
     private cachedSessions: SessionSummary[] = [];
+    private paused = false;
+
+    private static readonly REFRESH_INTERVAL = 120_000; // 2 minutes
 
     constructor() {
         this.client = BackendClient.getInstance();
         this.repoRoot = this.getRepoRoot();
 
-        // Auto-refresh every 30 seconds while the view is visible
         this.refreshTimer = setInterval(() => {
-            this._onDidChangeTreeData.fire();
-        }, 30_000);
+            if (!this.paused) {
+                this._onDidChangeTreeData.fire();
+            }
+        }, SessionTreeProvider.REFRESH_INTERVAL);
     }
 
     dispose(): void {
@@ -128,6 +132,16 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<TreeElement>
 
     refresh(): void {
         this._onDidChangeTreeData.fire();
+    }
+
+    /** Pause auto-refresh (e.g. during active chat streaming). */
+    pauseRefresh(): void {
+        this.paused = true;
+    }
+
+    /** Resume auto-refresh. */
+    resumeRefresh(): void {
+        this.paused = false;
     }
 
     getTreeItem(element: TreeElement): vscode.TreeItem {
