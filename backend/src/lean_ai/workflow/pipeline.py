@@ -920,10 +920,12 @@ async def _run_fix(
     await ws_send(ws, "stage_change", {"stage": "implementing"})
 
     is_request = mode == "request"
-    # Use dedicated request model when available for /request mode
-    active_client = (
-        request_llm_client if is_request and request_llm_client else llm_client
-    )
+    # Use dedicated model when available: request model for /request,
+    # expert model for /fix (bug diagnosis is reasoning-heavy).
+    if is_request:
+        active_client = request_llm_client or llm_client
+    else:
+        active_client = expert_llm_client or llm_client
     tool_executor = make_tool_executor(
         repo_root, ws, session_id, llm_client=active_client,
     )
