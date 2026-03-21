@@ -29,6 +29,7 @@ extension/dist/
 extension/backend/
 extension/*.vsix
 package-lock.json
+!extension/package-lock.json
 
 # OS
 .DS_Store
