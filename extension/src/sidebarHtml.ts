@@ -126,13 +126,43 @@ export function getWebviewHtml(chatFontSize: number): string {
         background: var(--vscode-toolbar-hoverBackground);
     }
 
-    .messages {
+    .messages-wrapper {
         flex: 1;
+        position: relative;
+        overflow: hidden;
+        min-height: 0;
+    }
+    .messages {
+        height: 100%;
         overflow-y: auto;
         padding: 12px;
         display: flex;
         flex-direction: column;
         gap: 12px;
+    }
+    .jump-to-bottom {
+        display: none;
+        position: absolute;
+        bottom: 8px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 4px 12px;
+        border-radius: 12px;
+        background: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+        border: none;
+        cursor: pointer;
+        font-size: 11px;
+        font-family: inherit;
+        opacity: 0.9;
+        z-index: 10;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    }
+    .jump-to-bottom:hover {
+        opacity: 1;
+    }
+    .jump-to-bottom.visible {
+        display: block;
     }
     .msg {
         padding: 8px 12px;
@@ -601,8 +631,11 @@ export function getWebviewHtml(chatFontSize: number): string {
     <button class="search-clear-btn" id="searchClearBtn" title="Close search">&times;</button>
 </div>
 
+<div class="messages-wrapper">
 <div class="messages" id="messages">
     <div class="msg msg-system">Describe what you'd like to build or change. I'll help you refine it into a clear task for the agent.</div>
+</div>
+<button class="jump-to-bottom" id="jumpToBottom" title="Jump to latest">&#8595; New messages</button>
 </div>
 <div class="thinking" id="thinking">Processing...</div>
 
@@ -658,6 +691,37 @@ export function getWebviewHtml(chatFontSize: number): string {
     let currentPlanningDiv = null; // AI bubble being filled during planning streaming
     let problemsActive = false;
     let debugActive = false;
+
+    // --- Smart auto-scroll: only scroll to bottom when user is already there ---
+    const jumpBtn = document.getElementById('jumpToBottom');
+    let userScrolledUp = false;
+
+    function isNearBottom(el, threshold) {
+        return el.scrollHeight - el.scrollTop - el.clientHeight < (threshold || 80);
+    }
+
+    function scrollToBottom() {
+        if (!userScrolledUp) {
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        } else {
+            jumpBtn.classList.add('visible');
+        }
+    }
+
+    function forceScrollToBottom() {
+        userScrolledUp = false;
+        jumpBtn.classList.remove('visible');
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    messagesEl.addEventListener('scroll', function() {
+        userScrolledUp = !isNearBottom(messagesEl, 80);
+        if (!userScrolledUp) {
+            jumpBtn.classList.remove('visible');
+        }
+    });
+
+    jumpBtn.addEventListener('click', forceScrollToBottom);
 
     // Delegated click handler for file-diff links in completion summary
     messagesEl.addEventListener('click', function(e) {
@@ -892,7 +956,7 @@ export function getWebviewHtml(chatFontSize: number): string {
         div.className = 'msg ' + cls;
         div.innerHTML = html;
         messagesEl.appendChild(div);
-        messagesEl.scrollTop = messagesEl.scrollHeight;
+        scrollToBottom();
         return div;
     }
 
@@ -957,6 +1021,8 @@ export function getWebviewHtml(chatFontSize: number): string {
         }
         sending = true;
         sendBtn.disabled = true;
+        userScrolledUp = false;
+        jumpBtn.classList.remove('visible');
         addMessage(escapeHtml(text), 'msg-user');
         inputEl.value = '';
         autoResize();
@@ -1096,7 +1162,7 @@ export function getWebviewHtml(chatFontSize: number): string {
             case 'thinking':
                 thinkingEl.textContent = msg.text || 'Processing...';
                 thinkingEl.classList.toggle('visible', msg.show);
-                if (msg.show) messagesEl.scrollTop = messagesEl.scrollHeight;
+                if (msg.show) scrollToBottom();
                 break;
 
             case 'stage':
@@ -1130,12 +1196,12 @@ export function getWebviewHtml(chatFontSize: number): string {
                         messagesEl.appendChild(currentPlanningDiv);
                     }
                     currentPlanningDiv.textContent += msg.text;
-                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                    scrollToBottom();
                 } else if (msg.done && currentPlanningDiv) {
                     // Streaming complete — apply markdown formatting
                     currentPlanningDiv.innerHTML = formatMarkdown(msg.text);
                     currentPlanningDiv = null;
-                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                    scrollToBottom();
                 } else {
                     // Non-streaming reply (existing behavior)
                     sending = false;
@@ -1179,7 +1245,7 @@ export function getWebviewHtml(chatFontSize: number): string {
                         details.appendChild(pre);
                         div.appendChild(details);
                         container.appendChild(div);
-                        container.scrollTop = container.scrollHeight;
+                        scrollToBottom();
                     }
                 } else {
                     // Bulk thinking content (existing behavior)
@@ -1200,7 +1266,7 @@ export function getWebviewHtml(chatFontSize: number): string {
                         details.appendChild(pre);
                         div.appendChild(details);
                         container.appendChild(div);
-                        container.scrollTop = container.scrollHeight;
+                        scrollToBottom();
                     }
                 }
                 break;
@@ -1218,7 +1284,7 @@ export function getWebviewHtml(chatFontSize: number): string {
                 // Append raw text (markdown applied on chatDone)
                 if (currentStreamDiv) {
                     currentStreamDiv.textContent += msg.content;
-                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                    scrollToBottom();
                 }
                 break;
             }
@@ -1227,7 +1293,7 @@ export function getWebviewHtml(chatFontSize: number): string {
                 // Re-render the streamed bubble with full markdown formatting
                 if (currentStreamDiv && msg.fullText) {
                     currentStreamDiv.innerHTML = formatMarkdown(msg.fullText);
-                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                    scrollToBottom();
                 }
                 currentStreamDiv = null;
                 // tok/s footer (client-side computation — mirrors old blocking chat mode)
@@ -1437,7 +1503,7 @@ export function getWebviewHtml(chatFontSize: number): string {
                     '<button class="btn-deny" onclick="approveToolCmd(this, false)">Deny</button>' +
                     '</div>';
                 messagesEl.appendChild(card);
-                messagesEl.scrollTop = messagesEl.scrollHeight;
+                scrollToBottom();
                 break;
             }
 
@@ -1479,7 +1545,7 @@ export function getWebviewHtml(chatFontSize: number): string {
                     div.innerHTML = m.role === 'user' ? escapeHtml(m.content) : formatMarkdown(m.content);
                     messagesEl.appendChild(div);
                 }
-                messagesEl.scrollTop = messagesEl.scrollHeight;
+                forceScrollToBottom();
                 break;
             }
         }
