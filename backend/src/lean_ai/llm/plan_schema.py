@@ -74,6 +74,15 @@ class ExecutionPlan(BaseModel):
     function/method naming, class naming, file naming patterns,
     import styles.  Extracted from files read during exploration."""
 
+    name_registry: str = ""
+    """Canonical name mapping for every new entity introduced by this plan.
+
+    Each entity lists its exact names across the stack: class/model name,
+    namespace/module, import path, table/collection name, file path,
+    route/endpoint, registration files, test file.  Populated by Phase 5
+    and injected into every step's system prompt to prevent naming
+    inconsistencies."""
+
     steps: list[PlanStep]
     """Ordered list of steps to execute.  Each step is one tool call."""
 
@@ -102,6 +111,9 @@ def plan_to_markdown(
 
     if plan.naming_conventions:
         parts.append(f"## Naming Conventions\n\n{plan.naming_conventions}\n")
+
+    if plan.name_registry:
+        parts.append(f"## Name Registry\n\n{plan.name_registry}\n")
 
     parts.append("## Steps\n")
     for step in plan.steps:

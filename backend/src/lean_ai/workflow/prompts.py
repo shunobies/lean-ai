@@ -76,6 +76,7 @@ def build_request_system_prompt(
 def build_step_system_prompt(
     context: str,
     naming_conventions: str = "",
+    name_registry: str = "",
 ) -> str:
     """Build the system prompt for per-step execution."""
     prompt = STEP_EXECUTION_SYSTEM_PROMPT
@@ -89,13 +90,24 @@ def build_step_system_prompt(
             "All new code MUST follow these conventions."
         )
 
+    if name_registry:
+        prompt += (
+            f"\n\n## Name Registry\n\n{name_registry}\n"
+            "Use EXACTLY these names for all new entities. Do NOT invent "
+            "alternative names, even if they seem more natural."
+        )
+
     return prompt
+
+
+_ARTIFACT_PER_FILE_LIMIT = 8000
 
 
 def build_step_user_message(
     step: PlanStep,
     completed: list[str],
     total_steps: int,
+    step_artifacts: dict[str, str] | None = None,
 ) -> str:
     """Build the user message for a specific step execution."""
     parts: list[str] = []
@@ -122,6 +134,36 @@ def build_step_user_message(
             "\nContext (file content from planner investigation):"
             f"\n```\n{step.context}\n```"
         )
+
+    # Include relevant artifacts from previous steps
+    if step_artifacts:
+        relevant: dict[str, str] = {}
+        searchable = (
+            (step.instruction or "")
+            + " " + (step.context or "")
+            + " " + (step.file_path or "")
+        )
+        for path, content in step_artifacts.items():
+            if path in searchable:
+                relevant[path] = content
+
+        # Also include last 3 created files as fallback (catches
+        # implicit dependencies like model ↔ migration)
+        if len(relevant) < 3:
+            for path, content in reversed(list(step_artifacts.items())):
+                if path not in relevant and len(relevant) < 3:
+                    relevant[path] = content
+
+        if relevant:
+            parts.append(
+                "\nFiles from previous steps (use exact "
+                "names/structure for consistency):"
+            )
+            for path, content in relevant.items():
+                truncated = content[:_ARTIFACT_PER_FILE_LIMIT]
+                if len(content) > _ARTIFACT_PER_FILE_LIMIT:
+                    truncated += "\n... (truncated)"
+                parts.append(f"\n--- {path} ---\n```\n{truncated}\n```")
 
     # Explicit directive
     if step.tool in ("run_tests", "run_lint", "format_code"):

@@ -342,11 +342,13 @@ async def _execute_plan(
     all_executed = []
     step_explanations: list[str] = []
     completed_descriptions: list[str] = []
+    step_artifacts: dict[str, str] = {}  # {relative_path: file_content}
 
     # Build the system prompt once (shared across all steps)
     system_prompt = build_step_system_prompt(
         load_condensed_context(repo_root),
         naming_conventions=getattr(plan, "naming_conventions", ""),
+        name_registry=getattr(plan, "name_registry", ""),
     )
 
     # Callbacks for WebSocket progress + conversation logging.
@@ -413,6 +415,7 @@ async def _execute_plan(
         # Build step-specific user message
         user_msg = build_step_user_message(
             step, completed_descriptions, total_steps,
+            step_artifacts=step_artifacts,
         )
 
         messages = [
@@ -443,6 +446,32 @@ async def _execute_plan(
         completed_descriptions.append(
             f"Step {step.step_number}: {step.instruction[:100]}"
         )
+
+        # Collect files created/modified by this step for cross-step context
+        artifact_budget = int(
+            settings._active_context_window * 0.10 * 3.5
+        )
+        for tc in executed:
+            if tc.tool_name in ("create_file", "edit_file"):
+                fpath = tc.parameters.get("path", "")
+                if fpath:
+                    full = os.path.join(repo_root, fpath)
+                    try:
+                        if os.path.isfile(full):
+                            content = open(
+                                full, encoding="utf-8", errors="replace",
+                            ).read()
+                            step_artifacts[fpath] = content
+                    except Exception:
+                        pass
+
+        # Evict oldest artifacts when over budget
+        while (
+            sum(len(c) for c in step_artifacts.values()) > artifact_budget
+            and step_artifacts
+        ):
+            oldest_key = next(iter(step_artifacts))
+            del step_artifacts[oldest_key]
 
         # Send checkpoint: step completed
         await ws_send(ws, "checkpoint", {

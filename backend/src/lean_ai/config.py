@@ -271,6 +271,17 @@ class Settings(BaseSettings):
         return val if val is not None else self.ollama_repeat_penalty
 
     @property
+    def effective_expert_context_window(self) -> int:
+        """Context window for the expert model provider."""
+        ep = (self.expert_llm_provider or "").lower()
+        if ep == "openai":
+            return self.openai_context_window
+        elif ep == "anthropic":
+            return self.anthropic_context_window
+        else:  # ollama (default / backwards-compat)
+            return self.ollama_expert_context_window or self.ollama_context_window
+
+    @property
     def effective_expert_max_tokens(self) -> int:
         """Max tokens for expert model — derived from the expert provider's settings."""
         ep = (self.expert_llm_provider or "").lower()

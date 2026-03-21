@@ -38,6 +38,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Phase 5/6 produce structured JSON plans with enriched step instructions
+# and context fields — give them 40% of the expert context window so
+# detailed plans are not truncated (vs. the default 25% for general output).
+PLAN_OUTPUT_PERCENT = 0.40
+
 
 def _save_debug_phase(
     repo_root: str,
@@ -232,6 +237,16 @@ async def create_plan(
         if expert_llm_client
         else phase_max_tokens
     )
+
+    expert_ctx = (
+        settings.effective_expert_context_window
+        if expert_llm_client
+        else settings._active_context_window
+    )
+    plan_assembly_max_tokens = max(
+        expert_max_tokens,
+        int(expert_ctx * PLAN_OUTPUT_PERCENT),
+    )
     plan_start = time.monotonic()
     phase_timings: dict[str, float] = {}
 
@@ -323,7 +338,29 @@ async def create_plan(
                 "file (package.json, composer.json, Gemfile, requirements.txt, "
                 "go.mod, Cargo.toml, etc.) to confirm they are present. "
                 "List any assumed infrastructure that is MISSING — these "
-                "gaps must be addressed in the plan.\n\n"
+                "gaps must be addressed in the plan.\n"
+                "6. EXISTING STATE CHECK: For each entity the task introduces "
+                "or modifies (database table, model, route group, config "
+                "entry, migration), search the codebase to determine if it "
+                "ALREADY EXISTS.\n"
+                "   - For database tables: search for existing migrations "
+                "that create or modify the table. Use grep_files to search "
+                "migration files for the table name.\n"
+                "   - For models/classes: check if a file already defines "
+                "this class.\n"
+                "   - For routes: check if the route/endpoint is already "
+                "registered.\n"
+                "   Note the results in the output — this determines whether "
+                "the plan should CREATE new files or MODIFY existing ones, "
+                "and whether database changes need a new CREATE migration or "
+                "an ALTER/add-column migration.\n"
+                "7. READ REGISTRATION FILES: Read the main files where new "
+                "modules must be registered — route definition files, "
+                "service container/DI config, middleware registration, "
+                "plugin/module bootstrap files, package __init__.py files, "
+                "etc. The executor needs to know WHERE and HOW to register "
+                "new components. Include these files in your output under "
+                "FILES READ FOR CONTEXT.\n\n"
                 "EFFICIENCY: You can call multiple tools in a single response. "
                 "For example, call read_file on several files at once instead "
                 "of reading them one at a time.\n\n"
@@ -457,13 +494,24 @@ async def create_plan(
                     f"SCOPE:\n{scope}\n\n"
                     f"FILES IDENTIFIED AND READ:\n{file_summary}\n\n"
                     "First, list the NAMING CONVENTIONS observed in the "
-                    "existing codebase:\n"
-                    "- Variable/property naming (camelCase, snake_case, etc.)\n"
-                    "- Function/method naming pattern\n"
-                    "- Class naming pattern\n"
-                    "- File naming pattern (kebab-case, PascalCase, etc.)\n"
+                    "existing codebase. For EACH convention, include 2-3 "
+                    "CONCRETE EXAMPLES from the files you read:\n"
+                    "- Variable/property naming: <pattern> (examples from "
+                    "code: <example1>, <example2>)\n"
+                    "- Function/method naming: <pattern> (examples: "
+                    "<example1>, <example2>)\n"
+                    "- Class naming: <pattern> (examples: <example1>, "
+                    "<example2>)\n"
+                    "- File naming: <pattern> (examples: <example1>, "
+                    "<example2>)\n"
+                    "- Route/URL naming: <pattern> (examples: <example1>, "
+                    "<example2>)\n"
+                    "- Database table/collection naming: <pattern> (examples: "
+                    "<example1>, <example2>)\n"
                     "- Import style and organization\n"
-                    "All new code MUST follow these conventions.\n\n"
+                    "Include ONLY conventions clearly demonstrated by the "
+                    "existing code — do not guess. All new code MUST follow "
+                    "these conventions.\n\n"
                     "Then, for each identified file, describe the SPECIFIC "
                     "changes:\n"
                     "- Functions/classes to add or modify (with signatures)\n"
@@ -574,6 +622,24 @@ async def create_plan(
                     "conventions observed in the codebase. Extract them into "
                     "the 'naming_conventions' field of the plan. All step "
                     "instructions must follow these conventions.\n\n"
+                    "NAME REGISTRY: Populate the 'name_registry' field with "
+                    "every NEW entity introduced by this plan and its "
+                    "canonical names across the full stack. Use this format:\n"
+                    "Entity \"<Name>\":\n"
+                    "  model/class: <ExactClassName>\n"
+                    "  namespace/module: <exact.namespace.path>\n"
+                    "  import: <exact import statement>\n"
+                    "  table/collection: <exact_table_name>\n"
+                    "  file: <exact/file/path>\n"
+                    "  route/endpoint: </exact/route>\n"
+                    "  registered in: <config/file1, routes/file2>\n"
+                    "  test: <exact/test/file>\n"
+                    "Include ONLY the rows that apply to each entity. The "
+                    "namespace/module and import rows are critical — the "
+                    "executor uses them for import statements in other files. "
+                    "The 'registered in' row lists files where this entity "
+                    "must be registered — each one must have a corresponding "
+                    "edit_file step.\n\n"
                     "IMPORTANT: If the risk assessment identified missing files "
                     "(files that consume or display the modified data but were "
                     "not in the original change design), you MUST include steps "
@@ -585,54 +651,103 @@ async def create_plan(
                     "- Do NOT include 'run_tests' or 'run_lint' steps — "
                     "verification will be appended automatically after "
                     "all implementation steps are complete\n"
-                    "- For edit_file steps: in the instruction field, describe "
-                    "EXACTLY what section to find and what to replace it with. "
-                    "Reference line numbers and content from the files you read. "
+                    "- For edit_file steps: the instruction field must specify: "
+                    "(a) The exact location in the file (function name, class "
+                    "name, or line range from the files read during exploration). "
+                    "(b) What currently exists at that location. "
+                    "(c) The exact new code to add — not 'add a route' but the "
+                    "actual code like 'Route::resource(\"reviews\", "
+                    "ReviewController::class)' or 'from app.models.review "
+                    "import Review'. "
+                    "(d) What surrounding code looks like (so the executor can "
+                    "build accurate search blocks). "
                     "In the context field, include the relevant section of the "
-                    "file that will be modified (the actual text the executor "
-                    "will need to construct search blocks).\n"
-                    "- For create_file steps: in the instruction field, describe "
-                    "what the file should contain — imports, classes, functions, "
-                    "their purpose, and patterns to follow. In the context field, "
-                    "include the SPECIFIC design from the change design above — "
-                    "exact column definitions, method signatures, relationship "
-                    "types, fillable arrays, validation rules, route definitions. "
+                    "actual file content (10+ lines around the modification "
+                    "point) as read during exploration.\n"
+                    "- For create_file steps: the instruction field must be a "
+                    "DETAILED SPECIFICATION, not a brief description. Include: "
+                    "(a) The exact type of file (e.g., 'ALTER migration to add "
+                    "columns' not just 'migration'; 'resource controller' not "
+                    "just 'controller'). "
+                    "(b) If this entity already exists (found during "
+                    "exploration), state that explicitly: 'The reviews table "
+                    "already exists (created by migration/2024_01_create_"
+                    "reviews_table). This migration ADDS two columns to it.' "
+                    "(c) The exact namespace/module path for the new file. "
+                    "(d) Every import statement the file will need. "
+                    "(e) For database files: every column with its type and "
+                    "constraints (e.g., 'rating: integer, unsigned, nullable, "
+                    "default 0'). "
+                    "(f) For code files: method signatures with parameter types "
+                    "and return types. "
+                    "(g) The exact existing file whose pattern to follow, by "
+                    "name. "
+                    "In the context field, include: "
+                    "(1) A substantial code snippet (15+ lines) from the "
+                    "pattern file showing the exact structure to replicate — "
+                    "imports, class declaration, key methods. Do NOT "
+                    "abbreviate with '...'. "
+                    "(2) All design details: column types with constraints, "
+                    "method signatures, relationships/associations with exact "
+                    "syntax. "
+                    "(3) If modifying existing infrastructure (ALTER migration, "
+                    "adding to existing route file): include what currently "
+                    "exists so the executor knows the starting state. "
                     "Do NOT use generic template comments like "
                     "'// Example migration structure'. The executor model is "
-                    "smaller and needs concrete details, not placeholders. Also "
-                    "include a short code snippet from an existing file showing "
-                    "the import/class structure pattern to follow.\n"
-                    "- Order steps so dependencies come first\n\n"
-                    "EXAMPLE STEP (edit_file):\n"
-                    '{\n'
-                    '  "step_number": 3,\n'
-                    '  "tool": "edit_file",\n'
-                    '  "file_path": "src/config.py",\n'
-                    '  "instruction": "Find the Settings class (around line 15). '
-                    "After the 'port: int = 8080' field, add a new field: "
-                    "'debug: bool = False'. Keep the existing fields unchanged."
-                    '",\n'
-                    '  "context": "class Settings:\\n    port: int = 8080\\n'
-                    '    host: str = \\"localhost\\""\n'
-                    "}\n\n"
-                    "EXAMPLE STEP (create_file):\n"
+                    "smaller and needs concrete details, not placeholders.\n"
+                    "- Order steps so dependencies come first\n"
+                    "- EXISTING INFRASTRUCTURE: If the file summary shows "
+                    "that a database table, route group, or config entry "
+                    "already exists, do NOT create duplicate infrastructure. "
+                    "For database tables that already exist, create a NEW "
+                    "migration that ALTERS the table (adds columns, indexes, "
+                    "etc.) — do NOT create a second CREATE TABLE migration. "
+                    "For route files that already exist, use edit_file to add "
+                    "new routes to the existing file. For config files that "
+                    "already exist, use edit_file.\n\n"
+                    "EXAMPLE STEP (edit_file — add route registration):\n"
                     '{\n'
                     '  "step_number": 5,\n'
+                    '  "tool": "edit_file",\n'
+                    '  "file_path": "routes/web.php",\n'
+                    '  "instruction": "Add review routes AFTER the existing '
+                    "book routes (around line 34). Add exactly: "
+                    "Route::resource('reviews', ReviewController::class); "
+                    "Also add the import at the top of the file: "
+                    "use App\\\\Http\\\\Controllers\\\\ReviewController; "
+                    "The import should go after the existing BookController "
+                    'import on line 8.",\n'
+                    '  "context": "// Current routes/web.php lines 5-12 '
+                    "and 30-36:\\nuse App\\\\Http\\\\Controllers\\\\"
+                    "BookController;\\n// ...\\nRoute::resource('books', "
+                    'BookController::class);"\n'
+                    "}\n\n"
+                    "EXAMPLE STEP (create_file — model with full spec):\n"
+                    '{\n'
+                    '  "step_number": 3,\n'
                     '  "tool": "create_file",\n'
                     '  "file_path": "app/Models/Review.php",\n'
-                    '  "instruction": "Create the Review model with fillable '
-                    "attributes and relationships to user and book. Use the "
-                    'same structure as app/Models/User.php.",\n'
-                    '  "context": "Design: fillable = [\'user_id\', '
-                    "'book_id', 'rating', 'review_text']. "
-                    "Relationships: user() -> belongsTo(User::class), "
-                    "book() -> belongsTo(Book::class). "
-                    "Cast rating as integer. "
-                    "Unique constraint (user_id, book_id) enforced at DB level.\\n\\n"
-                    "Pattern from app/Models/User.php:\\n"
-                    "<?php\\nnamespace App\\\\Models;\\n"
+                    '  "instruction": "Create the Review Eloquent model in '
+                    "namespace App\\\\Models. Fillable: user_id (bigint FK), "
+                    "book_id (bigint FK), rating (integer, unsigned), "
+                    "review_text (text, nullable). Relationships: "
+                    "user() belongsTo User::class, book() belongsTo "
+                    "Book::class. Cast rating as integer. Imports: "
+                    "Illuminate\\\\Database\\\\Eloquent\\\\Model, "
+                    "Illuminate\\\\Database\\\\Eloquent\\\\Relations\\\\"
+                    "BelongsTo. Follow the exact pattern from "
+                    'app/Models/Book.php.",\n'
+                    '  "context": "Pattern from app/Models/Book.php:\\n'
+                    "<?php\\nnamespace App\\\\Models;\\n\\n"
                     "use Illuminate\\\\Database\\\\Eloquent\\\\Model;\\n"
-                    '..."\n'
+                    "use Illuminate\\\\Database\\\\Eloquent\\\\Relations\\\\"
+                    "HasMany;\\n\\nclass Book extends Model\\n{\\n"
+                    "    protected $fillable = ['title', 'author', 'isbn'];"
+                    "\\n\\n    protected $casts = ['published_at' => "
+                    "'date'];\\n\\n    public function reviews(): HasMany\\n"
+                    '    {\\n        return $this->hasMany(Review::class);'
+                    '\\n    }\\n}"\n'
                     "}\n\n"
                     + (
                         "REQUIRED MISSING FILES — these were identified "
@@ -662,7 +777,16 @@ async def create_plan(
                     "configuration or bootstrap file\n"
                     "- If the task requires infrastructure that was identified as "
                     "missing during exploration (auth scaffolding, base templates, "
-                    "etc.), those setup steps come FIRST in the plan\n\n"
+                    "etc.), those setup steps come FIRST in the plan\n"
+                    "- No duplicate infrastructure: if a table already exists, "
+                    "the plan uses ALTER (not CREATE). If a route file exists, "
+                    "the plan edits it (not creates a new one)\n"
+                    "- Every new module/class has a registration step: if the "
+                    "framework requires registration (routes, service providers, "
+                    "middleware, plugins, __init__.py exports), there is an "
+                    "edit_file step that adds the registration\n"
+                    "- All import paths use the project's namespace/module "
+                    "conventions (from the naming conventions)\n\n"
                     "USER SUMMARY — populate the `user_summary` field with up to "
                     "1000 words of plain English explaining: (1) what problem this "
                     "plan solves and the overall approach, (2) why specific "
@@ -677,7 +801,7 @@ async def create_plan(
             },
         ],
         schema=ExecutionPlan,
-        max_tokens=expert_max_tokens,
+        max_tokens=plan_assembly_max_tokens,
         thinking_callback=on_thinking,
     )
 
@@ -803,7 +927,7 @@ async def create_plan(
                 },
             ],
             schema=VerificationPlan,
-            max_tokens=expert_max_tokens,
+            max_tokens=plan_assembly_max_tokens,
             thinking_callback=on_thinking,
         )
 
@@ -883,6 +1007,15 @@ async def _revise_plan(
         if expert_llm_client
         else settings.ollama_max_tokens
     )
+    expert_ctx = (
+        settings.effective_expert_context_window
+        if expert_llm_client
+        else settings._active_context_window
+    )
+    plan_max_tokens = max(
+        expert_max_tokens,
+        int(expert_ctx * PLAN_OUTPUT_PERCENT),
+    )
     await _send_stage(
         ws, "Revising plan based on feedback...", model=expert.model_name,
     )
@@ -904,7 +1037,7 @@ async def _revise_plan(
             },
         ],
         schema=ExecutionPlan,
-        max_tokens=expert_max_tokens,
+        max_tokens=plan_max_tokens,
         thinking_callback=on_thinking,
     )
     logger.info(

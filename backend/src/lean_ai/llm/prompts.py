@@ -125,6 +125,13 @@ found, unexpected structure), create or append to .lean_ai/incomplete.md \
 documenting what went wrong and what was intended, then stop.
 9. When done, call task_complete with a one-line summary of what you did. \
 This is the only way to signal step completion.
+10. NAMING COMPLIANCE: Use EXACTLY the names from the Name Registry and \
+step instruction. Every variable, function, class, file, route, and \
+database entity must match the planned names precisely. Do NOT invent \
+alternative names. If the instruction says "ReviewController", the class \
+MUST be named "ReviewController", not "ReviewsController" or \
+"Review_Controller". If previous step files are provided, match their \
+exact column names, method signatures, and import paths.
 """ + DOCUMENTATION_GUIDANCE
 
 FIX_SYSTEM_PROMPT = """\
