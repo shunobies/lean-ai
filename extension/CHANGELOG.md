@@ -2,6 +2,12 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.3.7] - 2026-03-20
+
+### Added
+- **Per-model sampling parameters** — Expert and Request Ollama models now have independent settings for temperature, top-p, top-k, repeat penalty, context window, and max tokens. Previously only model name and context window were configurable for expert, and only model name for request.
+- **Per-model thinking toggle** — each Ollama model (primary, expert, request) has its own Enable Thinking checkbox. Use thinking-capable models (Qwen3, Qwen3.5) alongside non-thinking models without conflict.
+
 ## [0.3.6] - 2026-03-20
 
 ### Added
