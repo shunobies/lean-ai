@@ -41,12 +41,7 @@ def build_fix_system_prompt(
     if not context:
         return base
 
-    max_context = 3000
-    ctx = context[:max_context]
-    if len(context) > max_context:
-        ctx += "\n... (condensed)"
-
-    return f"{base}\n## Project Context\n\n{ctx}"
+    return f"{base}\n## Project Context\n\n{context}"
 
 
 def build_request_system_prompt(
@@ -58,12 +53,7 @@ def build_request_system_prompt(
     if not context:
         return base
 
-    max_context = 3000
-    ctx = context[:max_context]
-    if len(context) > max_context:
-        ctx += "\n... (condensed)"
-
-    return f"{base}\n## Project Context\n\n{ctx}"
+    return f"{base}\n## Project Context\n\n{context}"
 
 
 def build_step_system_prompt(
@@ -74,12 +64,7 @@ def build_step_system_prompt(
     prompt = STEP_EXECUTION_SYSTEM_PROMPT
 
     if context:
-        # Include condensed project context so the executor knows patterns
-        max_context = 3000
-        ctx = context[:max_context]
-        if len(context) > max_context:
-            ctx += "\n... (condensed)"
-        prompt += f"\n## Project Context\n\n{ctx}"
+        prompt += f"\n## Project Context\n\n{context}"
 
     if naming_conventions:
         prompt += (

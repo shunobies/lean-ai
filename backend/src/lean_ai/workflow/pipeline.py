@@ -20,7 +20,7 @@ from lean_ai.config import settings
 from lean_ai.llm.plan_schema import ExecutionPlan, plan_to_markdown
 from lean_ai.llm.planner import assess_clarity, create_plan
 from lean_ai.llm.tool_definitions import IMPLEMENTATION_TOOLS
-from lean_ai.routers.context_helpers import load_full_context
+from lean_ai.routers.context_helpers import load_condensed_context
 from lean_ai.tools import scratchpad
 from lean_ai.workflow.prompts import (
     build_fix_system_prompt,
@@ -339,7 +339,7 @@ async def _execute_plan(
 
     # Build the system prompt once (shared across all steps)
     system_prompt = build_step_system_prompt(
-        context,
+        load_condensed_context(repo_root),
         naming_conventions=getattr(plan, "naming_conventions", ""),
     )
 
@@ -723,7 +723,7 @@ async def _run_validation_fix_loop(
     if max_retries <= 0:
         return validation_results
 
-    system_prompt = build_fix_system_prompt(context)
+    system_prompt = build_fix_system_prompt(load_condensed_context(repo_root))
 
     # Callbacks — same WebSocket progress reporting used by the main loop
     async def on_tool_call(name: str, args: dict) -> None:
@@ -928,11 +928,12 @@ async def _run_fix(
         repo_root, ws, session_id, llm_client=active_client,
     )
     commands = _effective_post_commands(repo_root)
+    execution_context = load_condensed_context(repo_root)
     if is_request:
-        system_prompt = build_request_system_prompt(context)
+        system_prompt = build_request_system_prompt(execution_context)
     else:
         system_prompt = build_fix_system_prompt(
-            context, test_command=commands.get("test", ""),
+            execution_context, test_command=commands.get("test", ""),
         )
 
     # Callbacks — fire-and-forget (same rationale as plan mode callbacks)
@@ -1008,7 +1009,7 @@ async def _run_fix(
 
     def _build_context_refresh(current_messages: list[dict]) -> list[dict]:
         """Rebuild message list from fresh disk state."""
-        fresh_context = load_full_context(repo_root)
+        fresh_context = load_condensed_context(repo_root)
         if is_request:
             fresh_system_prompt = build_request_system_prompt(fresh_context)
         else:

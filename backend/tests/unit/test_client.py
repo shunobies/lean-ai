@@ -834,7 +834,7 @@ async def test_default_nudge_when_no_custom():
 
     nudge_msgs = [
         m for m in messages
-        if m["role"] == "user" and "You must call a tool now" in m.get("content", "")
+        if m["role"] == "user" and "call task_complete" in m.get("content", "")
     ]
     assert len(nudge_msgs) == 1
 

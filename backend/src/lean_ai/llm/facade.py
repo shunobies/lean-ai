@@ -14,6 +14,17 @@ from lean_ai.llm.base import LLMMetrics, LLMProvider, ToolCall, ToolCallInfo
 logger = logging.getLogger(__name__)
 
 
+def _looks_like_completion(text: str) -> bool:
+    """Detect if a text-only response is a completion summary.
+
+    The LLM typically produces a structured summary containing both
+    "Summary of" and "Files Modified".  Checking for both together avoids
+    false positives from casual mid-task mentions.
+    """
+    lower = text.lower()
+    return "summary of" in lower and "files modified" in lower
+
+
 class LLMClient:
     """Unified LLM interface that delegates to a provider.
 
@@ -249,12 +260,20 @@ class LLMClient:
                         consecutive_text_only,
                     )
                     break
-                # Nudge: remind the LLM it must call tools, not just chat
-                nudge = text_only_nudge or (
-                    "You must call a tool now — do not respond with text "
-                    "only. If you have finished all work, call task_complete. "
-                    "Otherwise, call the next tool needed to make progress."
-                )
+                # Nudge: completion-aware to avoid pushing the LLM into
+                # unnecessary extra work when it has already summarised.
+                if _looks_like_completion(content):
+                    nudge = (
+                        "Your response looks like a completion summary but you "
+                        "did not call task_complete. Call task_complete now with "
+                        "your summary to signal that you are finished."
+                    )
+                else:
+                    nudge = text_only_nudge or (
+                        "If you have finished all work, call task_complete. "
+                        "Otherwise, you must call a tool now — do not respond "
+                        "with text only."
+                    )
                 messages.append({"role": "user", "content": nudge})
                 continue
 

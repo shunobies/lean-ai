@@ -4,12 +4,16 @@ import logging
 import os
 from pathlib import Path
 
+from lean_ai.config import settings
 from lean_ai.indexer.indexer import search_index
 from lean_ai.indexer.tree import list_repo_tree
 from lean_ai.llm.prompts import CHAT_SYSTEM_PROMPT
 from lean_ai.routers.models import WorkspaceContext
 
 logger = logging.getLogger(__name__)
+
+EXECUTION_CONTEXT_PERCENT = 0.05  # 5% of context window for execution prompts
+CUSTOM_DOCS_SHARE = 0.4  # 40% of budget reserved for custom steering docs
 
 
 def ensure_gitignore_entries(repo_root: str, entries: list[str]) -> list[str]:
@@ -126,6 +130,61 @@ def load_full_context(repo_root: str) -> str:
                 chunk = path.read_text(encoding="utf-8", errors="replace")
                 if chunk.strip():
                     parts.append(chunk)
+
+    return "\n\n".join(parts)
+
+
+def load_condensed_context(repo_root: str) -> str:
+    """Load project context condensed for execution prompts.
+
+    Unlike ``load_full_context`` (used by planning phases), this applies a
+    percentage-based budget and guarantees custom steering documents get a
+    reserved allocation so they are not truncated away by large auto-generated
+    context files.
+    """
+    total_budget = int(
+        settings._active_context_window * EXECUTION_CONTEXT_PERCENT * 3.5
+    )
+
+    # Load components separately
+    lean_dir = Path(repo_root) / ".lean_ai"
+
+    generated_parts: list[str] = []
+    for filename in ("project_context.md", "framework_guide.md"):
+        path = lean_dir / filename
+        if path.is_file():
+            chunk = path.read_text(encoding="utf-8", errors="replace")
+            if chunk.strip():
+                generated_parts.append(chunk)
+    generated_text = "\n\n".join(generated_parts)
+
+    custom_text = load_custom_steering_docs(repo_root)
+
+    # Budget allocation with rollover
+    custom_budget = int(total_budget * CUSTOM_DOCS_SHARE)
+    generated_budget = total_budget - custom_budget
+
+    if not custom_text:
+        generated_budget = total_budget
+        custom_budget = 0
+    if not generated_text:
+        custom_budget = total_budget
+        generated_budget = 0
+
+    parts: list[str] = []
+
+    if generated_text:
+        if len(generated_text) <= generated_budget:
+            parts.append(generated_text)
+            custom_budget += generated_budget - len(generated_text)
+        else:
+            parts.append(generated_text[:generated_budget] + "\n... (condensed)")
+
+    if custom_text:
+        if len(custom_text) <= custom_budget:
+            parts.append(custom_text)
+        else:
+            parts.append(custom_text[:custom_budget] + "\n... (condensed)")
 
     return "\n\n".join(parts)
 
