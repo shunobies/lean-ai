@@ -642,6 +642,7 @@ export function getWebviewHtml(chatFontSize: number): string {
     let savedMessagesHtml = null;
     let searchDebounceTimer = null;
     let currentStreamDiv = null; // AI bubble being filled during chat streaming
+    let currentPlanningDiv = null; // AI bubble being filled during planning streaming
     let problemsActive = false;
     let debugActive = false;
 
@@ -1102,10 +1103,27 @@ export function getWebviewHtml(chatFontSize: number): string {
                 break;
 
             case 'reply':
-                sending = false;
-                sendBtn.disabled = false;
-                if (sendTimeout) { clearTimeout(sendTimeout); sendTimeout = null; }
-                addMessage(formatMarkdown(msg.text), msg.cls || 'msg-ai');
+                if (msg.streaming) {
+                    // Streaming token — append to current planning bubble
+                    if (!currentPlanningDiv) {
+                        currentPlanningDiv = document.createElement('div');
+                        currentPlanningDiv.className = 'msg msg-ai';
+                        messagesEl.appendChild(currentPlanningDiv);
+                    }
+                    currentPlanningDiv.textContent += msg.text;
+                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                } else if (msg.done && currentPlanningDiv) {
+                    // Streaming complete — apply markdown formatting
+                    currentPlanningDiv.innerHTML = formatMarkdown(msg.text);
+                    currentPlanningDiv = null;
+                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                } else {
+                    // Non-streaming reply (existing behavior)
+                    sending = false;
+                    sendBtn.disabled = false;
+                    if (sendTimeout) { clearTimeout(sendTimeout); sendTimeout = null; }
+                    addMessage(formatMarkdown(msg.text), msg.cls || 'msg-ai');
+                }
                 break;
 
             case 'filesModifiedLinks': {
@@ -1123,24 +1141,48 @@ export function getWebviewHtml(chatFontSize: number): string {
                 // Collapsible thinking/reasoning trace from the LLM
                 const container = document.getElementById('messages');
                 const last = container.lastElementChild;
-                if (last && last.querySelector('.thinking-details')) {
-                    const pre = last.querySelector('.thinking-pre');
-                    if (pre) { pre.textContent += String.fromCharCode(10, 10) + msg.text; }
+                if (msg.streaming) {
+                    // Streaming token — append without double newline
+                    if (last && last.querySelector('.thinking-details')) {
+                        const pre = last.querySelector('.thinking-pre');
+                        if (pre) { pre.textContent += msg.text; }
+                    } else {
+                        const div = document.createElement('div');
+                        div.className = 'msg msg-system';
+                        const details = document.createElement('details');
+                        details.className = 'thinking-details';
+                        const summary = document.createElement('summary');
+                        summary.textContent = 'Thinking...';
+                        const pre = document.createElement('pre');
+                        pre.className = 'thinking-pre';
+                        pre.textContent = msg.text;
+                        details.appendChild(summary);
+                        details.appendChild(pre);
+                        div.appendChild(details);
+                        container.appendChild(div);
+                        container.scrollTop = container.scrollHeight;
+                    }
                 } else {
-                    const div = document.createElement('div');
-                    div.className = 'msg msg-system';
-                    const details = document.createElement('details');
-                    details.className = 'thinking-details';
-                    const summary = document.createElement('summary');
-                    summary.textContent = 'Thinking...';
-                    const pre = document.createElement('pre');
-                    pre.className = 'thinking-pre';
-                    pre.textContent = msg.text;
-                    details.appendChild(summary);
-                    details.appendChild(pre);
-                    div.appendChild(details);
-                    container.appendChild(div);
-                    container.scrollTop = container.scrollHeight;
+                    // Bulk thinking content (existing behavior)
+                    if (last && last.querySelector('.thinking-details')) {
+                        const pre = last.querySelector('.thinking-pre');
+                        if (pre) { pre.textContent += String.fromCharCode(10, 10) + msg.text; }
+                    } else {
+                        const div = document.createElement('div');
+                        div.className = 'msg msg-system';
+                        const details = document.createElement('details');
+                        details.className = 'thinking-details';
+                        const summary = document.createElement('summary');
+                        summary.textContent = 'Thinking...';
+                        const pre = document.createElement('pre');
+                        pre.className = 'thinking-pre';
+                        pre.textContent = msg.text;
+                        details.appendChild(summary);
+                        details.appendChild(pre);
+                        div.appendChild(details);
+                        container.appendChild(div);
+                        container.scrollTop = container.scrollHeight;
+                    }
                 }
                 break;
             }
@@ -1180,11 +1222,17 @@ export function getWebviewHtml(chatFontSize: number): string {
                 break;
             }
 
+            case 'streamingCleanup':
+                // Finalize any open planning streaming bubble (e.g. on stage done or error)
+                currentPlanningDiv = null;
+                break;
+
             case 'error':
                 sending = false;
                 sendBtn.disabled = false;
                 if (sendTimeout) { clearTimeout(sendTimeout); sendTimeout = null; }
                 currentStreamDiv = null; // clean up any partial streaming bubble
+                currentPlanningDiv = null; // clean up any partial planning bubble
                 addMessage(escapeHtml(msg.text), 'msg-error');
                 break;
 

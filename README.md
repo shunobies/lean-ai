@@ -10,7 +10,7 @@ Run it fully local with [Ollama](https://ollama.com), or connect to OpenAI and A
 
 ## Why Lean AI?
 
-- **Plan first, then execute** — a 6-phase planning pipeline reads your codebase, traces data flow across files, and produces a structured plan before touching any code. You approve (or revise) before anything changes.
+- **Plan first, then execute** — a 6-phase planning pipeline reads your codebase, traces data flow across files, and produces a structured plan before touching any code. You approve (or revise) before anything changes. Thinking and content tokens stream in real-time during every planning phase so you can follow the agent's reasoning as it works.
 - **Multi-provider flexibility** — Ollama for free local inference, OpenAI for GPT-4o, Anthropic for Claude. Switch from the dropdown without restarting. Use cheap local models for small fixes, cloud models for hard problems.
 - **Dual-model pipeline** — run a fast local model for codebase exploration and code execution, then automatically hand off to a cloud model (Claude, GPT-4o) for reasoning-heavy planning phases and complex fix attempts. Save cloud tokens for the decisions that matter.
 - **Local Refiner** — when using cloud providers, a local Ollama model pre-processes your prompts: enriches them with private knowledge base context, strips sensitive data, and structures vague requests into detailed specs. Your proprietary docs never leave your machine. [Learn more](docs/knowledge-base.md)

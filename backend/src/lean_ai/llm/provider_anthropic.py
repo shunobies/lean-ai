@@ -130,14 +130,18 @@ class AnthropicProvider(LLMProvider):
         messages: list[dict],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        stream_callback=None,
+        thinking_callback=None,
     ) -> tuple[str, LLMMetrics]:
         temp = temperature if temperature is not None else self._temperature
         tokens = max_tokens if max_tokens is not None else self._max_tokens_val
         system_prompt, filtered_messages = _split_system(messages)
 
         logger.info(
-            "Anthropic chat_raw: model=%s messages=%d temp=%.1f max_tokens=%d",
+            "Anthropic chat_raw: model=%s messages=%d temp=%.1f max_tokens=%d streaming=%s",
             self._model, len(filtered_messages), temp, tokens,
+            bool(stream_callback),
         )
 
         kwargs: dict = {
@@ -155,6 +159,8 @@ class AnthropicProvider(LLMProvider):
                 async for chunk in stream.text_stream:
                     if chunk:
                         chunks.append(chunk)
+                        if stream_callback:
+                            await stream_callback(chunk)
                 final_message = await stream.get_final_message()
             return "".join(chunks), final_message
 
@@ -172,6 +178,8 @@ class AnthropicProvider(LLMProvider):
         schema: type[BaseModel],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        thinking_callback=None,
     ) -> tuple[BaseModel, LLMMetrics]:
         temp = temperature if temperature is not None else self._temperature
         tokens = max_tokens if max_tokens is not None else self._max_tokens_val

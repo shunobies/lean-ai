@@ -104,14 +104,22 @@ class OpenAIProvider(LLMProvider):
         messages: list[dict],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        stream_callback=None,
+        thinking_callback=None,
     ) -> tuple[str, LLMMetrics]:
         temp = temperature if temperature is not None else self._temperature
         tokens = max_tokens if max_tokens is not None else self._max_tokens_val
 
         logger.info(
-            "OpenAI chat_raw: model=%s messages=%d temp=%.1f max_tokens=%d",
-            self._model, len(messages), temp, tokens,
+            "OpenAI chat_raw: model=%s messages=%d temp=%.1f max_tokens=%d streaming=%s",
+            self._model, len(messages), temp, tokens, bool(stream_callback),
         )
+
+        if stream_callback:
+            return await self._chat_raw_streaming(
+                messages, temp, tokens, stream_callback,
+            )
 
         async def _chat():
             return await self._client.chat.completions.create(
@@ -131,12 +139,62 @@ class OpenAIProvider(LLMProvider):
         logger.info("OpenAI chat_raw response (%d chars): %s", len(text), text[:200])
         return text, metrics
 
+    async def _chat_raw_streaming(
+        self,
+        messages: list[dict],
+        temp: float,
+        tokens: int,
+        stream_callback,
+    ) -> tuple[str, LLMMetrics]:
+        """Stream chat_raw response, forwarding content tokens via callback."""
+        async def _start_stream():
+            return await self._client.chat.completions.create(
+                model=self._model,
+                messages=messages,
+                temperature=temp,
+                max_tokens=tokens,
+                stream=True,
+                stream_options={"include_usage": True},
+            )
+
+        stream = await self._retry_with_backoff(
+            _start_stream, label="chat_raw(stream)",
+        )
+
+        content_parts: list[str] = []
+        stop_reason: str | None = None
+        usage = None
+
+        async for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                token = chunk.choices[0].delta.content
+                content_parts.append(token)
+                await stream_callback(token)
+            if chunk.choices and chunk.choices[0].finish_reason:
+                stop_reason = chunk.choices[0].finish_reason
+            if hasattr(chunk, "usage") and chunk.usage:
+                usage = chunk.usage
+
+        text = "".join(content_parts)
+        metrics = LLMMetrics(
+            prompt_tokens=usage.prompt_tokens if usage else 0,
+            completion_tokens=usage.completion_tokens if usage else 0,
+            stop_reason=stop_reason,
+        )
+
+        logger.info(
+            "OpenAI chat_raw response (%d chars, streamed): %s", len(text), text[:200],
+        )
+        return text, metrics
+
     async def chat_structured(
         self,
         messages: list[dict],
         schema: type[BaseModel],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        thinking_callback=None,
     ) -> tuple[BaseModel, LLMMetrics]:
         temp = temperature if temperature is not None else self._temperature
         tokens = max_tokens if max_tokens is not None else self._max_tokens_val

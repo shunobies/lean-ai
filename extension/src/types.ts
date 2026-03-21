@@ -139,6 +139,8 @@ export interface MergeCompleteMessage {
 export interface AssistantContentMessage {
     type: "assistant_content";
     content: string;
+    streaming?: boolean;
+    done?: boolean;
 }
 
 export interface MetricsUpdateMessage {

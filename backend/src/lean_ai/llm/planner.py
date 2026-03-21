@@ -16,6 +16,7 @@ Phase 6 only runs when a test command is available.
 import json
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -84,6 +85,17 @@ async def _send_stage_done(
     if model:
         payload["model"] = model
     await ws_send(ws, "stage_status", payload)
+
+
+async def _send_content_done(
+    ws: WebSocket | None,
+    text: str,
+) -> None:
+    """Signal that content streaming for a planning phase is complete."""
+    if ws is None:
+        return
+    from lean_ai.workflow.ws_handler import ws_send_nowait
+    ws_send_nowait(ws, "assistant_content", {"content": text, "done": True})
 
 
 async def _extract_missing_files(
@@ -178,6 +190,11 @@ async def create_plan(
     test_command: str = "",
     session_id: str = "",
     expert_llm_client: "LLMClient | None" = None,
+    on_content: "Callable | None" = None,
+    on_thinking: "Callable | None" = None,
+    on_tool_call: "Callable | None" = None,
+    on_tool_result: "Callable | None" = None,
+    on_metrics: "Callable | None" = None,
 ) -> ExecutionPlan:
     """Create a plan using 5-phase decomposed planning.
 
@@ -190,6 +207,11 @@ async def create_plan(
         ws: Optional WebSocket for streaming stage progress.
         refiner: Optional local refiner for privacy-stripping file summaries.
         test_command: If set, planner includes test creation steps.
+        on_content: Streaming callback for content tokens.
+        on_thinking: Streaming callback for thinking tokens.
+        on_tool_call: Callback for tool call events (phase 2).
+        on_tool_result: Callback for tool result events (phase 2).
+        on_metrics: Callback for metrics updates (phase 2).
 
     Returns:
         Structured ExecutionPlan ready for per-step execution.
@@ -198,6 +220,7 @@ async def create_plan(
         return await _revise_plan(
             task, revision_context, llm_client, context, ws,
             expert_llm_client=expert_llm_client,
+            on_thinking=on_thinking,
         )
 
     phase_max_tokens = settings.ollama_max_tokens
@@ -243,7 +266,11 @@ async def create_plan(
             },
         ],
         max_tokens=phase_max_tokens,
+        stream_callback=on_content,
+        thinking_callback=on_thinking,
     )
+    if on_content:
+        await _send_content_done(ws, scope)
 
     phase_timings["phase_1_scope"] = time.monotonic() - t0
     _save_debug_phase(
@@ -375,6 +402,11 @@ async def create_plan(
             "model/class being changed and read every file that references it."
         ),
         reminder_interval=15,
+        on_tool_call=on_tool_call,
+        on_tool_result=on_tool_result,
+        on_content=on_content,
+        on_thinking=on_thinking,
+        on_metrics=on_metrics,
     )
 
     phase_timings["phase_2_file_identification"] = time.monotonic() - t0
@@ -451,7 +483,11 @@ async def create_plan(
             },
         ],
         max_tokens=expert_max_tokens,
+        stream_callback=on_content,
+        thinking_callback=on_thinking,
     )
+    if on_content:
+        await _send_content_done(ws, change_design)
 
     phase_timings["phase_3_change_design"] = time.monotonic() - t0
     _save_debug_phase(
@@ -492,7 +528,11 @@ async def create_plan(
             },
         ],
         max_tokens=expert_max_tokens,
+        stream_callback=on_content,
+        thinking_callback=on_thinking,
     )
+    if on_content:
+        await _send_content_done(ws, risks)
 
     phase_timings["phase_4_risks"] = time.monotonic() - t0
     _save_debug_phase(
@@ -638,6 +678,7 @@ async def create_plan(
         ],
         schema=ExecutionPlan,
         max_tokens=expert_max_tokens,
+        thinking_callback=on_thinking,
     )
 
     phase_timings["phase_5_plan_assembly"] = time.monotonic() - t0
@@ -763,6 +804,7 @@ async def create_plan(
             ],
             schema=VerificationPlan,
             max_tokens=expert_max_tokens,
+            thinking_callback=on_thinking,
         )
 
         # Append verification steps, re-number for safety
@@ -820,6 +862,7 @@ async def _revise_plan(
     context: str = "",
     ws: WebSocket | None = None,
     expert_llm_client: "LLMClient | None" = None,
+    on_thinking: "Callable | None" = None,
 ) -> ExecutionPlan:
     """Revise an existing plan based on user feedback.
 
@@ -862,6 +905,7 @@ async def _revise_plan(
         ],
         schema=ExecutionPlan,
         max_tokens=expert_max_tokens,
+        thinking_callback=on_thinking,
     )
     logger.info(
         "Plan revised: %d steps, %d affected files",

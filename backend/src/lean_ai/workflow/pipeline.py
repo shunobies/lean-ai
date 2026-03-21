@@ -100,6 +100,45 @@ async def run_workflow(
     # ── Phase 2: Plan ────────────────────────────────────────────
     await ws_send(ws, "stage_change", {"stage": "planning"})
     plan_commands = _effective_post_commands(repo_root)
+
+    # Planning-specific streaming callbacks — include streaming flag
+    # so the extension can distinguish token-level updates from
+    # per-turn bulk content used during execution.
+    async def on_planning_content(text: str) -> None:
+        ws_send_nowait(ws, "assistant_content", {
+            "content": text, "streaming": True,
+        })
+
+    async def on_planning_thinking(text: str) -> None:
+        ws_send_nowait(ws, "thinking_content", {
+            "content": text, "streaming": True,
+        })
+
+    async def on_planning_tool_call(name: str, args: dict) -> None:
+        ws_send_nowait(ws, "tool_progress", {
+            "tool": name,
+            "status": "running",
+            "description": f"{name} {args.get('path', args.get('command', ''))}",
+        })
+
+    async def on_planning_tool_result(name: str, result: str) -> None:
+        is_error = result.startswith("ERROR:")
+        ws_send_nowait(ws, "tool_progress", {
+            "tool": name,
+            "status": "error" if is_error else "complete",
+            "output": result[:500],
+        })
+
+    async def on_planning_metrics(prompt_tokens: int, context_window: int) -> None:
+        context_pct = (
+            round((prompt_tokens / context_window) * 100) if context_window else 0
+        )
+        ws_send_nowait(ws, "metrics_update", {
+            "context_percent": context_pct,
+            "prompt_tokens": prompt_tokens,
+            "context_window": context_window,
+        })
+
     plan = await create_plan(
         task=task_with_answers,
         repo_root=repo_root,
@@ -110,6 +149,11 @@ async def run_workflow(
         test_command=plan_commands.get("test", ""),
         session_id=session_id,
         expert_llm_client=expert_llm_client,
+        on_content=on_planning_content,
+        on_thinking=on_planning_thinking,
+        on_tool_call=on_planning_tool_call,
+        on_tool_result=on_planning_tool_result,
+        on_metrics=on_planning_metrics,
     )
 
     # ── Phase 3: Approve ─────────────────────────────────────────

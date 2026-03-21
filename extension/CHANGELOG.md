@@ -2,6 +2,15 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.3.6] - 2026-03-20
+
+### Added
+- **Streaming planning output** — all 6 planning phases now stream thinking and content tokens to the sidebar in real-time. Previously, planning ran silently with only stage status messages; now you can watch the LLM's reasoning as it analyzes scope, explores files, designs changes, assesses risks, and assembles the plan.
+  - Phases 1, 3, 4 (scope, design, risks): thinking + content tokens stream live
+  - Phase 2 (file identification): tool call/result progress indicators + per-turn content
+  - Phases 5, 6 (plan assembly, verification): thinking tokens stream (JSON content hidden)
+- **Planning tool activity** — Phase 2 codebase exploration now shows tool progress (file reads, greps) in the sidebar, matching the feedback level of execution mode.
+
 ## [0.3.2] - 2026-03-20
 
 ### Added

@@ -62,15 +62,24 @@ class LLMClient:
         messages: list[dict],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        stream_callback=None,
+        thinking_callback=None,
     ) -> str:
+        kwargs = {}
+        if stream_callback is not None:
+            kwargs["stream_callback"] = stream_callback
+        if thinking_callback is not None:
+            kwargs["thinking_callback"] = thinking_callback
+
         if self._semaphore is not None:
             async with self._semaphore:
                 text, metrics = await self._provider.chat_raw(
-                    messages, temperature, max_tokens,
+                    messages, temperature, max_tokens, **kwargs,
                 )
         else:
             text, metrics = await self._provider.chat_raw(
-                messages, temperature, max_tokens,
+                messages, temperature, max_tokens, **kwargs,
             )
         self.last_chat_metrics = _metrics_to_dict(metrics)
         return text
@@ -81,9 +90,15 @@ class LLMClient:
         schema: type[BaseModel],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        thinking_callback=None,
     ) -> BaseModel:
+        kwargs = {}
+        if thinking_callback is not None:
+            kwargs["thinking_callback"] = thinking_callback
+
         result, metrics = await self._provider.chat_structured(
-            messages, schema, temperature, max_tokens,
+            messages, schema, temperature, max_tokens, **kwargs,
         )
         self.last_chat_metrics = _metrics_to_dict(metrics)
         return result

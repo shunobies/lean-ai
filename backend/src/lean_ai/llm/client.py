@@ -205,14 +205,23 @@ class OllamaProvider(LLMProvider):
         messages: list[dict],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        stream_callback=None,
+        thinking_callback=None,
     ) -> tuple[str, LLMMetrics]:
         temp = temperature if temperature is not None else self._temperature
         tokens = max_tokens if max_tokens is not None else self._max_tokens_val
 
         logger.info(
-            "LLM chat_raw: model=%s messages=%d temp=%.1f max_tokens=%d",
+            "LLM chat_raw: model=%s messages=%d temp=%.1f max_tokens=%d streaming=%s",
             self._model, len(messages), temp, tokens,
+            bool(stream_callback or thinking_callback),
         )
+
+        if stream_callback or thinking_callback:
+            return await self._chat_raw_streaming(
+                messages, temp, tokens, stream_callback, thinking_callback,
+            )
 
         async def _chat():
             return await self._client.chat(
@@ -231,36 +240,95 @@ class OllamaProvider(LLMProvider):
         logger.info("LLM chat_raw response (%d chars): %s", len(text), text[:200])
         return text, metrics
 
+    async def _chat_raw_streaming(
+        self,
+        messages: list[dict],
+        temp: float,
+        tokens: int,
+        stream_callback,
+        thinking_callback,
+    ) -> tuple[str, LLMMetrics]:
+        """Stream chat_raw response, forwarding tokens via callbacks."""
+        async def _start_stream():
+            return await self._client.chat(
+                model=self._model,
+                messages=messages,
+                stream=True,
+                options=self._build_options(temperature=temp, max_tokens=tokens),
+                think=self._enable_thinking,
+            )
+
+        stream = await self._retry_with_backoff(_start_stream, label="chat_raw(stream)")
+
+        content_parts: list[str] = []
+        thinking_parts: list[str] = []
+        last_chunk: dict = {}
+
+        async for chunk in stream:
+            msg = chunk.get("message") or {}
+            thinking_token = msg.get("thinking") or ""
+            content_token = msg.get("content") or ""
+
+            if thinking_token:
+                thinking_parts.append(thinking_token)
+                if thinking_callback:
+                    await thinking_callback(thinking_token)
+
+            if content_token:
+                content_parts.append(content_token)
+                if stream_callback:
+                    await stream_callback(content_token)
+
+            if chunk.get("done"):
+                last_chunk = chunk
+
+        text = "".join(content_parts)
+        thinking = "".join(thinking_parts) or None
+        metrics = self._extract_metrics(last_chunk) if last_chunk else LLMMetrics()
+        metrics.thinking = thinking
+
+        logger.info("LLM chat_raw response (%d chars, streamed): %s", len(text), text[:200])
+        return text, metrics
+
     async def chat_structured(
         self,
         messages: list[dict],
         schema: type[BaseModel],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        thinking_callback=None,
     ) -> tuple[BaseModel, LLMMetrics]:
         temp = temperature if temperature is not None else self._temperature
         tokens = max_tokens if max_tokens is not None else self._max_tokens_val
 
         logger.info(
-            "LLM chat_structured: schema=%s model=%s", schema.__name__, self._model,
+            "LLM chat_structured: schema=%s model=%s streaming=%s",
+            schema.__name__, self._model, bool(thinking_callback),
         )
-
-        async def _chat():
-            return await self._client.chat(
-                model=self._model,
-                messages=messages,
-                format=schema.model_json_schema(),
-                options=self._build_options(temperature=temp, max_tokens=tokens),
-                think=self._enable_thinking,
-            )
 
         last_error = None
         for attempt in range(2):
-            response = await self._retry_with_backoff(
-                _chat, label=f"structured({schema.__name__})",
-            )
-            raw = response["message"]["content"]
-            metrics = self._extract_metrics(response)
+            if thinking_callback:
+                raw, metrics = await self._chat_structured_streaming(
+                    messages, schema, temp, tokens, thinking_callback,
+                )
+            else:
+                async def _chat():
+                    return await self._client.chat(
+                        model=self._model,
+                        messages=messages,
+                        format=schema.model_json_schema(),
+                        options=self._build_options(temperature=temp, max_tokens=tokens),
+                        think=self._enable_thinking,
+                    )
+
+                response = await self._retry_with_backoff(
+                    _chat, label=f"structured({schema.__name__})",
+                )
+                raw = response["message"]["content"]
+                metrics = self._extract_metrics(response)
+
             try:
                 return schema.model_validate_json(raw), metrics
             except ValidationError as exc:
@@ -277,6 +345,50 @@ class OllamaProvider(LLMProvider):
                 )
                 raise
         raise last_error  # type: ignore[misc]
+
+    async def _chat_structured_streaming(
+        self,
+        messages: list[dict],
+        schema: type[BaseModel],
+        temp: float,
+        tokens: int,
+        thinking_callback,
+    ) -> tuple[str, LLMMetrics]:
+        """Stream structured output, forwarding thinking tokens via callback."""
+        async def _start_stream():
+            return await self._client.chat(
+                model=self._model,
+                messages=messages,
+                format=schema.model_json_schema(),
+                stream=True,
+                options=self._build_options(temperature=temp, max_tokens=tokens),
+                think=self._enable_thinking,
+            )
+
+        stream = await self._retry_with_backoff(
+            _start_stream, label=f"structured({schema.__name__})(stream)",
+        )
+
+        content_parts: list[str] = []
+        last_chunk: dict = {}
+
+        async for chunk in stream:
+            msg = chunk.get("message") or {}
+            thinking_token = msg.get("thinking") or ""
+            content_token = msg.get("content") or ""
+
+            if thinking_token:
+                await thinking_callback(thinking_token)
+
+            if content_token:
+                content_parts.append(content_token)
+
+            if chunk.get("done"):
+                last_chunk = chunk
+
+        raw = "".join(content_parts)
+        metrics = self._extract_metrics(last_chunk) if last_chunk else LLMMetrics()
+        return raw, metrics
 
     async def chat_with_tools_single(
         self,

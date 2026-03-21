@@ -119,6 +119,8 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
                 }
             } else if (status === "done") {
                 ctx.postMessage({ type: "thinking", show: false });
+                // Signal the webview to finalize any open streaming bubbles
+                ctx.postMessage({ type: "streamingCleanup" });
                 if (summary) {
                     ctx.postMessage({
                         type: "reply",
@@ -383,11 +385,17 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
         case "pong":
             break;
 
-        // --- Assistant reasoning text: streamed per-turn ---
+        // --- Assistant reasoning text: streamed per-turn or per-token ---
         case "assistant_content": {
             const content = (raw.content || "") as string;
             if (content) {
-                ctx.postMessage({ type: "reply", text: content, cls: "msg-ai" });
+                ctx.postMessage({
+                    type: "reply",
+                    text: content,
+                    cls: "msg-ai",
+                    streaming: raw.streaming || false,
+                    done: raw.done || false,
+                });
             }
             break;
         }
@@ -396,7 +404,11 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
         case "thinking_content": {
             const content = (raw.content || "") as string;
             if (content) {
-                ctx.postMessage({ type: "llmThinking", text: content });
+                ctx.postMessage({
+                    type: "llmThinking",
+                    text: content,
+                    streaming: raw.streaming || false,
+                });
             }
             break;
         }

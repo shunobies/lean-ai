@@ -6,10 +6,13 @@ are encapsulated inside each implementation.
 """
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel
+
+# Type alias for streaming callbacks used by chat_raw / chat_structured.
+StreamCallback = Callable[[str], Awaitable[None]]
 
 
 @dataclass
@@ -76,8 +79,17 @@ class LLMProvider(ABC):
         messages: list[dict],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        stream_callback: StreamCallback | None = None,
+        thinking_callback: StreamCallback | None = None,
     ) -> tuple[str, LLMMetrics]:
-        """Send a conversation and return (response_text, metrics)."""
+        """Send a conversation and return (response_text, metrics).
+
+        When *stream_callback* is provided, content tokens are forwarded
+        to the callback as they arrive (the full text is still returned).
+        When *thinking_callback* is provided, thinking/reasoning tokens
+        are forwarded similarly.
+        """
 
     @abstractmethod
     async def chat_structured(
@@ -86,8 +98,15 @@ class LLMProvider(ABC):
         schema: type[BaseModel],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        thinking_callback: StreamCallback | None = None,
     ) -> tuple[BaseModel, LLMMetrics]:
-        """Send a conversation and parse the response into a Pydantic model."""
+        """Send a conversation and parse the response into a Pydantic model.
+
+        When *thinking_callback* is provided, thinking/reasoning tokens
+        are forwarded to the callback as they arrive.  Content tokens
+        (JSON) are not streamed.
+        """
 
     @abstractmethod
     async def chat_with_tools_single(
