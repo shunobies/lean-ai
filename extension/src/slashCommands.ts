@@ -79,8 +79,9 @@ export async function handleInitCommand(
         text: "Indexing workspace...",
     });
 
+    let indexResult: any = { num_parallel: 1 };
     try {
-        const indexResult = await ctx.client.indexWorkspace(repoRoot, force);
+        indexResult = await ctx.client.indexWorkspace(repoRoot, force);
 
         if (indexResult.index_status === "failed") {
             anyFailure = true;
