@@ -125,6 +125,7 @@ async def init_workspace(request: InitWorkspaceRequest):
             detected_commands if detected_commands and any(detected_commands.values())
             else None
         ),
+        num_parallel=settings.num_parallel,
     )
 
 

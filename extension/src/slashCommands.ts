@@ -111,9 +111,12 @@ export async function handleInitCommand(
         });
     }
 
-    // ── Steps 2 + 3: Generate project context and framework guide in parallel ──
-    // Both are independent LLM-heavy operations — running them concurrently
-    // leverages Ollama's parallel request support for significant speedup.
+    // ── Steps 2 + 3: Generate project context and framework guide ──
+    // Only run in parallel when NUM_PARALLEL >= 2, giving each process its
+    // own LLM slot. With NUM_PARALLEL=1, run sequentially so the LLM can
+    // focus on one document at a time without interleaving.
+    const runParallel = (indexResult.num_parallel ?? 1) >= 2;
+
     const startTime = Date.now();
     let ctxDone = false;
     let guideDone = false;
@@ -134,7 +137,10 @@ export async function handleInitCommand(
         if (!ctxDone && guideDone) {
             return "Framework guide ✓ — generating project context";
         }
-        return "Generating project context + framework guide";
+        if (runParallel) {
+            return "Generating project context + framework guide";
+        }
+        return ctxDone ? "Generating framework guide" : "Generating project context";
     };
 
     const ticker = setInterval(() => {
@@ -148,22 +154,50 @@ export async function handleInitCommand(
     ctx.postMessage({
         type: "thinking",
         show: true,
-        text: "Generating project context + framework guide...",
+        text: runParallel
+            ? "Generating project context + framework guide..."
+            : "Generating project context...",
     });
 
-    // Wrap each promise to track completion for status updates.
-    const ctxPromise = ctx.client.generateProjectContext(repoRoot, force)
-        .then((result) => { ctxDone = true; return result; })
-        .catch((err) => { ctxDone = true; throw err; });
+    let ctxSettled: PromiseSettledResult<{ path: string; chars: number; skipped: boolean }>;
+    let guideSettled: PromiseSettledResult<{ path: string; chars: number; skipped: boolean }>;
 
-    const guidePromise = ctx.client.generateFrameworkGuide(repoRoot, force)
-        .then((result) => { guideDone = true; return result; })
-        .catch((err) => { guideDone = true; throw err; });
+    if (runParallel) {
+        // Parallel: each generation gets its own LLM slot
+        const ctxPromise = ctx.client.generateProjectContext(repoRoot, force)
+            .then((result) => { ctxDone = true; return result; })
+            .catch((err: unknown) => { ctxDone = true; throw err; });
 
-    const [ctxSettled, guideSettled] = await Promise.allSettled([
-        ctxPromise,
-        guidePromise,
-    ]);
+        const guidePromise = ctx.client.generateFrameworkGuide(repoRoot, force)
+            .then((result) => { guideDone = true; return result; })
+            .catch((err: unknown) => { guideDone = true; throw err; });
+
+        [ctxSettled, guideSettled] = await Promise.allSettled([
+            ctxPromise,
+            guidePromise,
+        ]);
+    } else {
+        // Sequential: project context first, then framework guide
+        ctxSettled = await ctx.client.generateProjectContext(repoRoot, force)
+            .then((result): PromiseFulfilledResult<typeof result> => {
+                ctxDone = true;
+                return { status: "fulfilled", value: result };
+            })
+            .catch((err: unknown): PromiseRejectedResult => {
+                ctxDone = true;
+                return { status: "rejected", reason: err };
+            });
+
+        guideSettled = await ctx.client.generateFrameworkGuide(repoRoot, force)
+            .then((result): PromiseFulfilledResult<typeof result> => {
+                guideDone = true;
+                return { status: "fulfilled", value: result };
+            })
+            .catch((err: unknown): PromiseRejectedResult => {
+                guideDone = true;
+                return { status: "rejected", reason: err };
+            });
+    }
 
     clearInterval(ticker);
 

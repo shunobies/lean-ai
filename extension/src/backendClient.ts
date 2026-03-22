@@ -498,6 +498,7 @@ export class BackendClient {
         index_status: string;
         index_file_count?: number;
         index_chunk_count?: number;
+        num_parallel?: number;
     }> {
         // 60s timeout — indexing is local file I/O, should be fast
         const controller = new AbortController();
@@ -519,6 +520,7 @@ export class BackendClient {
                 index_status: string;
                 index_file_count?: number;
                 index_chunk_count?: number;
+                num_parallel?: number;
             }>;
         } finally {
             clearTimeout(timeout);

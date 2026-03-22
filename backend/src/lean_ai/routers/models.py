@@ -23,6 +23,7 @@ class InitWorkspaceResponse(BaseModel):
     index_file_count: int | None = None
     index_chunk_count: int | None = None
     commands_detected: dict[str, str] | None = None
+    num_parallel: int = 1
 
 
 class GenerateProjectContextRequest(BaseModel):
