@@ -555,6 +555,7 @@ async def create_plan(
                 "role": "user",
                 "content": (
                     f"TASK: {task}\n\n"
+                    f"FILES IDENTIFIED AND READ:\n{file_summary}\n\n"
                     f"CHANGE DESIGN:\n{change_design}\n\n"
                     "Evaluate risks, failure modes, and edge cases:\n"
                     "- What could break?\n"
@@ -571,7 +572,10 @@ async def create_plan(
                     "new modules, database seed data registration. Do NOT "
                     "suggest optional architectural patterns (repositories, "
                     "services, events, jobs, helpers, decorators, etc.) "
-                    "unless the task explicitly requests them."
+                    "unless the task explicitly requests them.\n\n"
+                    "Do NOT simulate running commands, invent file listings, "
+                    "or fabricate file contents. Base your analysis ONLY on "
+                    "the codebase information provided above."
                 ),
             },
         ],
