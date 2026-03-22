@@ -158,9 +158,10 @@ function runWebSocketWorkflow(
                 stream.progress(`Stage: ${formatStageName(stage)}`);
             },
 
-            onStageStatus(stage, status, summary) {
+            onStageStatus(stage, status, summary, phase) {
                 if (status === "running") {
-                    stream.progress(`${formatStageName(stage)}...`);
+                    const phaseStr = phase ? ` phase ${phase}` : "";
+                    stream.progress(`${formatStageName(stage)}${phaseStr}...`);
                 } else if (status === "done" && summary) {
                     stream.markdown(`\n\n**${formatStageName(stage)}:** ${summary}\n\n`);
                 }

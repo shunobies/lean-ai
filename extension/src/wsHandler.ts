@@ -102,12 +102,17 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
             const status = raw.status as string;
             const summary = raw.summary as string | undefined;
             const model = raw.model as string | undefined;
+            const phase = raw.phase as number | undefined;
 
             if (status === "running") {
-                ctx.postMessage({ type: "stage", stage });
+                const displayStage = phase
+                    ? `${stage} phase ${phase}`
+                    : stage;
+                ctx.postMessage({ type: "stage", stage: displayStage });
+                const phaseStr = phase ? ` phase ${phase}` : "";
                 const thinkingText = model
-                    ? `${formatStageName(stage)}... (${model})`
-                    : `${formatStageName(stage)}...`;
+                    ? `${formatStageName(stage)}${phaseStr}... (${model})`
+                    : `${formatStageName(stage)}${phaseStr}...`;
                 ctx.postMessage({
                     type: "thinking",
                     show: true,

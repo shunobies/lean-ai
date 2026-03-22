@@ -14,7 +14,7 @@ export interface StreamCallbacks {
     onError?: (message: string, recoverable: boolean) => void;
     onComplete?: (summary: string, bundleId?: string, filesModified?: string[]) => void;
     onIndexStatus?: (status: string, progress?: number) => void;
-    onStageStatus?: (stage: string, status: string, summary?: string) => void;
+    onStageStatus?: (stage: string, status: string, summary?: string, phase?: number) => void;
     onClarificationNeeded?: (questions: string[], improvedPrompt?: string) => void;
     onPlanRevision?: (reviewFeedback: string, revisionNumber: number) => void;
     onPlanRejected?: (feedback: string, stage: string) => void;
@@ -56,7 +56,7 @@ export function handleStreamMessage(msg: WSMessage, callbacks: StreamCallbacks):
             callbacks.onIndexStatus?.(msg.status, msg.progress);
             break;
         case "stage_status":
-            callbacks.onStageStatus?.(msg.stage, msg.status, msg.summary);
+            callbacks.onStageStatus?.(msg.stage, msg.status, msg.summary, msg.phase);
             break;
         case "clarification_needed":
             callbacks.onClarificationNeeded?.(msg.questions, msg.improved_prompt);

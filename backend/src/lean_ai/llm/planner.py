@@ -66,6 +66,7 @@ async def _send_stage(
     ws: WebSocket | None,
     summary: str,
     model: str | None = None,
+    phase: int | None = None,
 ) -> None:
     """Send a planning stage_status running message if WebSocket is available."""
     if ws is None:
@@ -74,6 +75,8 @@ async def _send_stage(
     payload: dict = {"stage": "planning", "status": "running", "summary": summary}
     if model:
         payload["model"] = model
+    if phase is not None:
+        payload["phase"] = phase
     await ws_send(ws, "stage_status", payload)
 
 
@@ -81,6 +84,7 @@ async def _send_stage_done(
     ws: WebSocket | None,
     summary: str,
     model: str | None = None,
+    phase: int | None = None,
 ) -> None:
     """Send a planning stage_status done message if WebSocket is available."""
     if ws is None:
@@ -89,6 +93,8 @@ async def _send_stage_done(
     payload: dict = {"stage": "planning", "status": "done", "summary": summary}
     if model:
         payload["model"] = model
+    if phase is not None:
+        payload["phase"] = phase
     await ws_send(ws, "stage_status", payload)
 
 
@@ -259,7 +265,7 @@ async def create_plan(
         ).strip()
 
     # Phase 1: Scope Analysis
-    await _send_stage(ws, "Phase 1: Analyzing scope...", model=llm_client.model_name)
+    await _send_stage(ws, "Phase 1: Analyzing scope...", model=llm_client.model_name, phase=1)
     logger.info("Planning Phase 1: Scope analysis")
     t0 = time.monotonic()
     scope = await llm_client.chat_raw(
@@ -299,12 +305,12 @@ async def create_plan(
     _save_debug_phase(
         repo_root, session_id, "phase_1_scope", scope, phase_timings["phase_1_scope"],
     )
-    await _send_stage_done(ws, "Scope analysis complete", model=llm_client.model_name)
+    await _send_stage_done(ws, "Scope analysis complete", model=llm_client.model_name, phase=1)
 
     # Phase 2: File Identification + Content Reading (with tool access)
     await _send_stage(
         ws, "Phase 2: Exploring codebase and reading files...",
-        model=llm_client.model_name,
+        model=llm_client.model_name, phase=2,
     )
     logger.info("Planning Phase 2: File identification and reading")
     t0 = time.monotonic()
@@ -460,7 +466,7 @@ async def create_plan(
         file_identification, phase_timings["phase_2_file_identification"],
     )
     await _send_stage_done(
-        ws, "Codebase exploration complete", model=llm_client.model_name,
+        ws, "Codebase exploration complete", model=llm_client.model_name, phase=2,
     )
 
     # Pass exploration results directly to downstream phases
@@ -488,7 +494,7 @@ async def create_plan(
             expert_llm_client.model_name,
         )
     await _send_stage(
-        ws, "Phase 3: Designing specific changes...", model=expert.model_name,
+        ws, "Phase 3: Designing specific changes...", model=expert.model_name, phase=3,
     )
     logger.info("Planning Phase 3: Change design")
     t0 = time.monotonic()
@@ -562,10 +568,10 @@ async def create_plan(
         repo_root, session_id, "phase_3_change_design",
         change_design, phase_timings["phase_3_change_design"],
     )
-    await _send_stage_done(ws, "Change design complete", model=expert.model_name)
+    await _send_stage_done(ws, "Change design complete", model=expert.model_name, phase=3)
 
     # Phase 4: Risk Assessment
-    await _send_stage(ws, "Phase 4: Assessing risks...", model=expert.model_name)
+    await _send_stage(ws, "Phase 4: Assessing risks...", model=expert.model_name, phase=4)
     logger.info("Planning Phase 4: Risk assessment")
     t0 = time.monotonic()
     risks = await expert.chat_raw(
@@ -611,7 +617,7 @@ async def create_plan(
         repo_root, session_id, "phase_4_risks",
         risks, phase_timings["phase_4_risks"],
     )
-    await _send_stage_done(ws, "Risk assessment complete", model=expert.model_name)
+    await _send_stage_done(ws, "Risk assessment complete", model=expert.model_name, phase=4)
 
     # Extract missing files from Phase 4 for explicit injection into Phase 5
     missing_files = await _extract_missing_files(risks, expert)
@@ -620,7 +626,7 @@ async def create_plan(
 
     # Phase 5: Structured Plan Assembly
     await _send_stage(
-        ws, "Phase 5: Assembling structured plan...", model=expert.model_name,
+        ws, "Phase 5: Assembling structured plan...", model=expert.model_name, phase=5,
     )
     logger.info("Planning Phase 5: Structured plan assembly")
     t0 = time.monotonic()
@@ -875,7 +881,7 @@ async def create_plan(
         ws,
         f"Plan assembled — {len(plan.steps)} steps across "
         f"{len(plan.affected_files)} file(s)",
-        model=expert.model_name,
+        model=expert.model_name, phase=5,
     )
 
     # Phase 6: Verification (only when test_command is available)
@@ -893,7 +899,7 @@ async def create_plan(
             if tdd_mode
             else "Phase 6: Adding verification steps..."
         )
-        await _send_stage(ws, phase_label, model=expert.model_name)
+        await _send_stage(ws, phase_label, model=expert.model_name, phase=6)
         logger.info("Planning Phase 6: Verification step generation (tdd=%s)", tdd_mode)
         t0 = time.monotonic()
 
@@ -1045,7 +1051,7 @@ async def create_plan(
             if tdd_mode
             else f"Verification steps added — {test_steps} test step(s)"
         )
-        await _send_stage_done(ws, stage_msg, model=expert.model_name)
+        await _send_stage_done(ws, stage_msg, model=expert.model_name, phase=6)
 
     phase_timings["total"] = time.monotonic() - plan_start
 

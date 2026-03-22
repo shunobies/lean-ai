@@ -94,6 +94,7 @@ export interface StageStatusMessage {
     stage: string;
     status: "running" | "done" | "needs_input" | "unknown";
     summary?: string;
+    phase?: number;
 }
 
 export interface ClarificationNeededMessage {

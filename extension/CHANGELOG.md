@@ -2,6 +2,11 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.3.20] - 2026-03-22
+
+### Added
+- **Planning phase indicator** — the status badge now shows "planning phase 1" through "planning phase 6" as each planning phase starts, instead of a static "planning" label. Also reflected in the thinking indicator and Chat Participant progress.
+
 ## [0.3.13] - 2026-03-21
 
 ### Added
