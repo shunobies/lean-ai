@@ -86,6 +86,13 @@ class ExecutionPlan(BaseModel):
     steps: list[PlanStep]
     """Ordered list of steps to execute.  Each step is one tool call."""
 
+    tdd_test_steps: list[PlanStep] = []
+    """Test steps to execute BEFORE implementation (TDD mode only).
+
+    When TDD mode is enabled, these steps are separated from ``steps``
+    and executed first by the expert model.  Empty when TDD is disabled
+    — test steps remain inline in ``steps``."""
+
     affected_files: list[str]
     """All file paths that will be created or modified."""
 
@@ -115,7 +122,26 @@ def plan_to_markdown(
     if plan.name_registry:
         parts.append(f"## Name Registry\n\n{plan.name_registry}\n")
 
-    parts.append("## Steps\n")
+    if plan.tdd_test_steps:
+        parts.append("## TEST PHASE (Expert Model)\n")
+        for step in plan.tdd_test_steps:
+            tool_label = step.tool.upper().replace("_", " ")
+            if step.file_path:
+                parts.append(
+                    f"{step.step_number}. **{tool_label}** `{step.file_path}`"
+                    f" — {step.instruction}"
+                )
+            else:
+                parts.append(
+                    f"{step.step_number}. **{tool_label}** — {step.instruction}"
+                )
+            if include_context and step.context:
+                parts.append(f"   ```\n{step.context}\n   ```")
+        parts.append("")
+        parts.append("## IMPLEMENTATION PHASE (Primary Model)\n")
+    else:
+        parts.append("## Steps\n")
+
     for step in plan.steps:
         tool_label = step.tool.upper().replace("_", " ")
         if step.file_path:

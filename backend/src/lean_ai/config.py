@@ -166,6 +166,10 @@ class Settings(BaseSettings):
     # ── Fix-mode investigation phase ──
     enable_fix_investigation: bool = True  # Read-only investigation before editing
 
+    # ── TDD mode ──
+    enable_tdd: bool = False  # Expert writes tests first, primary implements
+    tdd_max_disputes_per_step: int = 3  # Max test disputes per implementation step
+
     # ── Post-execution validation ──
     enable_post_validation: bool = True  # Master switch
     post_format_command: str = ""     # e.g. "ruff format src/"

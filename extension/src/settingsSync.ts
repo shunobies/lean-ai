@@ -79,6 +79,9 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.searchApiUrl":              "LEAN_AI_SEARCH_API_URL",
     "lean-ai.searchDelay":               "LEAN_AI_SEARCH_DELAY",
 
+    // TDD mode
+    "lean-ai.enableTdd":                 "LEAN_AI_ENABLE_TDD",
+
     // Post-validation
     "lean-ai.enablePostValidation":      "LEAN_AI_ENABLE_POST_VALIDATION",
     "lean-ai.postFormatCommand":         "LEAN_AI_POST_FORMAT_COMMAND",

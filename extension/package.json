@@ -368,6 +368,11 @@
           "default": 2,
           "markdownDescription": "**Search** — Minimum seconds between search requests (with random jitter). Increase to avoid rate limiting. Default: `2.0`"
         },
+        "lean-ai.enableTdd": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**TDD Mode** — Expert model writes all tests first, then primary model implements code. Primary cannot edit test files but can dispute flawed tests via the expert. Requires an expert model to be configured. Default: `false`"
+        },
         "lean-ai.enablePostValidation": {
           "type": "boolean",
           "default": true,

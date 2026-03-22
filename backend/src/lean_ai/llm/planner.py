@@ -855,15 +855,52 @@ async def create_plan(
     # creation + test execution steps at the end.  Tests should only
     # run after all implementation files are created — running them
     # mid-plan on an incomplete codebase would cause premature failures.
+    #
+    # In TDD mode, test steps are separated into tdd_test_steps and
+    # executed first by the expert model during pipeline execution.
     if test_command:
-        await _send_stage(
-            ws, "Phase 6: Adding verification steps...", model=expert.model_name,
+        tdd_mode = settings.enable_tdd
+        phase_label = (
+            "Phase 6: Designing TDD test steps..."
+            if tdd_mode
+            else "Phase 6: Adding verification steps..."
         )
-        logger.info("Planning Phase 6: Verification step generation")
+        await _send_stage(ws, phase_label, model=expert.model_name)
+        logger.info("Planning Phase 6: Verification step generation (tdd=%s)", tdd_mode)
         t0 = time.monotonic()
 
         impl_plan_md = plan_to_markdown(plan, include_context=True)
         next_step = len(plan.steps) + 1
+
+        # TDD-specific guidance for comprehensive, well-documented tests
+        tdd_guidance = ""
+        if tdd_mode:
+            tdd_guidance = (
+                "\n\nTDD MODE — These tests will be written and executed "
+                "BEFORE any implementation code exists. Write tests that:\n"
+                "- Test PUBLIC interfaces and contracts, not internal "
+                "implementation details\n"
+                "- Import from the paths that WILL exist after "
+                "implementation (based on the plan)\n"
+                "- Use clear, descriptive assertion messages so failures "
+                "guide the implementor toward the correct solution\n"
+                "- Do NOT depend on implementation order — each test "
+                "file must be independently valid\n"
+                "- Mock external dependencies (DB, HTTP, filesystem) at "
+                "the boundary\n\n"
+                "DOCUMENTATION REQUIREMENTS (mandatory for TDD):\n"
+                "- Module-level docstring explaining what feature/module "
+                "is under test\n"
+                "- Per-test-function docstring with: what behavior is "
+                "tested, expected input/output, why this case matters\n"
+                "- Descriptive assertion messages in assert statements "
+                "so failures immediately tell the implementor what went "
+                "wrong\n"
+                "- Comments on non-obvious setup/mocking explaining "
+                "what boundary is being mocked and why\n\n"
+                "Do NOT include a run_tests step — tests will be "
+                "executed after implementation by the pipeline.\n"
+            )
 
         verification = await expert.chat_structured(
             messages=[
@@ -884,9 +921,15 @@ async def create_plan(
                         "include a 'create_file' step for a test file.\n"
                         "- Only create tests for NEW functionality — do "
                         "not duplicate existing test coverage.\n"
-                        "- End with a single 'run_tests' step using the "
-                        f"test command: {test_command}\n"
-                        f"- Start step numbering at {next_step}\n"
+                        + (
+                            ""
+                            if tdd_mode
+                            else (
+                                "- End with a single 'run_tests' step using "
+                                f"the test command: {test_command}\n"
+                            )
+                        )
+                        + f"- Start step numbering at {next_step}\n"
                         "- Follow the naming conventions from the plan\n\n"
                         "TEST FILE STEP — REQUIRED CONTENT IN `instruction`:\n"
                         "List each test function by name with the specific "
@@ -923,6 +966,7 @@ async def create_plan(
                         "existing test file content (imports, fixtures, "
                         "assertion style) so the executor can replicate "
                         "the pattern without reading additional files."
+                        + tdd_guidance
                     ),
                 },
             ],
@@ -931,14 +975,33 @@ async def create_plan(
             thinking_callback=on_thinking,
         )
 
-        # Append verification steps, re-number for safety
-        for i, step in enumerate(verification.steps, next_step):
-            step.step_number = i
-        plan.steps.extend(verification.steps)
+        if tdd_mode:
+            # TDD: keep test steps separate for expert-first execution.
+            # Filter out run_tests steps (tests will intentionally fail
+            # without implementation; post-validation handles execution).
+            test_steps_only = [
+                s for s in verification.steps if s.tool != "run_tests"
+            ]
+            for i, step in enumerate(test_steps_only, 1):
+                step.step_number = i
+            plan.tdd_test_steps = test_steps_only
+
+            # Re-number implementation steps starting after test steps
+            offset = len(test_steps_only)
+            for i, step in enumerate(plan.steps, offset + 1):
+                step.step_number = i
+        else:
+            # Normal mode: append to plan as before
+            for i, step in enumerate(verification.steps, next_step):
+                step.step_number = i
+            plan.steps.extend(verification.steps)
 
         # Update affected_files with any new test files
+        all_verification_steps = (
+            plan.tdd_test_steps if tdd_mode else verification.steps
+        )
         existing = set(plan.affected_files)
-        for step in verification.steps:
+        for step in all_verification_steps:
             if step.file_path and step.file_path not in existing:
                 plan.affected_files.append(step.file_path)
 
@@ -948,12 +1011,13 @@ async def create_plan(
             verification.model_dump_json(indent=2),
             phase_timings["phase_6_verification"],
         )
-        test_steps = len(verification.steps)
-        await _send_stage_done(
-            ws,
-            f"Verification steps added — {test_steps} test step(s)",
-            model=expert.model_name,
+        test_steps = len(all_verification_steps)
+        stage_msg = (
+            f"TDD test steps designed — {test_steps} step(s)"
+            if tdd_mode
+            else f"Verification steps added — {test_steps} test step(s)"
         )
+        await _send_stage_done(ws, stage_msg, model=expert.model_name)
 
     phase_timings["total"] = time.monotonic() - plan_start
 

@@ -100,6 +100,72 @@ def build_step_system_prompt(
     return prompt
 
 
+def build_tdd_step_system_prompt(
+    context: str,
+    naming_conventions: str = "",
+    name_registry: str = "",
+) -> str:
+    """Build the system prompt for TDD implementation steps (primary model).
+
+    Extends the standard step prompt with TDD constraints: the primary
+    model cannot modify test files and must use ``request_test_change``
+    to dispute flawed tests.
+    """
+    prompt = build_step_system_prompt(context, naming_conventions, name_registry)
+    prompt += (
+        "\n\nTDD MODE CONSTRAINTS:\n"
+        "- Tests have already been written by the expert model. Your job "
+        "is to write implementation code that makes the tests pass.\n"
+        "- You CANNOT create or edit test files. If you attempt to, the "
+        "tool call will be rejected.\n"
+        "- If you believe a test is genuinely flawed (wrong assertion, "
+        "tests an implementation detail, impossible precondition, wrong "
+        "import path), use the request_test_change tool with a specific "
+        "programmatic reason. The expert will evaluate your dispute.\n"
+        "- If a dispute is rejected, you must find a different "
+        "implementation approach — do not re-dispute the same test with "
+        "the same reason.\n"
+        "- Focus on making the tests GREEN through correct implementation, "
+        "not by changing the tests.\n"
+    )
+    return prompt
+
+
+def build_tdd_review_prompt(
+    context: str,
+    test_files: list[str],
+) -> str:
+    """Build the system prompt for the TDD test review phase.
+
+    The primary model reviews the expert's tests before starting
+    implementation and can dispute any that are flawed.
+    """
+    prompt = STEP_EXECUTION_SYSTEM_PROMPT
+
+    if context:
+        prompt += f"\n## Project Context\n\n{context}"
+
+    prompt += (
+        "\n\nTDD TEST REVIEW PHASE:\n"
+        "Review the test files created by the expert model below.  "
+        "For each test, check:\n"
+        "- Are the imports and module paths correct per the plan?\n"
+        "- Are the assertions testing public contracts (not private "
+        "internals)?\n"
+        "- Are there impossible preconditions or contradictory "
+        "assertions?\n"
+        "- Does the test align with the planned implementation?\n\n"
+        "For each flawed test, use request_test_change with a specific "
+        "programmatic reason.  If all tests look correct, call "
+        "task_complete with a brief confirmation.\n\n"
+        "Test files to review:\n"
+    )
+    for tf in test_files:
+        prompt += f"  - {tf}\n"
+
+    return prompt
+
+
 _ARTIFACT_PER_FILE_LIMIT = 8000
 
 

@@ -742,6 +742,18 @@ export function getSettingsPanelHtml(): string {
     </div>
 </div>
 
+<!-- ── TDD Mode ── -->
+<div class="section">
+    <h2>TDD Mode</h2>
+    <div class="field-check">
+        <input type="checkbox" id="enableTdd">
+        <div>
+            <label for="enableTdd">TDD Mode — expert writes tests first, primary implements</label>
+            <span class="hint">Requires an expert model. Primary cannot edit tests but can dispute flawed tests.</span>
+        </div>
+    </div>
+</div>
+
 <!-- ── Post-Validation ── -->
 <div class="section">
     <h2>Post-Validation</h2>
@@ -1251,6 +1263,9 @@ export function getSettingsPanelHtml(): string {
             openaiRequestModel:       requestChecked && requestProvider === 'openai' ? val('openaiRequestModel') : '',
             anthropicRequestModel:    requestChecked && requestProvider === 'anthropic' ? val('anthropicRequestModel') : '',
 
+            // TDD mode
+            enableTdd:             val('enableTdd'),
+
             // Post-validation
             enablePostValidation:  val('enablePostValidation'),
             postFormatCommand:     val('postFormatCommand'),
@@ -1377,6 +1392,9 @@ export function getSettingsPanelHtml(): string {
         setVal('enableThinkingRequest',   v.enableThinkingRequest);
         setVal('openaiRequestModel',      v.openaiRequestModel);
         setVal('anthropicRequestModel',   v.anthropicRequestModel);
+
+        // TDD mode
+        setVal('enableTdd',                v.enableTdd);
 
         // Post-validation
         setVal('enablePostValidation',     v.enablePostValidation);

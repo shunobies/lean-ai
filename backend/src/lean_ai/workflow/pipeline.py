@@ -19,7 +19,11 @@ from fastapi import WebSocket, WebSocketDisconnect
 from lean_ai.config import settings
 from lean_ai.llm.plan_schema import ExecutionPlan, plan_to_markdown
 from lean_ai.llm.planner import assess_clarity, create_plan
-from lean_ai.llm.tool_definitions import IMPLEMENTATION_TOOLS, INVESTIGATION_TOOLS
+from lean_ai.llm.tool_definitions import (
+    IMPLEMENTATION_TOOLS,
+    INVESTIGATION_TOOLS,
+    build_tdd_implementation_tools,
+)
 from lean_ai.routers.context_helpers import load_condensed_context
 from lean_ai.tools import scratchpad
 from lean_ai.workflow.prompts import (
@@ -28,6 +32,8 @@ from lean_ai.workflow.prompts import (
     build_request_system_prompt,
     build_step_system_prompt,
     build_step_user_message,
+    build_tdd_review_prompt,
+    build_tdd_step_system_prompt,
 )
 from lean_ai.workflow.tool_executor import make_tool_executor
 from lean_ai.workflow.ws_dispatcher import WSMessageDispatcher
@@ -76,6 +82,21 @@ async def run_workflow(
     Returns a structured commit message summarising the actions taken.
     """
     logger.info("Workflow (%s): starting task: %s", mode, task[:100])
+
+    # Validate TDD requires expert model
+    if settings.enable_tdd and expert_llm_client is None:
+        logger.warning(
+            "TDD mode enabled but no expert model configured — "
+            "falling back to normal mode",
+        )
+        await ws_send(ws, "stage_status", {
+            "stage": "tdd",
+            "status": "done",
+            "summary": (
+                "TDD mode requires an expert model. "
+                "Falling back to normal mode."
+            ),
+        })
 
     # Log the initial task
     if conversation_logger:
@@ -396,38 +417,39 @@ async def _execute_plan(
             "context_window": context_window,
         })
 
-    # Execute each step
-    for step in plan.steps:
+    # ── Helper: execute a single step with a given client/tools ─────
+    async def _run_step(
+        step, client, tools, executor, sys_prompt,
+        label_prefix: str = "",
+    ):
+        """Execute one plan step, collecting artifacts and progress."""
+        step_label = f"{label_prefix}Step {step.step_number}"
         logger.info(
-            "Executing step %d/%d: %s %s — %s",
-            step.step_number, total_steps, step.tool,
+            "Executing %s/%d: %s %s — %s",
+            step_label, total_steps, step.tool,
             step.file_path, step.instruction[:80],
         )
 
-        # Send checkpoint: step starting
         await ws_send(ws, "checkpoint", {
             "step_index": step.step_number - 1,
-            "step_description": f"Step {step.step_number}: {step.instruction[:100]}",
+            "step_description": f"{step_label}: {step.instruction[:100]}",
             "status": "running",
             "head_commit_sha": None,
         })
 
-        # Build step-specific user message
         user_msg = build_step_user_message(
             step, completed_descriptions, total_steps,
             step_artifacts=step_artifacts,
         )
-
         messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": sys_prompt},
             {"role": "user", "content": user_msg},
         ]
 
-        # Execute this step — turn budget comes from settings (0 = unlimited)
-        executed, explanation = await llm_client.chat_with_tools(
+        executed, explanation = await client.chat_with_tools(
             messages=messages,
-            tools=IMPLEMENTATION_TOOLS,
-            tool_executor_fn=tool_executor,
+            tools=tools,
+            tool_executor_fn=executor,
             max_turns=settings.implementation_max_turns,
             max_tokens=settings.implementation_max_tokens,
             on_tool_call=on_tool_call,
@@ -441,13 +463,13 @@ async def _execute_plan(
         all_executed.extend(executed)
         if explanation.strip():
             step_explanations.append(
-                f"Step {step.step_number}: {explanation.strip()}"
+                f"{step_label}: {explanation.strip()}"
             )
         completed_descriptions.append(
-            f"Step {step.step_number}: {step.instruction[:100]}"
+            f"{step_label}: {step.instruction[:100]}"
         )
 
-        # Collect files created/modified by this step for cross-step context
+        # Collect files created/modified for cross-step context
         artifact_budget = int(
             settings._active_context_window * 0.10 * 3.5
         )
@@ -465,7 +487,6 @@ async def _execute_plan(
                     except Exception:
                         pass
 
-        # Evict oldest artifacts when over budget
         while (
             sum(len(c) for c in step_artifacts.values()) > artifact_budget
             and step_artifacts
@@ -473,13 +494,215 @@ async def _execute_plan(
             oldest_key = next(iter(step_artifacts))
             del step_artifacts[oldest_key]
 
-        # Send checkpoint: step completed
         await ws_send(ws, "checkpoint", {
             "step_index": step.step_number - 1,
-            "step_description": f"Step {step.step_number}: {step.instruction[:100]}",
+            "step_description": f"{step_label}: {step.instruction[:100]}",
             "status": "completed",
             "head_commit_sha": None,
         })
+
+    # ── TDD three-phase execution ─────────────────────────────────
+    tdd_active = (
+        settings.enable_tdd
+        and plan.tdd_test_steps
+        and expert_llm_client is not None
+    )
+
+    if tdd_active:
+        from lean_ai.workflow.tdd import evaluate_test_dispute
+
+        total_steps = len(plan.tdd_test_steps) + len(plan.steps)
+
+        # ── Phase A: Expert writes tests ──────────────────────────
+        await ws_send(ws, "stage_status", {
+            "stage": "tdd_test_writing",
+            "status": "running",
+            "summary": (
+                f"TDD: Expert writing {len(plan.tdd_test_steps)} "
+                f"test step(s)..."
+            ),
+        })
+
+        test_tool_executor = make_tool_executor(
+            repo_root, ws, session_id,
+            llm_client=expert_llm_client,
+            dispatcher=dispatcher,
+        )
+        test_system_prompt = build_step_system_prompt(
+            load_condensed_context(repo_root),
+            naming_conventions=getattr(plan, "naming_conventions", ""),
+            name_registry=getattr(plan, "name_registry", ""),
+        )
+
+        for step in plan.tdd_test_steps:
+            await _run_step(
+                step, expert_llm_client, IMPLEMENTATION_TOOLS,
+                test_tool_executor, test_system_prompt,
+                label_prefix="[TDD Test] ",
+            )
+
+        await ws_send(ws, "stage_status", {
+            "stage": "tdd_test_writing",
+            "status": "done",
+            "summary": "TDD: All test steps complete.",
+        })
+
+        # Identify test files created for the review phase
+        tdd_test_files = [
+            s.file_path for s in plan.tdd_test_steps
+            if s.file_path and s.tool == "create_file"
+        ]
+
+        # ── Phase B: Primary reviews tests (read-only) ───────────
+        if tdd_test_files:
+            await ws_send(ws, "stage_status", {
+                "stage": "tdd_test_review",
+                "status": "running",
+                "summary": (
+                    f"TDD: Primary reviewing {len(tdd_test_files)} "
+                    f"test file(s)..."
+                ),
+            })
+
+            review_prompt = build_tdd_review_prompt(
+                load_condensed_context(repo_root),
+                tdd_test_files,
+            )
+
+            # Build review message — include test file contents
+            review_parts = [
+                "Review the following test files. Use "
+                "request_test_change for any flawed tests, or call "
+                "task_complete if all tests look correct.\n"
+            ]
+            for tf in tdd_test_files:
+                full_path = os.path.join(repo_root, tf)
+                try:
+                    with open(full_path, encoding="utf-8") as f:
+                        review_parts.append(
+                            f"\n--- {tf} ---\n```\n{f.read()}\n```"
+                        )
+                except Exception:
+                    review_parts.append(f"\n--- {tf} --- (could not read)")
+
+            # Dispute callback for review phase
+            plan_context_md = plan_to_markdown(plan)
+
+            async def _review_dispute(arguments: dict) -> str:
+                return await evaluate_test_dispute(
+                    test_file=arguments["test_file"],
+                    test_function=arguments["test_function"],
+                    reason=arguments["reason"],
+                    repo_root=repo_root,
+                    expert_client=expert_llm_client,
+                    ws=ws,
+                    session_id=session_id,
+                    dispatcher=dispatcher,
+                    plan_context=plan_context_md,
+                    step_artifacts=step_artifacts,
+                )
+
+            review_executor = make_tool_executor(
+                repo_root, ws, session_id,
+                llm_client=llm_client,
+                dispatcher=dispatcher,
+                tdd_protect_tests=True,
+                on_test_dispute=_review_dispute,
+            )
+
+            review_messages = [
+                {"role": "system", "content": review_prompt},
+                {"role": "user", "content": "\n".join(review_parts)},
+            ]
+            await llm_client.chat_with_tools(
+                messages=review_messages,
+                tools=build_tdd_implementation_tools(),
+                tool_executor_fn=review_executor,
+                max_turns=settings.implementation_max_turns,
+                max_tokens=settings.implementation_max_tokens,
+                on_tool_call=on_tool_call,
+                on_tool_result=on_tool_result,
+                on_content=on_content,
+                on_thinking=on_thinking,
+                on_metrics=on_metrics,
+                dispatcher=dispatcher,
+            )
+
+            await ws_send(ws, "stage_status", {
+                "stage": "tdd_test_review",
+                "status": "done",
+                "summary": "TDD: Test review complete.",
+            })
+
+        # ── Phase C: Primary implements code ──────────────────────
+        await ws_send(ws, "stage_status", {
+            "stage": "tdd_implementation",
+            "status": "running",
+            "summary": (
+                f"TDD: Primary implementing {len(plan.steps)} "
+                f"step(s)..."
+            ),
+        })
+
+        tdd_impl_prompt = build_tdd_step_system_prompt(
+            load_condensed_context(repo_root),
+            naming_conventions=getattr(plan, "naming_conventions", ""),
+            name_registry=getattr(plan, "name_registry", ""),
+        )
+        tdd_impl_tools = build_tdd_implementation_tools()
+
+        for step in plan.steps:
+            dispute_count = 0
+
+            async def _impl_dispute(arguments: dict) -> str:
+                nonlocal dispute_count
+                dispute_count += 1
+                if dispute_count > settings.tdd_max_disputes_per_step:
+                    return (
+                        "ERROR: Maximum dispute limit reached for this "
+                        f"step ({settings.tdd_max_disputes_per_step}). "
+                        "You must find another implementation approach."
+                    )
+                return await evaluate_test_dispute(
+                    test_file=arguments["test_file"],
+                    test_function=arguments["test_function"],
+                    reason=arguments["reason"],
+                    repo_root=repo_root,
+                    expert_client=expert_llm_client,
+                    ws=ws,
+                    session_id=session_id,
+                    dispatcher=dispatcher,
+                    plan_context=plan_context_md,
+                    step_artifacts=step_artifacts,
+                )
+
+            impl_executor = make_tool_executor(
+                repo_root, ws, session_id,
+                llm_client=llm_client,
+                dispatcher=dispatcher,
+                tdd_protect_tests=True,
+                on_test_dispute=_impl_dispute,
+            )
+
+            await _run_step(
+                step, llm_client, tdd_impl_tools,
+                impl_executor, tdd_impl_prompt,
+                label_prefix="[TDD Impl] ",
+            )
+
+        await ws_send(ws, "stage_status", {
+            "stage": "tdd_implementation",
+            "status": "done",
+            "summary": "TDD: Implementation complete.",
+        })
+
+    else:
+        # ── Normal (non-TDD) execution ────────────────────────────
+        for step in plan.steps:
+            await _run_step(
+                step, llm_client, IMPLEMENTATION_TOOLS,
+                tool_executor, system_prompt,
+            )
 
     # ── All steps done ───────────────────────────────────────────
     files_modified = list({
@@ -882,13 +1105,38 @@ async def _run_validation_fix_loop(
         ]
 
         # Run LLM with a tight turn budget
+        # In TDD mode, protect test files and allow disputes
+        tdd_fix_protect = settings.enable_tdd and expert_llm_client is not None
+        tdd_fix_dispute = None
+        if tdd_fix_protect:
+            from lean_ai.workflow.tdd import evaluate_test_dispute as _eval_dispute
+
+            async def tdd_fix_dispute(arguments: dict) -> str:
+                return await _eval_dispute(
+                    test_file=arguments["test_file"],
+                    test_function=arguments["test_function"],
+                    reason=arguments["reason"],
+                    repo_root=repo_root,
+                    expert_client=expert_llm_client,
+                    ws=ws,
+                    session_id=session_id,
+                    dispatcher=dispatcher,
+                )
+
+        fix_tools = (
+            build_tdd_implementation_tools()
+            if tdd_fix_protect
+            else IMPLEMENTATION_TOOLS
+        )
         tool_executor = make_tool_executor(
             repo_root, ws, session_id, llm_client=active_client,
             dispatcher=dispatcher,
+            tdd_protect_tests=tdd_fix_protect,
+            on_test_dispute=tdd_fix_dispute,
         )
         executed, explanation = await active_client.chat_with_tools(
             messages=messages,
-            tools=IMPLEMENTATION_TOOLS,
+            tools=fix_tools,
             tool_executor_fn=tool_executor,
             max_turns=settings.post_validation_fix_turns,
             max_tokens=settings.implementation_max_tokens,

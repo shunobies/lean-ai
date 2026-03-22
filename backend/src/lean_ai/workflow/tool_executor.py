@@ -1,6 +1,7 @@
 """Tool executor factory for workflow execution."""
 
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -84,11 +85,43 @@ def make_tool_executor(
     session_id: str = "",
     llm_client: "LLMClient | None" = None,
     dispatcher: "WSMessageDispatcher | None" = None,
+    tdd_protect_tests: bool = False,
+    on_test_dispute: "Callable | None" = None,
 ):
-    """Create a tool executor closure for the workflow."""
+    """Create a tool executor closure for the workflow.
+
+    Args:
+        tdd_protect_tests: When True, block ``create_file``/``edit_file``
+            calls targeting test files.  The LLM should use
+            ``request_test_change`` instead.
+        on_test_dispute: Async callback invoked when ``request_test_change``
+            is called.  Receives the tool arguments dict and returns a
+            string result for the primary model.
+    """
 
     async def execute(name: str, arguments: dict) -> str:
         """Execute a tool and return the result as a string."""
+
+        # TDD guard: block writes to test files during implementation
+        if tdd_protect_tests and name in ("create_file", "edit_file"):
+            from lean_ai.tools.test_file_utils import is_test_file_path
+            target_path = arguments.get("path", "")
+            if is_test_file_path(target_path):
+                return (
+                    "ERROR: TDD mode — you cannot modify test files during "
+                    "the implementation phase. If you believe a test is "
+                    "flawed, use the request_test_change tool to dispute it "
+                    "with a specific programmatic reason."
+                )
+
+        # Handle test dispute tool
+        if name == "request_test_change":
+            if on_test_dispute is not None:
+                return await on_test_dispute(arguments)
+            return (
+                "ERROR: request_test_change is not available in this "
+                "context."
+            )
 
         if name == "create_file":
             result = await file_ops.create_file(

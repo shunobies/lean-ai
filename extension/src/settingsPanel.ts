@@ -233,6 +233,7 @@ export class SettingsPanel {
             searchProvider:           "lean-ai.searchProvider",
             searchApiUrl:             "lean-ai.searchApiUrl",
             searchDelay:              "lean-ai.searchDelay",
+            enableTdd:                "lean-ai.enableTdd",
             enablePostValidation:     "lean-ai.enablePostValidation",
             postFormatCommand:        "lean-ai.postFormatCommand",
             postLintFixCommand:       "lean-ai.postLintFixCommand",
@@ -273,7 +274,7 @@ export class SettingsPanel {
         ]);
 
         const booleanFields = new Set([
-            "enableEmbeddings", "enablePostValidation",
+            "enableEmbeddings", "enableTdd", "enablePostValidation",
             "enableFrameworkGuide", "debugPlanning", "enableThinking",
             "enableThinkingExpert", "enableThinkingRequest",
         ]);
@@ -407,6 +408,9 @@ export class SettingsPanel {
             searchProvider:            config.get("lean-ai.searchProvider", "duckduckgo"),
             searchApiUrl:              config.get("lean-ai.searchApiUrl", ""),
             searchDelay:               config.get("lean-ai.searchDelay", ""),
+
+            // TDD mode
+            enableTdd:                 config.get("lean-ai.enableTdd", false),
 
             // Post-validation
             enablePostValidation:      config.get("lean-ai.enablePostValidation", true),
