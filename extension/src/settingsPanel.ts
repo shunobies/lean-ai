@@ -128,7 +128,14 @@ export class SettingsPanel {
                 break;
 
             case "saveSettings":
-                await this._handleSaveSettings(msg.values as Record<string, unknown>);
+                try {
+                    await this._handleSaveSettings(msg.values as Record<string, unknown>);
+                } catch (err) {
+                    const errMsg = err instanceof Error ? err.message : String(err);
+                    void vscode.window.showErrorMessage(
+                        `Lean AI: failed to save settings — ${errMsg}`,
+                    );
+                }
                 break;
 
             case "saveApiKey": {
@@ -240,6 +247,7 @@ export class SettingsPanel {
             postLintCommand:          "lean-ai.postLintCommand",
             postTestCommand:          "lean-ai.postTestCommand",
             postValidationMaxRetries: "lean-ai.postValidationMaxRetries",
+            postValidationFixTurns:   "lean-ai.postValidationFixTurns",
             enableFrameworkGuide:     "lean-ai.enableFrameworkGuide",
             implementationMaxTurns:   "lean-ai.implementationMaxTurns",
             refreshThreshold:         "lean-ai.refreshThreshold",
@@ -256,7 +264,7 @@ export class SettingsPanel {
             "ollamaRequestTopP", "ollamaRequestTopK",
             "ollamaRequestRepeatPenalty", "ollamaRequestMaxTokens",
             "openaiContextWindow", "anthropicContextWindow",
-            "searchDelay", "postValidationMaxRetries",
+            "searchDelay", "postValidationMaxRetries", "postValidationFixTurns",
             "implementationMaxTurns", "refreshThreshold", "numParallel",
             "ollamaTemperature", "ollamaTopP", "ollamaTopK", "ollamaRepeatPenalty",
             "openaiTemperature", "anthropicTemperature",
@@ -419,6 +427,7 @@ export class SettingsPanel {
             postLintCommand:           config.get("lean-ai.postLintCommand", ""),
             postTestCommand:           config.get("lean-ai.postTestCommand", ""),
             postValidationMaxRetries:  config.get("lean-ai.postValidationMaxRetries", ""),
+            postValidationFixTurns:    config.get("lean-ai.postValidationFixTurns", ""),
 
             // Advanced
             enableFrameworkGuide:      config.get("lean-ai.enableFrameworkGuide", true),
