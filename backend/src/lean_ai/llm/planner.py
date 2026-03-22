@@ -250,6 +250,14 @@ async def create_plan(
     plan_start = time.monotonic()
     phase_timings: dict[str, float] = {}
 
+    # Load project context for expert phases (3, 5)
+    _pc_path = Path(repo_root) / ".lean_ai" / "project_context.md"
+    project_context = ""
+    if _pc_path.is_file():
+        project_context = _pc_path.read_text(
+            encoding="utf-8", errors="replace",
+        ).strip()
+
     # Phase 1: Scope Analysis
     await _send_stage(ws, "Phase 1: Analyzing scope...", model=llm_client.model_name)
     logger.info("Planning Phase 1: Scope analysis")
@@ -492,7 +500,11 @@ async def create_plan(
                 "content": (
                     f"TASK: {task}\n\n"
                     f"SCOPE:\n{scope}\n\n"
-                    f"FILES IDENTIFIED AND READ:\n{file_summary}\n\n"
+                    + (
+                        f"PROJECT CONTEXT:\n{project_context}\n\n"
+                        if project_context else ""
+                    )
+                    + f"FILES IDENTIFIED AND READ:\n{file_summary}\n\n"
                     "First, list the NAMING CONVENTIONS observed in the "
                     "existing codebase. For each category below, cite "
                     "the specific filename where you observed the pattern. "
@@ -627,7 +639,11 @@ async def create_plan(
                     f"CHANGE DESIGN (includes naming conventions):\n"
                     f"{change_design}\n\n"
                     f"FILE SUMMARY:\n{file_summary}\n\n"
-                    f"SCOPE:\n{scope}\n\n"
+                    + (
+                        f"PROJECT CONTEXT:\n{project_context}\n\n"
+                        if project_context else ""
+                    )
+                    + f"SCOPE:\n{scope}\n\n"
                     "Assemble the final execution plan as structured JSON. "
                     "Each step must represent ONE tool call.\n\n"
                     "NAMING CONVENTIONS: The change design above lists naming "
