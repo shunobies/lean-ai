@@ -21,7 +21,7 @@ from lean_ai.routers.context_helpers import (
     read_project_context,
     search_workspace,
 )
-from lean_ai.routers.dependencies import _inline_client, llm_client, refiner
+from lean_ai.routers.dependencies import _inline_client, llm_client, refiner, request_llm_client
 from lean_ai.routers.models import (
     ChatRequest,
     ChatResponse,
@@ -105,6 +105,18 @@ def _get_active_max_tokens() -> int:
     if p == "anthropic":
         return settings.anthropic_max_tokens
     return settings.ollama_max_tokens
+
+
+def _get_chat_client():
+    """Return the active client for chat endpoints — request model when configured, else primary."""
+    return request_llm_client or llm_client
+
+
+def _get_chat_max_tokens() -> int:
+    """Return max_tokens for the chat client (request model when configured, else primary)."""
+    if request_llm_client is None:
+        return _get_active_max_tokens()
+    return settings.effective_request_max_tokens
 
 
 @chat_router.get("/models", response_model=ModelsResponse)
@@ -388,11 +400,12 @@ async def chat(request: ChatRequest):
     """
     try:
         messages, refiner_result = await _build_chat_messages(request)
-        reply = await llm_client.chat_raw(
+        _chat_client = _get_chat_client()
+        reply = await _chat_client.chat_raw(
             messages,
-            max_tokens=_get_active_max_tokens(),
+            max_tokens=_get_chat_max_tokens(),
         )
-        metrics = llm_client.last_chat_metrics or {}
+        metrics = _chat_client.last_chat_metrics or {}
         return ChatResponse(
             reply=reply,
             tokens_per_second=metrics.get("tokens_per_second"),
@@ -430,8 +443,8 @@ async def chat_stream_endpoint(request: ChatRequest):
                 "Chat stream: prompt ~%d chars (~%d tokens), num_ctx=%d",
                 prompt_chars, prompt_chars // 4, settings._active_context_window,
             )
-            async for token in llm_client.chat_stream(
-                messages, max_tokens=_get_active_max_tokens(),
+            async for token in _get_chat_client().chat_stream(
+                messages, max_tokens=_get_chat_max_tokens(),
             ):
                 yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"

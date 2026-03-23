@@ -73,7 +73,7 @@ cd extension && npm install && npm run build
 - **Tool naming**: `create_file` (not `write_file`) for clearer intent
 - **Structured JSON output** from Ollama replaces regex-based plan/output parsing
 - **Percentage-based token budgets** — internal limits (scratchpad, inline output, etc.) are computed as a percentage of the active context window, not hardcoded. This makes the system adaptive: smaller models get proportionally smaller budgets, larger models get more room. Convention: use `settings._active_context_window` and a named percentage constant (e.g. `SCRATCHPAD_CONTEXT_PERCENT = 0.05`)
-- **Dual-model pipeline** — standard (fast) model for codebase exploration and implementation, expert (large) model for reasoning-heavy planning phases (3-6) and the final validation fix retry (escalation only on last attempt). When no expert model is configured, everything uses the standard model. The expert model can be any provider (Ollama, OpenAI, or Anthropic) regardless of the primary provider — set `LEAN_AI_EXPERT_LLM_PROVIDER` to select. Phases communicate through structured text/JSON outputs, not shared conversation history, making model switching seamless. The expert receives `project_context.md` directly in phases 3 and 5 for architectural awareness; framework_guide.md and style.md are deferred to the implementation phase.
+- **Three-model pipeline** — **request model** (chatty, higher temperature) for the chat conversation and requirements gathering; **primary model** (tuned for coding) for planning phases 1-2 (codebase exploration) and implementation execution; **expert model** (large, reasoning-heavy) for planning phases 3-6 and the final validation fix retry (escalation only on last attempt). Any model falls back to the primary when not configured. All three can use any provider (Ollama, OpenAI, or Anthropic) independently — set `LEAN_AI_REQUEST_LLM_PROVIDER` / `LEAN_AI_EXPERT_LLM_PROVIDER` to select. Phases communicate through structured text/JSON outputs, not shared conversation history, making model switching seamless. The expert receives `project_context.md` directly in phases 3 and 5 for architectural awareness; framework_guide.md and style.md are deferred to the implementation phase.
 
 ## Technology Stack
 
@@ -189,7 +189,7 @@ All under `/api` prefix:
 - `POST /generate-project-context` — regenerate context
 - `POST /generate-framework-guide` — regenerate framework guide
 - `POST /index-knowledge` — index knowledge docs
-- `POST /chat` — expert chat endpoint (prompt building mode: multi-turn conversation that gathers requirements, handles non-technical users by filling gaps with best practices, and produces a refined "Suggested Agent Prompt" for the planning pipeline)
+- `POST /chat` — chat endpoint (multi-turn conversation that gathers requirements, handles non-technical users by filling gaps with best practices, and produces a refined "Suggested Agent Prompt" for the planning pipeline). Uses the request model when configured; falls back to the primary model.
 - `POST /predict` — inline predictions
 - `POST /scaffold/list` — list scaffold recipes
 - `POST /scaffold` — create project from scaffold

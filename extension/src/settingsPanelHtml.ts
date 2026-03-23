@@ -648,12 +648,12 @@ export function getSettingsPanelHtml(): string {
 
 <!-- ── Request Model ── -->
 <div class="section">
-    <h2>Request Model <span style="font-weight:normal;font-size:0.85em;color:var(--vscode-descriptionForeground)">— optional, for /request mode (open-ended tasks)</span></h2>
+    <h2>Request Model <span style="font-weight:normal;font-size:0.85em;color:var(--vscode-descriptionForeground)">— optional, for chat and /request mode</span></h2>
     <div class="field-check">
         <input type="checkbox" id="useRequestModel">
         <div>
-            <label for="useRequestModel">Use a separate model for /request mode</label>
-            <span class="hint">If disabled, the primary model is used. A general-purpose model may handle open-ended tasks better than a coding model.</span>
+            <label for="useRequestModel">Use a separate model for chat and /request mode</label>
+            <span class="hint">If disabled, the primary model is used. A conversational or general-purpose model works better here than a coding-tuned model.</span>
         </div>
     </div>
     <div class="request-section indent" id="request-section">
