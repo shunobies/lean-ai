@@ -928,7 +928,7 @@ async def create_plan(
         logger.info("Planning Phase 6: Verification step generation (tdd=%s)", tdd_mode)
         t0 = time.monotonic()
 
-        impl_plan_md = plan_to_markdown(plan, include_context=True)
+        impl_plan_md = plan_to_markdown(plan, include_context=False)
         next_step = len(plan.steps) + 1
 
         # TDD-specific guidance for comprehensive, well-documented tests
