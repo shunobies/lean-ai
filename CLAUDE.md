@@ -66,7 +66,7 @@ cd extension && npm install && npm run build
 
 10. **Scaffolding** (`scaffolds/`) — 19 YAML scaffold recipes for project bootstrapping.
 
-11. **Voice** (`voice/`) — Optional voice interaction: Speech-to-Text (faster-whisper), Text-to-Speech (kokoro-onnx), and wake word detection (openWakeWord). `AudioManager` singleton coordinates mic access — only one service (STT or wake word) captures at a time. Backend captures the mic directly via PyAudio (avoids VSCode webview audio restrictions). Extension UI has inline mic button, voice/speed controls, and TTS playback via HTML5 Audio with queuing. All deps in `voice` optional extras group. REST endpoints in `routers/voice.py`; SSE for wake word events and TTS streaming. TTS model files (~310MB) auto-downloaded to `~/.cache/lean_ai/kokoro/` on first use.
+11. **Voice** (`voice/`) — Optional voice interaction: Speech-to-Text (faster-whisper), Text-to-Speech (kokoro-onnx), and wake word detection (openWakeWord). All voice services run on CPU only (GPU is reserved for the LLM). `AudioManager` singleton coordinates mic access — only one service (STT or wake word) captures at a time. Backend captures the mic directly via PyAudio (avoids VSCode webview audio restrictions). Extension UI has inline mic button, voice/speed controls, and TTS playback via HTML5 Audio with queuing. All deps in `voice` optional extras group. REST endpoints in `routers/voice.py`; SSE for wake word events and TTS streaming. TTS model files (~169MB fp16 default) auto-downloaded to `~/.cache/lean_ai/kokoro/` on first use. ALSA errors on Linux are suppressed via `alsa_suppression.py`.
 
 ## Key Design Decisions
 
@@ -156,7 +156,6 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_ENABLE_STT` | `false` | Enable Speech-to-Text (faster-whisper). Requires voice extras + portaudio |
 | `LEAN_AI_STT_MODEL` | `turbo` | Whisper model size: `tiny`, `base`, `small`, `medium`, `large-v3`, `turbo` |
 | `LEAN_AI_STT_LANGUAGE` | *(empty)* | ISO 639-1 language code for STT. Empty = auto-detect |
-| `LEAN_AI_STT_DEVICE` | `auto` | STT compute device: `auto`, `cpu`, `cuda` |
 | `LEAN_AI_STT_SILENCE_THRESHOLD` | `2.0` | Seconds of silence before auto-stopping recording |
 | `LEAN_AI_STT_BEAM_SIZE` | `1` | Whisper beam size: 1=greedy (fastest), 5=beam search (most accurate) |
 | `LEAN_AI_STT_CPU_THREADS` | `6` | CPU threads for faster-whisper model inference |

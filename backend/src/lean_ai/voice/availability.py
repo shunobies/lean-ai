@@ -12,6 +12,8 @@ def is_stt_available() -> bool:
     """Check if faster-whisper and PyAudio are importable and STT is enabled."""
     if not settings.enable_stt:
         return False
+    from lean_ai.voice.alsa_suppression import suppress_alsa_errors
+    suppress_alsa_errors()
     try:
         import faster_whisper  # noqa: F401
         import pyaudio  # noqa: F401

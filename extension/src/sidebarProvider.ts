@@ -782,6 +782,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         let streamStartTime: number | null = null;
         let tokenCount = 0;
         let ttsSentenceBuffer = "";
+        let ttsSentencesSpoken = 0;
         this._ttsSentenceQueue = [];
         this._ttsSpeaking = false;
 
@@ -802,6 +803,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                     if (match) {
                         const sentence = match[1];
                         ttsSentenceBuffer = match[2];
+                        ttsSentencesSpoken++;
                         this.speakSentence(sentence);
                     }
                 }
@@ -810,9 +812,15 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             this.sessionTreeProvider?.resumeRefresh();
         }
 
-        // TTS: flush remaining buffer after stream ends
-        if (this._ttsEnabled && ttsSentenceBuffer.trim()) {
-            this.speakSentence(ttsSentenceBuffer.trim());
+        // TTS: flush remaining buffer or fall back to full reply
+        if (this._ttsEnabled && fullReply.trim()) {
+            if (ttsSentencesSpoken > 0 && ttsSentenceBuffer.trim()) {
+                // Sentence streaming worked — flush remaining partial sentence
+                this.speakSentence(ttsSentenceBuffer.trim());
+            } else if (ttsSentencesSpoken === 0) {
+                // Fallback: no sentences detected during streaming, speak full reply
+                await this.speakText(fullReply);
+            }
         }
 
         // Compute tok/s from first-token to last-token (excludes context-gathering latency)

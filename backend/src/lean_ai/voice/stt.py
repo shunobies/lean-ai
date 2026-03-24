@@ -42,42 +42,23 @@ class STTService:
             return
         from faster_whisper import WhisperModel
 
-        device = settings.stt_device
-        if device == "auto":
-            device = "cuda"
-            compute_type = "float16"
-        elif device == "cuda":
-            compute_type = "float16"
-        else:
-            compute_type = "int8"
-
-        try:
-            self._model = WhisperModel(
-                settings.stt_model,
-                device=device,
-                compute_type=compute_type,
-                cpu_threads=settings.stt_cpu_threads,
-            )
-            logger.info(
-                "STT: loaded model %s on %s (%s, threads=%d)",
-                settings.stt_model, device, compute_type,
-                settings.stt_cpu_threads,
-            )
-        except Exception:
-            if device == "cuda":
-                logger.info("STT: CUDA failed, falling back to CPU")
-                self._model = WhisperModel(
-                    settings.stt_model,
-                    device="cpu",
-                    compute_type="int8",
-                    cpu_threads=settings.stt_cpu_threads,
-                )
-            else:
-                raise
+        # Always CPU — GPU is reserved for the LLM (Ollama)
+        self._model = WhisperModel(
+            settings.stt_model,
+            device="cpu",
+            compute_type="int8",
+            cpu_threads=settings.stt_cpu_threads,
+        )
+        logger.info(
+            "STT: loaded model %s on cpu (int8, threads=%d)",
+            settings.stt_model, settings.stt_cpu_threads,
+        )
 
     def _ensure_pyaudio(self) -> None:
         """Create PyAudio instance if needed."""
         if self._pa is None:
+            from lean_ai.voice.alsa_suppression import suppress_alsa_errors
+            suppress_alsa_errors()
             import pyaudio
             self._pa = pyaudio.PyAudio()
 

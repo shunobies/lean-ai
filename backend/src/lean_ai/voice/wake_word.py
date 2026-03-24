@@ -47,6 +47,8 @@ class WakeWordService:
     def _ensure_pyaudio(self) -> None:
         """Create PyAudio instance if needed."""
         if self._pa is None:
+            from lean_ai.voice.alsa_suppression import suppress_alsa_errors
+            suppress_alsa_errors()
             import pyaudio
             self._pa = pyaudio.PyAudio()
 
