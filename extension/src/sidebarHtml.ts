@@ -861,8 +861,10 @@ export function getWebviewHtml(chatFontSize: number): string {
     let wakeWordEnabled = false;
     let isRecording = false;
     let wakeWordTriggered = false;
-    let currentAudio = null;
+    let ttsPlaying = false;
     let ttsQueue = [];
+    // Web Audio API — bypasses autoplay restrictions in webview iframes
+    let audioCtx = null;
 
     // --- Image attachments ---
     const attachmentStrip = document.getElementById('attachmentStrip');
@@ -1286,7 +1288,10 @@ export function getWebviewHtml(chatFontSize: number): string {
         vscode.postMessage({ type: 'toggleDebug', enabled: debugActive });
     });
 
-    sendBtn.addEventListener('click', send);
+    sendBtn.addEventListener('click', () => {
+        if (ttsEnabled) { ensureAudioCtx(); }
+        send();
+    });
     stopBtn.addEventListener('click', () => {
         vscode.postMessage({ type: 'stopWorkflow' });
         stopBtn.style.display = 'none';
@@ -1294,6 +1299,7 @@ export function getWebviewHtml(chatFontSize: number): string {
     inputEl.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
+            if (ttsEnabled) { ensureAudioCtx(); }
             send();
         }
     });
@@ -1345,35 +1351,43 @@ export function getWebviewHtml(chatFontSize: number): string {
         vscode.postMessage({ type: 'voiceConfigChange', speed: val });
     });
 
+    function ensureAudioCtx() {
+        if (!audioCtx) { audioCtx = new AudioContext(); }
+        if (audioCtx.state === 'suspended') { audioCtx.resume(); }
+        return audioCtx;
+    }
+
     function playTtsAudio(base64Audio) {
-        // Decode base64 to blob URL (more reliable than data URIs in webviews)
+        const ctx = ensureAudioCtx();
         const binary = atob(base64Audio);
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
-        const blob = new Blob([bytes], { type: 'audio/wav' });
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        currentAudio = audio;
-        stopTtsBtn.style.display = '';
-        audio.onended = () => {
-            URL.revokeObjectURL(url);
-            currentAudio = null;
-            if (ttsQueue.length > 0) {
-                playTtsAudio(ttsQueue.shift());
-            } else {
-                stopTtsBtn.style.display = 'none';
-            }
-        };
-        audio.play().catch((err) => {
-            console.error('[Lean AI] TTS playback failed:', err);
-            URL.revokeObjectURL(url);
-            currentAudio = null;
+
+        ctx.decodeAudioData(bytes.buffer.slice(0), (buffer) => {
+            const source = ctx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(ctx.destination);
+            ttsPlaying = true;
+            stopTtsBtn.style.display = '';
+            source.onended = () => {
+                ttsPlaying = false;
+                if (ttsQueue.length > 0) {
+                    playTtsAudio(ttsQueue.shift());
+                } else {
+                    stopTtsBtn.style.display = 'none';
+                }
+            };
+            source.start();
+        }, (err) => {
+            console.error('[Lean AI] TTS decode failed:', err);
+            ttsPlaying = false;
             stopTtsBtn.style.display = 'none';
         });
     }
 
     stopTtsBtn.addEventListener('click', () => {
-        if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+        if (audioCtx) { audioCtx.close(); audioCtx = null; }
+        ttsPlaying = false;
         ttsQueue = [];
         stopTtsBtn.style.display = 'none';
         vscode.postMessage({ type: 'ttsStop' });
@@ -1784,7 +1798,7 @@ export function getWebviewHtml(chatFontSize: number): string {
 
             case 'ttsAudio':
                 if (ttsEnabled && msg.audio) {
-                    if (currentAudio) {
+                    if (ttsPlaying) {
                         ttsQueue.push(msg.audio);
                     } else {
                         playTtsAudio(msg.audio);
