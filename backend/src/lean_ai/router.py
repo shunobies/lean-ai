@@ -12,6 +12,7 @@ from lean_ai.routers.chat import chat_router
 from lean_ai.routers.dependencies import llm_client  # noqa: F401
 from lean_ai.routers.generation import generation_router
 from lean_ai.routers.sessions import sessions_router
+from lean_ai.routers.voice import voice_router
 from lean_ai.routers.workflow import workflow_router
 
 router = APIRouter()
@@ -19,3 +20,4 @@ router.include_router(sessions_router)
 router.include_router(workflow_router)
 router.include_router(generation_router)
 router.include_router(chat_router)
+router.include_router(voice_router)

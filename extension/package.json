@@ -351,6 +351,59 @@
           "default": "",
           "markdownDescription": "**Vision Model** — Ollama endpoint for the vision model. Leave empty to use the primary Ollama URL."
         },
+        "lean-ai.enableStt": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Voice STT** — Enable speech-to-text via faster-whisper. Click the mic icon in chat to dictate. Requires the `voice` backend extras (`pip install -e \".[voice]\"`)."
+        },
+        "lean-ai.sttModel": {
+          "type": "string",
+          "default": "turbo",
+          "enum": [
+            "tiny",
+            "base",
+            "small",
+            "medium",
+            "large-v3",
+            "turbo"
+          ],
+          "enumDescriptions": [
+            "Tiny — fastest, least accurate (~1GB VRAM)",
+            "Base — fast, good accuracy (~1GB VRAM)",
+            "Small — balanced speed/accuracy (~2GB VRAM)",
+            "Medium — good accuracy, slower (~5GB VRAM)",
+            "Large-v3 — best accuracy, slowest (~10GB VRAM)",
+            "Turbo — fast with good accuracy, recommended (~6GB VRAM)"
+          ],
+          "markdownDescription": "**Voice STT** — faster-whisper model size. `turbo` is recommended for a balance of speed and accuracy."
+        },
+        "lean-ai.sttLanguage": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Voice STT** — ISO 639-1 language code (e.g. `en`, `es`, `fr`). Leave empty for auto-detection."
+        },
+        "lean-ai.enableTts": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Voice TTS** — Enable text-to-speech via Kokoro. Reads LLM responses aloud (thinking + final response)."
+        },
+        "lean-ai.ttsVoice": {
+          "type": "string",
+          "default": "af_heart",
+          "markdownDescription": "**Voice TTS** — Kokoro voice ID (e.g. `af_heart`, `am_adam`). Use the voice list in the settings panel to browse all available voices."
+        },
+        "lean-ai.ttsSpeed": {
+          "type": "number",
+          "default": 1.0,
+          "minimum": 0.5,
+          "maximum": 2.0,
+          "markdownDescription": "**Voice TTS** — Speech rate multiplier. `1.0` = normal speed, `0.5` = half speed, `2.0` = double speed."
+        },
+        "lean-ai.enableWakeWord": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Voice Wake Word** — Say \"Hey Computer\" to activate STT hands-free. Requires the `voice` backend extras."
+        },
         "lean-ai.searchApiUrl": {
           "type": "string",
           "default": "",

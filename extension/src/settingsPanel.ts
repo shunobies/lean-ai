@@ -256,6 +256,13 @@ export class SettingsPanel {
             numParallel:              "lean-ai.numParallel",
             debugPlanning:            "lean-ai.debugPlanning",
             enableThinking:           "lean-ai.enableThinking",
+            enableStt:                "lean-ai.enableStt",
+            sttModel:                 "lean-ai.sttModel",
+            sttLanguage:              "lean-ai.sttLanguage",
+            enableTts:                "lean-ai.enableTts",
+            ttsVoice:                 "lean-ai.ttsVoice",
+            ttsSpeed:                 "lean-ai.ttsSpeed",
+            enableWakeWord:           "lean-ai.enableWakeWord",
         };
 
         const numericFields = new Set([
@@ -267,7 +274,7 @@ export class SettingsPanel {
             "ollamaRequestRepeatPenalty", "ollamaRequestMaxTokens",
             "openaiContextWindow", "anthropicContextWindow",
             "searchDelay", "postValidationMaxRetries", "postValidationFixTurns",
-            "implementationMaxTurns", "refreshThreshold", "numParallel",
+            "implementationMaxTurns", "refreshThreshold", "numParallel", "ttsSpeed",
             "ollamaTemperature", "ollamaTopP", "ollamaTopK", "ollamaRepeatPenalty",
             "openaiTemperature", "anthropicTemperature",
         ]);
@@ -287,6 +294,7 @@ export class SettingsPanel {
             "enableEmbeddings", "enableTdd", "enablePostValidation",
             "enableFrameworkGuide", "debugPlanning", "enableThinking",
             "enableThinkingExpert", "enableThinkingRequest",
+            "enableStt", "enableTts", "enableWakeWord",
         ]);
 
         const coercedMap = new Map<string, unknown>();
@@ -417,6 +425,15 @@ export class SettingsPanel {
             // Vision
             visionModel:               config.get("lean-ai.visionModel", ""),
             visionOllamaUrl:           config.get("lean-ai.visionOllamaUrl", ""),
+
+            // Voice
+            enableStt:                 config.get("lean-ai.enableStt", false),
+            sttModel:                  config.get("lean-ai.sttModel", "turbo"),
+            sttLanguage:               config.get("lean-ai.sttLanguage", ""),
+            enableTts:                 config.get("lean-ai.enableTts", false),
+            ttsVoice:                  config.get("lean-ai.ttsVoice", "af_heart"),
+            ttsSpeed:                  config.get("lean-ai.ttsSpeed", 1.0),
+            enableWakeWord:            config.get("lean-ai.enableWakeWord", false),
 
             // Search
             searchProvider:            config.get("lean-ai.searchProvider", "duckduckgo"),

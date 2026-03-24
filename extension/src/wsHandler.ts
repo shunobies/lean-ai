@@ -9,6 +9,8 @@ export interface WsHandlerContext {
     postMessage(msg: Record<string, unknown>): void;
     closeWebSocket(): void;
     clearSession(): void;
+    /** Optional TTS callback — called with finalized content to speak aloud. */
+    onTtsContent?: (text: string) => void;
 }
 
 export function formatStageName(stage: string): string {
@@ -412,6 +414,10 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
                     streaming: raw.streaming || false,
                     done: raw.done || false,
                 });
+                // TTS: speak finalized content
+                if (raw.done && ctx.onTtsContent) {
+                    ctx.onTtsContent(content);
+                }
             }
             break;
         }
@@ -425,6 +431,10 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
                     text: content,
                     streaming: raw.streaming || false,
                 });
+                // TTS: speak finalized thinking content
+                if (!raw.streaming && ctx.onTtsContent) {
+                    ctx.onTtsContent(content);
+                }
             }
             break;
         }

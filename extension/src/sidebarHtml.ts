@@ -574,6 +574,83 @@ export function getWebviewHtml(chatFontSize: number): string {
         background: var(--vscode-list-hoverBackground);
     }
 
+    /* Voice controls */
+    .voice-controls {
+        padding: 4px 12px;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        border-bottom: 1px solid var(--vscode-panel-border);
+        flex-shrink: 0;
+        flex-wrap: wrap;
+    }
+    .voice-toggle {
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 11px;
+        cursor: pointer;
+        opacity: 0.8;
+    }
+    .voice-toggle:hover { opacity: 1; }
+    .voice-toggle input { accent-color: var(--vscode-button-background); }
+    .voice-select {
+        font-size: 11px;
+        padding: 1px 4px;
+        background: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        border: 1px solid var(--vscode-input-border);
+        border-radius: 3px;
+        max-width: 120px;
+    }
+    .voice-speed {
+        width: 60px;
+        accent-color: var(--vscode-button-background);
+    }
+    .voice-speed-label {
+        font-size: 10px;
+        opacity: 0.7;
+        min-width: 24px;
+    }
+    .voice-stop-tts {
+        background: none;
+        border: 1px solid var(--vscode-input-border);
+        color: var(--vscode-foreground);
+        border-radius: 3px;
+        padding: 1px 6px;
+        cursor: pointer;
+        font-size: 10px;
+    }
+    .voice-stop-tts:hover {
+        background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+    }
+
+    /* Mic button */
+    .mic-btn {
+        background: none;
+        border: 1px solid var(--vscode-input-border);
+        color: var(--vscode-foreground);
+        border-radius: 4px;
+        padding: 6px 8px;
+        cursor: pointer;
+        align-self: flex-end;
+        display: flex;
+        align-items: center;
+    }
+    .mic-btn:hover {
+        background: var(--vscode-list-hoverBackground);
+    }
+    .mic-btn.recording {
+        background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+        border-color: var(--vscode-inputValidation-errorBorder, #be1100);
+        color: var(--vscode-errorForeground, #f48771);
+        animation: mic-pulse 1s infinite;
+    }
+    @keyframes mic-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+
     .attachment-strip {
         display: flex;
         gap: 6px;
@@ -697,10 +774,23 @@ export function getWebviewHtml(chatFontSize: number): string {
     <button class="context-pill" id="debugPill" title="Include active debug session state (call stack, variables) as context" style="display:none;">&#9679; Debug State</button>
 </div>
 
+<div class="voice-controls" id="voiceControls" style="display:none;">
+    <label class="voice-toggle"><input type="checkbox" id="sttToggle"> STT</label>
+    <label class="voice-toggle"><input type="checkbox" id="ttsToggle"> TTS</label>
+    <label class="voice-toggle"><input type="checkbox" id="wakeWordToggle"> Wake</label>
+    <select id="voiceSelect" class="voice-select" title="TTS Voice" style="display:none;"></select>
+    <input type="range" id="speedSlider" class="voice-speed" min="0.5" max="2.0" step="0.1" value="1.0" title="TTS Speed" style="display:none;">
+    <span id="speedLabel" class="voice-speed-label" style="display:none;">1.0x</span>
+    <button class="voice-stop-tts" id="stopTtsBtn" style="display:none;" title="Stop speaking">&#9724;</button>
+</div>
+
 <div class="attachment-strip" id="attachmentStrip"></div>
 
 <div class="input-area">
     <textarea id="input" rows="2" placeholder="Ask a question or describe a task..." autofocus></textarea>
+    <button id="micBtn" class="mic-btn" title="Record voice (STT)" style="display:none;">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 10a2 2 0 0 0 2-2V4a2 2 0 1 0-4 0v4a2 2 0 0 0 2 2z"/><path d="M12 8a1 1 0 0 0-2 0 2 2 0 1 1-4 0 1 1 0 0 0-2 0 4 4 0 0 0 3 3.87V13H5.5a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1H9v-1.13A4 4 0 0 0 12 8z"/></svg>
+    </button>
     <button id="stopBtn" class="stop-btn" title="Stop the running workflow">Stop</button>
     <button id="sendBtn">Send</button>
 </div>
@@ -742,6 +832,23 @@ export function getWebviewHtml(chatFontSize: number): string {
     let problemsActive = false;
     let debugActive = false;
     let visionAvailable = false; // Set by health check response
+
+    // --- Voice state ---
+    const voiceControls = document.getElementById('voiceControls');
+    const sttToggle = document.getElementById('sttToggle');
+    const ttsToggle = document.getElementById('ttsToggle');
+    const wakeWordToggle = document.getElementById('wakeWordToggle');
+    const micBtn = document.getElementById('micBtn');
+    const stopTtsBtn = document.getElementById('stopTtsBtn');
+    const voiceSelect = document.getElementById('voiceSelect');
+    const speedSlider = document.getElementById('speedSlider');
+    const speedLabel = document.getElementById('speedLabel');
+    let sttEnabled = false;
+    let ttsEnabled = false;
+    let wakeWordEnabled = false;
+    let isRecording = false;
+    let currentAudio = null;
+    let ttsQueue = [];
 
     // --- Image attachments ---
     const attachmentStrip = document.getElementById('attachmentStrip');
@@ -1177,6 +1284,73 @@ export function getWebviewHtml(chatFontSize: number): string {
         }
     });
 
+    // --- Voice event handlers ---
+    micBtn.addEventListener('click', () => {
+        if (isRecording) {
+            vscode.postMessage({ type: 'sttStop' });
+            micBtn.classList.remove('recording');
+            isRecording = false;
+        } else {
+            vscode.postMessage({ type: 'sttStart', autoStop: false });
+            micBtn.classList.add('recording');
+            isRecording = true;
+        }
+    });
+
+    sttToggle.addEventListener('change', (e) => {
+        sttEnabled = e.target.checked;
+        micBtn.style.display = sttEnabled ? '' : 'none';
+        vscode.postMessage({ type: 'voiceToggle', feature: 'stt', enabled: sttEnabled });
+    });
+
+    ttsToggle.addEventListener('change', (e) => {
+        ttsEnabled = e.target.checked;
+        voiceSelect.style.display = ttsEnabled ? '' : 'none';
+        speedSlider.style.display = ttsEnabled ? '' : 'none';
+        speedLabel.style.display = ttsEnabled ? '' : 'none';
+        vscode.postMessage({ type: 'voiceToggle', feature: 'tts', enabled: ttsEnabled });
+    });
+
+    wakeWordToggle.addEventListener('change', (e) => {
+        wakeWordEnabled = e.target.checked;
+        vscode.postMessage({ type: 'voiceToggle', feature: 'wakeWord', enabled: wakeWordEnabled });
+    });
+
+    voiceSelect.addEventListener('change', (e) => {
+        vscode.postMessage({ type: 'voiceConfigChange', voice: e.target.value });
+    });
+
+    speedSlider.addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value);
+        speedLabel.textContent = val.toFixed(1) + 'x';
+        vscode.postMessage({ type: 'voiceConfigChange', speed: val });
+    });
+
+    function playTtsAudio(base64Audio) {
+        const audio = new Audio('data:audio/wav;base64,' + base64Audio);
+        currentAudio = audio;
+        stopTtsBtn.style.display = '';
+        audio.onended = () => {
+            currentAudio = null;
+            if (ttsQueue.length > 0) {
+                playTtsAudio(ttsQueue.shift());
+            } else {
+                stopTtsBtn.style.display = 'none';
+            }
+        };
+        audio.play().catch(() => {
+            currentAudio = null;
+            stopTtsBtn.style.display = 'none';
+        });
+    }
+
+    stopTtsBtn.addEventListener('click', () => {
+        if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+        ttsQueue = [];
+        stopTtsBtn.style.display = 'none';
+        vscode.postMessage({ type: 'ttsStop' });
+    });
+
     function autoResize() {
         const maxH = 200;
         inputEl.style.height = 'auto';
@@ -1506,6 +1680,59 @@ export function getWebviewHtml(chatFontSize: number): string {
 
             case 'visionAvailable':
                 visionAvailable = !!msg.available;
+                break;
+
+            case 'voiceAvailable':
+                if (msg.stt || msg.tts || msg.wakeWord) {
+                    voiceControls.style.display = '';
+                }
+                if (!msg.stt) { sttToggle.parentElement.style.display = 'none'; }
+                if (!msg.tts) { ttsToggle.parentElement.style.display = 'none'; }
+                if (!msg.wakeWord) { wakeWordToggle.parentElement.style.display = 'none'; }
+                break;
+
+            case 'voiceVoices':
+                // Populate voice dropdown
+                voiceSelect.innerHTML = '';
+                if (msg.voices) {
+                    for (const v of msg.voices) {
+                        const opt = document.createElement('option');
+                        opt.value = v.id;
+                        opt.textContent = v.id + ' (' + v.language + ')';
+                        voiceSelect.appendChild(opt);
+                    }
+                    if (msg.current) { voiceSelect.value = msg.current; }
+                }
+                break;
+
+            case 'sttResult':
+                inputEl.value += (inputEl.value ? ' ' : '') + msg.text;
+                inputEl.dispatchEvent(new Event('input'));
+                micBtn.classList.remove('recording');
+                isRecording = false;
+                break;
+
+            case 'sttRecording':
+                micBtn.classList.toggle('recording', !!msg.active);
+                isRecording = !!msg.active;
+                break;
+
+            case 'ttsAudio':
+                if (ttsEnabled && msg.audio) {
+                    if (currentAudio) {
+                        ttsQueue.push(msg.audio);
+                    } else {
+                        playTtsAudio(msg.audio);
+                    }
+                }
+                break;
+
+            case 'wakeWordDetected':
+                if (sttEnabled && !isRecording) {
+                    vscode.postMessage({ type: 'sttStart', autoStop: true });
+                    micBtn.classList.add('recording');
+                    isRecording = true;
+                }
                 break;
 
             case 'chatReset':

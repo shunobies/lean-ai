@@ -132,6 +132,21 @@ class Settings(BaseSettings):
     vision_max_tokens: int = 1024  # Max tokens for image description
     vision_timeout: float = 60.0  # Timeout per image description (seconds)
 
+    # ── Voice — STT (faster-whisper, always local) ──
+    enable_stt: bool = False
+    stt_model: str = "turbo"  # tiny|base|small|medium|large-v3|turbo
+    stt_language: str = ""  # ISO 639-1, empty = auto-detect
+    stt_device: str = "auto"  # auto|cpu|cuda
+    stt_silence_threshold: float = 2.0  # Seconds of silence before auto-stop
+
+    # ── Voice — TTS (Kokoro, always local) ──
+    enable_tts: bool = False
+    tts_voice: str = "af_heart"  # Kokoro voice ID
+    tts_speed: float = 1.0  # 0.5–2.0
+
+    # ── Voice — Wake word (openWakeWord, always local) ──
+    enable_wake_word: bool = False
+
     # ── Indexer ──
     index_dir: str = ".lean_ai_index"
     chunk_max_lines: int = 50

@@ -511,4 +511,14 @@ async def health():
     """Health check."""
     from lean_ai.llm.vision import is_vision_available
 
-    return {"status": "ok", "vision_available": is_vision_available()}
+    result = {"status": "ok", "vision_available": is_vision_available()}
+    try:
+        from lean_ai.voice.availability import voice_status
+        result.update(voice_status())
+    except ImportError:
+        result.update({
+            "stt_available": False,
+            "tts_available": False,
+            "wake_word_available": False,
+        })
+    return result

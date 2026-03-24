@@ -792,6 +792,59 @@ export function getSettingsPanelHtml(): string {
     </div>
 </div>
 
+<!-- ── Voice ── -->
+<div class="section">
+    <h2>Voice</h2>
+    <div class="field-check">
+        <input type="checkbox" id="enableStt">
+        <div>
+            <label for="enableStt">Speech-to-Text (faster-whisper)</label>
+            <span class="hint">Click the mic icon in chat to dictate. Requires portaudio system library.</span>
+        </div>
+    </div>
+    <div class="field-row">
+        <div class="field">
+            <label>STT model</label>
+            <select id="sttModel">
+                <option value="tiny">tiny</option>
+                <option value="base">base</option>
+                <option value="small">small</option>
+                <option value="medium">medium</option>
+                <option value="large-v3">large-v3</option>
+                <option value="turbo" selected>turbo</option>
+            </select>
+        </div>
+        <div class="field">
+            <label>STT language <span class="hint">empty = auto-detect</span></label>
+            <input type="text" id="sttLanguage" placeholder="">
+        </div>
+    </div>
+    <div class="field-check">
+        <input type="checkbox" id="enableTts">
+        <div>
+            <label for="enableTts">Text-to-Speech (Kokoro)</label>
+            <span class="hint">Reads LLM responses aloud. Voice and speed can be changed inline in the chat area.</span>
+        </div>
+    </div>
+    <div class="field-row">
+        <div class="field">
+            <label>TTS voice</label>
+            <input type="text" id="ttsVoice" placeholder="af_heart">
+        </div>
+        <div class="field">
+            <label>TTS speed <span class="hint">0.5–2.0</span></label>
+            <input type="number" id="ttsSpeed" min="0.5" max="2.0" step="0.1" placeholder="1.0">
+        </div>
+    </div>
+    <div class="field-check">
+        <input type="checkbox" id="enableWakeWord">
+        <div>
+            <label for="enableWakeWord">Wake word ("Hey Computer")</label>
+            <span class="hint">Hands-free STT activation via openWakeWord. Requires portaudio.</span>
+        </div>
+    </div>
+</div>
+
 <!-- ── Advanced (collapsible) ── -->
 <details>
     <summary>Advanced</summary>
@@ -1290,6 +1343,15 @@ export function getSettingsPanelHtml(): string {
             postValidationMaxRetries: val('postValidationMaxRetries'),
             postValidationFixTurns:   val('postValidationFixTurns'),
 
+            // Voice
+            enableStt:             val('enableStt'),
+            sttModel:              val('sttModel'),
+            sttLanguage:           val('sttLanguage'),
+            enableTts:             val('enableTts'),
+            ttsVoice:              val('ttsVoice'),
+            ttsSpeed:              val('ttsSpeed'),
+            enableWakeWord:        val('enableWakeWord'),
+
             // Advanced
             inlineModel:           val('inlineModel'),
             inlineOllamaUrl:       val('inlineOllamaUrl'),
@@ -1421,6 +1483,15 @@ export function getSettingsPanelHtml(): string {
         setVal('postTestCommand',          v.postTestCommand);
         setVal('postValidationMaxRetries', v.postValidationMaxRetries);
         setVal('postValidationFixTurns',   v.postValidationFixTurns);
+
+        // Voice
+        setVal('enableStt',             v.enableStt);
+        setVal('sttModel',              v.sttModel);
+        setVal('sttLanguage',           v.sttLanguage);
+        setVal('enableTts',             v.enableTts);
+        setVal('ttsVoice',              v.ttsVoice);
+        setVal('ttsSpeed',              v.ttsSpeed);
+        setVal('enableWakeWord',        v.enableWakeWord);
 
         // Advanced
         setVal('inlineModel',           v.inlineModel);

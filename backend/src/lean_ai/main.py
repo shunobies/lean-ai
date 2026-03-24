@@ -24,6 +24,14 @@ async def lifespan(app: FastAPI):
         close_browser()
     except ImportError:
         pass
+    # Cleanup voice audio resources
+    try:
+        from lean_ai.voice.audio_manager import get_audio_manager
+        mgr = get_audio_manager()
+        if mgr:
+            mgr.cleanup()
+    except ImportError:
+        pass
     logger.info("Shutting down Lean AI backend.")
 
 

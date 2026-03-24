@@ -52,6 +52,13 @@ knowledge = [
 google = [
     "selenium>=4.25.0,<5.0",
 ]
+voice = [
+    "faster-whisper>=1.2.1",
+    "kokoro>=0.9.4",
+    "soundfile",
+    "openwakeword",
+    "PyAudio",
+]
 dev = [
     "pytest>=8.0.0,<10.0",
     "pytest-asyncio>=0.24.0,<2.0",

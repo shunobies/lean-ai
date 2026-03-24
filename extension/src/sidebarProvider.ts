@@ -60,6 +60,8 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     // Context pill state — whether to append diagnostics/debug data to outgoing messages
     private _includeProblems = false;
     private _includeDebug = false;
+    private _ttsEnabled = false;
+    private _wakeWordActive = false;
     private _lastDebugStop?: { reason: string; text?: string; threadId?: number };
 
     constructor(
@@ -120,9 +122,26 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         this.conversations.ensureStorageDir().catch(() => {});
         webviewView.webview.html = this.getHtml();
 
-        // Probe backend for vision capability on startup
+        // Probe backend for vision and voice capabilities on startup
         this.client.healthCheck().then(() => {
             this.postMessage({ type: "visionAvailable", available: this.client.visionAvailable });
+            this.postMessage({
+                type: "voiceAvailable",
+                stt: this.client.sttAvailable,
+                tts: this.client.ttsAvailable,
+                wakeWord: this.client.wakeWordAvailable,
+            });
+            // Populate voice list if TTS is available
+            if (this.client.ttsAvailable) {
+                this.client.listVoices().then((voices) => {
+                    const voiceConfig = vscode.workspace.getConfiguration("lean-ai");
+                    this.postMessage({
+                        type: "voiceVoices",
+                        voices,
+                        current: voiceConfig.get<string>("ttsVoice", "af_heart"),
+                    });
+                }).catch(() => {});
+            }
         }).catch(() => {});
 
         // Check if a workflow completed while the panel was disposed
@@ -241,6 +260,27 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                         msg.file as string,
                         msg.baseBranch as string,
                     );
+                    break;
+                // --- Voice ---
+                case "sttStart":
+                    this.handleSttStart(!!(msg.autoStop));
+                    break;
+                case "sttStop":
+                    this.handleSttStop();
+                    break;
+                case "voiceToggle":
+                    this.handleVoiceToggle(msg.feature as string, !!(msg.enabled));
+                    break;
+                case "ttsStop":
+                    // Client-side only — audio is already stopped in the webview
+                    break;
+                case "voiceConfigChange":
+                    if (msg.voice) {
+                        this.client.voiceConfig(msg.voice as string).catch(() => {});
+                    }
+                    if (msg.speed) {
+                        this.client.voiceConfig(undefined, msg.speed as number).catch(() => {});
+                    }
                     break;
             }
         });
@@ -608,6 +648,9 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                     this.lastCompletedSessionId,
                 );
             },
+            onTtsContent: this._ttsEnabled
+                ? (text) => this.speakText(text)
+                : undefined,
         };
         handleWsMessage(msg, ctx);
     }
@@ -737,6 +780,11 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         const truncated = !receivedDone && tokenCount > 0;
         this.postMessage({ type: "chatDone", fullText: fullReply, tps, evalCount: tokenCount, truncated });
 
+        // TTS: speak the reply aloud if enabled
+        if (this._ttsEnabled && fullReply) {
+            this.speakText(fullReply);
+        }
+
         // Persist conversation after each exchange
         await this.conversations.persistCurrentConversation(this.chatHistory);
     }
@@ -810,5 +858,72 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     private getHtml(): string {
         const chatFontSize = vscode.workspace.getConfiguration("lean-ai").get<number>("chatFontSize", 13);
         return getWebviewHtml(chatFontSize);
+    }
+
+    // ── Voice helpers ───────────────────────────────────────────────
+
+    private async handleSttStart(autoStop: boolean): Promise<void> {
+        try {
+            await this.client.sttStart(autoStop);
+        } catch (err) {
+            this.postMessage({ type: "reply", text: `STT start failed: ${err}`, cls: "msg-error" });
+            this.postMessage({ type: "sttRecording", active: false });
+        }
+    }
+
+    private async handleSttStop(): Promise<void> {
+        try {
+            const result = await this.client.sttStop();
+            this.postMessage({ type: "sttResult", text: result.text });
+        } catch (err) {
+            this.postMessage({ type: "reply", text: `STT failed: ${err}`, cls: "msg-error" });
+            this.postMessage({ type: "sttRecording", active: false });
+        }
+    }
+
+    private async handleVoiceToggle(feature: string, enabled: boolean): Promise<void> {
+        if (feature === "tts") {
+            this._ttsEnabled = enabled;
+        } else if (feature === "stt") {
+            // STT toggle is UI-only (mic button visibility)
+        } else if (feature === "wakeWord") {
+            if (enabled) {
+                try {
+                    await this.client.wakeWordStart();
+                    this.client.connectVoiceEvents(() => {
+                        this.postMessage({ type: "wakeWordDetected" });
+                    });
+                    this._wakeWordActive = true;
+                } catch (err) {
+                    this.postMessage({ type: "reply", text: `Wake word failed: ${err}`, cls: "msg-error" });
+                }
+            } else {
+                try {
+                    await this.client.wakeWordStop();
+                    this.client.disconnectVoiceEvents();
+                    this._wakeWordActive = false;
+                } catch {
+                    // Best effort
+                }
+            }
+        }
+    }
+
+    /** Speak text aloud via TTS. Non-fatal on failure. */
+    async speakText(text: string): Promise<void> {
+        try {
+            if (text.length < 500) {
+                const result = await this.client.ttsSynthesize(text);
+                if (result.audio_base64) {
+                    this.postMessage({ type: "ttsAudio", audio: result.audio_base64 });
+                }
+            } else {
+                await this.client.ttsStream(text, undefined, undefined, (chunk) => {
+                    this.postMessage({ type: "ttsAudio", audio: chunk });
+                });
+            }
+        } catch (err) {
+            console.warn("[Lean AI] TTS failed:", err);
+        }
     }
 }

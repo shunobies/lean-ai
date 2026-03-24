@@ -78,6 +78,15 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.visionModel":              "LEAN_AI_VISION_MODEL",
     "lean-ai.visionOllamaUrl":          "LEAN_AI_VISION_OLLAMA_URL",
 
+    // Voice
+    "lean-ai.enableStt":                 "LEAN_AI_ENABLE_STT",
+    "lean-ai.sttModel":                  "LEAN_AI_STT_MODEL",
+    "lean-ai.sttLanguage":               "LEAN_AI_STT_LANGUAGE",
+    "lean-ai.enableTts":                 "LEAN_AI_ENABLE_TTS",
+    "lean-ai.ttsVoice":                  "LEAN_AI_TTS_VOICE",
+    "lean-ai.ttsSpeed":                  "LEAN_AI_TTS_SPEED",
+    "lean-ai.enableWakeWord":            "LEAN_AI_ENABLE_WAKE_WORD",
+
     // Search
     "lean-ai.searchProvider":            "LEAN_AI_SEARCH_PROVIDER",
     "lean-ai.searchApiUrl":              "LEAN_AI_SEARCH_API_URL",

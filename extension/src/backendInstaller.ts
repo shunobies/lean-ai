@@ -382,6 +382,14 @@ async function detectExtras(context: vscode.ExtensionContext): Promise<string[]>
         extras.push("anthropic");
     }
 
+    // Auto-detect voice extras if any voice feature is enabled
+    const sttEnabled = config.get<boolean>("enableStt", false);
+    const ttsEnabled = config.get<boolean>("enableTts", false);
+    const wakeWordEnabled = config.get<boolean>("enableWakeWord", false);
+    if (sttEnabled || ttsEnabled || wakeWordEnabled) {
+        extras.push("voice");
+    }
+
     return extras;
 }
 
@@ -423,6 +431,11 @@ async function promptOptionalExtras(context: vscode.ExtensionContext): Promise<v
         {
             label: "knowledge",
             description: "Document indexing (EPUB, PDF, Word)",
+            picked: false,
+        },
+        {
+            label: "voice",
+            description: "Voice interaction — STT, TTS, wake word (requires portaudio system lib)",
             picked: false,
         },
     ];

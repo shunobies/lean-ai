@@ -153,3 +153,50 @@ class ModelsResponse(BaseModel):
     models: list[ModelInfo]
     default_provider: str
     default_model: str
+
+
+# ── Voice models ──
+
+
+class STTStartRequest(BaseModel):
+    auto_stop: bool = False
+
+
+class STTStopResponse(BaseModel):
+    text: str
+    language: str | None = None
+    duration_seconds: float = 0.0
+
+
+class TTSRequest(BaseModel):
+    text: str
+    voice: str = ""
+    speed: float = 0.0
+
+
+class TTSResponse(BaseModel):
+    audio_base64: str
+    duration_seconds: float = 0.0
+
+
+class VoiceConfigRequest(BaseModel):
+    voice: str = ""
+    speed: float = 0.0
+
+
+class VoiceInfo(BaseModel):
+    id: str
+    name: str
+    language: str
+    gender: str | None = None
+
+
+class VoiceListResponse(BaseModel):
+    voices: list[VoiceInfo]
+
+
+class VoiceStatusResponse(BaseModel):
+    stt_available: bool = False
+    tts_available: bool = False
+    wake_word_available: bool = False
+    setup: dict = {}

@@ -485,13 +485,26 @@ export class BackendClient {
     /** Last known vision capability from the backend. */
     visionAvailable = false;
 
+    /** Last known voice capabilities from the backend. */
+    sttAvailable = false;
+    ttsAvailable = false;
+    wakeWordAvailable = false;
+
     async healthCheck(): Promise<boolean> {
         try {
             const resp = await fetch(`${this.baseUrl}/api/health`);
             if (resp.ok) {
                 try {
-                    const data = await resp.json() as { vision_available?: boolean };
+                    const data = await resp.json() as {
+                        vision_available?: boolean;
+                        stt_available?: boolean;
+                        tts_available?: boolean;
+                        wake_word_available?: boolean;
+                    };
                     this.visionAvailable = !!data.vision_available;
+                    this.sttAvailable = !!data.stt_available;
+                    this.ttsAvailable = !!data.tts_available;
+                    this.wakeWordAvailable = !!data.wake_word_available;
                 } catch {
                     // Older backends may not return JSON
                 }
@@ -622,6 +635,165 @@ export class BackendClient {
             throw new Error(err.detail ?? resp.statusText);
         }
         return resp.json() as Promise<ReturnType<typeof this.scaffold> extends Promise<infer T> ? T : never>;
+    }
+
+    // --- Voice ---
+
+    async sttStart(autoStop = false): Promise<void> {
+        const resp = await fetch(`${this.baseUrl}/api/voice/stt/start`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ auto_stop: autoStop }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
+            throw new Error(err.detail ?? resp.statusText);
+        }
+    }
+
+    async sttStop(): Promise<{ text: string; language?: string; duration_seconds: number }> {
+        const resp = await fetch(`${this.baseUrl}/api/voice/stt/stop`, {
+            method: "POST",
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
+            throw new Error(err.detail ?? resp.statusText);
+        }
+        return resp.json() as Promise<{ text: string; language?: string; duration_seconds: number }>;
+    }
+
+    async ttsSynthesize(
+        text: string,
+        voice?: string,
+        speed?: number,
+    ): Promise<{ audio_base64: string; duration_seconds: number }> {
+        const resp = await fetch(`${this.baseUrl}/api/voice/tts`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text, voice: voice || "", speed: speed || 0 }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
+            throw new Error(err.detail ?? resp.statusText);
+        }
+        return resp.json() as Promise<{ audio_base64: string; duration_seconds: number }>;
+    }
+
+    async ttsStream(
+        text: string,
+        voice: string | undefined,
+        speed: number | undefined,
+        onChunk: (base64: string) => void,
+    ): Promise<void> {
+        const resp = await fetch(`${this.baseUrl}/api/voice/tts/stream`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text, voice: voice || "", speed: speed || 0 }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
+            throw new Error(err.detail ?? resp.statusText);
+        }
+        const reader = resp.body?.getReader();
+        if (!reader) { return; }
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) { break; }
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+            for (const line of lines) {
+                if (line.startsWith("data: ")) {
+                    try {
+                        const data = JSON.parse(line.slice(6)) as { type?: string; audio_base64?: string };
+                        if (data.type === "done") { return; }
+                        if (data.audio_base64) { onChunk(data.audio_base64); }
+                    } catch { /* skip malformed */ }
+                }
+            }
+        }
+    }
+
+    async wakeWordStart(): Promise<void> {
+        const resp = await fetch(`${this.baseUrl}/api/voice/wakeword/start`, {
+            method: "POST",
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
+            throw new Error(err.detail ?? resp.statusText);
+        }
+    }
+
+    async wakeWordStop(): Promise<void> {
+        const resp = await fetch(`${this.baseUrl}/api/voice/wakeword/stop`, {
+            method: "POST",
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
+            throw new Error(err.detail ?? resp.statusText);
+        }
+    }
+
+    async listVoices(): Promise<Array<{ id: string; name: string; language: string; gender?: string }>> {
+        const resp = await fetch(`${this.baseUrl}/api/voice/tts/voices`);
+        if (!resp.ok) { return []; }
+        const data = await resp.json() as { voices: Array<{ id: string; name: string; language: string; gender?: string }> };
+        return data.voices || [];
+    }
+
+    async voiceConfig(voice?: string, speed?: number): Promise<void> {
+        await fetch(`${this.baseUrl}/api/voice/config`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ voice: voice || "", speed: speed || 0 }),
+        });
+    }
+
+    /** SSE connection for wake word events */
+    private _voiceEventAbort: AbortController | null = null;
+
+    connectVoiceEvents(onWakeWord: () => void): void {
+        this.disconnectVoiceEvents();
+        this._voiceEventAbort = new AbortController();
+        const signal = this._voiceEventAbort.signal;
+
+        (async () => {
+            try {
+                const resp = await fetch(`${this.baseUrl}/api/voice/events`, { signal });
+                const reader = resp.body?.getReader();
+                if (!reader) { return; }
+                const decoder = new TextDecoder();
+                let buffer = "";
+                while (!signal.aborted) {
+                    const { done, value } = await reader.read();
+                    if (done) { break; }
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split("\n");
+                    buffer = lines.pop() || "";
+                    for (const line of lines) {
+                        if (line.startsWith("data: ")) {
+                            try {
+                                const data = JSON.parse(line.slice(6)) as { type?: string };
+                                if (data.type === "wake_word_detected") {
+                                    onWakeWord();
+                                }
+                            } catch { /* skip */ }
+                        }
+                    }
+                }
+            } catch {
+                // Connection closed or aborted
+            }
+        })();
+    }
+
+    disconnectVoiceEvents(): void {
+        if (this._voiceEventAbort) {
+            this._voiceEventAbort.abort();
+            this._voiceEventAbort = null;
+        }
     }
 
     // --- WebSocket ---
