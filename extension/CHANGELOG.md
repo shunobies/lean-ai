@@ -2,6 +2,17 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.3.23] - 2026-03-24
+
+### Added
+- **Voice interaction** — optional Speech-to-Text, Text-to-Speech, and wake word detection. Enable via settings (`LEAN_AI_ENABLE_STT`, `LEAN_AI_ENABLE_TTS`, `LEAN_AI_ENABLE_WAKE_WORD`). Requires `pip install "lean-ai[voice]"` and portaudio for STT/wake word.
+  - **Mic button** in the chat input for push-to-talk transcription (faster-whisper STT).
+  - **TTS toggle** to have the LLM read responses aloud (kokoro-onnx, 58 voices, 24kHz audio). Voice and speed selectable from the chat controls.
+  - **Wake word** ("Hey Computer") for hands-free activation via openWakeWord.
+- **Auto-install voice dependencies** — when voice settings are enabled but dependencies are missing, the extension offers to install them automatically via a notification with "Install Now" and "Show Instructions" options.
+- **TTS model auto-download with progress** — the ~310MB kokoro-onnx model files are downloaded automatically on first use with a visible progress notification. A confirmation message appears when download completes.
+- **Python 3.13 support for TTS** — switched from `kokoro` (PyTorch-based, Python <3.13) to `kokoro-onnx` (ONNX Runtime, Python 3.10–3.13).
+
 ## [0.3.20] - 2026-03-22
 
 ### Added
