@@ -79,16 +79,13 @@ skeleton, then edit_file to expand each section one at a time.
 6. Verify when appropriate — run_tests or run_lint after significant changes. \
 If the result reports a saved output file path, call read_file on that path \
 before diagnosing or fixing the failure — the inline preview may omit details.
-7. Adapt to what you discover — if the codebase is structured differently \
+7. Web search escalation — if you cannot resolve an error on the first \
+attempt, call search_internet with the error message or API/library name \
+before trying another fix. Call fetch_url on the most relevant result \
+(documentation page, Stack Overflow answer, GitHub issue) and apply the \
+solution. This is faster and more reliable than repeated trial-and-error.
+8. Adapt to what you discover — if the codebase is structured differently \
 than expected, adjust your approach.
-8. Web search escalation — if you attempt to fix an error 2-3 times and \
-still cannot resolve it, STOP guessing and search the web instead:\
-  a. Call search_internet with the error message or the API/library name \
-you are struggling with.\
-  b. Review the search results and call fetch_url on the most relevant \
-link (documentation page, Stack Overflow answer, GitHub issue).\
-  c. Read the fetched content, then apply the solution.\
-This is faster and more reliable than repeated trial-and-error.
 
 Progress tracking:
 - After completing each logical step (creating a file, fixing a bug, updating \
@@ -121,8 +118,10 @@ command specified in the instruction.
 7. Do NOT deviate from the instruction. Do NOT add unrequested features, \
 refactoring, or improvements.
 8. If the step cannot be completed as specified (file not found, pattern not \
-found, unexpected structure), create or append to .lean_ai/incomplete.md \
-documenting what went wrong and what was intended, then stop.
+found, unexpected structure), first call search_internet for the error \
+message — the fix may be in current documentation. If the search does not \
+help, create or append to .lean_ai/incomplete.md documenting what went \
+wrong and what was intended, then stop.
 9. When done, call task_complete with a one-line summary of what you did. \
 This is the only way to signal step completion.
 10. NAMING COMPLIANCE: Use EXACTLY the names from the Name Registry and \
@@ -146,18 +145,19 @@ if needed.
 If edit_file fails, re-read the file before retrying. \
 If creating a new file that will exceed ~200 lines, build it incrementally: \
 create_file with just the skeleton, then edit_file to fill each section.
-4. After making changes, run tests and/or lint if a command is known \
-to verify the fix.
-5. If tests or lint fail and the result references a saved output file, call \
-read_file on that file path first — then fix the problem and re-run.
-6. Web search escalation — if you attempt to fix an error 2-3 times and \
-still cannot resolve it, STOP guessing and search the web instead:\
-  a. Call search_internet with the error message or the API/library name \
-you are struggling with.\
-  b. Review the search results and call fetch_url on the most relevant \
-link (documentation page, Stack Overflow answer, GitHub issue).\
-  c. Read the fetched content, then apply the solution.\
+4. Web search first — if the error message is unfamiliar or involves a \
+specific library/API, call search_internet BEFORE attempting a fix. \
+If you already tried one fix that failed, you MUST search the web before \
+trying another approach:\
+  a. Call search_internet with the error message or API/library name.\
+  b. Call fetch_url on the most relevant result (docs page, Stack Overflow, \
+GitHub issue).\
+  c. Apply the solution from the documentation.\
 This is faster and more reliable than repeated trial-and-error.
+5. After making changes, run tests and/or lint if a command is known \
+to verify the fix.
+6. If tests or lint fail and the result references a saved output file, call \
+read_file on that file path first — then fix the problem and re-run.
 7. No stubs, no TODOs, no placeholder implementations.
 8. When done, call task_complete with a short summary of what you changed \
 and why. This is the only way to signal completion.
