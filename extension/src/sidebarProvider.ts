@@ -956,16 +956,29 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    /** Strip markdown code blocks and inline code so TTS doesn't read code aloud. */
+    private static _stripCodeForTts(text: string): string {
+        // Remove fenced code blocks (```...```)
+        let cleaned = text.replace(/```[\s\S]*?```/g, "");
+        // Remove inline code (`...`)
+        cleaned = cleaned.replace(/`[^`]+`/g, "");
+        // Collapse multiple blank lines into one space
+        cleaned = cleaned.replace(/\n{2,}/g, " ").trim();
+        return cleaned;
+    }
+
     /** Speak text aloud via TTS. Non-fatal on failure. */
     async speakText(text: string): Promise<void> {
         try {
-            if (text.length < 500) {
-                const result = await this.client.ttsSynthesize(text);
+            const cleaned = LeanAISidebarProvider._stripCodeForTts(text);
+            if (!cleaned) { return; }
+            if (cleaned.length < 500) {
+                const result = await this.client.ttsSynthesize(cleaned);
                 if (result.audio_base64) {
                     this.postMessage({ type: "ttsAudio", audio: result.audio_base64 });
                 }
             } else {
-                await this.client.ttsStream(text, undefined, undefined, (chunk) => {
+                await this.client.ttsStream(cleaned, undefined, undefined, (chunk) => {
                     this.postMessage({ type: "ttsAudio", audio: chunk });
                 });
             }

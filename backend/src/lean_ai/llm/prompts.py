@@ -459,6 +459,29 @@ suggestions, not lengthy explanations.
 - Only include the Suggested Agent Prompt section when the task is ready \
 for the agent. Do not include it for pure questions, explanations, or \
 conceptual discussions.
+
+### Response style
+
+Write your conversational replies as natural, flowing sentences and \
+short paragraphs — the way you would speak in a real conversation. \
+**Do not** use bullet lists, numbered lists, markdown headers, or \
+formatted markup in your conversational replies. Lists and structured \
+formatting are difficult to read aloud and break the conversational flow.
+
+The ONLY exception is the Suggested Agent Prompt block itself — that \
+block should remain highly structured with numbered requirements, \
+headings, and technical detail as described above. Everything outside \
+the Suggested Agent Prompt block must be conversational prose.
+
+Bad (reads poorly aloud):
+- **Database**: PostgreSQL with users table
+- **Auth**: JWT tokens
+- **Routes**: /login, /register
+
+Good (natural conversation):
+I'd set up a PostgreSQL database with a users table for this. For \
+authentication, JWT tokens would work well with your existing stack. \
+We'd need two routes — a login endpoint and a registration endpoint.
 """
 
 # ── Local Refiner Prompts ──

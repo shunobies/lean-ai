@@ -2,6 +2,19 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.3.24] - 2026-03-24
+
+### Added
+- **Vision model support** — attach images (paste or drag-and-drop) to chat and agent workflows. An optional Ollama vision-language model (e.g. `qwen3-vl:8b`) describes each image so the main LLM understands visual content — screenshots, UI mockups, error messages, terminal output. Multiple images are processed in parallel. Configure via `lean-ai.visionModel` in settings; disabled by default.
+- **TTS sentence streaming** — TTS now speaks each sentence as it arrives during chat streaming instead of waiting for the full response. Reduces perceived delay from LLM output to audible speech.
+- **TTS code block filtering** — code blocks and inline code are stripped before TTS synthesis so the engine doesn't read code aloud.
+- **TTS model quality selection** — choose between fp32 (~311MB, highest quality), fp16 (~169MB, 2x faster, new default), or int8 (~88MB, smallest) via `LEAN_AI_TTS_MODEL_QUALITY`.
+- **Conversational chat responses** — the request LLM now produces flowing sentences instead of bullet lists, making TTS output sound natural.
+
+### Changed
+- **TTS performance** — ONNX Runtime session optimization (graph fusion, CPU thread tuning, warmup inference) for faster audio synthesis.
+- **STT performance** — faster-whisper now defaults to greedy decoding (`beam_size=1`) and 6 CPU threads for quicker transcription. Configurable via `LEAN_AI_STT_BEAM_SIZE` and `LEAN_AI_STT_CPU_THREADS`.
+
 ## [0.3.23] - 2026-03-24
 
 ### Added
