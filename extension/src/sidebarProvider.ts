@@ -781,11 +781,6 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         let isFirst = true;
         let streamStartTime: number | null = null;
         let tokenCount = 0;
-        let ttsSentenceBuffer = "";
-        let ttsSentencesSpoken = 0;
-        this._ttsSentenceQueue = [];
-        this._ttsSpeaking = false;
-
         this.sessionTreeProvider?.pauseRefresh();
         let receivedDone = false;
         try {
@@ -795,32 +790,14 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 fullReply += token;
                 this.postMessage({ type: "chatToken", content: token, isFirst });
                 isFirst = false;
-
-                // TTS: speak sentences as they arrive during streaming
-                if (this._ttsEnabled) {
-                    ttsSentenceBuffer += token;
-                    const match = ttsSentenceBuffer.match(/^(.*?[.!?])\s([\s\S]*)$/);
-                    if (match) {
-                        const sentence = match[1];
-                        ttsSentenceBuffer = match[2];
-                        ttsSentencesSpoken++;
-                        this.speakSentence(sentence);
-                    }
-                }
             }, apiAttachments));
         } finally {
             this.sessionTreeProvider?.resumeRefresh();
         }
 
-        // TTS: flush remaining buffer or fall back to full reply
+        // TTS: speak the full reply after streaming completes
         if (this._ttsEnabled && fullReply.trim()) {
-            if (ttsSentencesSpoken > 0 && ttsSentenceBuffer.trim()) {
-                // Sentence streaming worked — flush remaining partial sentence
-                this.speakSentence(ttsSentenceBuffer.trim());
-            } else if (ttsSentencesSpoken === 0) {
-                // Fallback: no sentences detected during streaming, speak full reply
-                await this.speakText(fullReply);
-            }
+            await this.speakText(fullReply);
         }
 
         // Compute tok/s from first-token to last-token (excludes context-gathering latency)
