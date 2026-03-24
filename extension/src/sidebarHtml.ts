@@ -569,6 +569,53 @@ export function getWebviewHtml(chatFontSize: number): string {
         background: var(--vscode-inputValidation-errorBorder, #be1100);
         color: #fff;
     }
+    .input-area.drag-over {
+        border-color: var(--vscode-focusBorder);
+        background: var(--vscode-list-hoverBackground);
+    }
+
+    .attachment-strip {
+        display: flex;
+        gap: 6px;
+        padding: 0 12px 4px;
+        flex-wrap: wrap;
+        flex-shrink: 0;
+    }
+    .attachment-strip:empty { display: none; }
+    .attachment-thumb {
+        position: relative;
+        width: 48px;
+        height: 48px;
+        border-radius: 4px;
+        overflow: visible;
+        border: 1px solid var(--vscode-panel-border);
+        flex-shrink: 0;
+    }
+    .attachment-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 3px;
+    }
+    .attachment-thumb .remove-btn {
+        position: absolute;
+        top: -6px;
+        right: -6px;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+        color: #fff;
+        border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+        font-size: 10px;
+        line-height: 14px;
+        text-align: center;
+        cursor: pointer;
+        padding: 0;
+    }
+    .attachment-thumb .remove-btn:hover {
+        background: var(--vscode-inputValidation-errorBorder, #be1100);
+    }
 
     .context-pills {
         padding: 0 12px 6px;
@@ -650,6 +697,8 @@ export function getWebviewHtml(chatFontSize: number): string {
     <button class="context-pill" id="debugPill" title="Include active debug session state (call stack, variables) as context" style="display:none;">&#9679; Debug State</button>
 </div>
 
+<div class="attachment-strip" id="attachmentStrip"></div>
+
 <div class="input-area">
     <textarea id="input" rows="2" placeholder="Ask a question or describe a task..." autofocus></textarea>
     <button id="stopBtn" class="stop-btn" title="Stop the running workflow">Stop</button>
@@ -692,6 +741,58 @@ export function getWebviewHtml(chatFontSize: number): string {
     let currentPlanningDiv = null; // AI bubble being filled during planning streaming
     let problemsActive = false;
     let debugActive = false;
+    let visionAvailable = false; // Set by health check response
+
+    // --- Image attachments ---
+    const attachmentStrip = document.getElementById('attachmentStrip');
+    let pendingAttachments = []; // [{data: base64, filename: string, mimeType: string}]
+    const MAX_ATTACHMENTS = 5;
+    const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
+
+    function addImageAttachment(file) {
+        if (!file.type.startsWith('image/')) return;
+        if (pendingAttachments.length >= MAX_ATTACHMENTS) return;
+        if (file.size > MAX_IMAGE_SIZE) return;
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            const base64 = reader.result.split(',')[1];
+            pendingAttachments.push({
+                data: base64,
+                filename: file.name || 'pasted-image.png',
+                mimeType: file.type,
+            });
+            renderAttachments();
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function renderAttachments() {
+        attachmentStrip.innerHTML = '';
+        pendingAttachments.forEach((att, idx) => {
+            const thumb = document.createElement('div');
+            thumb.className = 'attachment-thumb';
+            const img = document.createElement('img');
+            img.src = 'data:' + att.mimeType + ';base64,' + att.data;
+            img.alt = att.filename;
+            const btn = document.createElement('button');
+            btn.className = 'remove-btn';
+            btn.textContent = '\\u00d7';
+            btn.title = 'Remove image';
+            btn.addEventListener('click', () => {
+                pendingAttachments.splice(idx, 1);
+                renderAttachments();
+            });
+            thumb.appendChild(img);
+            thumb.appendChild(btn);
+            attachmentStrip.appendChild(thumb);
+        });
+    }
+
+    function clearAttachments() {
+        pendingAttachments = [];
+        renderAttachments();
+    }
 
     // --- Smart auto-scroll: only scroll to bottom when user is already there ---
     const jumpBtn = document.getElementById('jumpToBottom');
@@ -1010,7 +1111,8 @@ export function getWebviewHtml(chatFontSize: number): string {
     let sendTimeout = null;
     function send() {
         const text = inputEl.value.trim();
-        if (!text || sending) return;
+        const hasAttachments = pendingAttachments.length > 0;
+        if ((!text && !hasAttachments) || sending) return;
         // If viewing a historic conversation or in search mode, return to current chat first
         if (backBtn.style.display !== 'none') {
             vscode.postMessage({ type: 'backToCurrentChat' });
@@ -1024,10 +1126,23 @@ export function getWebviewHtml(chatFontSize: number): string {
         sendBtn.disabled = true;
         userScrolledUp = false;
         jumpBtn.classList.remove('visible');
-        addMessage(escapeHtml(text), 'msg-user');
+        // Show user message with image count if applicable
+        let displayText = escapeHtml(text);
+        if (hasAttachments) {
+            const n = pendingAttachments.length;
+            const label = n === 1 ? '1 image attached' : n + ' images attached';
+            displayText = (displayText ? displayText + '<br>' : '') +
+                '<span style="opacity:0.6;font-size:0.9em">[' + label + ']</span>';
+        }
+        addMessage(displayText, 'msg-user');
         inputEl.value = '';
         autoResize();
-        vscode.postMessage({ type: 'sendMessage', text });
+        const msg = { type: 'sendMessage', text };
+        if (hasAttachments) {
+            msg.attachments = pendingAttachments.slice();
+        }
+        vscode.postMessage(msg);
+        clearAttachments();
         // Safety: re-enable after 120s if response is lost
         if (sendTimeout) clearTimeout(sendTimeout);
         sendTimeout = setTimeout(() => {
@@ -1075,7 +1190,41 @@ export function getWebviewHtml(chatFontSize: number): string {
         }
     }
     inputEl.addEventListener('input', autoResize);
-    inputEl.addEventListener('paste', () => { setTimeout(autoResize, 0); });
+    inputEl.addEventListener('paste', (e) => {
+        // Intercept pasted images from clipboard
+        if (visionAvailable && e.clipboardData && e.clipboardData.items) {
+            for (const item of e.clipboardData.items) {
+                if (item.type.startsWith('image/')) {
+                    e.preventDefault();
+                    const file = item.getAsFile();
+                    if (file) addImageAttachment(file);
+                    return;
+                }
+            }
+        }
+        setTimeout(autoResize, 0);
+    });
+
+    // --- Drag and drop images ---
+    const inputArea = document.querySelector('.input-area');
+    inputArea.addEventListener('dragover', (e) => {
+        if (!visionAvailable) return;
+        e.preventDefault();
+        inputArea.classList.add('drag-over');
+    });
+    inputArea.addEventListener('dragleave', () => {
+        inputArea.classList.remove('drag-over');
+    });
+    inputArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        inputArea.classList.remove('drag-over');
+        if (!visionAvailable) return;
+        const files = e.dataTransfer && e.dataTransfer.files;
+        if (!files) return;
+        for (const file of files) {
+            addImageAttachment(file);
+        }
+    });
 
     newChatBtn.addEventListener('click', () => {
         if (searchMode) closeSearch();
@@ -1353,6 +1502,10 @@ export function getWebviewHtml(chatFontSize: number): string {
                 sendBtn.disabled = false;
                 stopBtn.style.display = 'none';
                 if (sendTimeout) { clearTimeout(sendTimeout); sendTimeout = null; }
+                break;
+
+            case 'visionAvailable':
+                visionAvailable = !!msg.available;
                 break;
 
             case 'chatReset':

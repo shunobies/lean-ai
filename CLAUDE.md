@@ -140,6 +140,10 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_INLINE_OLLAMA_URL` | *(falls back to OLLAMA_URL)* | Ollama instance for inline model |
 | `LEAN_AI_EMBEDDING_MODEL` | `qwen3-embedding:0.6b` | Embedding model for semantic search (always Ollama) |
 | `LEAN_AI_ENABLE_EMBEDDINGS` | `true` | Enable embedding generation + RRF hybrid search |
+| `LEAN_AI_VISION_MODEL` | *(empty)* | Vision model for describing images (e.g. `qwen3-vl:8b`). Empty = vision disabled. Always Ollama |
+| `LEAN_AI_VISION_OLLAMA_URL` | *(falls back to OLLAMA_URL)* | Ollama instance for vision model |
+| `LEAN_AI_VISION_MAX_TOKENS` | `1024` | Max tokens for image description |
+| `LEAN_AI_VISION_TIMEOUT` | `60.0` | Timeout per image description (seconds) |
 | `LEAN_AI_INDEX_DIR` | `.lean_ai_index` | Whoosh index directory name |
 | `LEAN_AI_SEARCH_PROVIDER` | `duckduckgo` | Search provider (`duckduckgo`, `searxng`, `google`, or `bing`). Google auto-falls back to Bing |
 | `LEAN_AI_SEARCH_DELAY` | `2.0` | Min seconds between searches (all providers, with random jitter) |

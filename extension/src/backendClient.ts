@@ -249,6 +249,7 @@ export class BackendClient {
             active_selection?: string;
         } | undefined,
         onToken: (token: string, isFirst: boolean) => void,
+        attachments?: Array<{ data: string; filename?: string; mime_type?: string }>,
     ): Promise<{ receivedDone: boolean }> {
         return new Promise((resolve, reject) => {
             const fullUrl = new URL(`${this.baseUrl}/api/chat/stream`);
@@ -257,6 +258,7 @@ export class BackendClient {
 
             const body: Record<string, unknown> = { message, history };
             if (workspace) { body.workspace = workspace; }
+            if (attachments && attachments.length > 0) { body.attachments = attachments; }
             const postData = JSON.stringify(body);
 
             const options: http.RequestOptions = {
@@ -480,9 +482,20 @@ export class BackendClient {
         return resp.json() as Promise<ReturnType<typeof this.getConversationLog> extends Promise<infer T> ? T : never>;
     }
 
+    /** Last known vision capability from the backend. */
+    visionAvailable = false;
+
     async healthCheck(): Promise<boolean> {
         try {
             const resp = await fetch(`${this.baseUrl}/api/health`);
+            if (resp.ok) {
+                try {
+                    const data = await resp.json() as { vision_available?: boolean };
+                    this.visionAvailable = !!data.vision_available;
+                } catch {
+                    // Older backends may not return JSON
+                }
+            }
             return resp.ok;
         } catch {
             return false;

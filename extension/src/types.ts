@@ -2,6 +2,14 @@
  * Shared TypeScript interfaces for the Lean AI VSCode extension.
  */
 
+// --- Image Attachments ---
+
+export interface Attachment {
+    data: string;        // Base64-encoded image data
+    filename?: string;
+    mimeType?: string;   // e.g. "image/png"
+}
+
 // --- WebSocket Message Types ---
 
 export type WSMessage =

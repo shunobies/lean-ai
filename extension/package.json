@@ -341,6 +341,16 @@
           "default": true,
           "markdownDescription": "**Embeddings** — Enable embedding generation and RRF hybrid search in the workspace index. Disable if you don't want to run an embedding model. Default: `true`"
         },
+        "lean-ai.visionModel": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Vision Model** — Ollama vision model for describing images attached in chat (e.g. `qwen3-vl:8b`). Leave empty to disable image support. Must be pulled with `ollama pull <model>`."
+        },
+        "lean-ai.visionOllamaUrl": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Vision Model** — Ollama endpoint for the vision model. Leave empty to use the primary Ollama URL."
+        },
         "lean-ai.searchApiUrl": {
           "type": "string",
           "default": "",

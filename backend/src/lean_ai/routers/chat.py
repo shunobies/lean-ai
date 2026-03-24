@@ -349,11 +349,39 @@ async def _build_chat_messages(
                 logger.debug("Chat URL fetch failed for %s: %s", url, e)
                 fetched_pages.append({"url": url, "content": f"(Failed to fetch: {e})"})
 
+    image_descriptions: str = ""
+
+    async def _describe_attachments():
+        nonlocal image_descriptions
+        from lean_ai.llm.vision import (
+            describe_images,
+            format_image_descriptions,
+            is_vision_available,
+        )
+
+        if not request.attachments or not is_vision_available():
+            return
+        image_attachments = [
+            {"data": a.data, "filename": a.filename}
+            for a in request.attachments
+            if a.mime_type and a.mime_type.startswith("image/")
+        ]
+        if not image_attachments:
+            return
+        try:
+            results = await describe_images(
+                image_attachments, prompt=request.message,
+            )
+            image_descriptions = format_image_descriptions(results)
+        except Exception as e:
+            logger.warning("Image description failed (non-fatal): %s", e)
+
     await asyncio.gather(
         _gather_workspace_context(),
         _do_web_search(),
         _fetch_urls(),
         _refine_message(),
+        _describe_attachments(),
     )
 
     # Use refined message if available, otherwise original
@@ -376,15 +404,20 @@ async def _build_chat_messages(
     )
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
+    # Append image descriptions to the user message
+    if image_descriptions:
+        user_message = f"{user_message}\n\n{image_descriptions}"
+
     for msg in request.history[-20:]:
         messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": user_message})
 
     logger.info(
-        "Chat: history=%d, files=%d, search=%d, project_ctx=%s, web=%s, refined=%s",
+        "Chat: history=%d, files=%d, search=%d, project_ctx=%s, web=%s, refined=%s, images=%d",
         len(request.history), len(file_tree), len(search_results),
         bool(project_context), bool(web_search_text),
         bool(refiner_result and refiner_result.was_refined),
+        len(request.attachments),
     )
 
     return messages, refiner_result
@@ -476,4 +509,6 @@ async def inline_predict(request: InlinePredictRequest):
 @chat_router.get("/health")
 async def health():
     """Health check."""
-    return {"status": "ok"}
+    from lean_ai.llm.vision import is_vision_available
+
+    return {"status": "ok", "vision_available": is_vision_available()}

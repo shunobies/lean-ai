@@ -84,10 +84,19 @@ class WorkspaceContext(BaseModel):
     active_selection: str | None = None
 
 
+class Attachment(BaseModel):
+    """A file attachment (typically an image) sent with a message."""
+
+    data: str  # Base64-encoded content
+    filename: str | None = None
+    mime_type: str | None = None  # e.g. "image/png", "image/jpeg"
+
+
 class ChatRequest(BaseModel):
     message: str
     history: list[dict[str, str]] = []
     workspace: WorkspaceContext | None = None
+    attachments: list[Attachment] = []
 
 
 class ChatResponse(BaseModel):

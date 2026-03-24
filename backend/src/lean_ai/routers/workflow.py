@@ -75,6 +75,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
             if msg_type == "user_message":
                 content = data.get("content", "")
                 repo_root = data.get("repo_root", "")
+                attachments = data.get("attachments", [])
 
                 if not repo_root:
                     await websocket.send_json({
@@ -128,6 +129,64 @@ async def session_stream(websocket: WebSocket, session_id: str):
 
                             # --- Load context and run workflow ---
                             context = load_full_context(repo_root)
+
+                            # --- Describe attached images via vision model ---
+                            if attachments:
+                                from lean_ai.llm.vision import (
+                                    describe_images,
+                                    format_image_descriptions,
+                                    is_vision_available,
+                                )
+
+                                if is_vision_available():
+                                    image_attachments = [
+                                        {
+                                            "data": a["data"],
+                                            "filename": a.get("filename"),
+                                        }
+                                        for a in attachments
+                                        if (a.get("mime_type") or "")
+                                        .startswith("image/")
+                                    ]
+                                    if image_attachments:
+                                        try:
+                                            await websocket.send_json({
+                                                "type": "stage_status",
+                                                "stage": "VISION",
+                                                "status": "running",
+                                                "summary": (
+                                                    f"Describing "
+                                                    f"{len(image_attachments)} "
+                                                    f"image(s)..."
+                                                ),
+                                            })
+                                            results = await describe_images(
+                                                image_attachments,
+                                                prompt=content,
+                                            )
+                                            desc = format_image_descriptions(
+                                                results,
+                                            )
+                                            if desc:
+                                                content = (
+                                                    f"{content}\n\n{desc}"
+                                                )
+                                            await websocket.send_json({
+                                                "type": "stage_status",
+                                                "stage": "VISION",
+                                                "status": "done",
+                                                "summary": (
+                                                    f"Described "
+                                                    f"{len(image_attachments)}"
+                                                    f" image(s)"
+                                                ),
+                                            })
+                                        except Exception as e:
+                                            logger.warning(
+                                                "Vision description failed "
+                                                "(non-fatal): %s",
+                                                e,
+                                            )
 
                             # Conversation logger — writes chain-of-thought to DB
                             async def _log_conversation(

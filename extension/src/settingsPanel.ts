@@ -237,6 +237,8 @@ export class SettingsPanel {
             inlineOllamaUrl:          "lean-ai.inlineOllamaUrl",
             embeddingModel:           "lean-ai.embeddingModel",
             enableEmbeddings:         "lean-ai.enableEmbeddings",
+            visionModel:              "lean-ai.visionModel",
+            visionOllamaUrl:          "lean-ai.visionOllamaUrl",
             searchProvider:           "lean-ai.searchProvider",
             searchApiUrl:             "lean-ai.searchApiUrl",
             searchDelay:              "lean-ai.searchDelay",
@@ -411,6 +413,10 @@ export class SettingsPanel {
             inlineOllamaUrl:           config.get("lean-ai.inlineOllamaUrl", ""),
             embeddingModel:            config.get("lean-ai.embeddingModel", ""),
             enableEmbeddings:          config.get("lean-ai.enableEmbeddings", true),
+
+            // Vision
+            visionModel:               config.get("lean-ai.visionModel", ""),
+            visionOllamaUrl:           config.get("lean-ai.visionOllamaUrl", ""),
 
             // Search
             searchProvider:            config.get("lean-ai.searchProvider", "duckduckgo"),

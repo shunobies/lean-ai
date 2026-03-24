@@ -819,6 +819,20 @@ export function getSettingsPanelHtml(): string {
             </div>
         </div>
         <div class="field">
+            <label>Vision model <span class="hint">leave empty to disable image support</span></label>
+            <div class="model-combobox" id="visionModelCombobox">
+                <input type="text" id="visionModel" placeholder="qwen3-vl:8b">
+                <button type="button" class="model-combobox-btn" tabindex="-1">&#9660;</button>
+                <div class="model-combobox-options"></div>
+            </div>
+        </div>
+    </div>
+    <div class="field-row">
+        <div class="field">
+            <label>Vision Ollama URL <span class="hint">leave empty to share primary URL</span></label>
+            <input type="text" id="visionOllamaUrl" placeholder="">
+        </div>
+        <div class="field">
             <label>Search provider</label>
             <input type="hidden" id="searchProvider" value="duckduckgo">
             <div class="custom-select" id="searchProviderDropdown">
@@ -1143,6 +1157,7 @@ export function getSettingsPanelHtml(): string {
         { comboboxId: 'ollamaModelRequestCombobox', inputId: 'ollamaModelRequest' },
         { comboboxId: 'inlineModelCombobox',       inputId: 'inlineModel' },
         { comboboxId: 'embeddingModelCombobox',    inputId: 'embeddingModel' },
+        { comboboxId: 'visionModelCombobox',      inputId: 'visionModel' },
     ];
 
     function updateOllamaModelDropdown(models) {
@@ -1280,6 +1295,8 @@ export function getSettingsPanelHtml(): string {
             inlineOllamaUrl:       val('inlineOllamaUrl'),
             embeddingModel:        val('embeddingModel'),
             enableEmbeddings:      val('enableEmbeddings'),
+            visionModel:           val('visionModel'),
+            visionOllamaUrl:       val('visionOllamaUrl'),
             searchProvider:        val('searchProvider'),
             searchApiUrl:          val('searchApiUrl'),
             searchDelay:           val('searchDelay'),
@@ -1410,6 +1427,8 @@ export function getSettingsPanelHtml(): string {
         setVal('inlineOllamaUrl',       v.inlineOllamaUrl);
         setVal('embeddingModel',        v.embeddingModel);
         setVal('enableEmbeddings',      v.enableEmbeddings);
+        setVal('visionModel',           v.visionModel);
+        setVal('visionOllamaUrl',       v.visionOllamaUrl);
         setSearchProvider(v.searchProvider || 'duckduckgo');
         setVal('searchApiUrl',          v.searchApiUrl);
         setVal('searchDelay',           v.searchDelay);

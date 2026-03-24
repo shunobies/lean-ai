@@ -17,7 +17,7 @@ import { ConversationManager } from "./conversationManager";
 import { getWebviewHtml } from "./sidebarHtml";
 import { createSlashCommands } from "./slashCommands";
 import type { SlashCommandContext } from "./slashCommands";
-import type { WSMessage } from "./types";
+import type { Attachment, WSMessage } from "./types";
 import { handleWsMessage } from "./wsHandler";
 import type { WsHandlerContext } from "./wsHandler";
 import { SettingsPanel } from "./settingsPanel";
@@ -120,6 +120,11 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         this.conversations.ensureStorageDir().catch(() => {});
         webviewView.webview.html = this.getHtml();
 
+        // Probe backend for vision capability on startup
+        this.client.healthCheck().then(() => {
+            this.postMessage({ type: "visionAvailable", available: this.client.visionAvailable });
+        }).catch(() => {});
+
         // Check if a workflow completed while the panel was disposed
         if (this.lastCompletedSessionId) {
             setTimeout(() => {
@@ -136,7 +141,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             switch (msg.type) {
                 case "sendMessage":
                     try {
-                        await this.handleUserMessage(msg.text);
+                        await this.handleUserMessage(msg.text, msg.attachments);
                     } catch {
                         // Safety: always re-enable send on unexpected errors
                         this.postMessage({ type: "sendEnabled" });
@@ -609,7 +614,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
 
     // ── Message routing ──────────────────────────────────────────────
 
-    private async handleUserMessage(text: string): Promise<void> {
+    private async handleUserMessage(text: string, attachments?: Attachment[]): Promise<void> {
         // --- Slash command interception (before chat/agent routing) ---
         const trimmed = text.trim();
         const slashMatch = trimmed.match(/^(\/\w+)(?:\s+(.*))?$/s);
@@ -645,6 +650,8 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         try {
             // Check backend health
             const healthy = await this.client.healthCheck();
+            // Notify webview of vision capability
+            this.postMessage({ type: "visionAvailable", available: this.client.visionAvailable });
             if (!healthy) {
                 this.postMessage({ type: "thinking", show: false });
                 this.postMessage({
@@ -655,7 +662,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 return;
             }
 
-            await this.handleChatMessage(text);
+            await this.handleChatMessage(text, attachments);
         } catch (e) {
             this.postMessage({ type: "thinking", show: false });
             const error = e instanceof Error ? e.message : String(e);
@@ -666,7 +673,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
 
     // ── Chat mode: streaming LLM call with workspace context ─────────
 
-    private async handleChatMessage(text: string): Promise<void> {
+    private async handleChatMessage(text: string, attachments?: Attachment[]): Promise<void> {
         const now = new Date().toISOString();
 
         // Append any enabled context pills to the outgoing message
@@ -677,6 +684,13 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         if (this._includeDebug && vscode.debug.activeDebugSession) {
             chatText += await this.collectDebugContext();
         }
+
+        // Convert attachments to backend format
+        const apiAttachments = attachments?.map(a => ({
+            data: a.data,
+            filename: a.filename,
+            mime_type: a.mimeType,
+        }));
 
         // Add user message to history with timestamp (store original text, not augmented)
         this.chatHistory.push({ role: "user", content: text, timestamp: now });
@@ -701,7 +715,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 fullReply += token;
                 this.postMessage({ type: "chatToken", content: token, isFirst });
                 isFirst = false;
-            }));
+            }, apiAttachments));
         } finally {
             this.sessionTreeProvider?.resumeRefresh();
         }

@@ -74,6 +74,10 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.embeddingModel":            "LEAN_AI_EMBEDDING_MODEL",
     "lean-ai.enableEmbeddings":          "LEAN_AI_ENABLE_EMBEDDINGS",
 
+    // Vision model
+    "lean-ai.visionModel":              "LEAN_AI_VISION_MODEL",
+    "lean-ai.visionOllamaUrl":          "LEAN_AI_VISION_OLLAMA_URL",
+
     // Search
     "lean-ai.searchProvider":            "LEAN_AI_SEARCH_PROVIDER",
     "lean-ai.searchApiUrl":              "LEAN_AI_SEARCH_API_URL",

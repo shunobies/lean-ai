@@ -123,6 +123,12 @@ class Settings(BaseSettings):
     enable_embeddings: bool = True
     embedding_ollama_url: str | None = None
 
+    # ── Vision model (always Ollama, on-demand) ──
+    vision_model: str = ""  # e.g. "qwen3-vl:8b". Empty = vision disabled
+    vision_ollama_url: str | None = None  # Falls back to ollama_url
+    vision_max_tokens: int = 1024  # Max tokens for image description
+    vision_timeout: float = 60.0  # Timeout per image description (seconds)
+
     # ── Indexer ──
     index_dir: str = ".lean_ai_index"
     chunk_max_lines: int = 50
@@ -253,6 +259,10 @@ class Settings(BaseSettings):
     @property
     def effective_embedding_url(self) -> str:
         return self.embedding_ollama_url or self.ollama_url
+
+    @property
+    def effective_vision_url(self) -> str:
+        return self.vision_ollama_url or self.ollama_url
 
     @property
     def effective_expert_temperature(self) -> float:
