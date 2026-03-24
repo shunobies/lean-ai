@@ -1346,10 +1346,17 @@ export function getWebviewHtml(chatFontSize: number): string {
     });
 
     function playTtsAudio(base64Audio) {
-        const audio = new Audio('data:audio/wav;base64,' + base64Audio);
+        // Decode base64 to blob URL (more reliable than data URIs in webviews)
+        const binary = atob(base64Audio);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
+        const blob = new Blob([bytes], { type: 'audio/wav' });
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
         currentAudio = audio;
         stopTtsBtn.style.display = '';
         audio.onended = () => {
+            URL.revokeObjectURL(url);
             currentAudio = null;
             if (ttsQueue.length > 0) {
                 playTtsAudio(ttsQueue.shift());
@@ -1357,7 +1364,9 @@ export function getWebviewHtml(chatFontSize: number): string {
                 stopTtsBtn.style.display = 'none';
             }
         };
-        audio.play().catch(() => {
+        audio.play().catch((err) => {
+            console.error('[Lean AI] TTS playback failed:', err);
+            URL.revokeObjectURL(url);
             currentAudio = null;
             stopTtsBtn.style.display = 'none';
         });
