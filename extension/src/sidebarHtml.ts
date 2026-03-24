@@ -624,6 +624,16 @@ export function getWebviewHtml(chatFontSize: number): string {
     .voice-stop-tts:hover {
         background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
     }
+    .voice-setup-hint {
+        font-size: 11px;
+        color: var(--vscode-editorWarning-foreground, #cca700);
+        margin-left: auto;
+    }
+    .voice-setup-hint a {
+        color: var(--vscode-textLink-foreground);
+        text-decoration: underline;
+        cursor: pointer;
+    }
 
     /* Mic button */
     .mic-btn {
@@ -782,6 +792,7 @@ export function getWebviewHtml(chatFontSize: number): string {
     <input type="range" id="speedSlider" class="voice-speed" min="0.5" max="2.0" step="0.1" value="1.0" title="TTS Speed" style="display:none;">
     <span id="speedLabel" class="voice-speed-label" style="display:none;">1.0x</span>
     <button class="voice-stop-tts" id="stopTtsBtn" style="display:none;" title="Stop speaking">&#9724;</button>
+    <span id="voiceSetupHint" class="voice-setup-hint" style="display:none;">&#9888; Deps missing &mdash; <a href="#" id="voiceSetupLink">setup steps</a></span>
 </div>
 
 <div class="attachment-strip" id="attachmentStrip"></div>
@@ -843,6 +854,8 @@ export function getWebviewHtml(chatFontSize: number): string {
     const voiceSelect = document.getElementById('voiceSelect');
     const speedSlider = document.getElementById('speedSlider');
     const speedLabel = document.getElementById('speedLabel');
+    const voiceSetupHint = document.getElementById('voiceSetupHint');
+    const voiceSetupLink = document.getElementById('voiceSetupLink');
     let sttEnabled = false;
     let ttsEnabled = false;
     let wakeWordEnabled = false;
@@ -1285,6 +1298,11 @@ export function getWebviewHtml(chatFontSize: number): string {
     });
 
     // --- Voice event handlers ---
+    voiceSetupLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        vscode.postMessage({ type: 'voiceShowSetup' });
+    });
+
     micBtn.addEventListener('click', () => {
         if (isRecording) {
             vscode.postMessage({ type: 'sttStop' });
@@ -1686,9 +1704,40 @@ export function getWebviewHtml(chatFontSize: number): string {
                 if (msg.stt || msg.tts || msg.wakeWord) {
                     voiceControls.style.display = '';
                 }
-                if (!msg.stt) { sttToggle.parentElement.style.display = 'none'; }
-                if (!msg.tts) { ttsToggle.parentElement.style.display = 'none'; }
-                if (!msg.wakeWord) { wakeWordToggle.parentElement.style.display = 'none'; }
+                // STT — init toggle + mic button
+                if (msg.stt) {
+                    sttToggle.parentElement.style.display = '';
+                    sttToggle.checked = true;
+                    sttEnabled = true;
+                    micBtn.style.display = '';
+                } else {
+                    sttToggle.parentElement.style.display = 'none';
+                    micBtn.style.display = 'none';
+                }
+                // TTS — init toggle + voice/speed controls
+                if (msg.tts) {
+                    ttsToggle.parentElement.style.display = '';
+                    ttsToggle.checked = true;
+                    ttsEnabled = true;
+                    voiceSelect.style.display = '';
+                    speedSlider.style.display = '';
+                    speedLabel.style.display = '';
+                } else {
+                    ttsToggle.parentElement.style.display = 'none';
+                }
+                // Wake word
+                if (msg.wakeWord) {
+                    wakeWordToggle.parentElement.style.display = '';
+                } else {
+                    wakeWordToggle.parentElement.style.display = 'none';
+                }
+                // Setup hint — show when settings enabled but deps missing
+                if (msg.setupNeeded) {
+                    voiceControls.style.display = '';
+                    voiceSetupHint.style.display = '';
+                } else {
+                    voiceSetupHint.style.display = 'none';
+                }
                 break;
 
             case 'voiceVoices':

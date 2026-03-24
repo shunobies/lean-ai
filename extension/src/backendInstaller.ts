@@ -181,6 +181,46 @@ export async function resetBackend(context: vscode.ExtensionContext): Promise<vo
     channel.appendLine("[Lean AI] Backend reset complete. Will reinstall on next activation.");
 }
 
+/**
+ * Incrementally install additional pip extras into the existing venv.
+ * Does NOT delete/recreate the venv — just runs pip install with the extras.
+ * Returns true on success.
+ */
+export async function addExtras(
+    context: vscode.ExtensionContext,
+    extras: string[],
+): Promise<boolean> {
+    if (extras.length === 0) { return true; }
+
+    const globalDir = context.globalStorageUri.fsPath;
+    const venvPath = path.join(globalDir, VENV_DIR);
+    const venvPython = getVenvPythonPath(venvPath);
+
+    if (!fs.existsSync(venvPython)) { return false; }
+
+    const bundledBackend = getBundledBackendPath(context);
+    const channel = getOutputChannel();
+
+    try {
+        await vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Notification,
+                title: `Installing ${extras.join(", ")} extras...`,
+                cancellable: false,
+            },
+            () => installBackend(venvPython, bundledBackend, extras, false, channel),
+        );
+        // Update stored extras
+        const prev = context.globalState.get<string[]>(EXTRAS_KEY, []);
+        const merged = [...new Set([...prev, ...extras])];
+        await context.globalState.update(EXTRAS_KEY, merged);
+        return true;
+    } catch {
+        channel.appendLine("[Lean AI] Failed to install extras: " + extras.join(", "));
+        return false;
+    }
+}
+
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
 let _outputChannel: vscode.OutputChannel | undefined;

@@ -22,6 +22,7 @@ import { handleWsMessage } from "./wsHandler";
 import type { WsHandlerContext } from "./wsHandler";
 import { SettingsPanel } from "./settingsPanel";
 import { BACKEND_SETTING_MAP, clearEnvSetting, resolveEnvFilePath, writeEnvSetting } from "./settingsSync";
+import { addExtras } from "./backendInstaller";
 import { restartBackend } from "./backendProcess";
 import {
     notifyApprovalNeeded,
@@ -123,25 +124,52 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         webviewView.webview.html = this.getHtml();
 
         // Probe backend for vision and voice capabilities on startup
-        this.client.healthCheck().then(() => {
+        this.client.healthCheck().then(async () => {
             this.postMessage({ type: "visionAvailable", available: this.client.visionAvailable });
-            this.postMessage({
-                type: "voiceAvailable",
-                stt: this.client.sttAvailable,
-                tts: this.client.ttsAvailable,
-                wakeWord: this.client.wakeWordAvailable,
-            });
-            // Populate voice list if TTS is available
-            if (this.client.ttsAvailable) {
-                this.client.listVoices().then((voices) => {
-                    const voiceConfig = vscode.workspace.getConfiguration("lean-ai");
-                    this.postMessage({
-                        type: "voiceVoices",
-                        voices,
-                        current: voiceConfig.get<string>("ttsVoice", "af_heart"),
-                    });
-                }).catch(() => {});
+
+            // Detect voice settings enabled but deps not installed
+            const voiceConfig = vscode.workspace.getConfiguration("lean-ai");
+            const sttWanted = voiceConfig.get<boolean>("enableStt", false);
+            const ttsWanted = voiceConfig.get<boolean>("enableTts", false);
+            const wakeWanted = voiceConfig.get<boolean>("enableWakeWord", false);
+            const anyWanted = sttWanted || ttsWanted || wakeWanted;
+            const anyAvailable = this.client.sttAvailable
+                || this.client.ttsAvailable
+                || this.client.wakeWordAvailable;
+
+            if (anyWanted && !anyAvailable) {
+                // Voice settings enabled but deps missing — offer to install
+                const choice = await vscode.window.showWarningMessage(
+                    "Voice features are enabled but dependencies are not installed.",
+                    "Install Now",
+                    "Show Instructions",
+                );
+                if (choice === "Install Now") {
+                    const ok = await addExtras(this.context, ["voice"]);
+                    if (ok) {
+                        vscode.window.showInformationMessage(
+                            "Voice dependencies installed. Restarting backend...",
+                        );
+                        await restartBackend();
+                        // Re-probe after restart
+                        setTimeout(() => {
+                            this.client.healthCheck().then(() => {
+                                this._sendVoiceAvailable();
+                            }).catch(() => {});
+                        }, 3000);
+                        return;
+                    } else {
+                        this._showVoiceSetupInstructions();
+                    }
+                } else if (choice === "Show Instructions") {
+                    this._showVoiceSetupInstructions();
+                }
+                // Still missing — show hint in voice controls bar
+                this._sendVoiceAvailable(true);
+                return;
             }
+
+            this._sendVoiceAvailable();
         }).catch(() => {});
 
         // Check if a workflow completed while the panel was disposed
@@ -281,6 +309,9 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                     if (msg.speed) {
                         this.client.voiceConfig(undefined, msg.speed as number).catch(() => {});
                     }
+                    break;
+                case "voiceShowSetup":
+                    this._showVoiceSetupInstructions();
                     break;
             }
         });
@@ -925,5 +956,56 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         } catch (err) {
             console.warn("[Lean AI] TTS failed:", err);
         }
+    }
+
+    /** Send voiceAvailable + voice list to the webview. */
+    private _sendVoiceAvailable(setupNeeded = false): void {
+        this.postMessage({
+            type: "voiceAvailable",
+            stt: this.client.sttAvailable,
+            tts: this.client.ttsAvailable,
+            wakeWord: this.client.wakeWordAvailable,
+            setupNeeded,
+        });
+        if (this.client.ttsAvailable) {
+            const voiceConfig = vscode.workspace.getConfiguration("lean-ai");
+            this.client.listVoices().then((voices) => {
+                this.postMessage({
+                    type: "voiceVoices",
+                    voices,
+                    current: voiceConfig.get<string>("ttsVoice", "af_heart"),
+                });
+            }).catch(() => {});
+        }
+    }
+
+    /** Show voice setup instructions in the chat panel. */
+    private _showVoiceSetupInstructions(): void {
+        const isLinux = process.platform === "linux";
+        const isMac = process.platform === "darwin";
+        const portaudioCmd = isLinux
+            ? "sudo apt install portaudio19-dev"
+            : isMac
+                ? "brew install portaudio"
+                : "Install portaudio for your platform";
+
+        const instructions = [
+            "**Voice Setup Instructions:**",
+            "",
+            "1. Install system dependency (needed for STT & wake word):",
+            "```",
+            portaudioCmd,
+            "```",
+            "",
+            "2. Run the **Lean AI: Reinstall Backend** command from the",
+            "   Command Palette, or manually run in the backend venv:",
+            "```",
+            "pip install lean-ai[voice]",
+            "```",
+            "",
+            "3. Restart the backend",
+        ].join("\n");
+
+        this.postMessage({ type: "reply", text: instructions, cls: "msg-ai" });
     }
 }
