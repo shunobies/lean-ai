@@ -412,7 +412,6 @@ export function getWebviewHtml(chatFontSize: number): string {
         border: 1px solid var(--vscode-panel-border);
         border-radius: 4px;
         padding: 4px 8px;
-        opacity: 0.7;
     }
     .thinking-details > summary {
         cursor: pointer;
@@ -420,7 +419,8 @@ export function getWebviewHtml(chatFontSize: number): string {
         user-select: none;
         padding: 2px 0;
         list-style: disclosure-closed;
-        color: var(--vscode-descriptionForeground);
+        color: var(--vscode-foreground);
+        opacity: 0.8;
     }
     .thinking-details[open] > summary {
         list-style: disclosure-open;
@@ -433,7 +433,8 @@ export function getWebviewHtml(chatFontSize: number): string {
         margin: 0;
         max-height: 300px;
         overflow-y: auto;
-        opacity: 0.75;
+        color: var(--vscode-foreground);
+        opacity: 0.85;
     }
 
     .approval-bar {
@@ -1236,6 +1237,7 @@ export function getWebviewHtml(chatFontSize: number): string {
                         div.className = 'msg msg-system';
                         const details = document.createElement('details');
                         details.className = 'thinking-details';
+                        details.open = true;
                         const summary = document.createElement('summary');
                         summary.textContent = 'Thinking...';
                         const pre = document.createElement('pre');
@@ -1257,6 +1259,7 @@ export function getWebviewHtml(chatFontSize: number): string {
                         div.className = 'msg msg-system';
                         const details = document.createElement('details');
                         details.className = 'thinking-details';
+                        details.open = true;
                         const summary = document.createElement('summary');
                         summary.textContent = 'Thinking...';
                         const pre = document.createElement('pre');
