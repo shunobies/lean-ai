@@ -160,8 +160,8 @@ export async function handleInitCommand(
             : "Generating project context...",
     });
 
-    let ctxSettled: PromiseSettledResult<{ path: string; chars: number; skipped: boolean }>;
-    let guideSettled: PromiseSettledResult<{ path: string; chars: number; skipped: boolean }>;
+    let ctxSettled: PromiseSettledResult<{ path: string; chars: number; skipped?: boolean }>;
+    let guideSettled: PromiseSettledResult<{ path: string; chars: number; skipped?: boolean }>;
 
     if (runParallel) {
         // Parallel: each generation gets its own LLM slot

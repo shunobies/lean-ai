@@ -26,6 +26,9 @@ cd backend && pip install -e ".[dev,anthropic]"
 # Install with Google search provider (requires Chrome installed)
 cd backend && pip install -e ".[dev,google]"
 
+# Install with voice interaction (STT, TTS, wake word — requires portaudio)
+cd backend && pip install -e ".[dev,voice]"
+
 # Run the server
 cd backend && uvicorn lean_ai.main:app --reload --port 8422
 
@@ -63,6 +66,8 @@ cd extension && npm install && npm run build
 
 10. **Scaffolding** (`scaffolds/`) — 19 YAML scaffold recipes for project bootstrapping.
 
+11. **Voice** (`voice/`) — Optional voice interaction: Speech-to-Text (faster-whisper), Text-to-Speech (Kokoro), and wake word detection (openWakeWord). `AudioManager` singleton coordinates mic access — only one service (STT or wake word) captures at a time. Backend captures the mic directly via PyAudio (avoids VSCode webview audio restrictions). Extension UI has inline mic button, voice/speed controls, and TTS playback via HTML5 Audio with queuing. All deps in `voice` optional extras group. REST endpoints in `routers/voice.py`; SSE for wake word events and TTS streaming.
+
 ## Key Design Decisions
 
 - **No regex for source code analysis** — all extraction uses tree-sitter AST queries
@@ -85,6 +90,10 @@ cd extension && npm install && npm run build
 | Search index | Whoosh |
 | Source analysis | tree-sitter + 13 grammar packages |
 | Internet search | duckduckgo-search, Selenium (optional Google/Bing provider with automatic fallback) |
+| Voice STT | faster-whisper (CTranslate2-based Whisper) |
+| Voice TTS | Kokoro (lightweight, 54 voices, 24kHz PCM) |
+| Wake word | openWakeWord (pre-trained `hey_computer` model) |
+| Audio capture | PyAudio (requires portaudio system library) |
 | HTML sanitization | BeautifulSoup4 |
 | Testing | pytest + pytest-asyncio |
 | Linting | ruff |
@@ -144,6 +153,15 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_VISION_OLLAMA_URL` | *(falls back to OLLAMA_URL)* | Ollama instance for vision model |
 | `LEAN_AI_VISION_MAX_TOKENS` | `1024` | Max tokens for image description |
 | `LEAN_AI_VISION_TIMEOUT` | `60.0` | Timeout per image description (seconds) |
+| `LEAN_AI_ENABLE_STT` | `false` | Enable Speech-to-Text (faster-whisper). Requires voice extras + portaudio |
+| `LEAN_AI_STT_MODEL` | `turbo` | Whisper model size: `tiny`, `base`, `small`, `medium`, `large-v3`, `turbo` |
+| `LEAN_AI_STT_LANGUAGE` | *(empty)* | ISO 639-1 language code for STT. Empty = auto-detect |
+| `LEAN_AI_STT_DEVICE` | `auto` | STT compute device: `auto`, `cpu`, `cuda` |
+| `LEAN_AI_STT_SILENCE_THRESHOLD` | `2.0` | Seconds of silence before auto-stopping recording |
+| `LEAN_AI_ENABLE_TTS` | `false` | Enable Text-to-Speech (Kokoro). Requires voice extras |
+| `LEAN_AI_TTS_VOICE` | `af_heart` | Kokoro voice ID (e.g. `af_heart`, `am_adam`, `bf_emma`) |
+| `LEAN_AI_TTS_SPEED` | `1.0` | TTS playback speed (0.5–2.0) |
+| `LEAN_AI_ENABLE_WAKE_WORD` | `false` | Enable "Hey Computer" wake word detection (openWakeWord) |
 | `LEAN_AI_INDEX_DIR` | `.lean_ai_index` | Whoosh index directory name |
 | `LEAN_AI_SEARCH_PROVIDER` | `duckduckgo` | Search provider (`duckduckgo`, `searxng`, `google`, or `bing`). Google auto-falls back to Bing |
 | `LEAN_AI_SEARCH_DELAY` | `2.0` | Min seconds between searches (all providers, with random jitter) |
@@ -197,7 +215,17 @@ All under `/api` prefix:
 - `POST /predict` — inline predictions
 - `POST /scaffold/list` — list scaffold recipes
 - `POST /scaffold` — create project from scaffold
-- `GET /health` — health check
+- `GET /health` — health check (includes voice availability)
+- `POST /voice/stt/start` — start mic recording
+- `POST /voice/stt/stop` — stop recording, return transcribed text
+- `POST /voice/tts` — synthesize text to base64 WAV audio
+- `POST /voice/tts/stream` — SSE: stream audio chunks for long text
+- `GET /voice/tts/voices` — list available TTS voices
+- `POST /voice/config` — update voice/speed at runtime
+- `POST /voice/wakeword/start` — start wake word listener
+- `POST /voice/wakeword/stop` — stop wake word listener
+- `GET /voice/events` — SSE: wake word detection events
+- `GET /voice/status` — voice feature availability + setup instructions
 
 ## LLM Prompt Authoring Standard
 
