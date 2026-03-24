@@ -244,7 +244,11 @@ class TestThinkingConfig:
         assert s.enable_thinking_request is False
 
     def test_thinking_all_disabled(self):
-        s = Settings(enable_thinking=False, enable_thinking_expert=False, enable_thinking_request=False)
+        s = Settings(
+            enable_thinking=False,
+            enable_thinking_expert=False,
+            enable_thinking_request=False,
+        )
         assert s.enable_thinking is False
         assert s.enable_thinking_expert is False
         assert s.enable_thinking_request is False

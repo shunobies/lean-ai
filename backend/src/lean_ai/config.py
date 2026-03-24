@@ -87,13 +87,16 @@ class Settings(BaseSettings):
     anthropic_max_tokens: int | None = None  # Derived: 25% of context window
 
     # ── Expert model — provider selection ──
-    expert_llm_provider: str = ""  # "openai", "anthropic", "ollama", or "" (auto-detect from OLLAMA_MODEL_EXPERT)
+    # "openai", "anthropic", "ollama", or "" (auto-detect from OLLAMA_MODEL_EXPERT)
+    expert_llm_provider: str = ""
 
     # ── OpenAI — expert model ──
-    openai_expert_model: str = ""  # Model to use when expert_llm_provider=openai (falls back to openai_model)
+    # Falls back to openai_model when empty
+    openai_expert_model: str = ""
 
     # ── Anthropic — expert model ──
-    anthropic_expert_model: str = ""  # Model to use when expert_llm_provider=anthropic (falls back to anthropic_model)
+    # Falls back to anthropic_model when empty
+    anthropic_expert_model: str = ""
 
     # ── Request model — for /request mode ──
     request_llm_provider: str = ""  # "ollama", "openai", "anthropic", or "" (auto-detect)
