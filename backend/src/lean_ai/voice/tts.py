@@ -1,7 +1,8 @@
 """Text-to-speech using kokoro-onnx.
 
 Generates 24kHz PCM audio, encodes as WAV, returns base64-encoded chunks.
-Model files (~310MB) are auto-downloaded to ~/.cache/lean_ai/kokoro/ on first use.
+Model files are auto-downloaded to ~/.cache/lean_ai/kokoro/ on first use.
+Default fp16 model is ~169MB; fp32 is ~311MB; int8 is ~88MB.
 """
 
 import asyncio
@@ -19,16 +20,21 @@ KOKORO_SAMPLE_RATE = 24000
 
 # ── Model file management ────────────────────────────────────────────────────
 
-KOKORO_MODEL_FILENAME = "kokoro-v1.0.onnx"
 KOKORO_VOICES_FILENAME = "voices-v1.0.bin"
-KOKORO_MODEL_URL = (
-    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/"
-    "model-files-v1.0/kokoro-v1.0.onnx"
-)
 KOKORO_VOICES_URL = (
     "https://github.com/thewh1teagle/kokoro-onnx/releases/download/"
     "model-files-v1.0/voices-v1.0.bin"
 )
+
+_RELEASE_BASE = (
+    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/"
+    "model-files-v1.0/"
+)
+MODEL_VARIANTS: dict[str, tuple[str, str]] = {
+    "fp32": ("kokoro-v1.0.onnx", _RELEASE_BASE + "kokoro-v1.0.onnx"),
+    "fp16": ("kokoro-v1.0.fp16.onnx", _RELEASE_BASE + "kokoro-v1.0.fp16.onnx"),
+    "int8": ("kokoro-v1.0.int8.onnx", _RELEASE_BASE + "kokoro-v1.0.int8.onnx"),
+}
 
 # ── Voice metadata ────────────────────────────────────────────────────────────
 
@@ -77,11 +83,23 @@ def _kokoro_cache_dir() -> str:
     return os.path.join(base, "lean_ai", "kokoro")
 
 
+def _model_variant() -> tuple[str, str]:
+    """Return (filename, url) for the configured model quality."""
+    quality = settings.tts_model_quality.lower()
+    if quality not in MODEL_VARIANTS:
+        logger.warning(
+            "TTS: unknown quality %r, falling back to fp16", quality,
+        )
+        quality = "fp16"
+    return MODEL_VARIANTS[quality]
+
+
 def get_model_paths() -> tuple[str, str]:
     """Return (model_path, voices_path) for Kokoro ONNX files."""
     cache_dir = _kokoro_cache_dir()
+    filename, _ = _model_variant()
     return (
-        os.path.join(cache_dir, KOKORO_MODEL_FILENAME),
+        os.path.join(cache_dir, filename),
         os.path.join(cache_dir, KOKORO_VOICES_FILENAME),
     )
 
@@ -125,8 +143,9 @@ async def _download_file(url: str, dest: str) -> None:
 async def ensure_models_downloaded() -> tuple[str, str]:
     """Download model files if not present. Returns (model_path, voices_path)."""
     model_path, voices_path = get_model_paths()
+    _, model_url = _model_variant()
     if not os.path.isfile(model_path):
-        await _download_file(KOKORO_MODEL_URL, model_path)
+        await _download_file(model_url, model_path)
     if not os.path.isfile(voices_path):
         await _download_file(KOKORO_VOICES_URL, voices_path)
     return model_path, voices_path
@@ -145,10 +164,31 @@ class TTSService:
         if self._kokoro is not None:
             return
         model_path, voices_path = await ensure_models_downloaded()
+        import onnxruntime as ort
         from kokoro_onnx import Kokoro
 
-        self._kokoro = Kokoro(model_path, voices_path)
-        logger.info("TTS: loaded kokoro-onnx model")
+        # Optimized ONNX session — graph optimization + threading
+        sess_opts = ort.SessionOptions()
+        sess_opts.graph_optimization_level = (
+            ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        )
+        sess_opts.intra_op_num_threads = min(os.cpu_count() or 4, 8)
+        sess_opts.inter_op_num_threads = 1
+        session = ort.InferenceSession(
+            model_path,
+            sess_options=sess_opts,
+            providers=["CPUExecutionProvider"],
+        )
+        self._kokoro = Kokoro.from_session(session, voices_path)
+        quality = settings.tts_model_quality.lower()
+        logger.info("TTS: loaded kokoro-onnx %s model (optimized)", quality)
+
+        # Warmup — first inference triggers ONNX JIT optimizations
+        await asyncio.to_thread(
+            self._kokoro.create,
+            "warmup", voice="af_heart", speed=1.0, lang="en-us",
+        )
+        logger.info("TTS: warmup complete")
 
     @staticmethod
     def _voice_lang_code(voice: str) -> str:

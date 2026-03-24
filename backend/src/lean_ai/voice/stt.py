@@ -56,10 +56,12 @@ class STTService:
                 settings.stt_model,
                 device=device,
                 compute_type=compute_type,
+                cpu_threads=settings.stt_cpu_threads,
             )
             logger.info(
-                "STT: loaded model %s on %s (%s)",
+                "STT: loaded model %s on %s (%s, threads=%d)",
                 settings.stt_model, device, compute_type,
+                settings.stt_cpu_threads,
             )
         except Exception:
             if device == "cuda":
@@ -68,6 +70,7 @@ class STTService:
                     settings.stt_model,
                     device="cpu",
                     compute_type="int8",
+                    cpu_threads=settings.stt_cpu_threads,
                 )
             else:
                 raise
@@ -199,7 +202,7 @@ class STTService:
         language = settings.stt_language or None
         segments, info = self._model.transcribe(
             audio_array,
-            beam_size=5,
+            beam_size=settings.stt_beam_size,
             language=language,
         )
 

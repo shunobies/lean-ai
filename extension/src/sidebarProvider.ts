@@ -63,6 +63,8 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     private _includeDebug = false;
     private _ttsEnabled = false;
     private _wakeWordActive = false;
+    private _ttsSentenceQueue: string[] = [];
+    private _ttsSpeaking = false;
     private _lastDebugStop?: { reason: string; text?: string; threadId?: number };
 
     constructor(
@@ -779,6 +781,9 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         let isFirst = true;
         let streamStartTime: number | null = null;
         let tokenCount = 0;
+        let ttsSentenceBuffer = "";
+        this._ttsSentenceQueue = [];
+        this._ttsSpeaking = false;
 
         this.sessionTreeProvider?.pauseRefresh();
         let receivedDone = false;
@@ -789,9 +794,25 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 fullReply += token;
                 this.postMessage({ type: "chatToken", content: token, isFirst });
                 isFirst = false;
+
+                // TTS: speak sentences as they arrive during streaming
+                if (this._ttsEnabled) {
+                    ttsSentenceBuffer += token;
+                    const match = ttsSentenceBuffer.match(/^(.*?[.!?])\s([\s\S]*)$/);
+                    if (match) {
+                        const sentence = match[1];
+                        ttsSentenceBuffer = match[2];
+                        this.speakSentence(sentence);
+                    }
+                }
             }, apiAttachments));
         } finally {
             this.sessionTreeProvider?.resumeRefresh();
+        }
+
+        // TTS: flush remaining buffer after stream ends
+        if (this._ttsEnabled && ttsSentenceBuffer.trim()) {
+            this.speakSentence(ttsSentenceBuffer.trim());
         }
 
         // Compute tok/s from first-token to last-token (excludes context-gathering latency)
@@ -810,11 +831,6 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         // Send full text so the webview can apply markdown formatting, plus tok/s metrics
         const truncated = !receivedDone && tokenCount > 0;
         this.postMessage({ type: "chatDone", fullText: fullReply, tps, evalCount: tokenCount, truncated });
-
-        // TTS: speak the reply aloud if enabled
-        if (this._ttsEnabled && fullReply) {
-            this.speakText(fullReply);
-        }
 
         // Persist conversation after each exchange
         await this.conversations.persistCurrentConversation(this.chatHistory);
@@ -955,6 +971,27 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             }
         } catch (err) {
             console.warn("[Lean AI] TTS failed:", err);
+        }
+    }
+
+    /** Queue a sentence for sequential TTS playback. Fire-and-forget safe. */
+    speakSentence(text: string): void {
+        this._ttsSentenceQueue.push(text);
+        if (!this._ttsSpeaking) {
+            this._processTtsSentenceQueue();
+        }
+    }
+
+    private async _processTtsSentenceQueue(): Promise<void> {
+        if (this._ttsSpeaking) { return; }
+        this._ttsSpeaking = true;
+        try {
+            while (this._ttsSentenceQueue.length > 0) {
+                const sentence = this._ttsSentenceQueue.shift()!;
+                await this.speakText(sentence);
+            }
+        } finally {
+            this._ttsSpeaking = false;
         }
     }
 

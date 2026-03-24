@@ -138,11 +138,14 @@ class Settings(BaseSettings):
     stt_language: str = ""  # ISO 639-1, empty = auto-detect
     stt_device: str = "auto"  # auto|cpu|cuda
     stt_silence_threshold: float = 2.0  # Seconds of silence before auto-stop
+    stt_beam_size: int = 1  # 1=greedy (fastest), 5=beam search (most accurate)
+    stt_cpu_threads: int = 6  # CPU threads for faster-whisper inference
 
     # ── Voice — TTS (kokoro-onnx, always local) ──
     enable_tts: bool = False
     tts_voice: str = "af_heart"  # kokoro-onnx voice ID
     tts_speed: float = 1.0  # 0.5–2.0
+    tts_model_quality: str = "fp16"  # fp32, fp16, or int8
 
     # ── Voice — Wake word (openWakeWord, always local) ──
     enable_wake_word: bool = False

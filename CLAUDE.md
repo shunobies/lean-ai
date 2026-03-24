@@ -158,9 +158,12 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_STT_LANGUAGE` | *(empty)* | ISO 639-1 language code for STT. Empty = auto-detect |
 | `LEAN_AI_STT_DEVICE` | `auto` | STT compute device: `auto`, `cpu`, `cuda` |
 | `LEAN_AI_STT_SILENCE_THRESHOLD` | `2.0` | Seconds of silence before auto-stopping recording |
-| `LEAN_AI_ENABLE_TTS` | `false` | Enable Text-to-Speech (kokoro-onnx). Requires voice extras. Model files (~310MB) auto-downloaded on first use |
+| `LEAN_AI_STT_BEAM_SIZE` | `1` | Whisper beam size: 1=greedy (fastest), 5=beam search (most accurate) |
+| `LEAN_AI_STT_CPU_THREADS` | `6` | CPU threads for faster-whisper model inference |
+| `LEAN_AI_ENABLE_TTS` | `false` | Enable Text-to-Speech (kokoro-onnx). Requires voice extras. Default fp16 model ~169MB, auto-downloaded on first use |
 | `LEAN_AI_TTS_VOICE` | `af_heart` | kokoro-onnx voice ID (e.g. `af_heart`, `am_adam`, `bf_emma`) |
 | `LEAN_AI_TTS_SPEED` | `1.0` | TTS playback speed (0.5–2.0) |
+| `LEAN_AI_TTS_MODEL_QUALITY` | `fp16` | ONNX model variant: `fp32` (~311MB), `fp16` (~169MB, 2x faster), `int8` (~88MB) |
 | `LEAN_AI_ENABLE_WAKE_WORD` | `false` | Enable "Hey Computer" wake word detection (openWakeWord) |
 | `LEAN_AI_INDEX_DIR` | `.lean_ai_index` | Whoosh index directory name |
 | `LEAN_AI_SEARCH_PROVIDER` | `duckduckgo` | Search provider (`duckduckgo`, `searxng`, `google`, or `bing`). Google auto-falls back to Bing |
