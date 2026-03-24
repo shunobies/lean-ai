@@ -3,11 +3,13 @@
 import asyncio
 import json
 import logging
+import os
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from lean_ai.routers.models import (
+    EnsureModelsResponse,
     STTStartRequest,
     STTStopResponse,
     TTSRequest,
@@ -137,6 +139,42 @@ async def list_voices():
     return VoiceListResponse(
         voices=[VoiceInfo(**v) for v in voices],
     )
+
+
+@voice_router.post(
+    "/voice/tts/ensure-models", response_model=EnsureModelsResponse,
+)
+async def tts_ensure_models():
+    """Ensure TTS model files are downloaded. Returns download status."""
+    try:
+        from lean_ai.voice.availability import is_tts_available
+        if not is_tts_available():
+            return _unavailable("tts")
+    except ImportError:
+        return _unavailable("tts")
+
+    from lean_ai.voice.tts import (
+        are_models_downloaded,
+        ensure_models_downloaded,
+        get_model_paths,
+    )
+
+    if are_models_downloaded():
+        return EnsureModelsResponse(already_cached=True)
+
+    try:
+        await ensure_models_downloaded()
+        model_path, voices_path = get_model_paths()
+        size = os.path.getsize(model_path) + os.path.getsize(voices_path)
+        return EnsureModelsResponse(
+            downloaded=True, size_mb=round(size / (1024 * 1024), 1),
+        )
+    except Exception as e:
+        logger.exception("TTS model download failed")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"Model download failed: {e}"},
+        )
 
 
 # ── Voice config ──

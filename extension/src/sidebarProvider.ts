@@ -960,6 +960,11 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
 
     /** Send voiceAvailable + voice list to the webview. */
     private _sendVoiceAvailable(setupNeeded = false): void {
+        // Sync provider TTS state with backend availability
+        if (this.client.ttsAvailable) {
+            this._ttsEnabled = true;
+        }
+
         this.postMessage({
             type: "voiceAvailable",
             stt: this.client.sttAvailable,
@@ -975,6 +980,22 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                     voices,
                     current: voiceConfig.get<string>("ttsVoice", "af_heart"),
                 });
+            }).catch(() => {});
+
+            // Proactively download TTS model files if not yet cached
+            vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: "Downloading TTS models (~310MB)...",
+                    cancellable: false,
+                },
+                () => this.client.ensureTtsModels(),
+            ).then((result) => {
+                if (result.downloaded) {
+                    vscode.window.showInformationMessage(
+                        "TTS models downloaded. Voice is ready!",
+                    );
+                }
             }).catch(() => {});
         }
     }

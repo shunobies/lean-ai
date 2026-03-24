@@ -195,6 +195,12 @@ class VoiceListResponse(BaseModel):
     voices: list[VoiceInfo]
 
 
+class EnsureModelsResponse(BaseModel):
+    downloaded: bool = False
+    already_cached: bool = False
+    size_mb: float = 0.0
+
+
 class VoiceStatusResponse(BaseModel):
     stt_available: bool = False
     tts_available: bool = False

@@ -743,6 +743,17 @@ export class BackendClient {
         return data.voices || [];
     }
 
+    async ensureTtsModels(): Promise<{ downloaded: boolean; size_mb: number }> {
+        const resp = await fetch(`${this.baseUrl}/api/voice/tts/ensure-models`, {
+            method: "POST",
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
+            throw new Error(err.detail ?? resp.statusText);
+        }
+        return resp.json() as Promise<{ downloaded: boolean; size_mb: number }>;
+    }
+
     async voiceConfig(voice?: string, speed?: number): Promise<void> {
         await fetch(`${this.baseUrl}/api/voice/config`, {
             method: "POST",
