@@ -404,6 +404,11 @@
           "default": false,
           "markdownDescription": "**Voice Wake Word** — Say \"Hey Computer\" to activate STT hands-free. Requires the `voice` backend extras."
         },
+        "lean-ai.wakeWordAutoSubmit": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Voice Wake Word** — Automatically submit transcribed text after wake word detection. When disabled, text fills the input for review before sending."
+        },
         "lean-ai.searchApiUrl": {
           "type": "string",
           "default": "",

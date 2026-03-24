@@ -64,7 +64,10 @@ async def stt_start(request: STTStartRequest):
         return _unavailable("stt")
 
     try:
-        await mgr.start_stt(auto_stop=request.auto_stop)
+        await mgr.start_stt(
+            auto_stop=request.auto_stop,
+            on_auto_stop=_on_stt_auto_stopped if request.auto_stop else None,
+        )
         return {"status": "recording"}
     except Exception as e:
         logger.exception("STT start failed")
@@ -196,18 +199,31 @@ async def voice_config(request: VoiceConfigRequest):
     }
 
 
-# ── Wake word endpoints ──
+# ── Voice SSE event channel ──
 
-# SSE connections waiting for wake word events
-_wake_word_events: list[asyncio.Event] = []
-_wake_word_lock = asyncio.Lock()
+# Each connected SSE client gets a queue for voice events
+_voice_queues: list[asyncio.Queue] = []
+_voice_lock = asyncio.Lock()
+
+
+async def _broadcast_voice_event(event_type: str) -> None:
+    """Push a voice event to all connected SSE listeners."""
+    async with _voice_lock:
+        for queue in _voice_queues:
+            queue.put_nowait(event_type)
 
 
 async def _on_wake_word_detected():
-    """Callback when wake word is detected — notify all SSE listeners."""
-    async with _wake_word_lock:
-        for event in _wake_word_events:
-            event.set()
+    """Callback when wake word is detected."""
+    await _broadcast_voice_event("wake_word_detected")
+
+
+async def _on_stt_auto_stopped():
+    """Callback when STT auto-stop (silence) triggers."""
+    await _broadcast_voice_event("stt_auto_stopped")
+
+
+# ── Wake word endpoints ──
 
 
 @voice_router.post("/voice/wakeword/start")
@@ -242,28 +258,26 @@ async def wakeword_stop():
 
 @voice_router.get("/voice/events")
 async def voice_events():
-    """SSE endpoint for wake word detection events.
+    """SSE endpoint for voice events (wake word detection, STT auto-stop).
 
     The extension keeps this connection open when wake word is enabled.
-    Backend pushes wake_word_detected events here.
     """
-    event = asyncio.Event()
+    queue: asyncio.Queue = asyncio.Queue()
 
-    async with _wake_word_lock:
-        _wake_word_events.append(event)
+    async with _voice_lock:
+        _voice_queues.append(queue)
 
     async def event_generator():
         try:
             while True:
-                await event.wait()
-                event.clear()
-                yield f"data: {json.dumps({'type': 'wake_word_detected'})}\n\n"
+                event_type = await queue.get()
+                yield f"data: {json.dumps({'type': event_type})}\n\n"
         except asyncio.CancelledError:
             pass
         finally:
-            async with _wake_word_lock:
-                if event in _wake_word_events:
-                    _wake_word_events.remove(event)
+            async with _voice_lock:
+                if queue in _voice_queues:
+                    _voice_queues.remove(queue)
 
     return StreamingResponse(
         event_generator(), media_type="text/event-stream",

@@ -860,6 +860,7 @@ export function getWebviewHtml(chatFontSize: number): string {
     let ttsEnabled = false;
     let wakeWordEnabled = false;
     let isRecording = false;
+    let wakeWordTriggered = false;
     let currentAudio = null;
     let ttsQueue = [];
 
@@ -1759,6 +1760,12 @@ export function getWebviewHtml(chatFontSize: number): string {
                 inputEl.dispatchEvent(new Event('input'));
                 micBtn.classList.remove('recording');
                 isRecording = false;
+                if (wakeWordTriggered && msg.autoSubmit && msg.text.trim()) {
+                    wakeWordTriggered = false;
+                    sendBtn.click();
+                } else {
+                    wakeWordTriggered = false;
+                }
                 break;
 
             case 'sttRecording':
@@ -1778,9 +1785,16 @@ export function getWebviewHtml(chatFontSize: number): string {
 
             case 'wakeWordDetected':
                 if (sttEnabled && !isRecording) {
+                    wakeWordTriggered = true;
                     vscode.postMessage({ type: 'sttStart', autoStop: true });
                     micBtn.classList.add('recording');
                     isRecording = true;
+                }
+                break;
+
+            case 'sttAutoStopped':
+                if (isRecording) {
+                    vscode.postMessage({ type: 'sttStop' });
                 }
                 break;
 

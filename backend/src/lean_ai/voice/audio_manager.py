@@ -59,7 +59,9 @@ class AudioManager:
             self.wake_word is not None,
         )
 
-    async def start_stt(self, auto_stop: bool = False) -> None:
+    async def start_stt(
+        self, auto_stop: bool = False, on_auto_stop: Callable | None = None,
+    ) -> None:
         """Pause wake word, start STT recording."""
         async with self._lock:
             if self.stt is None:
@@ -72,7 +74,9 @@ class AudioManager:
             else:
                 self._wake_word_was_active = False
 
-            await self.stt.start_recording(auto_stop=auto_stop)
+            await self.stt.start_recording(
+                auto_stop=auto_stop, on_auto_stop=on_auto_stop,
+            )
 
     async def stop_stt(self) -> dict:
         """Stop STT recording, resume wake word (if it was active)."""

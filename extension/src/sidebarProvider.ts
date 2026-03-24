@@ -929,7 +929,9 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     private async handleSttStop(): Promise<void> {
         try {
             const result = await this.client.sttStop();
-            this.postMessage({ type: "sttResult", text: result.text });
+            const autoSubmit = vscode.workspace.getConfiguration("lean-ai")
+                .get<boolean>("wakeWordAutoSubmit", false);
+            this.postMessage({ type: "sttResult", text: result.text, autoSubmit });
         } catch (err) {
             this.postMessage({ type: "reply", text: `STT failed: ${err}`, cls: "msg-error" });
             this.postMessage({ type: "sttRecording", active: false });
@@ -945,9 +947,10 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             if (enabled) {
                 try {
                     await this.client.wakeWordStart();
-                    this.client.connectVoiceEvents(() => {
-                        this.postMessage({ type: "wakeWordDetected" });
-                    });
+                    this.client.connectVoiceEvents(
+                        () => this.postMessage({ type: "wakeWordDetected" }),
+                        () => this.postMessage({ type: "sttAutoStopped" }),
+                    );
                     this._wakeWordActive = true;
                 } catch (err) {
                     this.postMessage({ type: "reply", text: `Wake word failed: ${err}`, cls: "msg-error" });

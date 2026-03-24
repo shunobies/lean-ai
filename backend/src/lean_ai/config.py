@@ -136,7 +136,7 @@ class Settings(BaseSettings):
     enable_stt: bool = False
     stt_model: str = "turbo"  # tiny|base|small|medium|large-v3|turbo
     stt_language: str = ""  # ISO 639-1, empty = auto-detect
-    stt_silence_threshold: float = 2.0  # Seconds of silence before auto-stop
+    stt_silence_threshold: float = 4.0  # Seconds of silence before auto-stop
     stt_beam_size: int = 1  # 1=greedy (fastest), 5=beam search (most accurate)
     stt_cpu_threads: int = 6  # CPU threads for faster-whisper inference
 

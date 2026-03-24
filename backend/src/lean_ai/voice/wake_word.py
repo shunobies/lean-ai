@@ -60,7 +60,12 @@ class WakeWordService:
         import numpy as np
         import pyaudio
 
-        self._load_model()
+        try:
+            self._load_model()
+        except Exception as exc:
+            logger.error("Wake word: failed to load model: %s", exc)
+            self._running = False
+            return
         self._ensure_pyaudio()
 
         stream = self._pa.open(
@@ -93,7 +98,9 @@ class WakeWordService:
                         )
                         self._model.reset()
                         if self._on_detected and self._loop:
-                            self._loop.call_soon_threadsafe(self._on_detected)
+                            asyncio.run_coroutine_threadsafe(
+                                self._on_detected(), self._loop,
+                            )
                         break
         finally:
             stream.stop_stream()

@@ -156,7 +156,7 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_ENABLE_STT` | `false` | Enable Speech-to-Text (faster-whisper). Requires voice extras + portaudio |
 | `LEAN_AI_STT_MODEL` | `turbo` | Whisper model size: `tiny`, `base`, `small`, `medium`, `large-v3`, `turbo` |
 | `LEAN_AI_STT_LANGUAGE` | *(empty)* | ISO 639-1 language code for STT. Empty = auto-detect |
-| `LEAN_AI_STT_SILENCE_THRESHOLD` | `2.0` | Seconds of silence before auto-stopping recording |
+| `LEAN_AI_STT_SILENCE_THRESHOLD` | `4.0` | Seconds of silence before auto-stopping recording |
 | `LEAN_AI_STT_BEAM_SIZE` | `1` | Whisper beam size: 1=greedy (fastest), 5=beam search (most accurate) |
 | `LEAN_AI_STT_CPU_THREADS` | `6` | CPU threads for faster-whisper model inference |
 | `LEAN_AI_ENABLE_TTS` | `false` | Enable Text-to-Speech (kokoro-onnx). Requires voice extras. Default fp16 model ~169MB, auto-downloaded on first use |

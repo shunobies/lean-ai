@@ -7,6 +7,7 @@ import asyncio
 import logging
 import struct
 import time
+from collections.abc import Callable
 
 from lean_ai.config import settings
 
@@ -33,6 +34,8 @@ class STTService:
         self._audio_buffer: list[bytes] = []
         self._lock = asyncio.Lock()
         self._auto_stop = False
+        self._on_auto_stop: Callable | None = None
+        self._auto_stop_loop: asyncio.AbstractEventLoop | None = None
         self._record_task: asyncio.Task | None = None
         self._record_start_time: float = 0.0
 
@@ -114,6 +117,11 @@ class STTService:
                                 settings.stt_silence_threshold,
                             )
                             self._recording = False
+                            if self._on_auto_stop and self._auto_stop_loop:
+                                asyncio.run_coroutine_threadsafe(
+                                    self._on_auto_stop(),
+                                    self._auto_stop_loop,
+                                )
                     else:
                         silence_frames = 0
         finally:
@@ -122,7 +130,9 @@ class STTService:
                 self._stream.close()
                 self._stream = None
 
-    async def start_recording(self, auto_stop: bool = False) -> None:
+    async def start_recording(
+        self, auto_stop: bool = False, on_auto_stop: Callable | None = None,
+    ) -> None:
         """Begin capturing audio from the microphone."""
         async with self._lock:
             if self._recording:
@@ -130,6 +140,8 @@ class STTService:
 
             self._recording = True
             self._auto_stop = auto_stop
+            self._on_auto_stop = on_auto_stop
+            self._auto_stop_loop = asyncio.get_event_loop() if on_auto_stop else None
             self._audio_buffer = []
             self._record_start_time = time.monotonic()
 

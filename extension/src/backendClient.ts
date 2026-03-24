@@ -765,7 +765,7 @@ export class BackendClient {
     /** SSE connection for wake word events */
     private _voiceEventAbort: AbortController | null = null;
 
-    connectVoiceEvents(onWakeWord: () => void): void {
+    connectVoiceEvents(onWakeWord: () => void, onSttAutoStop?: () => void): void {
         this.disconnectVoiceEvents();
         this._voiceEventAbort = new AbortController();
         const signal = this._voiceEventAbort.signal;
@@ -789,6 +789,8 @@ export class BackendClient {
                                 const data = JSON.parse(line.slice(6)) as { type?: string };
                                 if (data.type === "wake_word_detected") {
                                     onWakeWord();
+                                } else if (data.type === "stt_auto_stopped" && onSttAutoStop) {
+                                    onSttAutoStop();
                                 }
                             } catch { /* skip */ }
                         }
