@@ -1,13 +1,15 @@
-"""Text-to-speech using Kokoro.
+"""Text-to-speech using kokoro-onnx.
 
 Generates 24kHz PCM audio, encodes as WAV, returns base64-encoded chunks.
+Model files (~310MB) are auto-downloaded to ~/.cache/lean_ai/kokoro/ on first use.
 """
 
 import asyncio
 import base64
 import io
 import logging
-import re
+import os
+import platform
 
 from lean_ai.config import settings
 
@@ -15,8 +17,22 @@ logger = logging.getLogger(__name__)
 
 KOKORO_SAMPLE_RATE = 24000
 
-# Kokoro voice metadata: {lang_code: {voice_id: {name, gender}}}
-# The full list is derived from Kokoro's built-in voices.
+# ── Model file management ────────────────────────────────────────────────────
+
+KOKORO_MODEL_FILENAME = "kokoro-v1.0.onnx"
+KOKORO_VOICES_FILENAME = "voices-v1.0.bin"
+KOKORO_MODEL_URL = (
+    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/"
+    "model-files-v1.0/kokoro-v1.0.onnx"
+)
+KOKORO_VOICES_URL = (
+    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/"
+    "model-files-v1.0/voices-v1.0.bin"
+)
+
+# ── Voice metadata ────────────────────────────────────────────────────────────
+
+# Display names (voice ID first-char → human-readable language)
 VOICE_LANG_MAP = {
     "a": "American English",
     "b": "British English",
@@ -29,33 +45,123 @@ VOICE_LANG_MAP = {
     "z": "Mandarin Chinese",
 }
 
+# kokoro-onnx lang codes (voice ID first-char → BCP-47)
+VOICE_LANG_CODE_MAP = {
+    "a": "en-us",
+    "b": "en-gb",
+    "e": "es",
+    "f": "fr-fr",
+    "h": "hi",
+    "i": "it",
+    "j": "ja",
+    "p": "pt-br",
+    "z": "zh-cn",
+}
+
+
+# ── Model file helpers ────────────────────────────────────────────────────────
+
+def _kokoro_cache_dir() -> str:
+    """Return the cache directory for Kokoro model files.
+
+    Uses XDG_CACHE_HOME on Linux, ~/Library/Caches on macOS,
+    falls back to ~/.cache/lean_ai/kokoro.
+    """
+    system = platform.system().lower()
+    if system == "darwin":
+        base = os.path.expanduser("~/Library/Caches")
+    else:
+        base = os.environ.get(
+            "XDG_CACHE_HOME", os.path.expanduser("~/.cache"),
+        )
+    return os.path.join(base, "lean_ai", "kokoro")
+
+
+def get_model_paths() -> tuple[str, str]:
+    """Return (model_path, voices_path) for Kokoro ONNX files."""
+    cache_dir = _kokoro_cache_dir()
+    return (
+        os.path.join(cache_dir, KOKORO_MODEL_FILENAME),
+        os.path.join(cache_dir, KOKORO_VOICES_FILENAME),
+    )
+
+
+def are_models_downloaded() -> bool:
+    """Check if both model files exist on disk."""
+    model_path, voices_path = get_model_paths()
+    return os.path.isfile(model_path) and os.path.isfile(voices_path)
+
+
+async def _download_file(url: str, dest: str) -> None:
+    """Download a file from url to dest with progress logging."""
+    import httpx
+
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    tmp = dest + ".tmp"
+    logger.info("TTS: downloading %s -> %s", url, dest)
+    async with httpx.AsyncClient(
+        follow_redirects=True, timeout=300.0,
+    ) as client:
+        async with client.stream("GET", url) as response:
+            response.raise_for_status()
+            total = int(response.headers.get("content-length", 0))
+            downloaded = 0
+            with open(tmp, "wb") as f:
+                async for chunk in response.aiter_bytes(chunk_size=65536):
+                    f.write(chunk)
+                    downloaded += len(chunk)
+            if total and downloaded != total:
+                os.unlink(tmp)
+                raise RuntimeError(
+                    f"Incomplete download: {downloaded}/{total} bytes",
+                )
+    os.rename(tmp, dest)
+    logger.info(
+        "TTS: downloaded %s (%d bytes)",
+        os.path.basename(dest), downloaded,
+    )
+
+
+async def ensure_models_downloaded() -> tuple[str, str]:
+    """Download model files if not present. Returns (model_path, voices_path)."""
+    model_path, voices_path = get_model_paths()
+    if not os.path.isfile(model_path):
+        await _download_file(KOKORO_MODEL_URL, model_path)
+    if not os.path.isfile(voices_path):
+        await _download_file(KOKORO_VOICES_URL, voices_path)
+    return model_path, voices_path
+
+
+# ── TTS Service ───────────────────────────────────────────────────────────────
 
 class TTSService:
-    """Generates speech audio from text."""
+    """Generates speech audio from text using kokoro-onnx."""
 
     def __init__(self) -> None:
-        self._pipeline = None  # Lazy-loaded KPipeline
-        self._current_lang = ""
+        self._kokoro = None  # Lazy-loaded Kokoro instance
 
-    def _load_pipeline(self, lang_code: str = "a") -> None:
-        """Lazy-load the Kokoro pipeline for the given language."""
-        if self._pipeline is not None and self._current_lang == lang_code:
+    async def _ensure_loaded(self) -> None:
+        """Lazy-load the Kokoro instance, downloading models if needed."""
+        if self._kokoro is not None:
             return
-        from kokoro import KPipeline
+        model_path, voices_path = await ensure_models_downloaded()
+        from kokoro_onnx import Kokoro
 
-        self._pipeline = KPipeline(lang_code=lang_code)
-        self._current_lang = lang_code
-        logger.info("TTS: loaded Kokoro pipeline (lang=%s)", lang_code)
+        self._kokoro = Kokoro(model_path, voices_path)
+        logger.info("TTS: loaded kokoro-onnx model")
 
     @staticmethod
     def _voice_lang_code(voice: str) -> str:
-        """Extract language code from voice ID (first char)."""
+        """Map voice ID first char to kokoro-onnx BCP-47 lang code."""
         if voice:
-            return voice[0].lower()
-        return "a"
+            prefix = voice[0].lower()
+            return VOICE_LANG_CODE_MAP.get(prefix, "en-us")
+        return "en-us"
 
     @staticmethod
-    def _audio_to_base64_wav(audio_array, sample_rate: int = KOKORO_SAMPLE_RATE) -> str:
+    def _audio_to_base64_wav(
+        audio_array, sample_rate: int = KOKORO_SAMPLE_RATE,
+    ) -> str:
         """Encode a numpy audio array as a base64 WAV string."""
         import soundfile as sf
 
@@ -82,6 +188,7 @@ class TTSService:
         voice = voice or settings.tts_voice
         speed = speed if speed > 0 else settings.tts_speed
 
+        await self._ensure_loaded()
         result = await asyncio.to_thread(
             self._synthesize_sync, text, voice, speed,
         )
@@ -89,24 +196,20 @@ class TTSService:
 
     def _synthesize_sync(self, text: str, voice: str, speed: float) -> dict:
         """Synchronous synthesis — runs in a thread."""
-        import numpy as np
+        lang = self._voice_lang_code(voice)
+        samples, sample_rate = self._kokoro.create(
+            text, voice=voice, speed=speed, lang=lang,
+        )
 
-        lang_code = self._voice_lang_code(voice)
-        self._load_pipeline(lang_code)
-
-        all_audio = []
-        for _graphemes, _phonemes, audio in self._pipeline(text, voice=voice, speed=speed):
-            if audio is not None:
-                all_audio.append(audio)
-
-        if not all_audio:
+        if samples is None or len(samples) == 0:
             return {"audio_base64": "", "duration_seconds": 0.0}
 
-        combined = np.concatenate(all_audio)
-        duration = len(combined) / KOKORO_SAMPLE_RATE
-        audio_b64 = self._audio_to_base64_wav(combined)
+        duration = len(samples) / sample_rate
+        audio_b64 = self._audio_to_base64_wav(samples, sample_rate)
 
-        logger.info("TTS: synthesized %.1fs audio (%d chars)", duration, len(text))
+        logger.info(
+            "TTS: synthesized %.1fs audio (%d chars)", duration, len(text),
+        )
         return {
             "audio_base64": audio_b64,
             "duration_seconds": round(duration, 2),
@@ -118,50 +221,47 @@ class TTSService:
         voice: str = "",
         speed: float = 0.0,
     ):
-        """Stream audio chunks for long text (sentence-by-sentence).
+        """Stream audio chunks using kokoro-onnx native streaming.
 
         Yields:
-            Dicts with audio_base64 and duration_seconds per sentence.
+            Dicts with audio_base64 and duration_seconds per chunk.
         """
         voice = voice or settings.tts_voice
         speed = speed if speed > 0 else settings.tts_speed
 
-        sentences = self._split_sentences(text)
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if not sentence:
-                continue
-            chunk = await asyncio.to_thread(
-                self._synthesize_sync, sentence, voice, speed,
-            )
-            if chunk["audio_base64"]:
-                yield chunk
+        await self._ensure_loaded()
+        lang = self._voice_lang_code(voice)
 
-    @staticmethod
-    def _split_sentences(text: str) -> list[str]:
-        """Split text into sentences for streaming TTS."""
-        return re.split(r'(?<=[.!?])\s+', text)
+        async for samples, sample_rate in self._kokoro.create_stream(
+            text, voice=voice, speed=speed, lang=lang,
+        ):
+            if samples is not None and len(samples) > 0:
+                duration = len(samples) / sample_rate
+                audio_b64 = self._audio_to_base64_wav(samples, sample_rate)
+                yield {
+                    "audio_base64": audio_b64,
+                    "duration_seconds": round(duration, 2),
+                }
 
     def list_voices(self) -> list[dict]:
         """Return available Kokoro voices with metadata."""
         voices = []
         try:
-            from kokoro import KPipeline
-            for lang_code, lang_name in VOICE_LANG_MAP.items():
-                try:
-                    pipeline = KPipeline(lang_code=lang_code)
-                    if hasattr(pipeline, "voices") and pipeline.voices:
-                        for vid in pipeline.voices:
-                            gender = "female" if vid.startswith(f"{lang_code}f") else "male"
-                            voices.append({
-                                "id": vid,
-                                "name": vid,
-                                "language": lang_name,
-                                "gender": gender,
-                            })
-                except Exception:
-                    pass
-        except ImportError:
+            if self._kokoro is not None:
+                for vid in self._kokoro.get_voices():
+                    prefix = vid[0].lower() if vid else ""
+                    lang_name = VOICE_LANG_MAP.get(prefix, "Unknown")
+                    gender = (
+                        "female" if len(vid) > 1 and vid[1] == "f"
+                        else "male"
+                    )
+                    voices.append({
+                        "id": vid,
+                        "name": vid,
+                        "language": lang_name,
+                        "gender": gender,
+                    })
+        except Exception:
             pass
 
         if not voices:

@@ -21,11 +21,11 @@ def is_stt_available() -> bool:
 
 
 def is_tts_available() -> bool:
-    """Check if kokoro and soundfile are importable and TTS is enabled."""
+    """Check if kokoro-onnx and soundfile are importable and TTS is enabled."""
     if not settings.enable_tts:
         return False
     try:
-        import kokoro  # noqa: F401
+        import kokoro_onnx  # noqa: F401
         import soundfile  # noqa: F401
         return True
     except ImportError:
@@ -71,7 +71,10 @@ def get_setup_instructions() -> dict:
         "tts": {
             "pip": 'pip install "lean-ai[voice]"',
             "system": None,
-            "description": "Text-to-speech via Kokoro (no system deps)",
+            "description": (
+                "Text-to-speech via kokoro-onnx"
+                " (model files ~310MB auto-downloaded on first use)"
+            ),
         },
         "wake_word": {
             "pip": 'pip install "lean-ai[voice]"',

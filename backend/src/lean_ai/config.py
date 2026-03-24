@@ -139,9 +139,9 @@ class Settings(BaseSettings):
     stt_device: str = "auto"  # auto|cpu|cuda
     stt_silence_threshold: float = 2.0  # Seconds of silence before auto-stop
 
-    # ── Voice — TTS (Kokoro, always local) ──
+    # ── Voice — TTS (kokoro-onnx, always local) ──
     enable_tts: bool = False
-    tts_voice: str = "af_heart"  # Kokoro voice ID
+    tts_voice: str = "af_heart"  # kokoro-onnx voice ID
     tts_speed: float = 1.0  # 0.5–2.0
 
     # ── Voice — Wake word (openWakeWord, always local) ──

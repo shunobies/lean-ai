@@ -66,7 +66,7 @@ cd extension && npm install && npm run build
 
 10. **Scaffolding** (`scaffolds/`) — 19 YAML scaffold recipes for project bootstrapping.
 
-11. **Voice** (`voice/`) — Optional voice interaction: Speech-to-Text (faster-whisper), Text-to-Speech (Kokoro), and wake word detection (openWakeWord). `AudioManager` singleton coordinates mic access — only one service (STT or wake word) captures at a time. Backend captures the mic directly via PyAudio (avoids VSCode webview audio restrictions). Extension UI has inline mic button, voice/speed controls, and TTS playback via HTML5 Audio with queuing. All deps in `voice` optional extras group. REST endpoints in `routers/voice.py`; SSE for wake word events and TTS streaming.
+11. **Voice** (`voice/`) — Optional voice interaction: Speech-to-Text (faster-whisper), Text-to-Speech (kokoro-onnx), and wake word detection (openWakeWord). `AudioManager` singleton coordinates mic access — only one service (STT or wake word) captures at a time. Backend captures the mic directly via PyAudio (avoids VSCode webview audio restrictions). Extension UI has inline mic button, voice/speed controls, and TTS playback via HTML5 Audio with queuing. All deps in `voice` optional extras group. REST endpoints in `routers/voice.py`; SSE for wake word events and TTS streaming. TTS model files (~310MB) auto-downloaded to `~/.cache/lean_ai/kokoro/` on first use.
 
 ## Key Design Decisions
 
@@ -91,7 +91,7 @@ cd extension && npm install && npm run build
 | Source analysis | tree-sitter + 13 grammar packages |
 | Internet search | duckduckgo-search, Selenium (optional Google/Bing provider with automatic fallback) |
 | Voice STT | faster-whisper (CTranslate2-based Whisper) |
-| Voice TTS | Kokoro (lightweight, 54 voices, 24kHz PCM) |
+| Voice TTS | kokoro-onnx (ONNX Runtime, 58 voices, 24kHz PCM) |
 | Wake word | openWakeWord (pre-trained `hey_computer` model) |
 | Audio capture | PyAudio (requires portaudio system library) |
 | HTML sanitization | BeautifulSoup4 |
@@ -158,8 +158,8 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_STT_LANGUAGE` | *(empty)* | ISO 639-1 language code for STT. Empty = auto-detect |
 | `LEAN_AI_STT_DEVICE` | `auto` | STT compute device: `auto`, `cpu`, `cuda` |
 | `LEAN_AI_STT_SILENCE_THRESHOLD` | `2.0` | Seconds of silence before auto-stopping recording |
-| `LEAN_AI_ENABLE_TTS` | `false` | Enable Text-to-Speech (Kokoro). Requires voice extras |
-| `LEAN_AI_TTS_VOICE` | `af_heart` | Kokoro voice ID (e.g. `af_heart`, `am_adam`, `bf_emma`) |
+| `LEAN_AI_ENABLE_TTS` | `false` | Enable Text-to-Speech (kokoro-onnx). Requires voice extras. Model files (~310MB) auto-downloaded on first use |
+| `LEAN_AI_TTS_VOICE` | `af_heart` | kokoro-onnx voice ID (e.g. `af_heart`, `am_adam`, `bf_emma`) |
 | `LEAN_AI_TTS_SPEED` | `1.0` | TTS playback speed (0.5–2.0) |
 | `LEAN_AI_ENABLE_WAKE_WORD` | `false` | Enable "Hey Computer" wake word detection (openWakeWord) |
 | `LEAN_AI_INDEX_DIR` | `.lean_ai_index` | Whoosh index directory name |
