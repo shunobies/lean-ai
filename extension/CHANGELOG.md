@@ -2,6 +2,21 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.3.29] - 2026-03-24
+
+### Fixed
+- **Wake word detection** — completely rewritten SSE transport for wake word events. Replaced `fetch()` with `http.request()` + `socket.setTimeout(0)` to avoid Node/undici's 5-minute connection timeout that silently killed the event stream. Added auto-reconnect with 3-second backoff so the connection recovers from backend restarts.
+- **Wake word error reporting** — the wake word listener now reports failures (model load errors, mic access failures, runtime crashes) back to the extension via SSE events. The chat shows an error message and the toggle resets automatically instead of silently appearing active while the listener is dead.
+- **Wake word model loading** — updated for openWakeWord v0.4 API. Removed defunct `download_models()` call, switched to bundled model loading, and changed default wake word from "Hey Computer" (no longer bundled) to **"Hey Jarvis"**.
+- **Wake word availability check** — `is_wake_word_available()` now verifies both `openwakeword` and `pyaudio` are installed (previously only checked `openwakeword`, reporting available when the mic couldn't actually open).
+- **SSE heartbeat** — the voice events SSE endpoint now sends an immediate `:connected` flush on connection and `:heartbeat` every 30 seconds to keep the connection alive through proxies and detect stale connections.
+- **Mic open crash** — the `pa.open()` call for the wake word microphone stream was unguarded. If it threw (e.g., no mic available, permission denied), the listener thread crashed silently. Now caught and reported.
+
+### Changed
+- **Chat agent** — no longer asks redundant questions already answered by the project context.
+- **Chat URL handling** — skips redundant web search when the user's message already contains explicit URLs; fixed stale `summarize_threshold` parameter in URL fetching.
+- **Inline predictions** — gracefully handles models that don't support FIM (Fill-in-the-Middle) instead of erroring.
+
 ## [0.3.24] - 2026-03-24
 
 ### Added
