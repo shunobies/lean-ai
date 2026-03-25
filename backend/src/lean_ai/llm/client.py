@@ -119,6 +119,8 @@ class OllamaProvider(LLMProvider):
             else settings.enable_thinking
         )
 
+        self._fim_supported = True
+
         effective_embed_url = embed_ollama_url or settings.effective_embedding_url
         if effective_embed_url != effective_url:
             self._embed_client = ollama_lib.AsyncClient(host=effective_embed_url)
@@ -480,6 +482,8 @@ class OllamaProvider(LLMProvider):
         self, prompt: str, suffix: str = "", timeout: float = 5.0,
     ) -> str:
         """Raw text completion for inline predictions (FIM mode)."""
+        if not self._fim_supported:
+            return ""
         try:
             response = await asyncio.wait_for(
                 self._client.generate(
@@ -498,7 +502,16 @@ class OllamaProvider(LLMProvider):
                 "Inline prediction: cannot reach Ollama at %s", self._url,
             )
             return ""
-        except Exception:
+        except Exception as exc:
+            if "does not support insert" in str(exc):
+                self._fim_supported = False
+                logger.warning(
+                    "Model %s does not support FIM/insert mode — "
+                    "inline predictions disabled. Set LEAN_AI_INLINE_MODEL "
+                    "to a FIM-capable model (e.g. qwen2.5-coder).",
+                    self._model,
+                )
+                return ""
             logger.exception("Completion call failed")
             return ""
 
