@@ -316,6 +316,9 @@ async def _build_chat_messages(
 
     async def _do_web_search():
         nonlocal web_search_text
+        # Skip web search when the user provided explicit URLs to fetch
+        if extract_urls(request.message):
+            return
         query = _extract_search_query(request.message)
         if not query:
             return
