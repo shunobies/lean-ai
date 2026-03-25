@@ -115,6 +115,42 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.enableThinkingRequest":     "LEAN_AI_ENABLE_THINKING_REQUEST",
 };
 
+// ── Zero-value filtering ─────────────────────────────────────────────────────
+
+// Numeric VSCode settings where 0 means "not configured — let the backend use
+// its own default".  VSCode returns 0 for number-typed settings that have no
+// explicit default in package.json, so we filter these out to avoid overriding
+// the backend's real defaults via env vars.
+const ZERO_MEANS_UNSET: ReadonlySet<string> = new Set([
+    // Primary Ollama model
+    "lean-ai.ollamaContextWindow",
+    "lean-ai.ollamaMaxTokens",
+    "lean-ai.ollamaTemperature",
+    "lean-ai.ollamaTopP",
+    "lean-ai.ollamaTopK",
+    "lean-ai.ollamaRepeatPenalty",
+    // Expert Ollama model (0 = inherit from primary)
+    "lean-ai.ollamaExpertContextWindow",
+    "lean-ai.ollamaExpertMaxTokens",
+    "lean-ai.ollamaExpertTemperature",
+    "lean-ai.ollamaExpertTopP",
+    "lean-ai.ollamaExpertTopK",
+    "lean-ai.ollamaExpertRepeatPenalty",
+    // Request Ollama model (0 = inherit from primary)
+    "lean-ai.ollamaRequestContextWindow",
+    "lean-ai.ollamaRequestMaxTokens",
+    "lean-ai.ollamaRequestTemperature",
+    "lean-ai.ollamaRequestTopP",
+    "lean-ai.ollamaRequestTopK",
+    "lean-ai.ollamaRequestRepeatPenalty",
+    // OpenAI
+    "lean-ai.openaiContextWindow",
+    "lean-ai.openaiTemperature",
+    // Anthropic
+    "lean-ai.anthropicContextWindow",
+    "lean-ai.anthropicTemperature",
+]);
+
 // ── Env building helpers ─────────────────────────────────────────────────────
 
 /**
@@ -127,6 +163,9 @@ export function buildBackendEnv(): Record<string, string> {
     for (const [key, envVar] of Object.entries(BACKEND_SETTING_MAP)) {
         const val = config.get<unknown>(key);
         if (val !== undefined && val !== null && val !== "") {
+            if (val === 0 && ZERO_MEANS_UNSET.has(key)) {
+                continue;
+            }
             env[envVar] = String(val);
         }
     }
