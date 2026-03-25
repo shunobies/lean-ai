@@ -790,7 +790,9 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 fullReply += token;
                 this.postMessage({ type: "chatToken", content: token, isFirst });
                 isFirst = false;
-            }, apiAttachments));
+            }, apiAttachments, (thinkingToken) => {
+                this.postMessage({ type: "llmThinking", text: thinkingToken, streaming: true });
+            }));
         } finally {
             this.sessionTreeProvider?.resumeRefresh();
         }

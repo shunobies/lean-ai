@@ -250,6 +250,7 @@ export class BackendClient {
         } | undefined,
         onToken: (token: string, isFirst: boolean) => void,
         attachments?: Array<{ data: string; filename?: string; mime_type?: string }>,
+        onThinking?: (token: string) => void,
     ): Promise<{ receivedDone: boolean }> {
         return new Promise((resolve, reject) => {
             const fullUrl = new URL(`${this.baseUrl}/api/chat/stream`);
@@ -295,6 +296,8 @@ export class BackendClient {
                             if (data["type"] === "token" && data["content"]) {
                                 onToken(data["content"] as string, isFirst);
                                 isFirst = false;
+                            } else if (data["type"] === "thinking" && data["content"] && onThinking) {
+                                onThinking(data["content"] as string);
                             } else if (data["type"] === "done") {
                                 resolved = true;
                                 resolve({ receivedDone: true });

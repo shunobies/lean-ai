@@ -466,8 +466,9 @@ async def chat_stream_endpoint(request: ChatRequest):
     Event format::
 
         data: {"type": "token", "content": "..."}\n\n
+        data: {"type": "thinking", "content": "..."}\n\n  # reasoning tokens
         data: {"type": "done"}\n\n
-        data: {"type": "error", "message": "..."}\n\n   # only on failure
+        data: {"type": "error", "message": "..."}\n\n     # only on failure
     """
     async def generate() -> AsyncGenerator[str, None]:
         try:
@@ -477,10 +478,35 @@ async def chat_stream_endpoint(request: ChatRequest):
                 "Chat stream: prompt ~%d chars (~%d tokens), num_ctx=%d",
                 prompt_chars, prompt_chars // 4, settings._active_context_window,
             )
+
+            # Thinking tokens arrive via callback while content tokens
+            # are yielded by the async generator.  Use a queue so the
+            # SSE generator can interleave both event types.
+            thinking_queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+            async def _on_thinking(token: str) -> None:
+                await thinking_queue.put(token)
+
+            async def _drain_thinking():
+                """Yield all queued thinking tokens as SSE events."""
+                while not thinking_queue.empty():
+                    t = thinking_queue.get_nowait()
+                    if t is not None:
+                        yield f"data: {json.dumps({'type': 'thinking', 'content': t})}\n\n"
+
             async for token in _get_chat_client().chat_stream(
                 messages, max_tokens=_get_chat_max_tokens(),
+                thinking_callback=_on_thinking,
             ):
+                # Flush any thinking tokens that arrived before this content token
+                async for sse in _drain_thinking():
+                    yield sse
                 yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+            # Flush any remaining thinking tokens after the stream ends
+            async for sse in _drain_thinking():
+                yield sse
+
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as e:
             logger.exception("Chat stream failed")

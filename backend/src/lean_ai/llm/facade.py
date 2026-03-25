@@ -123,8 +123,13 @@ class LLMClient:
         messages: list[dict],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        thinking_callback=None,
     ) -> AsyncIterator[str]:
-        async for token in self._provider.chat_stream(messages, temperature, max_tokens):
+        async for token in self._provider.chat_stream(
+            messages, temperature, max_tokens,
+            thinking_callback=thinking_callback,
+        ):
             yield token
 
     async def check_health(self) -> bool:

@@ -297,6 +297,8 @@ class OpenAIProvider(LLMProvider):
         messages: list[dict],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        thinking_callback=None,
     ) -> AsyncIterator[str]:
         temp = temperature if temperature is not None else self._temperature
         tokens = max_tokens if max_tokens is not None else self._max_tokens_val

@@ -435,6 +435,8 @@ class OllamaProvider(LLMProvider):
         messages: list[dict],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        thinking_callback=None,
     ) -> AsyncIterator[str]:
         temp = temperature if temperature is not None else self._temperature
         num_predict = max_tokens if max_tokens is not None else self._max_tokens_val
@@ -445,7 +447,7 @@ class OllamaProvider(LLMProvider):
                 messages=messages,
                 stream=True,
                 options=self._build_options(temperature=temp, max_tokens=num_predict),
-                think=False,
+                think=self._enable_thinking,
             )
 
         stream = await self._retry_with_backoff(_chat, label="chat_stream")
@@ -455,10 +457,16 @@ class OllamaProvider(LLMProvider):
         async for chunk in stream:
             if chunk.get("done"):
                 done_reason = chunk.get("done_reason", "unknown")
-            token = chunk["message"]["content"]
-            if token:
+            msg = chunk.get("message") or {}
+            thinking_token = msg.get("thinking") or ""
+            content_token = msg.get("content") or ""
+
+            if thinking_token and thinking_callback:
+                await thinking_callback(thinking_token)
+
+            if content_token:
                 token_count += 1
-                yield token
+                yield content_token
 
         logger.info("chat_stream: tokens=%d done_reason=%s", token_count, done_reason)
         if done_reason == "length":

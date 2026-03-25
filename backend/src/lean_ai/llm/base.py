@@ -127,8 +127,14 @@ class LLMProvider(ABC):
         messages: list[dict],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        thinking_callback: StreamCallback | None = None,
     ) -> AsyncIterator[str]:
-        """Stream response tokens."""
+        """Stream response tokens.
+
+        When *thinking_callback* is provided, thinking/reasoning tokens
+        are forwarded via the callback instead of being yielded.
+        """
         # yield is needed to make this an async generator in the ABC
         yield ""  # pragma: no cover
         raise NotImplementedError  # pragma: no cover
