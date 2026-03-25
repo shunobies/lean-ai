@@ -331,12 +331,10 @@ async def _build_chat_messages(
     async def _fetch_urls():
         nonlocal fetched_pages
         urls = extract_urls(request.message)
-        summarize_threshold = min(30_000, max(5_000, settings._active_context_window // 4))
         for url in urls[:3]:
             try:
                 result = await internet.fetch_url(
                     url, llm_client=llm_client,
-                    summarize_threshold=summarize_threshold,
                 )
                 if result.success:
                     fetched_pages.append({"url": url, "content": result.output})
@@ -346,7 +344,7 @@ async def _build_chat_messages(
                         "content": f"(Failed to fetch: {result.error})",
                     })
             except Exception as e:
-                logger.debug("Chat URL fetch failed for %s: %s", url, e)
+                logger.warning("Chat URL fetch failed for %s: %s", url, e)
                 fetched_pages.append({"url": url, "content": f"(Failed to fetch: {e})"})
 
     image_descriptions: str = ""
