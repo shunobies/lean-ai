@@ -177,29 +177,40 @@ def _full_knowledge_index(
         created_at=datetime.now(timezone.utc).isoformat(),
     )
     total_chunks = 0
+    skipped = 0
 
-    for rel_path, full_path in files:
-        chunks = _read_and_chunk(kdir, rel_path, full_path)
-        for chunk in chunks:
-            chunk_id = f"{rel_path}:{chunk.chunk_index}"
-            writer.add_document(
-                chunk_id=chunk_id,
-                doc_path=chunk.doc_path,
-                doc_title=chunk.doc_title,
-                section=chunk.section,
-                content=chunk.content,
-                format=chunk.format,
-                chunk_index=chunk.chunk_index,
+    try:
+        for rel_path, full_path in files:
+            try:
+                chunks = _read_and_chunk(kdir, rel_path, full_path)
+            except Exception:
+                logger.warning("Skipping unreadable knowledge doc: %s", rel_path, exc_info=True)
+                skipped += 1
+                continue
+
+            for chunk in chunks:
+                chunk_id = f"{rel_path}:{chunk.chunk_index}"
+                writer.add_document(
+                    chunk_id=chunk_id,
+                    doc_path=chunk.doc_path,
+                    doc_title=chunk.doc_title,
+                    section=chunk.section,
+                    content=chunk.content,
+                    format=chunk.format,
+                    chunk_index=chunk.chunk_index,
+                )
+                total_chunks += 1
+
+            manifest.files[rel_path] = FileRecord(
+                sha256=current_hashes.get(rel_path, ""),
+                chunk_count=len(chunks),
             )
-            total_chunks += 1
+            logger.debug("Indexed knowledge doc %s → %d chunks", rel_path, len(chunks))
 
-        manifest.files[rel_path] = FileRecord(
-            sha256=current_hashes.get(rel_path, ""),
-            chunk_count=len(chunks),
-        )
-        logger.debug("Indexed knowledge doc %s → %d chunks", rel_path, len(chunks))
-
-    writer.commit()
+        writer.commit()
+    except Exception:
+        writer.cancel()
+        raise
     save_manifest(Path(idx_path), manifest)
 
     stats = {
@@ -250,50 +261,64 @@ def _incremental_knowledge_index(
     ix = open_dir(idx_path)
     writer = ix.writer()
 
-    # Delete chunks for removed documents.
-    for rel_path in diff.deleted:
-        old_count = old_manifest.files[rel_path].chunk_count
-        for i in range(old_count):
-            writer.delete_by_term("chunk_id", f"{rel_path}:{i}")
+    try:
+        # Delete chunks for removed documents.
+        for rel_path in diff.deleted:
+            old_count = old_manifest.files[rel_path].chunk_count
+            for i in range(old_count):
+                writer.delete_by_term("chunk_id", f"{rel_path}:{i}")
 
-    # Delete + re-add modified documents.
-    new_chunk_counts: dict[str, int] = {}
-    for rel_path in diff.modified:
-        old_count = old_manifest.files[rel_path].chunk_count
-        for i in range(old_count):
-            writer.delete_by_term("chunk_id", f"{rel_path}:{i}")
+        # Delete + re-add modified documents.
+        new_chunk_counts: dict[str, int] = {}
+        for rel_path in diff.modified:
+            old_count = old_manifest.files[rel_path].chunk_count
+            for i in range(old_count):
+                writer.delete_by_term("chunk_id", f"{rel_path}:{i}")
 
-        full_path = kdir / rel_path
-        chunks = _read_and_chunk(kdir, rel_path, full_path)
-        for chunk in chunks:
-            writer.add_document(
-                chunk_id=f"{rel_path}:{chunk.chunk_index}",
-                doc_path=chunk.doc_path,
-                doc_title=chunk.doc_title,
-                section=chunk.section,
-                content=chunk.content,
-                format=chunk.format,
-                chunk_index=chunk.chunk_index,
-            )
-        new_chunk_counts[rel_path] = len(chunks)
+            full_path = kdir / rel_path
+            try:
+                chunks = _read_and_chunk(kdir, rel_path, full_path)
+            except Exception:
+                logger.warning("Skipping unreadable knowledge doc: %s", rel_path, exc_info=True)
+                continue
 
-    # Add new documents.
-    for rel_path in diff.added:
-        full_path = kdir / rel_path
-        chunks = _read_and_chunk(kdir, rel_path, full_path)
-        for chunk in chunks:
-            writer.add_document(
-                chunk_id=f"{rel_path}:{chunk.chunk_index}",
-                doc_path=chunk.doc_path,
-                doc_title=chunk.doc_title,
-                section=chunk.section,
-                content=chunk.content,
-                format=chunk.format,
-                chunk_index=chunk.chunk_index,
-            )
-        new_chunk_counts[rel_path] = len(chunks)
+            for chunk in chunks:
+                writer.add_document(
+                    chunk_id=f"{rel_path}:{chunk.chunk_index}",
+                    doc_path=chunk.doc_path,
+                    doc_title=chunk.doc_title,
+                    section=chunk.section,
+                    content=chunk.content,
+                    format=chunk.format,
+                    chunk_index=chunk.chunk_index,
+                )
+            new_chunk_counts[rel_path] = len(chunks)
 
-    writer.commit()
+        # Add new documents.
+        for rel_path in diff.added:
+            full_path = kdir / rel_path
+            try:
+                chunks = _read_and_chunk(kdir, rel_path, full_path)
+            except Exception:
+                logger.warning("Skipping unreadable knowledge doc: %s", rel_path, exc_info=True)
+                continue
+
+            for chunk in chunks:
+                writer.add_document(
+                    chunk_id=f"{rel_path}:{chunk.chunk_index}",
+                    doc_path=chunk.doc_path,
+                    doc_title=chunk.doc_title,
+                    section=chunk.section,
+                    content=chunk.content,
+                    format=chunk.format,
+                    chunk_index=chunk.chunk_index,
+                )
+            new_chunk_counts[rel_path] = len(chunks)
+
+        writer.commit()
+    except Exception:
+        writer.cancel()
+        raise
 
     # Build updated manifest.
     new_manifest = Manifest(

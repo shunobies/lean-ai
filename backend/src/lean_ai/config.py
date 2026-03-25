@@ -236,6 +236,30 @@ class Settings(BaseSettings):
         return data
 
     @model_validator(mode="after")
+    def _validate_positive_fields(self) -> "Settings":
+        """Ensure critical numeric settings are positive."""
+        for field_name in (
+            "ollama_context_window", "openai_context_window",
+            "anthropic_context_window", "tool_timeout_seconds",
+            "stt_cpu_threads",
+        ):
+            val = getattr(self, field_name, None)
+            if val is not None and val <= 0:
+                raise ValueError(
+                    f"{field_name} must be positive, got {val}"
+                )
+        for field_name in (
+            "stt_silence_threshold", "tts_speed",
+            "refresh_threshold",
+        ):
+            val = getattr(self, field_name, None)
+            if val is not None and val <= 0:
+                raise ValueError(
+                    f"{field_name} must be positive, got {val}"
+                )
+        return self
+
+    @model_validator(mode="after")
     def _derive_from_context_window(self) -> "Settings":
         """Fill in token limits that weren't explicitly set."""
         if self.ollama_max_tokens is None:

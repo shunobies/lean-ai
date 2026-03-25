@@ -110,7 +110,7 @@ def close_browser() -> None:
                 _browser.quit()
                 logger.info("Browser search: headless Chrome closed")
             except Exception:
-                pass
+                logger.debug("Browser cleanup error", exc_info=True)
             _browser = None
 
 

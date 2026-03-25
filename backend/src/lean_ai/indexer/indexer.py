@@ -51,10 +51,11 @@ def _get_head_commit(repo_root: str) -> str:
     return ""
 
 
-def _hash_all_files(repo_root: str) -> dict[str, str]:
+def _hash_all_files(repo_root: str, entries=None) -> dict[str, str]:
     """Build {rel_path: sha256} dict for all indexable files."""
     root = Path(repo_root)
-    entries = list_repo_tree(repo_root)
+    if entries is None:
+        entries = list_repo_tree(repo_root)
     return {e.path: hash_file_content(root / e.path) for e in entries}
 
 
@@ -62,21 +63,25 @@ def index_workspace(repo_root: str, force: bool = False) -> tuple[int, int]:
     """Index the workspace. Returns ``(file_count, chunk_count)``.
 
     Uses incremental indexing if a valid manifest exists, otherwise full.
+    Walks the repo tree once and passes entries to avoid redundant traversals.
     """
     idx_dir = _index_dir(repo_root)
     idx_dir.mkdir(parents=True, exist_ok=True)
 
+    # Walk repo tree once and reuse for both hashing and indexing
+    entries = list_repo_tree(repo_root)
+
     if force or not exists_in(str(idx_dir)):
-        return _full_index(repo_root, idx_dir)
+        return _full_index(repo_root, idx_dir, entries=entries)
 
     old_manifest = load_manifest(idx_dir)
     if old_manifest is None:
-        return _full_index(repo_root, idx_dir)
+        return _full_index(repo_root, idx_dir, entries=entries)
 
-    return _incremental_index(repo_root, idx_dir, old_manifest)
+    return _incremental_index(repo_root, idx_dir, old_manifest, entries=entries)
 
 
-def _full_index(repo_root: str, idx_dir: Path) -> tuple[int, int]:
+def _full_index(repo_root: str, idx_dir: Path, entries=None) -> tuple[int, int]:
     """Wipe and rebuild the index from scratch."""
     logger.info("Full index of %s", repo_root)
     root = Path(repo_root)
@@ -86,7 +91,8 @@ def _full_index(repo_root: str, idx_dir: Path) -> tuple[int, int]:
 
     ix = create_in(str(idx_dir), INDEX_SCHEMA)
     writer = ix.writer()
-    entries = list_repo_tree(repo_root)
+    if entries is None:
+        entries = list_repo_tree(repo_root)
 
     manifest = Manifest(commit_hash=_get_head_commit(repo_root))
     total_chunks = 0
@@ -122,11 +128,11 @@ def _full_index(repo_root: str, idx_dir: Path) -> tuple[int, int]:
 
 
 def _incremental_index(
-    repo_root: str, idx_dir: Path, old_manifest: Manifest,
+    repo_root: str, idx_dir: Path, old_manifest: Manifest, entries=None,
 ) -> tuple[int, int]:
     """Update only changed files in the index."""
     root = Path(repo_root)
-    current_hashes = _hash_all_files(repo_root)
+    current_hashes = _hash_all_files(repo_root, entries=entries)
     diff = compute_diff(current_hashes, old_manifest)
 
     if not diff.added and not diff.modified and not diff.deleted:

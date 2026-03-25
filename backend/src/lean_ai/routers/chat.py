@@ -1,14 +1,12 @@
-"""Chat, inline prediction, scaffolding, knowledge, and health endpoints."""
+"""Chat and chat-streaming endpoints."""
 
 import asyncio
 import json
 import logging
-import os
 import re
-import shutil
 from collections.abc import AsyncGenerator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from lean_ai.config import settings
@@ -21,20 +19,8 @@ from lean_ai.routers.context_helpers import (
     read_project_context,
     search_workspace,
 )
-from lean_ai.routers.dependencies import _inline_client, llm_client, refiner, request_llm_client
-from lean_ai.routers.models import (
-    ChatRequest,
-    ChatResponse,
-    IndexKnowledgeRequest,
-    IndexKnowledgeResponse,
-    InlinePredictRequest,
-    ModelInfo,
-    ModelsResponse,
-    ScaffoldInfo,
-    ScaffoldListResponse,
-    ScaffoldRequest,
-    ScaffoldResponse,
-)
+from lean_ai.routers.dependencies import llm_client, refiner, request_llm_client
+from lean_ai.routers.models import ChatRequest, ChatResponse
 from lean_ai.tools import internet
 
 logger = logging.getLogger(__name__)
@@ -87,26 +73,6 @@ def _extract_search_query(message: str | None) -> str | None:
     return " ".join(keywords[:8])
 
 
-def _get_default_model_name() -> str:
-    """Return the model name for the active provider."""
-    p = settings.llm_provider.lower()
-    if p == "openai":
-        return settings.openai_model
-    if p == "anthropic":
-        return settings.anthropic_model
-    return settings.ollama_model
-
-
-def _get_active_max_tokens() -> int:
-    """Return max_tokens for the active provider."""
-    p = settings.llm_provider.lower()
-    if p == "openai":
-        return settings.openai_max_tokens
-    if p == "anthropic":
-        return settings.anthropic_max_tokens
-    return settings.ollama_max_tokens
-
-
 def _get_chat_client():
     """Return the active client for chat endpoints — request model when configured, else primary."""
     return request_llm_client or llm_client
@@ -115,150 +81,13 @@ def _get_chat_client():
 def _get_chat_max_tokens() -> int:
     """Return max_tokens for the chat client (request model when configured, else primary)."""
     if request_llm_client is None:
-        return _get_active_max_tokens()
+        p = settings.llm_provider.lower()
+        if p == "openai":
+            return settings.openai_max_tokens
+        if p == "anthropic":
+            return settings.anthropic_max_tokens
+        return settings.ollama_max_tokens
     return settings.effective_request_max_tokens
-
-
-@chat_router.get("/models", response_model=ModelsResponse)
-async def list_models():
-    """List available LLM providers/models based on server configuration."""
-    models: list[ModelInfo] = []
-
-    # Ollama: query live API for available models
-    try:
-        import ollama as ollama_lib
-
-        client = ollama_lib.AsyncClient(host=settings.ollama_url)
-        response = await client.list()
-        for m in response.models:
-            name = m.model
-            models.append(ModelInfo(
-                provider="ollama",
-                model=name,
-                display_name=f"Ollama: {name}",
-                is_default=(
-                    settings.llm_provider == "ollama"
-                    and name == settings.ollama_model
-                ),
-            ))
-    except Exception:
-        # Ollama not reachable — add the configured model as fallback
-        models.append(ModelInfo(
-            provider="ollama",
-            model=settings.ollama_model,
-            display_name=f"Ollama: {settings.ollama_model}",
-            is_default=settings.llm_provider == "ollama",
-        ))
-
-    # OpenAI: show if API key configured
-    if settings.openai_api_key:
-        models.append(ModelInfo(
-            provider="openai",
-            model=settings.openai_model,
-            display_name=f"OpenAI: {settings.openai_model}",
-            is_default=settings.llm_provider == "openai",
-        ))
-
-    # Anthropic: show if API key configured
-    if settings.anthropic_api_key:
-        models.append(ModelInfo(
-            provider="anthropic",
-            model=settings.anthropic_model,
-            display_name=f"Anthropic: {settings.anthropic_model}",
-            is_default=settings.llm_provider == "anthropic",
-        ))
-
-    return ModelsResponse(
-        models=models,
-        default_provider=settings.llm_provider,
-        default_model=_get_default_model_name(),
-    )
-
-
-@chat_router.get("/scaffold/list", response_model=ScaffoldListResponse)
-async def list_scaffolds():
-    """List all available scaffold templates."""
-    from lean_ai.tools.scaffold import get_scaffold_registry
-
-    registry = get_scaffold_registry()
-    return ScaffoldListResponse(
-        scaffolds=[
-            ScaffoldInfo(
-                name=t.name,
-                display_name=t.display_name,
-                description=t.description,
-                language=t.language,
-                framework=t.framework,
-                aliases=t.aliases,
-                setup_type=t.setup_type,
-            )
-            for t in registry.list_all()
-        ]
-    )
-
-
-@chat_router.post("/scaffold", response_model=ScaffoldResponse)
-async def scaffold_project(request: ScaffoldRequest):
-    """Set up a new project from a scaffold recipe."""
-    from lean_ai.tools.scaffold import get_scaffold_registry, get_scaffold_runner
-
-    registry = get_scaffold_registry()
-    template = registry.get(request.scaffold_name)
-    if template is None:
-        available = [t.name for t in registry.list_all()]
-        raise HTTPException(
-            status_code=404,
-            detail=f"Unknown scaffold '{request.scaffold_name}'. Available: {available}",
-        )
-
-    runner = get_scaffold_runner()
-    result = await runner.run(template, request.project_name, request.parent_dir)
-
-    if not result.success:
-        error_msg = result.error or "Scaffold failed"
-        if result.command_output:
-            error_msg = f"{error_msg}\n\nCommand output:\n{result.command_output.strip()}"
-        raise HTTPException(status_code=500, detail=error_msg)
-
-    return ScaffoldResponse(
-        scaffold_name=result.scaffold_name,
-        project_dir=result.project_dir,
-        files_created=result.files_created,
-        command_output=result.command_output,
-        message=(
-            f"Created {template.display_name} project '{request.project_name}' "
-            f"at {result.project_dir}"
-        ),
-    )
-
-
-@chat_router.post("/index-knowledge", response_model=IndexKnowledgeResponse)
-async def index_knowledge_endpoint(request: IndexKnowledgeRequest):
-    """Index the knowledge directory for domain document retrieval."""
-    try:
-        from lean_ai.knowledge.indexer import index_knowledge, knowledge_index_dir
-    except ImportError:
-        raise HTTPException(
-            status_code=501,
-            detail="Knowledge module not yet available",
-        )
-
-    if request.force_reindex:
-        idx_path = knowledge_index_dir(request.repo_root)
-        if os.path.exists(idx_path):
-            shutil.rmtree(idx_path)
-
-    try:
-        stats = await asyncio.to_thread(index_knowledge, request.repo_root)
-    except Exception as e:
-        logger.warning("Knowledge indexing failed: %s", e)
-        return IndexKnowledgeResponse(status="failed")
-
-    return IndexKnowledgeResponse(
-        status=stats.get("status", "indexed"),
-        doc_count=stats.get("doc_count", 0),
-        chunk_count=stats.get("chunk_count", 0),
-    )
 
 
 async def _build_chat_messages(
@@ -518,35 +347,3 @@ async def chat_stream_endpoint(request: ChatRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-
-
-@chat_router.post("/predict")
-async def inline_predict(request: InlinePredictRequest):
-    """Stateless inline prediction — Copilot-style completions."""
-    try:
-        completion = await _inline_client.generate_completion(
-            request.prefix, suffix=request.suffix,
-        )
-        confidence = 0.8 if completion.strip() else 0.0
-        return {"completion": completion, "confidence": confidence}
-    except Exception as e:
-        logger.exception("Inline prediction failed")
-        return {"completion": "", "confidence": 0.0, "error": str(e)}
-
-
-@chat_router.get("/health")
-async def health():
-    """Health check."""
-    from lean_ai.llm.vision import is_vision_available
-
-    result = {"status": "ok", "vision_available": is_vision_available()}
-    try:
-        from lean_ai.voice.availability import voice_status
-        result.update(voice_status())
-    except ImportError:
-        result.update({
-            "stt_available": False,
-            "tts_available": False,
-            "wake_word_available": False,
-        })
-    return result

@@ -28,6 +28,11 @@ async def _run_command(cmd: str, cwd: str) -> ToolResult:
             exit_code=process.returncode,
         )
     except asyncio.TimeoutError:
+        try:
+            process.kill()
+            await process.wait()
+        except ProcessLookupError:
+            pass
         return ToolResult(success=False, error="Command timed out", exit_code=-1)
     except Exception as e:
         return ToolResult(success=False, error=str(e))

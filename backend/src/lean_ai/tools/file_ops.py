@@ -10,10 +10,30 @@ from lean_ai.tools.executor import ToolResult
 
 logger = logging.getLogger(__name__)
 
+# Maximum file size for read_file (2 MB)
+_MAX_READ_BYTES = 2 * 1024 * 1024
+
+
+def _safe_resolve(path: str, repo_root: str) -> Path | None:
+    """Resolve *path* under *repo_root* and verify it doesn't escape.
+
+    Returns the resolved ``Path`` or ``None`` if the path escapes the
+    repository root (e.g. via ``../`` traversal or symlinks).
+    """
+    resolved = (Path(repo_root) / path).resolve()
+    if not resolved.is_relative_to(Path(repo_root).resolve()):
+        return None
+    return resolved
+
 
 async def create_file(path: str, content: str, repo_root: str) -> ToolResult:
     """Create a new file with the given content."""
-    file_path = Path(repo_root) / path
+    file_path = _safe_resolve(path, repo_root)
+    if file_path is None:
+        return ToolResult(
+            success=False,
+            error=f"Path escapes repository root: {path}",
+        )
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
     original = ""
@@ -37,7 +57,12 @@ async def edit_file(
 
     Falls back to whitespace-tolerant matching if exact match fails.
     """
-    file_path = Path(repo_root) / path
+    file_path = _safe_resolve(path, repo_root)
+    if file_path is None:
+        return ToolResult(
+            success=False,
+            error=f"Path escapes repository root: {path}",
+        )
 
     if not file_path.exists():
         return ToolResult(
@@ -81,10 +106,29 @@ async def read_file(
     end_line: int | None = None,
 ) -> ToolResult:
     """Read a file with line numbers. Auto-truncates at 500 lines."""
-    file_path = Path(repo_root) / path
+    file_path = _safe_resolve(path, repo_root)
+    if file_path is None:
+        return ToolResult(
+            success=False,
+            error=f"Path escapes repository root: {path}",
+        )
 
     if not file_path.exists():
         return ToolResult(success=False, error=f"File not found: {path}")
+
+    try:
+        size = file_path.stat().st_size
+    except OSError:
+        return ToolResult(success=False, error=f"Cannot stat file: {path}")
+
+    if size > _MAX_READ_BYTES:
+        return ToolResult(
+            success=False,
+            error=(
+                f"File too large ({size:,} bytes, limit {_MAX_READ_BYTES:,}). "
+                f"Use start_line/end_line to read a portion."
+            ),
+        )
 
     try:
         text = file_path.read_text(encoding="utf-8")

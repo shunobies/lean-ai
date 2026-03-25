@@ -55,15 +55,33 @@ SKIP_FILES = frozenset({
 })
 
 
+_gitignore_cache: dict[str, tuple[float, pathspec.PathSpec | None]] = {}
+
+
 def _load_gitignore(repo_root: Path) -> pathspec.PathSpec | None:
     gitignore = repo_root / ".gitignore"
+    root_str = str(repo_root)
+
     if gitignore.exists():
         try:
-            return pathspec.PathSpec.from_lines(
+            mtime = gitignore.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+
+        cached = _gitignore_cache.get(root_str)
+        if cached is not None and cached[0] == mtime:
+            return cached[1]
+
+        try:
+            spec = pathspec.PathSpec.from_lines(
                 "gitwildmatch", gitignore.read_text().splitlines(),
             )
+            _gitignore_cache[root_str] = (mtime, spec)
+            return spec
         except Exception:
             pass
+
+    _gitignore_cache.pop(root_str, None)
     return None
 
 

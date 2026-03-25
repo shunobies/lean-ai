@@ -39,8 +39,8 @@ class WSMessageDispatcher:
     def __init__(self, websocket: WebSocket) -> None:
         self.ws = websocket
         self._cancel_event = asyncio.Event()
-        self._user_messages: asyncio.Queue[dict] = asyncio.Queue()
-        self._approval_queue: asyncio.Queue[dict] = asyncio.Queue()
+        self._user_messages: asyncio.Queue[dict] = asyncio.Queue(maxsize=1000)
+        self._approval_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=1000)
         self._listener_task: asyncio.Task | None = None
         self._execution_mode = False
 
