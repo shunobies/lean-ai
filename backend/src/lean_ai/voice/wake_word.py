@@ -1,7 +1,7 @@
 """Wake word detection using openWakeWord.
 
 Runs a lightweight background listener on the microphone (16kHz 16-bit PCM).
-When "Hey Computer" is detected, notifies via a callback.
+When a wake word is detected (default: "hey_jarvis"), notifies via a callback.
 """
 
 import asyncio
@@ -18,7 +18,7 @@ CHANNELS = 1
 CHUNK_DURATION_MS = 80  # openWakeWord expects 80ms frames
 CHUNK_SIZE = int(SAMPLE_RATE * CHUNK_DURATION_MS / 1000)  # 1280 samples
 
-WAKE_WORD_MODEL = "hey_computer"
+WAKE_WORD_MODEL = "hey_jarvis"
 CONFIDENCE_THRESHOLD = 0.5
 
 
@@ -35,15 +35,24 @@ class WakeWordService:
         self._loop: asyncio.AbstractEventLoop | None = None
 
     def _load_model(self) -> None:
-        """Load the openWakeWord model."""
+        """Load the openWakeWord model (v0.4+ API — bundled models)."""
         if self._model is not None:
             return
-        import openwakeword
         from openwakeword.model import Model
 
-        openwakeword.utils.download_models()
-        self._model = Model(wakeword_models=[WAKE_WORD_MODEL])
-        logger.info("Wake word: loaded model '%s'", WAKE_WORD_MODEL)
+        # v0.4: Model() loads all bundled models; predict() returns scores
+        # for each. We filter by WAKE_WORD_MODEL in the listener loop.
+        self._model = Model()
+        available = list(self._model.models.keys())
+        if WAKE_WORD_MODEL not in available:
+            raise RuntimeError(
+                f"Wake word model '{WAKE_WORD_MODEL}' not found. "
+                f"Available: {available}"
+            )
+        logger.info(
+            "Wake word: loaded model '%s' (available: %s)",
+            WAKE_WORD_MODEL, available,
+        )
 
     def _ensure_pyaudio(self) -> None:
         """Create PyAudio instance if needed."""
@@ -108,18 +117,18 @@ class WakeWordService:
                 audio = np.frombuffer(data, dtype=np.int16)
                 prediction = self._model.predict(audio)
 
-                for model_name, score in prediction.items():
-                    if score > CONFIDENCE_THRESHOLD:
-                        logger.info(
-                            "Wake word: detected '%s' (score=%.3f)",
-                            model_name, score,
+                score = prediction.get(WAKE_WORD_MODEL, 0)
+                if score > CONFIDENCE_THRESHOLD:
+                    logger.info(
+                        "Wake word: detected '%s' (score=%.3f)",
+                        WAKE_WORD_MODEL, score,
+                    )
+                    self._model.reset()
+                    if self._on_detected and self._loop:
+                        asyncio.run_coroutine_threadsafe(
+                            self._on_detected(), self._loop,
                         )
-                        self._model.reset()
-                        if self._on_detected and self._loop:
-                            asyncio.run_coroutine_threadsafe(
-                                self._on_detected(), self._loop,
-                            )
-                        break
+
         except Exception as exc:
             logger.error("Wake word: listener crashed: %s", exc)
             self._fire_error(f"Wake word listener crashed: {exc}")
