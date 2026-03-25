@@ -173,6 +173,11 @@
           "maximum": 20,
           "markdownDescription": "Font size (px) for chat messages in the Lean AI sidebar. Adjusts live without restarting. Range: 10–20."
         },
+        "lean-ai.userName": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Your name — the chat LLM will use this to address you personally."
+        },
         "lean-ai.llmProvider": {
           "type": "string",
           "default": "ollama",

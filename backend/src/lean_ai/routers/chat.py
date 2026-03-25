@@ -402,6 +402,7 @@ async def _build_chat_messages(
         fetched_pages=fetched_pages or None,
         web_search_results=web_search_text,
         knowledge_context=knowledge_ctx,
+        user_name=request.user_name,
     )
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
 

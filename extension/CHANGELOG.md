@@ -2,6 +2,14 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.3.30] - 2026-03-25
+
+### Added
+- **First-boot quickstart guide** — new users see an in-chat setup guide with OS-specific Ollama install commands, model pull command, and links to ollama.com. Commands have copy-to-clipboard buttons. Shown automatically when the backend isn't reachable and setup hasn't been completed before.
+- **LLM greeting on startup** — when the sidebar opens with a fresh chat, the LLM automatically greets the user and asks what they'd like to work on today, including the project name for context.
+- **Personalized chat** — new `lean-ai.userName` setting lets the LLM address you by name in conversation.
+- **STT model warm-up** — the speech-to-text model now pre-loads in the background when the extension starts (if STT is enabled), eliminating the delay on first voice use.
+
 ## [0.3.29] - 2026-03-24
 
 ### Fixed

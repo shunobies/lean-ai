@@ -89,6 +89,16 @@ async def stt_stop():
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
 
+@voice_router.post("/voice/stt/warmup")
+async def stt_warmup():
+    """Pre-load the STT model in the background so first use is instant."""
+    mgr = _get_manager()
+    if mgr is None or mgr.stt is None:
+        return {"status": "unavailable"}
+    asyncio.create_task(mgr.stt.warm_up())
+    return {"status": "warming_up"}
+
+
 # ── TTS endpoints ──
 
 

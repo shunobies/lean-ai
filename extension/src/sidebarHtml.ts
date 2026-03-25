@@ -196,6 +196,74 @@ export function getWebviewHtml(chatFontSize: number): string {
         font-style: italic;
     }
 
+    /* First-boot setup guide */
+    .setup-guide {
+        align-self: flex-start;
+        background: var(--vscode-editor-background);
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 8px;
+        padding: 14px 16px;
+        max-width: 95%;
+        line-height: 1.5;
+    }
+    .setup-guide h3 {
+        margin: 0 0 4px 0;
+        font-size: 15px;
+    }
+    .setup-guide .setup-tagline {
+        opacity: 0.7;
+        font-size: 12px;
+        margin-bottom: 12px;
+    }
+    .setup-guide .setup-step {
+        margin-bottom: 10px;
+    }
+    .setup-guide .setup-step-title {
+        font-weight: 600;
+        margin-bottom: 4px;
+    }
+    .setup-guide .setup-step-note {
+        font-size: 11px;
+        opacity: 0.7;
+        margin-top: 2px;
+    }
+    .setup-cmd {
+        display: flex;
+        align-items: center;
+        background: var(--vscode-textBlockQuote-background, rgba(127,127,127,0.1));
+        border-radius: 4px;
+        padding: 4px 8px;
+        margin: 4px 0;
+        font-family: var(--vscode-editor-font-family, monospace);
+        font-size: 12px;
+        gap: 8px;
+    }
+    .setup-cmd code {
+        flex: 1;
+        word-break: break-all;
+    }
+    .setup-cmd .copy-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 2px 4px;
+        border-radius: 3px;
+        font-size: 13px;
+        opacity: 0.6;
+        flex-shrink: 0;
+    }
+    .setup-cmd .copy-btn:hover {
+        opacity: 1;
+        background: var(--vscode-toolbar-hoverBackground);
+    }
+    .setup-guide a {
+        color: var(--vscode-textLink-foreground);
+        text-decoration: none;
+    }
+    .setup-guide a:hover {
+        text-decoration: underline;
+    }
+
     .timestamp-divider {
         align-self: center;
         font-size: 10px;
@@ -1101,6 +1169,20 @@ export function getWebviewHtml(chatFontSize: number): string {
         return d.innerHTML;
     }
 
+    // Expose globally for inline onclick handlers in setup guide
+    window.copyCmd = function(btn) {
+        const code = btn.parentElement.querySelector('code');
+        if (code) {
+            navigator.clipboard.writeText(code.textContent).then(function() {
+                btn.textContent = '✓';
+                setTimeout(function() { btn.textContent = '📋'; }, 1500);
+            });
+        }
+    };
+    window.openExternal = function(url) {
+        vscode.postMessage({ type: 'openExternal', url: url });
+    };
+
     function _applyMarkdownFormatting(html) {
         // Code blocks
         html = html.replace(/\`\`\`([\\s\\S]*?)\`\`\`/g, '<pre>$1</pre>');
@@ -1690,6 +1772,40 @@ export function getWebviewHtml(chatFontSize: number): string {
                 currentPlanningDiv = null; // clean up any partial planning bubble
                 addMessage(escapeHtml(msg.text), 'msg-error');
                 break;
+
+            case 'setupGuide': {
+                const div = document.createElement('div');
+                div.className = 'msg setup-guide';
+                div.innerHTML =
+                    '<h3>Welcome to Lean AI!</h3>' +
+                    '<div class="setup-tagline">Your AI coding assistant — let\\'s get you up and running in under 5 minutes.</div>' +
+
+                    '<div class="setup-step">' +
+                    '<div class="setup-step-title">Step 1 — Install Ollama</div>' +
+                    '<div class="setup-cmd"><code>' + escapeHtml(msg.installCmd) + '</code>' +
+                    '<button class="copy-btn" title="Copy" onclick="copyCmd(this)">📋</button></div>' +
+                    '<div class="setup-step-note">' +
+                    '<a href="#" onclick="openExternal(\\'https://ollama.com/download\\'); return false;">Download from ollama.com</a>' +
+                    ' — Ollama runs AI models locally on your machine. No cloud, no API keys needed.</div>' +
+                    '</div>' +
+
+                    '<div class="setup-step">' +
+                    '<div class="setup-step-title">Step 2 — Pull a model</div>' +
+                    '<div class="setup-cmd"><code>' + escapeHtml(msg.pullCmd) + '</code>' +
+                    '<button class="copy-btn" title="Copy" onclick="copyCmd(this)">📋</button></div>' +
+                    '<div class="setup-step-note">This downloads the model. It only needs to happen once. ' +
+                    '<a href="#" onclick="openExternal(\\'https://ollama.com/library\\'); return false;">Browse other models</a></div>' +
+                    '</div>' +
+
+                    '<div class="setup-step">' +
+                    '<div class="setup-step-title">Step 3 — Start chatting!</div>' +
+                    '<div class="setup-step-note">Once the download finishes, type a message below to start. ' +
+                    '<a href="#" onclick="vscode.postMessage({type:\\'openSettings\\'})">Open Settings</a> to customize.</div>' +
+                    '</div>';
+                messagesEl.appendChild(div);
+                scrollToBottom();
+                break;
+            }
 
             case 'cancelled':
                 sending = false;

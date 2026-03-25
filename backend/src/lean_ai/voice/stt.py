@@ -57,6 +57,12 @@ class STTService:
             settings.stt_model, settings.stt_cpu_threads,
         )
 
+    async def warm_up(self) -> None:
+        """Pre-load the Whisper model in a background thread."""
+        if self._model is not None:
+            return
+        await asyncio.to_thread(self._load_model)
+
     def _ensure_pyaudio(self) -> None:
         """Create PyAudio instance if needed."""
         if self._pa is None:

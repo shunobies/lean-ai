@@ -213,11 +213,13 @@ export class BackendClient {
             active_language?: string;
             active_selection?: string;
         },
+        userName?: string,
     ): Promise<{ reply: string; tokens_per_second?: number | null; eval_count?: number | null }> {
         const body: Record<string, unknown> = { message, history };
         if (workspace) {
             body.workspace = workspace;
         }
+        if (userName) { body.user_name = userName; }
         // Uses http module — fetch (undici) has a hardcoded 5-min timeout
         // that kills long-running LLM calls with large local models.
         const data = (await this._postJsonNoTimeout("/api/chat", body)) as {
@@ -251,6 +253,7 @@ export class BackendClient {
         onToken: (token: string, isFirst: boolean) => void,
         attachments?: Array<{ data: string; filename?: string; mime_type?: string }>,
         onThinking?: (token: string) => void,
+        userName?: string,
     ): Promise<{ receivedDone: boolean }> {
         return new Promise((resolve, reject) => {
             const fullUrl = new URL(`${this.baseUrl}/api/chat/stream`);
@@ -260,6 +263,7 @@ export class BackendClient {
             const body: Record<string, unknown> = { message, history };
             if (workspace) { body.workspace = workspace; }
             if (attachments && attachments.length > 0) { body.attachments = attachments; }
+            if (userName) { body.user_name = userName; }
             const postData = JSON.stringify(body);
 
             const options: http.RequestOptions = {
@@ -641,6 +645,12 @@ export class BackendClient {
     }
 
     // --- Voice ---
+
+    async sttWarmup(): Promise<void> {
+        try {
+            await fetch(`${this.baseUrl}/api/voice/stt/warmup`, { method: "POST" });
+        } catch { /* fire-and-forget */ }
+    }
 
     async sttStart(autoStop = false): Promise<void> {
         const resp = await fetch(`${this.baseUrl}/api/voice/stt/start`, {

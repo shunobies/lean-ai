@@ -218,10 +218,21 @@ def build_chat_system_prompt(
     fetched_pages: list[dict] | None = None,
     web_search_results: str | None = None,
     knowledge_context: str | None = None,
+    user_name: str | None = None,
 ) -> str:
     """Build the chat system prompt with workspace context injected."""
     parts = [
         CHAT_SYSTEM_PROMPT,
+    ]
+
+    if user_name:
+        parts.append("")
+        parts.append(
+            f"The user's name is {user_name}. "
+            "Address them by name naturally in conversation."
+        )
+
+    parts.extend([
         "",
         "IMPORTANT — How your capabilities work:",
         "- The system has ALREADY read the user's project files and searched "
@@ -231,7 +242,7 @@ def build_chat_system_prompt(
         "- You DO have access to their code. DO NOT say 'I cannot access your files'.",
         "- The system AUTOMATICALLY searches the web and fetches URLs on your behalf.",
         "- When answering, reference the actual code provided below.",
-    ]
+    ])
 
     if workspace:
         parts.append("")

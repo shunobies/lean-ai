@@ -129,6 +129,11 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         this.client.healthCheck().then(async () => {
             this.postMessage({ type: "visionAvailable", available: this.client.visionAvailable });
 
+            // Pre-load STT model in background so first voice use is instant
+            if (this.client.sttAvailable) {
+                this.client.sttWarmup();
+            }
+
             // Detect voice settings enabled but deps not installed
             const voiceConfig = vscode.workspace.getConfiguration("lean-ai");
             const sttWanted = voiceConfig.get<boolean>("enableStt", false);
@@ -172,7 +177,22 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             }
 
             this._sendVoiceAvailable();
-        }).catch(() => {});
+
+            // Mark setup complete — backend is healthy
+            if (!this.context.globalState.get<boolean>("lean-ai.hasCompletedSetup")) {
+                this.context.globalState.update("lean-ai.hasCompletedSetup", true);
+            }
+
+            // Auto-greet on fresh startup (no existing conversation, no pending workflow)
+            if (this.chatHistory.length === 0 && !this.lastCompletedSessionId && !this._pendingInit) {
+                this.sendGreeting();
+            }
+        }).catch(() => {
+            // Backend not reachable — show first-boot setup if never completed
+            if (!this.context.globalState.get<boolean>("lean-ai.hasCompletedSetup")) {
+                setTimeout(() => this.showFirstBootSetup(), 500);
+            }
+        });
 
         // Check if a workflow completed while the panel was disposed
         if (this.lastCompletedSessionId) {
@@ -284,6 +304,9 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                     break;
                 case "openSettings":
                     SettingsPanel.createOrShow(this.context);
+                    break;
+                case "openExternal":
+                    vscode.env.openExternal(vscode.Uri.parse(msg.url as string));
                     break;
                 case "openFileDiff":
                     this.openFileDiff(
@@ -776,6 +799,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
 
         // Stream tokens from /api/chat/stream — strip timestamps before sending
         const historyForApi = this.chatHistory.slice(0, -1).map(({ role, content }) => ({ role, content }));
+        const userName = vscode.workspace.getConfiguration("lean-ai").get<string>("userName", "") || undefined;
 
         let fullReply = "";
         let isFirst = true;
@@ -792,7 +816,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 isFirst = false;
             }, apiAttachments, (thinkingToken) => {
                 this.postMessage({ type: "llmThinking", text: thinkingToken, streaming: true });
-            }));
+            }, userName));
         } finally {
             this.sessionTreeProvider?.resumeRefresh();
         }
@@ -821,6 +845,76 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
 
         // Persist conversation after each exchange
         await this.conversations.persistCurrentConversation(this.chatHistory);
+    }
+
+    // ── Startup greeting: LLM greets user on fresh chat ────────────
+
+    private async sendGreeting(): Promise<void> {
+        const config = vscode.workspace.getConfiguration("lean-ai");
+        const userName = config.get<string>("userName", "") || undefined;
+        const workspace = this.getWorkspaceContext();
+        const projectName = workspace?.workspace_name || "your project";
+
+        const greetingPrompt = userName
+            ? `Greet ${userName} warmly and ask what we're going to work on in ${projectName} today. Keep it brief and friendly — one or two sentences.`
+            : `Greet the user warmly and ask what we're going to work on in ${projectName} today. Keep it brief and friendly — one or two sentences.`;
+
+        let fullReply = "";
+        let isFirst = true;
+
+        try {
+            await this.client.chatStream(
+                greetingPrompt, [], workspace,
+                (token) => {
+                    fullReply += token;
+                    this.postMessage({ type: "chatToken", content: token, isFirst });
+                    isFirst = false;
+                },
+                undefined,
+                (thinkingToken) => {
+                    this.postMessage({ type: "llmThinking", text: thinkingToken, streaming: true });
+                },
+                userName,
+            );
+        } catch {
+            // Greeting failed — not critical, user can type
+            return;
+        }
+
+        if (fullReply.trim()) {
+            this.chatHistory.push({
+                role: "assistant",
+                content: fullReply,
+                timestamp: new Date().toISOString(),
+            });
+            this.postMessage({ type: "chatDone", fullText: fullReply });
+        }
+    }
+
+    // ── First-boot setup guide ───────────────────────────────────────
+
+    private showFirstBootSetup(): void {
+        const platform = process.platform; // 'linux', 'darwin', 'win32'
+
+        let installCmd: string;
+        if (platform === "linux") {
+            installCmd = "curl -fsSL https://ollama.com/install.sh | sh";
+        } else if (platform === "darwin") {
+            installCmd = "brew install ollama";
+        } else {
+            installCmd = "winget install Ollama.Ollama";
+        }
+
+        const model = vscode.workspace.getConfiguration("lean-ai")
+            .get<string>("ollamaModel", "qwen3-coder:30b");
+
+        this.postMessage({
+            type: "setupGuide",
+            platform,
+            installCmd,
+            pullCmd: `ollama pull ${model}`,
+            model,
+        });
     }
 
     // ── Agent mode: full WebSocket FSM workflow ──────────────────────

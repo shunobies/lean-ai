@@ -97,6 +97,7 @@ class ChatRequest(BaseModel):
     history: list[dict[str, str]] = []
     workspace: WorkspaceContext | None = None
     attachments: list[Attachment] = []
+    user_name: str | None = None
 
 
 class ChatResponse(BaseModel):
