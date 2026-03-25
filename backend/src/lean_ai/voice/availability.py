@@ -35,11 +35,14 @@ def is_tts_available() -> bool:
 
 
 def is_wake_word_available() -> bool:
-    """Check if openwakeword is importable and wake word is enabled."""
+    """Check if openwakeword and PyAudio are importable and wake word is enabled."""
     if not settings.enable_wake_word:
         return False
+    from lean_ai.voice.alsa_suppression import suppress_alsa_errors
+    suppress_alsa_errors()
     try:
         import openwakeword  # noqa: F401
+        import pyaudio  # noqa: F401
         return True
     except ImportError:
         return False

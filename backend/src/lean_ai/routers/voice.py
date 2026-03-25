@@ -223,6 +223,12 @@ async def _on_stt_auto_stopped():
     await _broadcast_voice_event("stt_auto_stopped")
 
 
+async def _on_wake_word_error(message: str):
+    """Callback when wake word listener fails."""
+    logger.error("Wake word listener error: %s", message)
+    await _broadcast_voice_event("wake_word_error")
+
+
 # ── Wake word endpoints ──
 
 
@@ -234,7 +240,9 @@ async def wakeword_start():
         return _unavailable("wake_word")
 
     try:
-        await mgr.start_wake_word(_on_wake_word_detected)
+        await mgr.start_wake_word(
+            _on_wake_word_detected, on_error=_on_wake_word_error,
+        )
         return {"status": "listening"}
     except Exception as e:
         logger.exception("Wake word start failed")
@@ -269,9 +277,13 @@ async def voice_events():
 
     async def event_generator():
         try:
+            yield ":connected\n\n"
             while True:
-                event_type = await queue.get()
-                yield f"data: {json.dumps({'type': event_type})}\n\n"
+                try:
+                    event_type = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"data: {json.dumps({'type': event_type})}\n\n"
+                except asyncio.TimeoutError:
+                    yield ":heartbeat\n\n"
         except asyncio.CancelledError:
             pass
         finally:
@@ -280,7 +292,12 @@ async def voice_events():
                     _voice_queues.remove(queue)
 
     return StreamingResponse(
-        event_generator(), media_type="text/event-stream",
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

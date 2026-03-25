@@ -762,50 +762,110 @@ export class BackendClient {
         });
     }
 
-    /** SSE connection for wake word events */
-    private _voiceEventAbort: AbortController | null = null;
+    /**
+     * SSE connection for wake word events.
+     *
+     * Uses http.request (not fetch) to avoid Node/undici's hardcoded
+     * 5-minute headersTimeout — wake word may sit idle for long periods.
+     * Auto-reconnects on connection loss.
+     */
+    private _voiceEventReq: http.ClientRequest | null = null;
+    private _voiceReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-    connectVoiceEvents(onWakeWord: () => void, onSttAutoStop?: () => void): void {
+    connectVoiceEvents(
+        onWakeWord: () => void,
+        onSttAutoStop?: () => void,
+        onError?: () => void,
+    ): void {
         this.disconnectVoiceEvents();
-        this._voiceEventAbort = new AbortController();
-        const signal = this._voiceEventAbort.signal;
 
-        (async () => {
-            try {
-                const resp = await fetch(`${this.baseUrl}/api/voice/events`, { signal });
-                const reader = resp.body?.getReader();
-                if (!reader) { return; }
-                const decoder = new TextDecoder();
-                let buffer = "";
-                while (!signal.aborted) {
-                    const { done, value } = await reader.read();
-                    if (done) { break; }
-                    buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split("\n");
-                    buffer = lines.pop() || "";
-                    for (const line of lines) {
-                        if (line.startsWith("data: ")) {
-                            try {
-                                const data = JSON.parse(line.slice(6)) as { type?: string };
-                                if (data.type === "wake_word_detected") {
-                                    onWakeWord();
-                                } else if (data.type === "stt_auto_stopped" && onSttAutoStop) {
-                                    onSttAutoStop();
-                                }
-                            } catch { /* skip */ }
-                        }
-                    }
+        const connect = () => {
+            const fullUrl = new URL(`${this.baseUrl}/api/voice/events`);
+            const isHttps = fullUrl.protocol === "https:";
+            const transport = isHttps ? https : http;
+
+            const options: http.RequestOptions = {
+                hostname: fullUrl.hostname,
+                port: fullUrl.port || (isHttps ? "443" : "80"),
+                path: fullUrl.pathname,
+                method: "GET",
+                timeout: 0,
+            };
+
+            let buffer = "";
+
+            const req = transport.request(options, (res) => {
+                if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
+                    console.error(`[Lean AI] Voice events SSE: HTTP ${res.statusCode}`);
+                    scheduleReconnect();
+                    return;
                 }
-            } catch {
-                // Connection closed or aborted
-            }
-        })();
+
+                console.log("[Lean AI] Voice events SSE: connected");
+
+                res.on("data", (chunk: Buffer | string) => {
+                    buffer += chunk.toString();
+                    const lines = buffer.split("\n");
+                    buffer = lines.pop()!;
+
+                    for (const line of lines) {
+                        if (line.startsWith(":") || line === "") { continue; }
+                        if (!line.startsWith("data: ")) { continue; }
+                        try {
+                            const data = JSON.parse(line.slice(6)) as { type?: string };
+                            if (data.type === "wake_word_detected") {
+                                onWakeWord();
+                            } else if (data.type === "stt_auto_stopped" && onSttAutoStop) {
+                                onSttAutoStop();
+                            } else if (data.type === "wake_word_error" && onError) {
+                                onError();
+                            }
+                        } catch { /* skip malformed SSE lines */ }
+                    }
+                });
+
+                res.on("end", () => {
+                    console.warn("[Lean AI] Voice events SSE: connection ended, reconnecting...");
+                    scheduleReconnect();
+                });
+
+                res.on("error", (err) => {
+                    console.error("[Lean AI] Voice events SSE: stream error:", err.message);
+                    scheduleReconnect();
+                });
+            });
+
+            req.on("socket", (socket) => { socket.setTimeout(0); });
+            req.on("error", (err) => {
+                console.error("[Lean AI] Voice events SSE: request error:", err.message);
+                scheduleReconnect();
+            });
+            req.end();
+
+            this._voiceEventReq = req;
+        };
+
+        const scheduleReconnect = () => {
+            if (this._voiceEventReq === null && this._voiceReconnectTimer === null) { return; }
+            this._voiceEventReq = null;
+            this._voiceReconnectTimer = setTimeout(() => {
+                this._voiceReconnectTimer = null;
+                connect();
+            }, 3000);
+        };
+
+        connect();
     }
 
     disconnectVoiceEvents(): void {
-        if (this._voiceEventAbort) {
-            this._voiceEventAbort.abort();
-            this._voiceEventAbort = null;
+        if (this._voiceReconnectTimer !== null) {
+            clearTimeout(this._voiceReconnectTimer);
+            this._voiceReconnectTimer = null;
+        }
+        const req = this._voiceEventReq;
+        this._voiceEventReq = null;
+        if (req) {
+            req.destroy();
         }
     }
 

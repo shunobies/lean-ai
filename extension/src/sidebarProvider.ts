@@ -927,6 +927,11 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                     this.client.connectVoiceEvents(
                         () => this.postMessage({ type: "wakeWordDetected" }),
                         () => this.postMessage({ type: "sttAutoStopped" }),
+                        () => {
+                            this._wakeWordActive = false;
+                            this.postMessage({ type: "reply", text: "Wake word listener stopped unexpectedly.", cls: "msg-error" });
+                            this.postMessage({ type: "wakeWordStopped" });
+                        },
                     );
                     this._wakeWordActive = true;
                 } catch (err) {

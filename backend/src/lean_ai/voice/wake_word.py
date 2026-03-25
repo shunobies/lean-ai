@@ -31,6 +31,7 @@ class WakeWordService:
         self._running = False
         self._listener_task: asyncio.Task | None = None
         self._on_detected: Callable | None = None
+        self._on_error: Callable | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
     def _load_model(self) -> None:
@@ -52,6 +53,16 @@ class WakeWordService:
             import pyaudio
             self._pa = pyaudio.PyAudio()
 
+    def _fire_error(self, message: str) -> None:
+        """Notify via callback that the listener has failed."""
+        if self._on_error and self._loop:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    self._on_error(message), self._loop,
+                )
+            except Exception:
+                pass
+
     def _listener_loop(self) -> None:
         """Blocking loop that captures audio and checks for the wake word.
 
@@ -65,16 +76,23 @@ class WakeWordService:
         except Exception as exc:
             logger.error("Wake word: failed to load model: %s", exc)
             self._running = False
+            self._fire_error(f"Failed to load wake word model: {exc}")
             return
-        self._ensure_pyaudio()
 
-        stream = self._pa.open(
-            format=pyaudio.paInt16,
-            channels=CHANNELS,
-            rate=SAMPLE_RATE,
-            input=True,
-            frames_per_buffer=CHUNK_SIZE,
-        )
+        try:
+            self._ensure_pyaudio()
+            stream = self._pa.open(
+                format=pyaudio.paInt16,
+                channels=CHANNELS,
+                rate=SAMPLE_RATE,
+                input=True,
+                frames_per_buffer=CHUNK_SIZE,
+            )
+        except Exception as exc:
+            logger.error("Wake word: failed to open microphone: %s", exc)
+            self._running = False
+            self._fire_error(f"Failed to open microphone: {exc}")
+            return
 
         logger.info("Wake word: listening for '%s'...", WAKE_WORD_MODEL)
 
@@ -102,16 +120,23 @@ class WakeWordService:
                                 self._on_detected(), self._loop,
                             )
                         break
+        except Exception as exc:
+            logger.error("Wake word: listener crashed: %s", exc)
+            self._fire_error(f"Wake word listener crashed: {exc}")
         finally:
+            self._running = False
             stream.stop_stream()
             stream.close()
 
-    async def start(self, on_detected: Callable) -> None:
+    async def start(
+        self, on_detected: Callable, on_error: Callable | None = None,
+    ) -> None:
         """Start listening for the wake word in a background task."""
         if self._running:
             return
 
         self._on_detected = on_detected
+        self._on_error = on_error
         self._running = True
         self._loop = asyncio.get_event_loop()
         self._listener_task = asyncio.get_event_loop().run_in_executor(

@@ -34,6 +34,7 @@ class AudioManager:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
         self._wake_word_callback: Callable | None = None
+        self._wake_word_error_callback: Callable | None = None
         self._wake_word_was_active = False
 
         self.stt = None
@@ -89,19 +90,25 @@ class AudioManager:
             # Resume wake word if it was paused
             if self._wake_word_was_active and self.wake_word is not None:
                 if self._wake_word_callback is not None:
-                    await self.wake_word.start(self._wake_word_callback)
+                    await self.wake_word.start(
+                        self._wake_word_callback,
+                        on_error=self._wake_word_error_callback,
+                    )
                 self._wake_word_was_active = False
 
             return result
 
-    async def start_wake_word(self, callback: Callable) -> None:
+    async def start_wake_word(
+        self, callback: Callable, on_error: Callable | None = None,
+    ) -> None:
         """Start wake word listener with the given detection callback."""
         async with self._lock:
             if self.wake_word is None:
                 raise RuntimeError("Wake word is not available")
 
             self._wake_word_callback = callback
-            await self.wake_word.start(callback)
+            self._wake_word_error_callback = on_error
+            await self.wake_word.start(callback, on_error=on_error)
 
     async def stop_wake_word(self) -> None:
         """Stop wake word listener."""

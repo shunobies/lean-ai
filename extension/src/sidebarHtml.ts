@@ -1821,6 +1821,11 @@ export function getWebviewHtml(chatFontSize: number): string {
                 }
                 break;
 
+            case 'wakeWordStopped':
+                wakeWordEnabled = false;
+                wakeWordToggle.checked = false;
+                break;
+
             case 'chatReset':
                 lastTimestamp = null;
                 break;
