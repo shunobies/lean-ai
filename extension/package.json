@@ -2,7 +2,7 @@
   "name": "lean-ai",
   "displayName": "Lean AI",
   "description": "Single-Model Deterministic Agentic Architecture - Chat Agent & Inline Predictions",
-  "version": "0.3.30",
+  "version": "0.3.31",
   "publisher": "lean-ai",
   "icon": "icon.png",
   "repository": {
@@ -99,6 +99,11 @@
       {
         "command": "lean-ai.reinstallBackend",
         "title": "Lean AI: Reinstall Backend"
+      },
+      {
+        "command": "lean-ai.openChatInNewWindow",
+        "title": "Lean AI: Open Chat in New Window",
+        "icon": "$(link-external)"
       }
     ],
     "menus": {

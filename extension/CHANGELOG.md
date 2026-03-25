@@ -2,6 +2,15 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.3.31] - 2026-03-25
+
+### Added
+- **Open Chat in New Window** — a pop-out button next to Search in the header opens the chat in a separate editor panel (`ViewColumn.Two`), ideal for multi-monitor setups. The sidebar and detached panel stay in sync — messages, tokens, and state are broadcast to both. Also available via the command palette: `Lean AI: Open Chat in New Window`.
+- **Code block action buttons** — every code block in chat responses now shows a floating toolbar (top-right, on hover) with Copy to Clipboard and Send to Terminal buttons. The terminal button reuses the active VS Code terminal or creates a new one. Existing "Send to Agent" buttons on Suggested Agent Prompt blocks are unaffected.
+
+### Changed
+- **Refactored webview message handler** — extracted the inline `onDidReceiveMessage` switch into a shared `handleWebviewMessage()` method, enabling both the sidebar and detached panel to share the same message routing.
+
 ## [0.3.30] - 2026-03-25
 
 ### Added

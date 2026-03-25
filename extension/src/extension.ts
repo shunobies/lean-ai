@@ -116,6 +116,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand("lean-ai.openSettings", () => {
             SettingsPanel.createOrShow(context);
         }),
+        vscode.commands.registerCommand("lean-ai.openChatInNewWindow", () => {
+            sidebarProvider.openChatInNewWindow();
+        }),
     );
 
     // Session history commands

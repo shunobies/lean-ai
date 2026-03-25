@@ -37,6 +37,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = "lean-ai.chatView";
 
     private webviewView?: vscode.WebviewView;
+    private detachedPanel?: vscode.WebviewPanel;
     private client: BackendClient;
     private sessionTreeProvider?: SessionTreeProvider;
     private sessionId: string | undefined;
@@ -207,138 +208,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         }
 
         webviewView.webview.onDidReceiveMessage(async (msg) => {
-            switch (msg.type) {
-                case "sendMessage":
-                    try {
-                        await this.handleUserMessage(msg.text, msg.attachments);
-                    } catch {
-                        // Safety: always re-enable send on unexpected errors
-                        this.postMessage({ type: "sendEnabled" });
-                    }
-                    break;
-                case "sendToAgent":
-                    // User clicked "Send to Agent" on a refined prompt block
-                    this.postMessage({
-                        type: "reply",
-                        text: "Sending to agent...",
-                        cls: "msg-system",
-                    });
-                    await this.handleAgentMessage(msg.text as string);
-                    break;
-                case "newChat": {
-                    // Persist current conversation, then archive it as a tab
-                    await this.conversations.persistCurrentConversation(this.chatHistory);
-
-                    // Build archive info before clearing state
-                    const archiveTabId = this.conversations.currentConversationId
-                        ? `chat-${this.conversations.currentConversationId}`
-                        : undefined;
-                    const firstUserMsg = this.chatHistory.find(m => m.role === "user");
-                    const archiveTitle = firstUserMsg
-                        ? firstUserMsg.content.slice(0, 80).replace(/\n/g, " ")
-                        : "";
-                    const hasMessages = this.chatHistory.length > 0;
-
-                    this.closeWebSocket();
-                    this.sessionId = undefined;
-                    this.lastCompletedSessionId = undefined;
-                    this.context.globalState.update("lean-ai.lastCompletedSessionId", undefined);
-                    this.chatHistory = [];
-                    this.conversations.currentConversationId = undefined;
-                    this.conversations.viewingHistoricConversation = false;
-
-                    // Send archived tab info + reset in one message
-                    this.postMessage({
-                        type: "chatArchived",
-                        tabId: hasMessages ? archiveTabId : undefined,
-                        title: hasMessages ? archiveTitle : undefined,
-                        messagesHtml: hasMessages ? (msg.messagesHtml as string) : undefined,
-                    });
-                    break;
-                }
-                case "approve":
-                    this.handleApprove();
-                    break;
-                case "searchConversations":
-                    this.conversations.handleSearchConversations(msg.query as string);
-                    break;
-                case "loadConversation":
-                    this.conversations.handleLoadConversation(msg.id as string);
-                    break;
-                case "backToCurrentChat":
-                    this.conversations.handleBackToCurrentChat(this.chatHistory);
-                    break;
-                case "webviewReady":
-                    // Webview (re)initialised — replay chat history so messages aren't
-                    // lost when the panel is destroyed and recreated (e.g. open-in-editor).
-                    if (this.chatHistory.length > 0) {
-                        this.conversations.handleBackToCurrentChat(this.chatHistory);
-                    }
-                    // Push current diagnostics count and debug session state
-                    this.sendDiagnosticsUpdate();
-                    {
-                        const dbgSession = vscode.debug.activeDebugSession;
-                        this.postMessage({ type: 'debugStateUpdate', active: !!dbgSession, name: dbgSession?.name });
-                    }
-                    break;
-                case "approve_tool":
-                case "deny_tool":
-                    // Forward tool approval/denial straight to the backend WebSocket.
-                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                        this.ws.send(JSON.stringify({
-                            type: msg.type,
-                            token: msg.token as string,
-                        }));
-                    }
-                    break;
-                case "stopWorkflow":
-                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                        this.ws.send(JSON.stringify({ type: "cancel" }));
-                    }
-                    break;
-                case "toggleProblems":
-                    this._includeProblems = msg.enabled as boolean;
-                    break;
-                case "toggleDebug":
-                    this._includeDebug = msg.enabled as boolean;
-                    break;
-                case "openSettings":
-                    SettingsPanel.createOrShow(this.context);
-                    break;
-                case "openExternal":
-                    vscode.env.openExternal(vscode.Uri.parse(msg.url as string));
-                    break;
-                case "openFileDiff":
-                    this.openFileDiff(
-                        msg.file as string,
-                        msg.baseBranch as string,
-                    );
-                    break;
-                // --- Voice ---
-                case "sttStart":
-                    this.handleSttStart(!!(msg.autoStop));
-                    break;
-                case "sttStop":
-                    this.handleSttStop();
-                    break;
-                case "voiceToggle":
-                    this.handleVoiceToggle(msg.feature as string, !!(msg.enabled));
-                    break;
-                case "ttsStop":
-                    // Client-side only — audio is already stopped in the webview
-                    break;
-                case "voiceConfigChange":
-                    if (msg.voice) {
-                        this.client.voiceConfig(msg.voice as string).catch(() => {});
-                    }
-                    if (msg.speed) {
-                        this.client.voiceConfig(undefined, msg.speed as number).catch(() => {});
-                    }
-                    break;
-                case "voiceShowSetup":
-                    this._showVoiceSetupInstructions();
-                    break;
-            }
+            await this.handleWebviewMessage(msg);
         });
 
         // Live font-size updates when user changes the setting
@@ -428,6 +298,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
 
     private postMessage(msg: Record<string, unknown>): void {
         this.webviewView?.webview.postMessage(msg);
+        this.detachedPanel?.webview.postMessage(msg);
     }
 
     private getRepoRoot(): string {
@@ -986,6 +857,171 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     private getHtml(): string {
         const chatFontSize = vscode.workspace.getConfiguration("lean-ai").get<number>("chatFontSize", 13);
         return getWebviewHtml(chatFontSize);
+    }
+
+    // ── Webview message handler (shared by sidebar + detached panel) ──
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    private async handleWebviewMessage(msg: any): Promise<void> {
+        switch (msg.type) {
+            case "sendMessage":
+                try {
+                    await this.handleUserMessage(msg.text, msg.attachments);
+                } catch {
+                    this.postMessage({ type: "sendEnabled" });
+                }
+                break;
+            case "sendToAgent":
+                this.postMessage({
+                    type: "reply",
+                    text: "Sending to agent...",
+                    cls: "msg-system",
+                });
+                await this.handleAgentMessage(msg.text as string);
+                break;
+            case "newChat": {
+                await this.conversations.persistCurrentConversation(this.chatHistory);
+                const archiveTabId = this.conversations.currentConversationId
+                    ? `chat-${this.conversations.currentConversationId}`
+                    : undefined;
+                const firstUserMsg = this.chatHistory.find(m => m.role === "user");
+                const archiveTitle = firstUserMsg
+                    ? firstUserMsg.content.slice(0, 80).replace(/\n/g, " ")
+                    : "";
+                const hasMessages = this.chatHistory.length > 0;
+                this.closeWebSocket();
+                this.sessionId = undefined;
+                this.lastCompletedSessionId = undefined;
+                this.context.globalState.update("lean-ai.lastCompletedSessionId", undefined);
+                this.chatHistory = [];
+                this.conversations.currentConversationId = undefined;
+                this.conversations.viewingHistoricConversation = false;
+                this.postMessage({
+                    type: "chatArchived",
+                    tabId: hasMessages ? archiveTabId : undefined,
+                    title: hasMessages ? archiveTitle : undefined,
+                    messagesHtml: hasMessages ? (msg.messagesHtml as string) : undefined,
+                });
+                break;
+            }
+            case "approve":
+                this.handleApprove();
+                break;
+            case "searchConversations":
+                this.conversations.handleSearchConversations(msg.query as string);
+                break;
+            case "loadConversation":
+                this.conversations.handleLoadConversation(msg.id as string);
+                break;
+            case "backToCurrentChat":
+                this.conversations.handleBackToCurrentChat(this.chatHistory);
+                break;
+            case "webviewReady":
+                if (this.chatHistory.length > 0) {
+                    this.conversations.handleBackToCurrentChat(this.chatHistory);
+                }
+                this.sendDiagnosticsUpdate();
+                {
+                    const dbgSession = vscode.debug.activeDebugSession;
+                    this.postMessage({ type: "debugStateUpdate", active: !!dbgSession, name: dbgSession?.name });
+                }
+                break;
+            case "approve_tool":
+            case "deny_tool":
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({
+                        type: msg.type,
+                        token: msg.token as string,
+                    }));
+                }
+                break;
+            case "stopWorkflow":
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({ type: "cancel" }));
+                }
+                break;
+            case "toggleProblems":
+                this._includeProblems = msg.enabled as boolean;
+                break;
+            case "toggleDebug":
+                this._includeDebug = msg.enabled as boolean;
+                break;
+            case "openSettings":
+                SettingsPanel.createOrShow(this.context);
+                break;
+            case "openExternal":
+                vscode.env.openExternal(vscode.Uri.parse(msg.url as string));
+                break;
+            case "sendToTerminal": {
+                const terminal = vscode.window.activeTerminal
+                    || vscode.window.createTerminal("Lean AI");
+                terminal.show();
+                terminal.sendText(msg.code as string);
+                break;
+            }
+            case "openChatInNewWindow":
+                this.openChatInNewWindow();
+                break;
+            case "openFileDiff":
+                this.openFileDiff(
+                    msg.file as string,
+                    msg.baseBranch as string,
+                );
+                break;
+            // --- Voice ---
+            case "sttStart":
+                this.handleSttStart(!!(msg.autoStop));
+                break;
+            case "sttStop":
+                this.handleSttStop();
+                break;
+            case "voiceToggle":
+                this.handleVoiceToggle(msg.feature as string, !!(msg.enabled));
+                break;
+            case "ttsStop":
+                break;
+            case "voiceConfigChange":
+                if (msg.voice) {
+                    this.client.voiceConfig(msg.voice as string).catch(() => {});
+                }
+                if (msg.speed) {
+                    this.client.voiceConfig(undefined, msg.speed as number).catch(() => {});
+                }
+                break;
+            case "voiceShowSetup":
+                this._showVoiceSetupInstructions();
+                break;
+        }
+    }
+
+    // ── Detached chat panel ──────────────────────────────────────────
+
+    openChatInNewWindow(): void {
+        if (this.detachedPanel) {
+            this.detachedPanel.reveal(vscode.ViewColumn.Two);
+            return;
+        }
+
+        const panel = vscode.window.createWebviewPanel(
+            "lean-ai.chatPanel",
+            "Lean AI Chat",
+            vscode.ViewColumn.Two,
+            {
+                enableScripts: true,
+                retainContextWhenHidden: true,
+            },
+        );
+
+        this.detachedPanel = panel;
+        panel.webview.html = this.getHtml();
+
+        panel.webview.onDidReceiveMessage(async (msg) => {
+            await this.handleWebviewMessage(msg);
+        });
+
+        panel.onDidDispose(() => {
+            this.detachedPanel = undefined;
+        });
     }
 
     // ── Voice helpers ───────────────────────────────────────────────
