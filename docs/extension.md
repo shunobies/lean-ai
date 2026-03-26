@@ -180,7 +180,7 @@ Click the **⚙ gear button** in the Lean AI sidebar header to open the guided s
 The panel is organised into sections:
 
 - **Provider** — Radio group: Ollama / OpenAI / Anthropic. Only the fields relevant to your chosen provider are shown.
-- **Expert Model** — Optional separate model for reasoning-heavy planning phases (phases 3–6). Can use a different provider than the main model — e.g. fast local Ollama for coding, cloud model for planning.
+- **Expert Model** — Optional separate model for reasoning-heavy planning phases (phases 3–5). Can use a different provider than the main model — e.g. fast local Ollama for coding, cloud model for planning.
 - **Post-Validation** — Commands for format/lint/test to run automatically after agent changes.
 - **Advanced** — Inline prediction model, embedding model, search provider, context thresholds.
 
@@ -226,7 +226,7 @@ All settings are also available via VSCode's native settings UI (**Settings** > 
 | `lean-ai.ollamaTopK` | `20` | Top-k sampling |
 | `lean-ai.ollamaRepeatPenalty` | `1.05` | Repetition penalty |
 | `lean-ai.ollamaMaxTokens` | *(25% of ctx)* | Max output tokens |
-| `lean-ai.ollamaModelExpert` | *(empty)* | Separate Ollama model for planning phases 3–6 |
+| `lean-ai.ollamaModelExpert` | *(empty)* | Separate Ollama model for planning phases 3–5 |
 | `lean-ai.ollamaExpertContextWindow` | *(inherit)* | Context window for the expert model |
 | `lean-ai.expertLlmProvider` | *(auto)* | Provider for expert phases: `ollama`, `openai`, or `anthropic` |
 | `lean-ai.openaiModel` | `gpt-4o` | OpenAI model name |

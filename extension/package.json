@@ -235,7 +235,7 @@
         "lean-ai.ollamaModelExpert": {
           "type": "string",
           "default": "",
-          "markdownDescription": "**Ollama Expert Model** — A larger/reasoning model used for planning phases 3–6. Leave empty to use the primary model for all phases. Example: `qwen3:32b`"
+          "markdownDescription": "**Ollama Expert Model** — A larger/reasoning model used for planning phases 3–5. Leave empty to use the primary model for all phases. Example: `qwen3:32b`"
         },
         "lean-ai.ollamaExpertContextWindow": {
           "type": "number",

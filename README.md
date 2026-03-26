@@ -119,7 +119,7 @@ Use a local model for the bulk of the work and a cloud model only for planning a
 LEAN_AI_LLM_PROVIDER=ollama
 LEAN_AI_OLLAMA_MODEL=qwen3-coder:30b
 
-# Expert: cloud model for planning phases (3-6) and final fix retry
+# Expert: cloud model for planning phases 3-5 and final fix retry
 LEAN_AI_EXPERT_LLM_PROVIDER=anthropic
 LEAN_AI_ANTHROPIC_API_KEY=sk-ant-...
 LEAN_AI_ANTHROPIC_EXPERT_MODEL=claude-opus-4-6
@@ -133,7 +133,7 @@ LEAN_AI_OPENAI_API_KEY=sk-...
 LEAN_AI_OPENAI_EXPERT_MODEL=gpt-4o
 ```
 
-The expert model only runs for planning phases 3–6 (change design, risk assessment, plan assembly, verification) and the final validation fix retry. All codebase exploration, implementation, and routine tool calls use the primary local model.
+The expert model only runs for planning phases 3–5 (design + risk synthesis, plan assembly, verification) and the final validation fix retry. All codebase exploration, implementation, and routine tool calls use the primary local model.
 
 > **Note:** the cloud provider's Python SDK must be installed even when the primary provider is Ollama — run `pip install -e ".[dev,anthropic]"` or `pip install -e ".[dev,openai]"` as appropriate, then restart the server.
 

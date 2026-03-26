@@ -556,7 +556,7 @@ export function getSettingsPanelHtml(): string {
     <div class="field-check">
         <input type="checkbox" id="useExpertModel">
         <div>
-            <label for="useExpertModel">Use a separate model for planning phases 3–6</label>
+            <label for="useExpertModel">Use a separate model for planning phases 3–5</label>
             <span class="hint">If disabled, the primary model is used for everything.</span>
         </div>
     </div>

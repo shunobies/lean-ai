@@ -78,7 +78,7 @@ All notable changes to the Lean AI extension will be documented in this file.
 ## [0.3.11] - 2026-03-21
 
 ### Changed
-- **Expert model for /fix mode** — bug-fix workflows now use the expert model (when configured) since diagnosis is reasoning-heavy. Previously only planning phases 3-6 and the final validation retry used the expert model.
+- **Expert model for /fix mode** — bug-fix workflows now use the expert model (when configured) since diagnosis is reasoning-heavy. Previously only planning phases 3-5 and the final validation retry used the expert model.
 
 ### Fixed
 - **Custom steering docs truncated** — `.lean_ai/context/` steering documents were being cut short during execution due to condensed context loading. Now loads full context for steering docs.

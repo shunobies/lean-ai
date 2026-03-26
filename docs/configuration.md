@@ -62,7 +62,7 @@ Ollama is always required, even when using cloud providers — it handles inline
 
 ## Expert Model
 
-An optional second model for reasoning-heavy tasks. When configured, the expert model handles planning phases 3–6 (change design, risk assessment, plan assembly, verification) and the final validation fix retry. Phases 1–2 and all implementation turns always use the primary model.
+An optional second model for reasoning-heavy tasks. When configured, the expert model handles planning phases 3–5 (design + risk synthesis, plan assembly, verification) and the final validation fix retry. Phases 1–2 and all implementation turns always use the primary model.
 
 The expert model can be a different provider from the primary — for example, run a fast local Ollama model for exploration and implementation, then hand off to Claude or ChatGPT for planning and complex fixes.
 
@@ -106,7 +106,7 @@ This is the recommended setup for saving cloud tokens while still getting strong
 LEAN_AI_LLM_PROVIDER=ollama
 LEAN_AI_OLLAMA_MODEL=qwen3-coder:30b
 
-# Expert: Claude for planning phases 3-6 and final validation fix retry
+# Expert: Claude for planning phases 3-5 and final validation fix retry
 LEAN_AI_EXPERT_LLM_PROVIDER=anthropic
 LEAN_AI_ANTHROPIC_API_KEY=sk-ant-...
 LEAN_AI_ANTHROPIC_EXPERT_MODEL=claude-opus-4-6
