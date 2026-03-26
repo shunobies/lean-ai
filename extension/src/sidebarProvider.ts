@@ -1124,15 +1124,29 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    /** Strip markdown code blocks and inline code so TTS doesn't read code aloud. */
+    /** Strip markdown formatting and code so TTS reads natural prose. */
     private static _stripCodeForTts(text: string): string {
         // Remove fenced code blocks (```...```)
         let cleaned = text.replace(/```[\s\S]*?```/g, "");
         // Remove inline code (`...`)
         cleaned = cleaned.replace(/`[^`]+`/g, "");
-        // Collapse multiple blank lines into one space
-        cleaned = cleaned.replace(/\n{2,}/g, " ").trim();
-        return cleaned;
+        // Remove markdown bold/italic markers (* and _)
+        cleaned = cleaned.replace(/[*_]{1,3}/g, "");
+        // Remove markdown table pipes and heading markers
+        cleaned = cleaned.replace(/[|#]/g, "");
+        // Remove markdown horizontal rules (--- or ***)
+        cleaned = cleaned.replace(/^[-*]{3,}\s*$/gm, "");
+        // Remove markdown link syntax [text](url) → text
+        cleaned = cleaned.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+        // Remove markdown image syntax ![alt](url)
+        cleaned = cleaned.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1");
+        // Remove bullet markers (-, +, numbered lists)
+        cleaned = cleaned.replace(/^\s*[-+]\s+/gm, "");
+        cleaned = cleaned.replace(/^\s*\d+\.\s+/gm, "");
+        // Collapse multiple blank lines/spaces into one space
+        cleaned = cleaned.replace(/\n{2,}/g, " ");
+        cleaned = cleaned.replace(/\s{2,}/g, " ");
+        return cleaned.trim();
     }
 
     /** Speak text aloud via TTS. Prefers raw PCM streaming for lower latency. */
