@@ -262,6 +262,19 @@ class TTSService:
         sf.write(buf, audio_array, sample_rate, format="WAV", subtype="PCM_16")
         return base64.b64encode(buf.getvalue()).decode("ascii")
 
+    @staticmethod
+    def _audio_to_base64_pcm(audio_array) -> str:
+        """Encode a numpy float32 audio array as base64 Int16 PCM (no WAV header).
+
+        Lighter than WAV: no 44-byte header overhead per chunk, and clients
+        can construct AudioBuffers synchronously without decodeAudioData().
+        """
+        import numpy as np
+
+        clipped = np.clip(audio_array, -1.0, 1.0)
+        int16_data = (clipped * 32767).astype(np.int16)
+        return base64.b64encode(int16_data.tobytes()).decode("ascii")
+
     async def synthesize(
         self,
         text: str,
@@ -363,6 +376,64 @@ class TTSService:
                     "TTS: kokoro IndexError on chunk (%d chars), skipping",
                     len(chunk_text),
                 )
+
+    async def synthesize_streaming_pcm(
+        self,
+        text: str,
+        voice: str = "",
+        speed: float = 0.0,
+    ):
+        """Stream raw PCM audio chunks for zero-decode playback.
+
+        Same as synthesize_streaming but yields raw Int16 PCM (no WAV header)
+        for lower overhead and synchronous client-side AudioBuffer construction.
+
+        Yields:
+            Dicts with pcm_base64, sample_rate, and duration_seconds per chunk.
+        """
+        voice = voice or settings.tts_voice
+        speed = speed if speed > 0 else settings.tts_speed
+
+        await self._ensure_loaded()
+        lang = self._voice_lang_code(voice)
+        chunks = self._split_for_tts(text)
+
+        # Pipeline: produce audio chunks via asyncio.Queue so phonemization
+        # of the next text chunk overlaps with delivery of the current one.
+        output_queue: asyncio.Queue = asyncio.Queue()
+
+        async def _produce():
+            for chunk_text in chunks:
+                try:
+                    async for samples, sample_rate in self._kokoro.create_stream(
+                        chunk_text, voice=voice, speed=speed, lang=lang,
+                    ):
+                        if samples is not None and len(samples) > 0:
+                            await output_queue.put((samples, sample_rate))
+                except IndexError:
+                    logger.warning(
+                        "TTS: kokoro IndexError on chunk (%d chars), skipping",
+                        len(chunk_text),
+                    )
+            await output_queue.put(None)  # sentinel
+
+        producer = asyncio.create_task(_produce())
+
+        try:
+            while True:
+                item = await output_queue.get()
+                if item is None:
+                    break
+                samples, sample_rate = item
+                duration = len(samples) / sample_rate
+                audio_b64 = self._audio_to_base64_pcm(samples)
+                yield {
+                    "pcm_base64": audio_b64,
+                    "sample_rate": sample_rate,
+                    "duration_seconds": round(duration, 2),
+                }
+        finally:
+            await producer  # ensure clean exit
 
     def list_voices(self) -> list[dict]:
         """Return available Kokoro voices with metadata."""

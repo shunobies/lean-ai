@@ -66,6 +66,8 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     private _wakeWordActive = false;
     private _ttsSentenceQueue: string[] = [];
     private _ttsSpeaking = false;
+    private _ttsSentenceAccumulator = "";
+    private _ttsInCodeFence = false;
     private _lastDebugStop?: { reason: string; text?: string; threadId?: number };
     private _currentStage: string | null = null;
 
@@ -667,6 +669,9 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             mime_type: a.mimeType,
         }));
 
+        // Cancel any in-progress TTS from previous message
+        if (this._ttsEnabled) { this._resetTtsAccumulator(); }
+
         // Add user message to history with timestamp (store original text, not augmented)
         this.chatHistory.push({ role: "user", content: text, timestamp: now });
 
@@ -690,6 +695,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 fullReply += token;
                 this.postMessage({ type: "chatToken", content: token, isFirst });
                 isFirst = false;
+                if (this._ttsEnabled) { this._feedTtsToken(token); }
             }, apiAttachments, (thinkingToken) => {
                 this.postMessage({ type: "llmThinking", text: thinkingToken, streaming: true });
             }, userName, undefined, (desc) => {
@@ -703,9 +709,12 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             this.sessionTreeProvider?.resumeRefresh();
         }
 
-        // TTS: speak the full reply after streaming completes
-        if (this._ttsEnabled && fullReply.trim()) {
-            await this.speakText(fullReply);
+        // TTS: flush any remaining accumulated text
+        if (this._ttsEnabled && this._ttsSentenceAccumulator.trim()) {
+            const remainder = LeanAISidebarProvider._stripCodeForTts(this._ttsSentenceAccumulator);
+            if (remainder) { this.speakSentence(remainder); }
+            this._ttsSentenceAccumulator = "";
+            this._ttsInCodeFence = false;
         }
 
         // Compute tok/s from first-token to last-token (excludes context-gathering latency)
@@ -743,6 +752,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
 
         let fullReply = "";
         let isFirst = true;
+        if (this._ttsEnabled) { this._resetTtsAccumulator(); }
 
         try {
             await this.client.chatStream(
@@ -751,6 +761,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                     fullReply += token;
                     this.postMessage({ type: "chatToken", content: token, isFirst });
                     isFirst = false;
+                    if (this._ttsEnabled) { this._feedTtsToken(token); }
                 },
                 undefined,
                 (thinkingToken) => {
@@ -772,8 +783,12 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             });
             this.postMessage({ type: "chatDone", fullText: fullReply });
 
-            if (this._ttsEnabled) {
-                await this.speakText(fullReply);
+            // TTS: flush any remaining accumulated text
+            if (this._ttsEnabled && this._ttsSentenceAccumulator.trim()) {
+                const remainder = LeanAISidebarProvider._stripCodeForTts(this._ttsSentenceAccumulator);
+                if (remainder) { this.speakSentence(remainder); }
+                this._ttsSentenceAccumulator = "";
+                this._ttsInCodeFence = false;
             }
         }
     }
@@ -1120,20 +1135,28 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         return cleaned;
     }
 
-    /** Speak text aloud via TTS. Non-fatal on failure. */
+    /** Speak text aloud via TTS. Prefers raw PCM streaming for lower latency. */
     async speakText(text: string): Promise<void> {
         try {
             const cleaned = LeanAISidebarProvider._stripCodeForTts(text);
             if (!cleaned) { return; }
-            if (cleaned.length < 500) {
-                const result = await this.client.ttsSynthesize(cleaned);
-                if (result.audio_base64) {
-                    this.postMessage({ type: "ttsAudio", audio: result.audio_base64 });
-                }
-            } else {
-                await this.client.ttsStream(cleaned, undefined, undefined, (chunk) => {
-                    this.postMessage({ type: "ttsAudio", audio: chunk });
+            // Always use PCM streaming for lower latency — falls back to WAV on error
+            try {
+                await this.client.ttsStreamPcm(cleaned, undefined, undefined, (pcmBase64, sampleRate) => {
+                    this.postMessage({ type: "ttsAudio", audio: pcmBase64, isPcm: true, sampleRate });
                 });
+            } catch {
+                // Fallback: WAV streaming or non-streaming
+                if (cleaned.length < 500) {
+                    const result = await this.client.ttsSynthesize(cleaned);
+                    if (result.audio_base64) {
+                        this.postMessage({ type: "ttsAudio", audio: result.audio_base64 });
+                    }
+                } else {
+                    await this.client.ttsStream(cleaned, undefined, undefined, (chunk) => {
+                        this.postMessage({ type: "ttsAudio", audio: chunk });
+                    });
+                }
             }
         } catch (err) {
             console.warn("[Lean AI] TTS failed:", err);
@@ -1161,6 +1184,49 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    /** Feed a streaming token into the TTS sentence accumulator.
+     *  Detects sentence boundaries and dispatches complete sentences to speakSentence(). */
+    private _feedTtsToken(token: string): void {
+        this._ttsSentenceAccumulator += token;
+
+        // Track code fences — don't speak code blocks
+        const fenceCount = (token.match(/```/g) || []).length;
+        if (fenceCount % 2 !== 0) {
+            this._ttsInCodeFence = !this._ttsInCodeFence;
+        }
+        if (this._ttsInCodeFence) { return; }
+
+        // Check for sentence boundaries in the accumulated text
+        const sentenceEndPattern = /(?<=[.!?])\s+/;
+        const match = sentenceEndPattern.exec(this._ttsSentenceAccumulator);
+        if (!match) { return; }
+
+        // Extract all complete sentences
+        let remaining = this._ttsSentenceAccumulator;
+        let lastEnd = 0;
+        const re = /(?<=[.!?])\s+/g;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(remaining)) !== null) {
+            const sentence = remaining.slice(lastEnd, m.index).trim();
+            if (sentence) {
+                // Strip fenced code blocks and inline code
+                const cleaned = LeanAISidebarProvider._stripCodeForTts(sentence);
+                if (cleaned) { this.speakSentence(cleaned); }
+            }
+            lastEnd = m.index + m[0].length;
+        }
+        this._ttsSentenceAccumulator = remaining.slice(lastEnd);
+    }
+
+    /** Reset TTS accumulator state for a fresh streaming session. */
+    private _resetTtsAccumulator(): void {
+        this._ttsSentenceAccumulator = "";
+        this._ttsInCodeFence = false;
+        this._ttsSentenceQueue = [];
+        this._ttsSpeaking = false;
+        this.postMessage({ type: "ttsStopPlayback" });
+    }
+
     /** Send voiceAvailable + voice list to the webview. */
     private _sendVoiceAvailable(setupNeeded = false): void {
         // Sync provider TTS state with backend availability
@@ -1186,20 +1252,23 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             }).catch(() => {});
 
             // Proactively download TTS model files if not yet cached
-            vscode.window.withProgress(
-                {
-                    location: vscode.ProgressLocation.Notification,
-                    title: "Downloading TTS models (~310MB)...",
-                    cancellable: false,
-                },
-                () => this.client.ensureTtsModels(),
-            ).then((result) => {
-                if (result.downloaded) {
-                    vscode.window.showInformationMessage(
-                        "TTS models downloaded. Voice is ready!",
+            (async () => {
+                try {
+                    const result = await vscode.window.withProgress(
+                        {
+                            location: vscode.ProgressLocation.Notification,
+                            title: "Downloading TTS models (~310MB)...",
+                            cancellable: false,
+                        },
+                        () => this.client.ensureTtsModels(),
                     );
-                }
-            }).catch(() => {});
+                    if (result.downloaded) {
+                        vscode.window.showInformationMessage(
+                            "TTS models downloaded. Voice is ready!",
+                        );
+                    }
+                } catch { /* best effort */ }
+            })();
         }
     }
 

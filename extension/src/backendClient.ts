@@ -734,6 +734,47 @@ export class BackendClient {
         }
     }
 
+    async ttsStreamPcm(
+        text: string,
+        voice: string | undefined,
+        speed: number | undefined,
+        onChunk: (pcmBase64: string, sampleRate: number) => void,
+    ): Promise<void> {
+        const resp = await fetch(`${this.baseUrl}/api/voice/tts/stream-pcm`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text, voice: voice || "", speed: speed || 0 }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
+            throw new Error(err.detail ?? resp.statusText);
+        }
+        const reader = resp.body?.getReader();
+        if (!reader) { return; }
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) { break; }
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+            for (const line of lines) {
+                if (line.startsWith("data: ")) {
+                    try {
+                        const data = JSON.parse(line.slice(6)) as {
+                            type?: string; pcm_base64?: string; sample_rate?: number;
+                        };
+                        if (data.type === "done") { return; }
+                        if (data.pcm_base64 && data.sample_rate) {
+                            onChunk(data.pcm_base64, data.sample_rate);
+                        }
+                    } catch { /* skip malformed */ }
+                }
+            }
+        }
+    }
+
     async wakeWordStart(): Promise<void> {
         const resp = await fetch(`${this.baseUrl}/api/voice/wakeword/start`, {
             method: "POST",

@@ -991,6 +991,10 @@ export function getWebviewHtml(chatFontSize: number): string {
     let ttsQueue = [];
     // Web Audio API — bypasses autoplay restrictions in webview iframes
     let audioCtx = null;
+    // Gapless playback state
+    let ttsDecodedQueue = [];   // Pre-decoded AudioBuffer objects
+    let ttsNextStartTime = 0;   // AudioContext time for next buffer
+    let ttsScheduledSources = []; // Active BufferSourceNodes for cleanup
 
     // --- Image attachments ---
     const attachmentStrip = document.getElementById('attachmentStrip');
@@ -1537,39 +1541,118 @@ export function getWebviewHtml(chatFontSize: number): string {
         return audioCtx;
     }
 
-    function playTtsAudio(base64Audio) {
-        const ctx = ensureAudioCtx();
-        const binary = atob(base64Audio);
+    /** Decode base64 audio to an ArrayBuffer. */
+    function base64ToArrayBuffer(base64) {
+        const binary = atob(base64);
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
+        return bytes.buffer.slice(0);
+    }
 
-        ctx.decodeAudioData(bytes.buffer.slice(0), (buffer) => {
-            const source = ctx.createBufferSource();
-            source.buffer = buffer;
-            source.connect(ctx.destination);
-            ttsPlaying = true;
-            stopTtsBtn.style.display = '';
-            source.onended = () => {
+    /** Convert raw PCM Int16 base64 to an AudioBuffer (synchronous, no decodeAudioData). */
+    function pcmToAudioBuffer(base64Pcm, sampleRate) {
+        const ctx = ensureAudioCtx();
+        const binary = atob(base64Pcm);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
+        const int16 = new Int16Array(bytes.buffer);
+        const buffer = ctx.createBuffer(1, int16.length, sampleRate);
+        const channelData = buffer.getChannelData(0);
+        for (let i = 0; i < int16.length; i++) {
+            channelData[i] = int16[i] / 32768.0;
+        }
+        return buffer;
+    }
+
+    /** Schedule a decoded AudioBuffer for gapless playback. */
+    function scheduleBuffer(buffer) {
+        const ctx = ensureAudioCtx();
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ctx.destination);
+
+        // First buffer or if we've fallen behind, start from now
+        const now = ctx.currentTime;
+        if (!ttsPlaying || ttsNextStartTime < now) {
+            ttsNextStartTime = now;
+        }
+
+        source.start(ttsNextStartTime);
+        ttsNextStartTime += buffer.duration;
+
+        ttsPlaying = true;
+        stopTtsBtn.style.display = '';
+        ttsScheduledSources.push(source);
+
+        source.onended = () => {
+            const idx = ttsScheduledSources.indexOf(source);
+            if (idx !== -1) { ttsScheduledSources.splice(idx, 1); }
+            // If no more sources and no more queued data, we're done
+            if (ttsScheduledSources.length === 0 && ttsQueue.length === 0 && ttsDecodedQueue.length === 0) {
                 ttsPlaying = false;
-                if (ttsQueue.length > 0) {
-                    playTtsAudio(ttsQueue.shift());
-                } else {
-                    stopTtsBtn.style.display = 'none';
+                stopTtsBtn.style.display = 'none';
+            }
+        };
+    }
+
+    /** Pre-decode raw queue items and schedule decoded buffers for gapless playback. */
+    function pumpTtsPipeline() {
+        const ctx = ensureAudioCtx();
+
+        // Pre-decode: convert base64 WAV chunks to AudioBuffers (cap at 3 concurrent decodes)
+        while (ttsQueue.length > 0 && ttsDecodedQueue.length < 3) {
+            const base64 = ttsQueue.shift();
+            const arrayBuf = base64ToArrayBuffer(base64);
+            ctx.decodeAudioData(arrayBuf, (decoded) => {
+                ttsDecodedQueue.push(decoded);
+                // Schedule any newly decoded buffers
+                while (ttsDecodedQueue.length > 0) {
+                    scheduleBuffer(ttsDecodedQueue.shift());
                 }
-            };
-            source.start();
-        }, (err) => {
-            console.error('[Lean AI] TTS decode failed:', err);
-            ttsPlaying = false;
-            stopTtsBtn.style.display = 'none';
-        });
+                // Continue pumping if more raw items
+                if (ttsQueue.length > 0) { pumpTtsPipeline(); }
+            }, (err) => {
+                console.error('[Lean AI] TTS decode failed:', err);
+                // Continue with remaining queue
+                if (ttsQueue.length > 0 || ttsDecodedQueue.length > 0) { pumpTtsPipeline(); }
+            });
+        }
+
+        // Schedule any already-decoded buffers
+        while (ttsDecodedQueue.length > 0) {
+            scheduleBuffer(ttsDecodedQueue.shift());
+        }
+    }
+
+    /** Enqueue audio for gapless playback (WAV base64 or PCM base64). */
+    function playTtsAudio(base64Audio, isPcm, sampleRate) {
+        if (isPcm && sampleRate) {
+            // PCM: synchronous decode, schedule immediately
+            const buffer = pcmToAudioBuffer(base64Audio, sampleRate);
+            scheduleBuffer(buffer);
+        } else {
+            // WAV: async decode via pipeline
+            ttsQueue.push(base64Audio);
+            pumpTtsPipeline();
+        }
+    }
+
+    /** Stop all TTS playback and clear queues. */
+    function stopTtsPlayback() {
+        for (const src of ttsScheduledSources) {
+            try { src.stop(); src.disconnect(); } catch {}
+        }
+        ttsScheduledSources = [];
+        ttsDecodedQueue = [];
+        ttsQueue = [];
+        ttsPlaying = false;
+        ttsNextStartTime = 0;
+        if (audioCtx) { audioCtx.close(); audioCtx = null; }
+        stopTtsBtn.style.display = 'none';
     }
 
     stopTtsBtn.addEventListener('click', () => {
-        if (audioCtx) { audioCtx.close(); audioCtx = null; }
-        ttsPlaying = false;
-        ttsQueue = [];
-        stopTtsBtn.style.display = 'none';
+        stopTtsPlayback();
         vscode.postMessage({ type: 'ttsStop' });
     });
 
@@ -2018,12 +2101,12 @@ export function getWebviewHtml(chatFontSize: number): string {
 
             case 'ttsAudio':
                 if (ttsEnabled && msg.audio) {
-                    if (ttsPlaying) {
-                        ttsQueue.push(msg.audio);
-                    } else {
-                        playTtsAudio(msg.audio);
-                    }
+                    playTtsAudio(msg.audio, msg.isPcm, msg.sampleRate);
                 }
+                break;
+
+            case 'ttsStopPlayback':
+                stopTtsPlayback();
                 break;
 
             case 'wakeWordDetected':

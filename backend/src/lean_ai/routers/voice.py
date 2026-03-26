@@ -141,6 +141,32 @@ async def tts_stream(request: TTSRequest):
     )
 
 
+@voice_router.post("/voice/tts/stream-pcm")
+async def tts_stream_pcm(request: TTSRequest):
+    """Stream raw PCM audio chunks via SSE for zero-decode playback.
+
+    Returns Int16 PCM samples (no WAV header) so the client can construct
+    AudioBuffers synchronously without decodeAudioData() overhead.
+    """
+    mgr = _get_manager()
+    if mgr is None or mgr.tts is None:
+        return _unavailable("tts")
+
+    async def event_generator():
+        try:
+            async for chunk in mgr.tts.synthesize_streaming_pcm(
+                request.text, voice=request.voice, speed=request.speed,
+            ):
+                yield f"data: {json.dumps(chunk)}\n\n"
+            yield "data: {\"type\": \"done\"}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(), media_type="text/event-stream",
+    )
+
+
 @voice_router.get("/voice/tts/voices", response_model=VoiceListResponse)
 async def list_voices():
     """List available TTS voices."""
