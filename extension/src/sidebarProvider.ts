@@ -67,6 +67,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     private _ttsSentenceQueue: string[] = [];
     private _ttsSpeaking = false;
     private _lastDebugStop?: { reason: string; text?: string; threadId?: number };
+    private _currentStage: string | null = null;
 
     constructor(
         private readonly extensionUri: vscode.Uri,
@@ -297,6 +298,10 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     }
 
     private postMessage(msg: Record<string, unknown>): void {
+        // Track current workflow stage for webviewReady re-sync
+        if (msg.type === "stage") {
+            this._currentStage = (msg.stage as string) || null;
+        }
         this.webviewView?.webview.postMessage(msg);
         this.detachedPanel?.webview.postMessage(msg);
     }
@@ -687,7 +692,13 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 isFirst = false;
             }, apiAttachments, (thinkingToken) => {
                 this.postMessage({ type: "llmThinking", text: thinkingToken, streaming: true });
-            }, userName));
+            }, userName, undefined, (desc) => {
+                this.postMessage({
+                    type: "reply",
+                    text: `<details class="vision-desc"><summary>Vision model description</summary>\n\n${desc}\n</details>`,
+                    cls: "msg-system",
+                });
+            }));
         } finally {
             this.sessionTreeProvider?.resumeRefresh();
         }
@@ -929,6 +940,13 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 {
                     const dbgSession = vscode.debug.activeDebugSession;
                     this.postMessage({ type: "debugStateUpdate", active: !!dbgSession, name: dbgSession?.name });
+                }
+                // Re-send voice/vision state (fixes pop-out timing race)
+                this._sendVoiceAvailable();
+                this.postMessage({ type: "visionAvailable", available: this.client.visionAvailable });
+                // Re-send workflow stage so stop button appears if active
+                if (this._currentStage) {
+                    this.postMessage({ type: "stage", stage: this._currentStage });
                 }
                 break;
             case "approve_tool":

@@ -142,6 +142,19 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
             break;
         }
 
+        // --- Vision description: show what the vision model produced ---
+        case "vision_description": {
+            const descriptions = raw.descriptions as string;
+            if (descriptions) {
+                ctx.postMessage({
+                    type: "reply",
+                    text: `<details class="vision-desc"><summary>Vision model description</summary>\n\n${escapeHtml(descriptions)}\n</details>`,
+                    cls: "msg-system",
+                });
+            }
+            break;
+        }
+
         // --- Clarification pauses and asks the user ---
         case "clarification_needed": {
             ctx.postMessage({ type: "thinking", show: false });

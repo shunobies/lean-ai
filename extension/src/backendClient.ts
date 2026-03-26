@@ -255,6 +255,7 @@ export class BackendClient {
         onThinking?: (token: string) => void,
         userName?: string,
         skipWebSearch?: boolean,
+        onVisionDescription?: (desc: string) => void,
     ): Promise<{ receivedDone: boolean }> {
         return new Promise((resolve, reject) => {
             const fullUrl = new URL(`${this.baseUrl}/api/chat/stream`);
@@ -304,6 +305,8 @@ export class BackendClient {
                                 isFirst = false;
                             } else if (data["type"] === "thinking" && data["content"] && onThinking) {
                                 onThinking(data["content"] as string);
+                            } else if (data["type"] === "vision_description" && data["descriptions"] && onVisionDescription) {
+                                onVisionDescription(data["descriptions"] as string);
                             } else if (data["type"] === "done") {
                                 resolved = true;
                                 resolve({ receivedDone: true });

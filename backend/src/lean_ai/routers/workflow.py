@@ -171,6 +171,10 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                                 content = (
                                                     f"{content}\n\n{desc}"
                                                 )
+                                                await websocket.send_json({
+                                                    "type": "vision_description",
+                                                    "descriptions": desc,
+                                                })
                                             await websocket.send_json({
                                                 "type": "stage_status",
                                                 "stage": "VISION",

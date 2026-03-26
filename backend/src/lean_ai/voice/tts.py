@@ -199,6 +199,59 @@ class TTSService:
         return "en-us"
 
     @staticmethod
+    def _split_for_tts(text: str, max_chars: int = 300) -> list[str]:
+        """Split text into chunks safe for kokoro-onnx phoneme limits.
+
+        kokoro-onnx crashes when phonemes exceed 510. Split on sentence
+        boundaries first, then clause boundaries, then word boundaries.
+        300 chars is conservative (~200-300 phonemes, well under 510).
+        """
+        import re
+
+        text = text.strip()
+        if not text:
+            return []
+        if len(text) <= max_chars:
+            return [text]
+
+        chunks: list[str] = []
+
+        # Split on sentence boundaries
+        sentences = re.split(r"(?<=[.!?])\s+", text)
+
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+            if len(sentence) <= max_chars:
+                chunks.append(sentence)
+            else:
+                # Split long sentences on clause boundaries
+                clauses = re.split(r"(?<=[,;:\u2014\u2013])\s+", sentence)
+                for clause in clauses:
+                    clause = clause.strip()
+                    if not clause:
+                        continue
+                    if len(clause) <= max_chars:
+                        chunks.append(clause)
+                    else:
+                        # Last resort: split on word boundaries
+                        words = clause.split()
+                        current = ""
+                        for word in words:
+                            candidate = f"{current} {word}".strip()
+                            if len(candidate) <= max_chars:
+                                current = candidate
+                            else:
+                                if current:
+                                    chunks.append(current)
+                                current = word
+                        if current:
+                            chunks.append(current)
+
+        return chunks if chunks else [text[:max_chars]]
+
+    @staticmethod
     def _audio_to_base64_wav(
         audio_array, sample_rate: int = KOKORO_SAMPLE_RATE,
     ) -> str:
@@ -236,16 +289,32 @@ class TTSService:
 
     def _synthesize_sync(self, text: str, voice: str, speed: float) -> dict:
         """Synchronous synthesis — runs in a thread."""
-        lang = self._voice_lang_code(voice)
-        samples, sample_rate = self._kokoro.create(
-            text, voice=voice, speed=speed, lang=lang,
-        )
+        import numpy as np
 
-        if samples is None or len(samples) == 0:
+        lang = self._voice_lang_code(voice)
+        all_samples = []
+        rate = KOKORO_SAMPLE_RATE
+
+        for chunk_text in self._split_for_tts(text):
+            try:
+                samples, sample_rate = self._kokoro.create(
+                    chunk_text, voice=voice, speed=speed, lang=lang,
+                )
+                if samples is not None and len(samples) > 0:
+                    all_samples.append(samples)
+                    rate = sample_rate
+            except IndexError:
+                logger.warning(
+                    "TTS: kokoro IndexError on chunk (%d chars), skipping",
+                    len(chunk_text),
+                )
+
+        if not all_samples:
             return {"audio_base64": "", "duration_seconds": 0.0}
 
-        duration = len(samples) / sample_rate
-        audio_b64 = self._audio_to_base64_wav(samples, sample_rate)
+        combined = np.concatenate(all_samples)
+        duration = len(combined) / rate
+        audio_b64 = self._audio_to_base64_wav(combined, rate)
 
         logger.info(
             "TTS: synthesized %.1fs audio (%d chars)", duration, len(text),
@@ -263,6 +332,9 @@ class TTSService:
     ):
         """Stream audio chunks using kokoro-onnx native streaming.
 
+        Splits text into safe chunks to avoid kokoro-onnx's 510-phoneme
+        limit crash (off-by-one in create_stream).
+
         Yields:
             Dicts with audio_base64 and duration_seconds per chunk.
         """
@@ -272,16 +344,25 @@ class TTSService:
         await self._ensure_loaded()
         lang = self._voice_lang_code(voice)
 
-        async for samples, sample_rate in self._kokoro.create_stream(
-            text, voice=voice, speed=speed, lang=lang,
-        ):
-            if samples is not None and len(samples) > 0:
-                duration = len(samples) / sample_rate
-                audio_b64 = self._audio_to_base64_wav(samples, sample_rate)
-                yield {
-                    "audio_base64": audio_b64,
-                    "duration_seconds": round(duration, 2),
-                }
+        for chunk_text in self._split_for_tts(text):
+            try:
+                async for samples, sample_rate in self._kokoro.create_stream(
+                    chunk_text, voice=voice, speed=speed, lang=lang,
+                ):
+                    if samples is not None and len(samples) > 0:
+                        duration = len(samples) / sample_rate
+                        audio_b64 = self._audio_to_base64_wav(
+                            samples, sample_rate,
+                        )
+                        yield {
+                            "audio_base64": audio_b64,
+                            "duration_seconds": round(duration, 2),
+                        }
+            except IndexError:
+                logger.warning(
+                    "TTS: kokoro IndexError on chunk (%d chars), skipping",
+                    len(chunk_text),
+                )
 
     def list_voices(self) -> list[dict]:
         """Return available Kokoro voices with metadata."""

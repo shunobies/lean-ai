@@ -487,6 +487,29 @@ export function getWebviewHtml(chatFontSize: number): string {
         margin-bottom: 10px;
         white-space: pre-wrap;
     }
+    .vision-desc {
+        margin-top: 6px;
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 4px;
+        padding: 6px 8px;
+    }
+    .vision-desc > summary {
+        cursor: pointer;
+        color: var(--vscode-descriptionForeground);
+        font-style: italic;
+        font-size: 11px;
+    }
+    .vision-desc > summary:hover {
+        color: var(--vscode-foreground);
+    }
+    .vision-desc[open] > summary {
+        margin-bottom: 6px;
+    }
+    .vision-desc pre {
+        white-space: pre-wrap;
+        font-size: 11px;
+        opacity: 0.85;
+    }
     .plan-details {
         margin-top: 6px;
         border-top: 1px solid var(--vscode-panel-border);

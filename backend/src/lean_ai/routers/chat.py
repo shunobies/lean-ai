@@ -92,11 +92,14 @@ def _get_chat_max_tokens() -> int:
 
 async def _build_chat_messages(
     request: ChatRequest,
-) -> tuple[list[dict], RefinerResult | None]:
+) -> tuple[list[dict], RefinerResult | None, str]:
     """Gather workspace context and build the LLM message list for a chat request.
 
     Shared by both the blocking ``/chat`` endpoint and the streaming
     ``/chat/stream`` endpoint so context-gathering logic lives in one place.
+
+    Returns:
+        Tuple of (messages, refiner_result, image_descriptions).
     """
     workspace = request.workspace
     file_tree: list[str] = []
@@ -253,7 +256,7 @@ async def _build_chat_messages(
         len(request.attachments),
     )
 
-    return messages, refiner_result
+    return messages, refiner_result, image_descriptions
 
 
 @chat_router.post("/chat", response_model=ChatResponse)
@@ -265,7 +268,7 @@ async def chat(request: ChatRequest):
     no tool execution.
     """
     try:
-        messages, refiner_result = await _build_chat_messages(request)
+        messages, refiner_result, image_desc = await _build_chat_messages(request)
         _chat_client = _get_chat_client()
         reply = await _chat_client.chat_raw(
             messages,
@@ -281,6 +284,7 @@ async def chat(request: ChatRequest):
                 len(refiner_result.privacy_redactions)
                 if refiner_result else 0
             ),
+            image_descriptions=image_desc or None,
         )
     except Exception as e:
         logger.exception("Chat call failed")
@@ -304,7 +308,13 @@ async def chat_stream_endpoint(request: ChatRequest):
     """
     async def generate() -> AsyncGenerator[str, None]:
         try:
-            messages, _ = await _build_chat_messages(request)
+            messages, _, image_desc = await _build_chat_messages(request)
+
+            # Surface vision descriptions to the client before LLM tokens
+            if image_desc:
+                event = {"type": "vision_description", "descriptions": image_desc}
+                yield f"data: {json.dumps(event)}\n\n"
+
             prompt_chars = sum(len(m.get("content", "")) for m in messages)
             logger.info(
                 "Chat stream: prompt ~%d chars (~%d tokens), num_ctx=%d",

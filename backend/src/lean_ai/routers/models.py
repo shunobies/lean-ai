@@ -107,6 +107,7 @@ class ChatResponse(BaseModel):
     eval_count: int | None = None
     refined: bool = False
     privacy_redactions: int = 0
+    image_descriptions: str | None = None
 
 
 class InlinePredictRequest(BaseModel):

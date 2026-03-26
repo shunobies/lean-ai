@@ -1,3 +1,6 @@
+# Local scripts
+release.sh
+
 # Python
 __pycache__/
 *.py[cod]
