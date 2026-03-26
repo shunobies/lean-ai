@@ -103,11 +103,9 @@ stale or incomplete, call read_file on the target file first, then make the edit
 - If the step cannot be completed as specified, create or append to \
 .lean_ai/incomplete.md documenting what went wrong, then stop.
 
-NAMING COMPLIANCE: Use EXACTLY the names from the Name Registry and \
-step instruction. Every variable, function, class, file, route, and \
-database entity must match the planned names precisely. Do NOT invent \
-alternative names. If previous step files are provided, match their \
-exact column names, method signatures, and import paths.
+CONSISTENCY: Before creating or modifying entities, verify your assumptions \
+about existing names, paths, and signatures. Duplicated files, mismatched \
+names, and inconsistent references are the hardest bugs to find.
 
 """ + COMPLETION_CONTRACT
 
