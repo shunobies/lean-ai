@@ -104,6 +104,71 @@ class TestDescribeImage:
             assert "Cannot reach Ollama" in result.error
 
     @pytest.mark.asyncio
+    async def test_empty_response_retries_then_succeeds(self):
+        empty_response = {"message": {"content": ""}}
+        good_response = {"message": {"content": "A React component."}}
+
+        with patch("lean_ai.llm.vision.settings") as mock_settings, \
+             patch("lean_ai.llm.vision.ollama_lib") as mock_ollama:
+            mock_settings.vision_model = "qwen3-vl:8b"
+            mock_settings.effective_vision_url = "http://localhost:11434"
+            mock_settings.vision_max_tokens = 1024
+            mock_settings.vision_timeout = 60.0
+
+            mock_client = AsyncMock()
+            mock_client.chat = AsyncMock(
+                side_effect=[empty_response, good_response],
+            )
+            mock_ollama.AsyncClient.return_value = mock_client
+
+            result = await describe_image("base64data")
+
+            assert result.success is True
+            assert result.description == "A React component."
+            assert mock_client.chat.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_empty_response_retries_then_fails(self):
+        empty_response = {"message": {"content": ""}}
+
+        with patch("lean_ai.llm.vision.settings") as mock_settings, \
+             patch("lean_ai.llm.vision.ollama_lib") as mock_ollama:
+            mock_settings.vision_model = "qwen3-vl:8b"
+            mock_settings.effective_vision_url = "http://localhost:11434"
+            mock_settings.vision_max_tokens = 1024
+            mock_settings.vision_timeout = 60.0
+
+            mock_client = AsyncMock()
+            mock_client.chat = AsyncMock(return_value=empty_response)
+            mock_ollama.AsyncClient.return_value = mock_client
+
+            result = await describe_image("base64data")
+
+            assert result.success is False
+            assert "empty description" in result.error
+            assert mock_client.chat.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_whitespace_only_response_treated_as_empty(self):
+        whitespace_response = {"message": {"content": "   \n  "}}
+
+        with patch("lean_ai.llm.vision.settings") as mock_settings, \
+             patch("lean_ai.llm.vision.ollama_lib") as mock_ollama:
+            mock_settings.vision_model = "qwen3-vl:8b"
+            mock_settings.effective_vision_url = "http://localhost:11434"
+            mock_settings.vision_max_tokens = 1024
+            mock_settings.vision_timeout = 60.0
+
+            mock_client = AsyncMock()
+            mock_client.chat = AsyncMock(return_value=whitespace_response)
+            mock_ollama.AsyncClient.return_value = mock_client
+
+            result = await describe_image("base64data")
+
+            assert result.success is False
+            assert mock_client.chat.call_count == 2
+
+    @pytest.mark.asyncio
     async def test_includes_filename_in_prompt(self):
         mock_response = {"message": {"content": "An error dialog."}}
 

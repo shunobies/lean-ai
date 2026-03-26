@@ -130,7 +130,7 @@ class Settings(BaseSettings):
     vision_model: str = ""  # e.g. "qwen3-vl:8b". Empty = vision disabled
     vision_ollama_url: str | None = None  # Falls back to ollama_url
     vision_max_tokens: int = 1024  # Max tokens for image description
-    vision_timeout: float = 60.0  # Timeout per image description (seconds)
+    vision_timeout: float = 120.0  # Timeout per image description (seconds)
 
     # ── Voice — STT (faster-whisper, always local) ──
     enable_stt: bool = False

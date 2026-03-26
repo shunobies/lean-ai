@@ -181,7 +181,7 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_VISION_MODEL` | *(empty)* | Vision model for describing images (e.g. `qwen3-vl:8b`). Empty = vision disabled. Always Ollama |
 | `LEAN_AI_VISION_OLLAMA_URL` | *(falls back to OLLAMA_URL)* | Ollama instance for vision model |
 | `LEAN_AI_VISION_MAX_TOKENS` | `1024` | Max tokens for image description |
-| `LEAN_AI_VISION_TIMEOUT` | `60.0` | Timeout per image description (seconds) |
+| `LEAN_AI_VISION_TIMEOUT` | `120.0` | Timeout per image description (seconds) |
 | `LEAN_AI_ENABLE_STT` | `false` | Enable Speech-to-Text (faster-whisper). Requires voice extras + portaudio |
 | `LEAN_AI_STT_MODEL` | `turbo` | Whisper model size: `tiny`, `base`, `small`, `medium`, `large-v3`, `turbo` |
 | `LEAN_AI_STT_LANGUAGE` | *(empty)* | ISO 639-1 language code for STT. Empty = auto-detect |

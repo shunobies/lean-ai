@@ -82,8 +82,8 @@ async def describe_image(
 
     client = ollama_lib.AsyncClient(host=settings.effective_vision_url)
 
-    try:
-        response = await asyncio.wait_for(
+    async def _call_vision() -> str:
+        resp = await asyncio.wait_for(
             client.chat(
                 model=settings.vision_model,
                 messages=messages,
@@ -94,7 +94,22 @@ async def describe_image(
             ),
             timeout=settings.vision_timeout,
         )
-        text = response["message"]["content"]
+        return resp["message"]["content"]
+
+    try:
+        text = await _call_vision()
+
+        # Empty response (common on cold starts) — retry once.
+        if not text.strip():
+            logger.warning("Vision: empty response, retrying once")
+            text = await _call_vision()
+            if not text.strip():
+                logger.warning("Vision: still empty after retry")
+                return VisionResult(
+                    success=False,
+                    error="Vision model returned empty description",
+                )
+
         logger.info(
             "Vision: described image (%d chars) using %s",
             len(text),
