@@ -746,6 +746,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                     this.postMessage({ type: "llmThinking", text: thinkingToken, streaming: true });
                 },
                 userName,
+                true, // skipWebSearch — greeting doesn't need internet
             );
         } catch {
             // Greeting failed — not critical, user can type

@@ -254,6 +254,7 @@ export class BackendClient {
         attachments?: Array<{ data: string; filename?: string; mime_type?: string }>,
         onThinking?: (token: string) => void,
         userName?: string,
+        skipWebSearch?: boolean,
     ): Promise<{ receivedDone: boolean }> {
         return new Promise((resolve, reject) => {
             const fullUrl = new URL(`${this.baseUrl}/api/chat/stream`);
@@ -264,6 +265,7 @@ export class BackendClient {
             if (workspace) { body.workspace = workspace; }
             if (attachments && attachments.length > 0) { body.attachments = attachments; }
             if (userName) { body.user_name = userName; }
+            if (skipWebSearch) { body.skip_web_search = true; }
             const postData = JSON.stringify(body);
 
             const options: http.RequestOptions = {

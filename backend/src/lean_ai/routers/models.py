@@ -98,6 +98,7 @@ class ChatRequest(BaseModel):
     workspace: WorkspaceContext | None = None
     attachments: list[Attachment] = []
     user_name: str | None = None
+    skip_web_search: bool = False
 
 
 class ChatResponse(BaseModel):
