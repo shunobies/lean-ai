@@ -1124,25 +1124,48 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    /** Strip markdown formatting and code so TTS reads natural prose. */
+    /** Strip markdown formatting, special chars, and non-prose content so TTS reads naturally. */
     private static _stripCodeForTts(text: string): string {
         // Remove fenced code blocks (```...```)
         let cleaned = text.replace(/```[\s\S]*?```/g, "");
         // Remove inline code (`...`)
         cleaned = cleaned.replace(/`[^`]+`/g, "");
+        // Remove HTML tags (<br>, <div>, etc.)
+        cleaned = cleaned.replace(/<[^>]+>/g, "");
+        // Remove markdown image syntax ![alt](url) before link syntax
+        cleaned = cleaned.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1");
+        // Remove markdown link syntax [text](url) → keep text
+        cleaned = cleaned.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+        // Remove footnote references [^1], [^note]
+        cleaned = cleaned.replace(/\[\^[^\]]*\]/g, "");
+        // Remove raw URLs (https://..., http://..., www.)
+        cleaned = cleaned.replace(/https?:\/\/\S+/g, "");
+        cleaned = cleaned.replace(/www\.\S+/g, "");
         // Remove markdown bold/italic markers (* and _)
         cleaned = cleaned.replace(/[*_]{1,3}/g, "");
         // Remove markdown table pipes and heading markers
         cleaned = cleaned.replace(/[|#]/g, "");
         // Remove markdown horizontal rules (--- or ***)
         cleaned = cleaned.replace(/^[-*]{3,}\s*$/gm, "");
-        // Remove markdown link syntax [text](url) → text
-        cleaned = cleaned.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
-        // Remove markdown image syntax ![alt](url)
-        cleaned = cleaned.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1");
+        // Remove blockquote markers
+        cleaned = cleaned.replace(/^\s*>\s*/gm, "");
         // Remove bullet markers (-, +, numbered lists)
         cleaned = cleaned.replace(/^\s*[-+]\s+/gm, "");
         cleaned = cleaned.replace(/^\s*\d+\.\s+/gm, "");
+        // Replace arrows with natural words
+        cleaned = cleaned.replace(/-->/g, " to ");
+        cleaned = cleaned.replace(/=>/g, " to ");
+        cleaned = cleaned.replace(/->/g, " to ");
+        cleaned = cleaned.replace(/<--/g, " from ");
+        cleaned = cleaned.replace(/<-/g, " from ");
+        // Replace & with "and"
+        cleaned = cleaned.replace(/\s&\s/g, " and ");
+        // Replace triple dots with a pause-friendly comma
+        cleaned = cleaned.replace(/\.{3}/g, ",");
+        // Remove remaining special characters that TTS reads literally
+        cleaned = cleaned.replace(/[~^\\{}[\]<>]/g, "");
+        // Remove emoji (Unicode emoji ranges)
+        cleaned = cleaned.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, "");
         // Collapse multiple blank lines/spaces into one space
         cleaned = cleaned.replace(/\n{2,}/g, " ");
         cleaned = cleaned.replace(/\s{2,}/g, " ");
