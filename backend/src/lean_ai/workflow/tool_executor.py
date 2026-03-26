@@ -251,6 +251,75 @@ def make_tool_executor(
                     f"{tail_block}"
                 )
 
+        elif name == "run_command":
+            command = arguments["command"]
+            risk, reason = check_command(command)
+            if risk == CommandRisk.ALWAYS_BLOCK:
+                return f"ERROR: Command blocked: {reason}"
+            # Always require approval for general-purpose commands
+            if risk == CommandRisk.SAFE:
+                risk = CommandRisk.REQUIRES_APPROVAL
+                reason = "General-purpose command requires approval"
+            await ws_send(ws, "tool_approval_required", {
+                "tool": name, "command": command, "reason": reason,
+            })
+            if dispatcher:
+                from lean_ai.workflow.ws_dispatcher import WorkflowCancelledError
+                try:
+                    approval_msg = await dispatcher.wait_for_approval()
+                except WorkflowCancelledError:
+                    return "ERROR: Workflow cancelled by user"
+            else:
+                from lean_ai.workflow.ws_handler import safe_receive
+                approval_msg = await safe_receive(ws)
+            if approval_msg is None:
+                return "ERROR: WebSocket disconnected — command skipped (requires approval)"
+            if approval_msg.get("type") != "approve_tool":
+                return "ERROR: Command not approved by user"
+
+            result = await shell.run_command(
+                command=command,
+                repo_root=repo_root,
+                working_directory=arguments.get("working_directory", ""),
+            )
+            if result.success:
+                output = result.output or ""
+            else:
+                prefix = (
+                    f"FAILED (exit code {result.exit_code})\n"
+                    if result.exit_code else "FAILED\n"
+                )
+                output = prefix + (
+                    result.output or result.error or "No output"
+                )
+
+            if len(output) <= _INLINE_LIMIT:
+                return output
+
+            total_lines = output.count("\n") + 1
+            out_path = _save_tool_output(repo_root, name, output)
+            tail_lines = output.splitlines()[-40:]
+            tail_block = "\n".join(tail_lines)
+
+            if result.success:
+                return (
+                    f"Command completed — full output saved to {out_path} "
+                    f"({total_lines} lines)\n"
+                    f"Last {len(tail_lines)} lines:\n\n"
+                    f"{tail_block}"
+                )
+            else:
+                return (
+                    f"FAILED — full output saved to {out_path} "
+                    f"({total_lines} lines)\n"
+                    f"REQUIRED: You MUST call read_file on '{out_path}' before "
+                    f"diagnosing or fixing this failure. "
+                    f"The tail preview below may omit important details "
+                    f"that appear earlier in the output.\n"
+                    f"Last {len(tail_lines)} lines (preview only):\n\n"
+                    f"{tail_block}"
+                )
+
         elif name == "list_directory":
             target = Path(repo_root) / arguments.get("path", "")
             if not target.is_dir():

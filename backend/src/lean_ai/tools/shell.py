@@ -1,7 +1,8 @@
-"""Shell command runners: tests, lint, format."""
+"""Shell command runners: tests, lint, format, general-purpose."""
 
 import asyncio
 import logging
+from pathlib import Path
 
 from lean_ai.config import settings
 from lean_ai.tools.executor import ToolResult
@@ -50,4 +51,24 @@ async def run_lint(command: str, repo_root: str) -> ToolResult:
 
 async def format_code(command: str, repo_root: str) -> ToolResult:
     """Run a code formatter."""
+    return await _run_command(command, cwd=repo_root)
+
+
+async def run_command(
+    command: str, repo_root: str, working_directory: str = "",
+) -> ToolResult:
+    """Run a general-purpose shell command."""
+    if working_directory:
+        cwd = (Path(repo_root) / working_directory).resolve()
+        if not cwd.is_relative_to(Path(repo_root).resolve()):
+            return ToolResult(
+                success=False,
+                error=f"Working directory escapes repository root: {working_directory}",
+            )
+        if not cwd.is_dir():
+            return ToolResult(
+                success=False,
+                error=f"Working directory does not exist: {working_directory}",
+            )
+        return await _run_command(command, cwd=str(cwd))
     return await _run_command(command, cwd=repo_root)

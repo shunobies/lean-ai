@@ -212,7 +212,7 @@ def build_step_user_message(
                 parts.append(f"\n--- {path} ---\n```\n{truncated}\n```")
 
     # Explicit directive
-    if step.tool in ("run_tests", "run_lint", "format_code"):
+    if step.tool in ("run_tests", "run_lint", "format_code", "run_command"):
         parts.append(
             f"\nCall {step.tool} with the command specified in the instruction."
         )

@@ -18,12 +18,13 @@ class PlanStep(BaseModel):
 
     step_number: int
     tool: str
-    """Tool to call: ``create_file``, ``edit_file``, ``run_tests``,
-    ``run_lint``, ``format_code``."""
+    """Tool to call: ``create_file``, ``edit_file``, ``run_command``,
+    ``run_tests``, ``run_lint``, ``format_code``."""
 
     file_path: str
     """Target file path (relative to repo root).
-    Empty string for ``run_tests`` / ``run_lint`` / ``format_code``."""
+    Empty string for ``run_command`` / ``run_tests`` / ``run_lint`` /
+    ``format_code``."""
 
     instruction: str
     """Detailed natural-language instruction for this step.
@@ -33,6 +34,8 @@ class PlanStep(BaseModel):
 
     For ``create_file``: what the file should contain, imports, structure,
     patterns to follow from existing files.
+
+    For ``run_command``: the exact command to run and why.
 
     For ``run_tests`` / ``run_lint``: the exact command to run.
     """
@@ -46,7 +49,8 @@ class PlanStep(BaseModel):
     For ``create_file``: content from related files showing patterns
     to follow.
 
-    Empty string for ``run_tests`` / ``run_lint`` / ``format_code``.
+    Empty string for ``run_command`` / ``run_tests`` / ``run_lint`` /
+    ``format_code``.
     """
 
 

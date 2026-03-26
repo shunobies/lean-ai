@@ -45,8 +45,9 @@ When asked to create a plan, produce a structured plan with numbered steps, \
 affected files, risks, and a test strategy.
 
 When implementing code, use the provided tools (create_file, edit_file, \
-read_file, run_tests, run_lint, format_code) to make changes. Read files \
-before editing them. Prefer small, focused edits over rewriting entire files.
+read_file, run_command, run_tests, run_lint, format_code) to make changes. \
+Read files before editing them. Prefer small, focused edits over rewriting \
+entire files.
 """
 
 # ── Planning system prompt ────────────────────────────────────────

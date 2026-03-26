@@ -150,6 +150,41 @@ IMPLEMENTATION_TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "run_command",
+            "description": (
+                "Run a general-purpose shell command such as a build command, "
+                "database migration, code generator, package install, or "
+                "asset compilation. Do NOT use this for testing (use run_tests), "
+                "linting (use run_lint), or formatting (use format_code). "
+                "Every command requires user approval before execution."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": (
+                            "The shell command to execute "
+                            "(e.g. 'npm run build', 'cargo build', "
+                            "'python manage.py migrate')"
+                        ),
+                    },
+                    "working_directory": {
+                        "type": "string",
+                        "description": (
+                            "Directory to run the command in, relative to the "
+                            "repository root. Defaults to the repository root "
+                            "if omitted."
+                        ),
+                    },
+                },
+                "required": ["command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "list_directory",
             "description": (
                 "List files and subdirectories in a directory. "
