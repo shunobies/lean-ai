@@ -310,24 +310,8 @@ async def _run_validation_fix_loop(
             {
                 "role": "user",
                 "content": (
-                    "Post-execution validation detected the following failures. "
-                    "Follow this workflow:\n"
-                    "1. Re-run the failing command to confirm the error before "
-                    "touching any code.\n"
-                    "2. Read the relevant files to locate the root cause.\n"
-                    "3. State your diagnosis in update_scratchpad before making "
-                    "changes — if your assumption about the cause is wrong, "
-                    "update it.\n"
-                    "4. Make the minimal fix.\n"
-                    "5. If the fix does not work on the first try, call "
-                    "search_internet with the error message before guessing "
-                    "again — documentation is more reliable than "
-                    "trial-and-error.\n"
-                    "6. Re-run the command to verify the fix works. "
-                    "If it still fails, revise your diagnosis and repeat "
-                    "from step 2.\n"
-                    "Focus ONLY on these specific failures — do not make "
-                    "unrelated changes.\n"
+                    "Validation failed. Fix the failures below.\n"
+                    "Workflow: re-run command → diagnose → fix → verify.\n"
                     + (
                         "\nFILE SCOPE: Only modify files from this list "
                         "(new files are allowed):\n"

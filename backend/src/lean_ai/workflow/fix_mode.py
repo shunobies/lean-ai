@@ -177,10 +177,10 @@ async def _run_fix(
         messages.append({
             "role": "user",
             "content": (
-                "Investigation complete. You now have full tool access "
-                "including edit_file and create_file. Review your diagnosis "
-                "in the scratchpad and make the minimal changes needed to "
-                "fix the issue."
+                "MODE: IMPLEMENTATION\n"
+                "Write tools now available: edit_file, create_file.\n"
+                "Use your scratchpad diagnosis. Make the minimal fix. "
+                "Do not continue investigating."
             ),
         })
     else:
@@ -230,21 +230,12 @@ async def _run_fix(
         if pad:
             new_messages.append({
                 "role": "user",
-                "content": (
-                    "[CONTEXT REFRESHED — conversation history cleared to "
-                    "free context space. Your scratchpad has your "
-                    "progress.]\n\n" + pad
-                ),
+                "content": f"[CONTEXT REFRESHED]\n\n{pad}",
             })
         else:
             new_messages.append({
                 "role": "user",
-                "content": (
-                    "[CONTEXT REFRESHED — conversation history cleared to "
-                    "free context space.]\n\n"
-                    "Call update_scratchpad to record your progress, "
-                    "then continue working on the task."
-                ),
+                "content": "[CONTEXT REFRESHED]\n\nContinue working on the task.",
             })
 
         ws_send_nowait(ws, "context_refreshed", {
@@ -254,10 +245,8 @@ async def _run_fix(
 
     # Request mode: stronger nudge that suggests specific tools for open-ended tasks
     request_nudge = (
-        "STOP generating text. You MUST call a tool now. "
-        "Based on the task, call search_internet to research the topic, "
-        "or call directory_tree to explore the project. "
-        "Do not explain — act."
+        "Call one tool now. Prefer reading workspace state before "
+        "broader research."
     ) if is_request else None
 
     # ── Implementation phase ──────────────────────────────────────

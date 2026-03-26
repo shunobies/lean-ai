@@ -219,8 +219,15 @@ def build_chat_system_prompt(
     web_search_results: str | None = None,
     knowledge_context: str | None = None,
     user_name: str | None = None,
+    max_context_chars: int = 30000,
 ) -> str:
-    """Build the chat system prompt with workspace context injected."""
+    """Build the chat system prompt with budget-gated context injection.
+
+    Dynamic context sections are appended in priority order until
+    *max_context_chars* is reached.  Lower-priority sections are
+    dropped or truncated to keep the prompt within budget for smaller
+    models (e.g. 20B request model).
+    """
     parts = [
         CHAT_SYSTEM_PROMPT,
     ]
@@ -237,13 +244,14 @@ def build_chat_system_prompt(
         "IMPORTANT — How your capabilities work:",
         "- The system has ALREADY read the user's project files and searched "
         "their codebase for you.",
-        "- The file tree, file contents, and code snippets shown below are "
-        "REAL, LIVE data from their workspace.",
-        "- You DO have access to their code. DO NOT say 'I cannot access your files'.",
-        "- The system AUTOMATICALLY searches the web and fetches URLs on your behalf.",
+        "- You DO have access to their code. DO NOT say 'I cannot access "
+        "your files'.",
+        "- The system AUTOMATICALLY searches the web and fetches URLs on "
+        "your behalf.",
         "- When answering, reference the actual code provided below.",
     ])
 
+    # Workspace metadata — always included (tiny)
     if workspace:
         parts.append("")
         parts.append("=== WORKSPACE ===")
@@ -254,50 +262,77 @@ def build_chat_system_prompt(
         if workspace.active_language:
             parts.append(f"Language: {workspace.active_language}")
 
-    if file_tree:
-        parts.append("")
-        parts.append("=== PROJECT FILES ===")
-        parts.append("\n".join(file_tree))
+    # ── Budget-gated dynamic sections ──
+    # Track remaining budget for context sections
+    base_size = sum(len(p) for p in parts)
+    budget = max(0, max_context_chars - base_size)
 
-    if project_context:
-        parts.append("")
-        parts.append("=== PROJECT ARCHITECTURE ===")
-        parts.append(project_context)
+    def _try_append(header: str, content: str) -> bool:
+        """Append a section if it fits within the remaining budget."""
+        nonlocal budget
+        section = f"\n{header}\n{content}"
+        if len(section) <= budget:
+            parts.append(section)
+            budget -= len(section)
+            return True
+        # Try truncating to fit
+        if budget > len(header) + 200:
+            truncated = content[:budget - len(header) - 50]
+            parts.append(
+                f"\n{header}\n{truncated}\n... (truncated to fit context budget)"
+            )
+            budget = 0
+            return True
+        return False
 
-    if knowledge_context:
-        parts.append("")
-        parts.append("=== DOMAIN KNOWLEDGE ===")
-        parts.append(knowledge_context)
-
+    # Priority 1: Selected code / active file — most directly relevant
     if workspace and workspace.active_selection:
-        parts.append("")
-        parts.append("=== SELECTED CODE ===")
-        parts.append(f"```\n{workspace.active_selection}\n```")
+        _try_append(
+            "=== SELECTED CODE ===",
+            f"```\n{workspace.active_selection}\n```",
+        )
     elif active_file_content:
         file_name = workspace.active_file if workspace else "unknown"
-        parts.append("")
-        parts.append(f"=== ACTIVE FILE ({file_name}) ===")
-        parts.append(f"```\n{active_file_content}\n```")
+        _try_append(
+            f"=== ACTIVE FILE ({file_name}) ===",
+            f"```\n{active_file_content}\n```",
+        )
 
-    if fetched_pages:
-        for page in fetched_pages:
-            parts.append("")
-            parts.append(f"=== FETCHED PAGE: {page['url']} ===")
-            parts.append(page["content"])
-
-    if web_search_results:
-        parts.append("")
-        parts.append("=== WEB SEARCH RESULTS ===")
-        parts.append(web_search_results)
-
-    if search_results:
-        parts.append("")
-        parts.append("=== CODE SEARCH RESULTS ===")
+    # Priority 2: Code search results — directly answers user's query
+    if search_results and budget > 0:
+        sr_parts = []
         for result in search_results[:8]:
-            parts.append(
+            sr_parts.append(
                 f"--- {result['file_path']} "
                 f"(lines {result['start_line']}-{result['end_line']}) ---"
             )
-            parts.append(f"```\n{result['content']}\n```")
+            sr_parts.append(f"```\n{result['content']}\n```")
+        _try_append("=== CODE SEARCH RESULTS ===", "\n".join(sr_parts))
+
+    # Priority 3: Project architecture — truncated to fit
+    if project_context and budget > 0:
+        _try_append("=== PROJECT ARCHITECTURE ===", project_context)
+
+    # Priority 4: Web search results
+    if web_search_results and budget > 0:
+        _try_append("=== WEB SEARCH RESULTS ===", web_search_results)
+
+    # Priority 5: Fetched pages
+    if fetched_pages and budget > 0:
+        for page in fetched_pages:
+            if budget <= 0:
+                break
+            _try_append(
+                f"=== FETCHED PAGE: {page['url']} ===",
+                page["content"],
+            )
+
+    # Priority 6: File tree (drop if over budget)
+    if file_tree and budget > 0:
+        _try_append("=== PROJECT FILES ===", "\n".join(file_tree))
+
+    # Priority 7: Domain knowledge (drop if over budget)
+    if knowledge_context and budget > 0:
+        _try_append("=== DOMAIN KNOWLEDGE ===", knowledge_context)
 
     return "\n".join(parts)

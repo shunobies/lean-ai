@@ -307,7 +307,7 @@ async def test_loop_detection_triggers_at_threshold():
 
     warnings = [
         m for m in messages
-        if m["role"] == "user" and "identical arguments" in m.get("content", "")
+        if m["role"] == "user" and "Loop detected" in m.get("content", "")
     ]
     assert len(warnings) >= 1
     assert "edit_file" in warnings[0]["content"]
@@ -344,7 +344,7 @@ async def test_loop_detection_resets_on_different_call():
 
     warnings = [
         m for m in messages
-        if m["role"] == "user" and "identical arguments" in m.get("content", "")
+        if m["role"] == "user" and "Loop detected" in m.get("content", "")
     ]
     # Never hit 3 consecutive — no warning
     assert len(warnings) == 0
@@ -374,7 +374,7 @@ async def test_loop_detection_threshold_zero_disables():
 
     warnings = [
         m for m in messages
-        if m["role"] == "user" and "identical arguments" in m.get("content", "")
+        if m["role"] == "user" and "Loop detected" in m.get("content", "")
     ]
     assert len(warnings) == 0
 
@@ -834,7 +834,7 @@ async def test_default_nudge_when_no_custom():
 
     nudge_msgs = [
         m for m in messages
-        if m["role"] == "user" and "call task_complete" in m.get("content", "")
+        if m["role"] == "user" and "task_complete" in m.get("content", "")
     ]
     assert len(nudge_msgs) == 1
 

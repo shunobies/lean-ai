@@ -77,6 +77,7 @@ cd extension && npm install && npm run build
 - **Tool naming**: `create_file` (not `write_file`) for clearer intent
 - **Structured JSON output** from Ollama replaces regex-based plan/output parsing
 - **Percentage-based token budgets** — internal limits (scratchpad, inline output, etc.) are computed as a percentage of the active context window, not hardcoded. This makes the system adaptive: smaller models get proportionally smaller budgets, larger models get more room. Convention: use `settings._active_context_window` and a named percentage constant (e.g. `SCRATCHPAD_CONTEXT_PERCENT = 0.05`)
+- **Canonical policy blocks** — all LLM system prompts are in `llm/prompts.py`. Shared rules (tool usage, completion signaling, quality, web search, scratchpad) are defined once as canonical policy blocks (`TOOL_POLICY`, `COMPLETION_CONTRACT`, `QUALITY_RULES`, `WEB_SEARCH_POLICY`, `SCRATCHPAD_POLICY`) and composed into mode-specific prompts via string concatenation. This prevents instruction duplication across execution modes — smaller models are sensitive to seeing the same rule from multiple voices. Guardrail nudges in `facade.py` are kept short and never introduce fresh policy; they reinforce the system prompt. Chat context injection in `routers/context_helpers.py` is budget-gated (`max_context_chars`) to avoid overwhelming smaller request models.
 - **Three-model pipeline** — **request model** (chatty, higher temperature) for the chat conversation and requirements gathering; **primary model** (tuned for coding) for planning phases 1-2 (codebase exploration) and implementation execution; **expert model** (large, reasoning-heavy) for planning phases 3-5 and the final validation fix retry (escalation only on last attempt). Any model falls back to the primary when not configured. All three can use any provider (Ollama, OpenAI, or Anthropic) independently — set `LEAN_AI_REQUEST_LLM_PROVIDER` / `LEAN_AI_EXPERT_LLM_PROVIDER` to select. Phases communicate through structured text/JSON outputs, not shared conversation history, making model switching seamless. The expert receives `project_context.md` directly in phases 3 and 4 for architectural awareness; framework_guide.md and style.md are deferred to the implementation phase.
 
 ## Guardrails
@@ -87,9 +88,9 @@ Lightweight control mechanisms in the `chat_with_tools` orchestration loop. Afte
 |---|---|---|
 | Text-only exit | 3 consecutive text-only responses | Exit loop |
 | Truncation exit | 5 consecutive truncated responses | Exit loop |
-| Text-only nudge | Text response without tool call | Inject "call task_complete or use a tool" |
-| Truncation nudge | Response cut off by max_tokens | Inject "respond with ONLY the tool call" |
-| Loop detection | N identical tool calls (default 3) | Inject "try a different approach" |
+| Text-only nudge | Text response without tool call | Inject "call task_complete if done, otherwise call your next tool" |
+| Truncation nudge | Response cut off by max_tokens | Inject "output ONLY the tool call, nothing else" |
+| Loop detection | N identical tool calls (default 3) | Inject "use a different approach" |
 | Context refresh | Token usage crosses 70% of context window | Drop old messages, re-read from disk |
 | Task reminder | Every N turns (default 10) | Re-inject task description |
 | Cancel/interrupt | User sends cancel or new message | Raise error or inject interrupt |

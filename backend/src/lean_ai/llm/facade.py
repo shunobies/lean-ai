@@ -348,13 +348,10 @@ class LLMClient:
                             messages.append({
                                 "role": "user",
                                 "content": (
-                                    f"You have called {tc.name} with "
-                                    f"identical arguments "
+                                    f"Loop detected: {tc.name} called "
                                     f"{state.consecutive_same_tool} times "
-                                    f"consecutively and it keeps failing. "
-                                    f"Try a different approach — read the "
-                                    f"file first, check the error, or use "
-                                    f"different arguments."
+                                    f"with same args. Use a different "
+                                    f"approach."
                                 ),
                             })
                             state.consecutive_same_tool = 0
@@ -452,10 +449,8 @@ class LLMClient:
                 return TurnAction(
                     verdict=TurnVerdict.NUDGE,
                     message=(
-                        "Your previous response was truncated before "
-                        "you could make a tool call. Respond with "
-                        "ONLY the tool call — no explanation, no "
-                        "reasoning, no preamble. Just the tool call."
+                        "Response truncated. Output ONLY the tool "
+                        "call, nothing else."
                     ),
                 )
 
@@ -471,9 +466,7 @@ class LLMClient:
                 )
 
             nudge = text_only_nudge or (
-                "If you have finished all work, call task_complete. "
-                "Otherwise, you must call a tool now — do not respond "
-                "with text only."
+                "Call task_complete if done, otherwise call your next tool."
             )
             return TurnAction(verdict=TurnVerdict.NUDGE, message=nudge)
 

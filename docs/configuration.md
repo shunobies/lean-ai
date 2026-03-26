@@ -114,6 +114,43 @@ LEAN_AI_ANTHROPIC_EXPERT_MODEL=claude-opus-4-6
 
 With this configuration, cloud API calls only happen during planning (change design, risk assessment, plan assembly, verification steps) and on the final retry of any validation fix loop. All codebase exploration, code execution, and routine tool calls use the local model.
 
+### Example: all-local three-model setup
+
+Use three different local models matched to each role's requirements:
+
+```env
+# Primary: coding-tuned model for exploration and implementation
+LEAN_AI_LLM_PROVIDER=ollama
+LEAN_AI_OLLAMA_MODEL=qwen3-coder:30b
+
+# Expert: larger model for planning phases 3-5, TDD disputes, final validation
+LEAN_AI_OLLAMA_MODEL_EXPERT=qwen3-coder-next:80b
+
+# Request: smaller model for chat conversation and prompt building
+LEAN_AI_REQUEST_LLM_PROVIDER=openai
+LEAN_AI_OPENAI_BASE_URL=http://localhost:11434/v1
+LEAN_AI_OPENAI_REQUEST_MODEL=gpt-oss:20b
+```
+
+This keeps everything local while using the right model for each task — the 20B model handles conversational chat, the 30B handles code execution, and the 80B handles complex reasoning during planning.
+
+### Recommended Models
+
+Models tested and known to work well with Lean AI's prompt architecture:
+
+| Role | Model | Size | Notes |
+|---|---|---|---|
+| **Primary** | `qwen3-coder:30b` | 30B | Default. Strong tool calling and code generation |
+| **Primary** | `qwen3-coder:8b` | 8B | Lighter alternative for constrained hardware |
+| **Expert** | `qwen3-coder-next:80b` | 80B | Recommended local expert. Handles rich planning prompts well |
+| **Expert** | `claude-opus-4-6` | Cloud | Best cloud expert for planning and TDD disputes |
+| **Expert** | `gpt-4o` | Cloud | Good cloud alternative for planning |
+| **Request** | `gpt-oss:20b` | 20B | Tested for chat/prompt building. Benefits from shorter prompts |
+| **Request** | `qwen3.5:27b` | 27B | Good conversational model for chat mode |
+| **Embedding** | `qwen3-embedding:0.6b` | 0.6B | Default. Small and fast for semantic search |
+
+The prompt architecture is optimized for this model range: prompts use canonical policy blocks to avoid instruction duplication, chat context is budget-gated for smaller request models, and guardrail nudges are kept short to avoid overriding system-level policy on smaller models.
+
 ## Request Model
 
 An optional separate model for `/request` mode (open-ended tasks like writing guides, research, documentation). If not configured, the primary model is used.

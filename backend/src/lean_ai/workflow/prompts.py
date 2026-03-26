@@ -22,21 +22,9 @@ def build_fix_system_prompt(
 
     if test_command:
         base += (
-            "\n\nTEST REQUIREMENT:\n"
-            "When you create new functionality or fix a bug, write or "
-            "update tests alongside your changes.\n"
-            "Cover all applicable categories:\n"
-            "  HAPPY PATH  — primary use case works end-to-end\n"
-            "  EDGE CASES  — None/empty/zero/boundary/unicode inputs\n"
-            "  ERROR PATHS — wrong inputs raise the correct exception "
-            "type; assert the message text, not just the type\n"
-            "  INTEGRATION — mock external I/O and verify caller contracts\n"
-            "  SECURITY    — if the code handles file paths, shell "
-            "commands, user-supplied strings, or auth: add one test per "
-            "attack surface (path traversal, injection, unauthed access)\n"
-            "Follow project test patterns (class-based, pytest.raises, "
-            "fixture reuse). Tests run with: "
-            f"{test_command}"
+            "\n\nTEST REQUIREMENT: Write or update tests alongside changes. "
+            "Cover: happy path, edge cases, error paths, integration, security. "
+            f"Run with: {test_command}"
         )
 
     if not context:
@@ -113,20 +101,13 @@ def build_tdd_step_system_prompt(
     """
     prompt = build_step_system_prompt(context, naming_conventions, name_registry)
     prompt += (
-        "\n\nTDD MODE CONSTRAINTS:\n"
-        "- Tests have already been written by the expert model. Your job "
-        "is to write implementation code that makes the tests pass.\n"
-        "- You CANNOT create or edit test files. If you attempt to, the "
-        "tool call will be rejected.\n"
-        "- If you believe a test is genuinely flawed (wrong assertion, "
-        "tests an implementation detail, impossible precondition, wrong "
-        "import path), use the request_test_change tool with a specific "
-        "programmatic reason. The expert will evaluate your dispute.\n"
-        "- If a dispute is rejected, you must find a different "
-        "implementation approach — do not re-dispute the same test with "
-        "the same reason.\n"
-        "- Focus on making the tests GREEN through correct implementation, "
-        "not by changing the tests.\n"
+        "\n\nTDD MODE:\n"
+        "- Tests are written. Implement code to make them pass.\n"
+        "- Test files are LOCKED — edits will be rejected.\n"
+        "- Dispute flawed tests with request_test_change (requires: "
+        "failing assertion, public contract violation, proposed fix).\n"
+        "- Rejected disputes are final for that reason — try a "
+        "different implementation.\n"
     )
     return prompt
 
@@ -147,17 +128,16 @@ def build_tdd_review_prompt(
 
     prompt += (
         "\n\nTDD TEST REVIEW PHASE:\n"
-        "Review the test files created by the expert model below.  "
-        "For each test, check:\n"
-        "- Are the imports and module paths correct per the plan?\n"
-        "- Are the assertions testing public contracts (not private "
-        "internals)?\n"
-        "- Are there impossible preconditions or contradictory "
-        "assertions?\n"
-        "- Does the test align with the planned implementation?\n\n"
-        "For each flawed test, use request_test_change with a specific "
-        "programmatic reason.  If all tests look correct, call "
-        "task_complete with a brief confirmation.\n\n"
+        "Review the test files created by the expert model. Check:\n"
+        "- Imports and module paths correct per the plan?\n"
+        "- Assertions test public contracts (not private internals)?\n"
+        "- No impossible preconditions or contradictory assertions?\n\n"
+        "For each flawed test, call request_test_change with:\n"
+        "  - test_function: the function name\n"
+        "  - failing_assertion: which assert and why it fails\n"
+        "  - contract_violation: how it violates the public interface\n"
+        "  - proposed_fix: what the test should assert instead\n\n"
+        "If all tests look correct, call task_complete.\n\n"
         "Test files to review:\n"
     )
     for tf in test_files:

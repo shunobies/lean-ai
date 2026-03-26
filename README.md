@@ -137,6 +137,23 @@ The expert model only runs for planning phases 3–6 (change design, risk assess
 
 > **Note:** the cloud provider's Python SDK must be installed even when the primary provider is Ollama — run `pip install -e ".[dev,anthropic]"` or `pip install -e ".[dev,openai]"` as appropriate, then restart the server.
 
+### All-local three-model setup
+
+Use three different local models matched to each role:
+
+```env
+# Primary: coding-tuned model for exploration and implementation
+LEAN_AI_OLLAMA_MODEL=qwen3-coder:30b
+
+# Expert: larger model for planning and complex reasoning
+LEAN_AI_OLLAMA_MODEL_EXPERT=qwen3-coder-next:80b
+
+# Request: smaller model for chat conversation and prompt building
+LEAN_AI_REQUEST_LLM_PROVIDER=openai
+LEAN_AI_OPENAI_BASE_URL=http://localhost:11434/v1
+LEAN_AI_OPENAI_REQUEST_MODEL=gpt-oss:20b
+```
+
 See the [full configuration reference](docs/configuration.md) for all options.
 
 ## Documentation
