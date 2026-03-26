@@ -306,6 +306,7 @@ async def _run_fix(
                 conversation_logger=conversation_logger,
                 expert_llm_client=expert_llm_client,
                 dispatcher=dispatcher,
+                allowed_files=files_modified,
             )
 
     all_executed = executed_investigation + executed

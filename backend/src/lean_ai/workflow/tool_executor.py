@@ -87,6 +87,7 @@ def make_tool_executor(
     dispatcher: "WSMessageDispatcher | None" = None,
     tdd_protect_tests: bool = False,
     on_test_dispute: "Callable | None" = None,
+    allowed_files: "list[str] | None" = None,
 ):
     """Create a tool executor closure for the workflow.
 
@@ -97,10 +98,25 @@ def make_tool_executor(
         on_test_dispute: Async callback invoked when ``request_test_change``
             is called.  Receives the tool arguments dict and returns a
             string result for the primary model.
+        allowed_files: When set, restrict ``edit_file`` to only these paths.
+            ``create_file`` is allowed for genuinely new files but blocked
+            if it would overwrite an existing file not on the list.
     """
 
     async def execute(name: str, arguments: dict) -> str:
         """Execute a tool and return the result as a string."""
+
+        # File whitelist guard (validation fix loop scoping)
+        if allowed_files is not None and name in ("create_file", "edit_file"):
+            target_path = arguments.get("path", "")
+            if target_path and target_path not in allowed_files:
+                full_target = Path(repo_root) / target_path
+                if name == "edit_file" or full_target.exists():
+                    return (
+                        f"ERROR: File '{target_path}' is not in the allowed "
+                        f"modification list for this fix attempt. Only modify "
+                        f"files from the original plan."
+                    )
 
         # TDD guard: block writes to test files during implementation
         if tdd_protect_tests and name in ("create_file", "edit_file"):

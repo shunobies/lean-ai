@@ -1,16 +1,15 @@
-"""6-phase decomposed planning pipeline with structured output.
+"""5-phase decomposed planning pipeline with structured output.
 
 Phase 1: Scope analysis
 Phase 2: File identification + content reading (with codebase exploration via tools)
-Phase 3: Change design (specific changes per file, using exploration results)
-Phase 4: Risk assessment
-Phase 5: Structured plan assembly (produces ExecutionPlan via chat_structured)
-Phase 6: Verification step generation (test file creation + test execution)
+Phase 3: Design + risk synthesis (change design, naming conventions, gap analysis)
+Phase 4: Structured plan assembly (produces ExecutionPlan via chat_structured)
+Phase 5: Verification step generation (test file creation + test execution)
 
 Each phase is a focused LLM call. The planner uses read-only tools
 (read_file, list_directory, directory_tree, grep_files) during Phase 2
 to explore the codebase and read every file it plans to modify.
-Phase 6 only runs when a test command is available.
+Phase 5 only runs when a test command is available.
 """
 
 import json
@@ -38,7 +37,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Phase 5/6 produce structured JSON plans with enriched step instructions
+# Phase 4/5 produce structured JSON plans with enriched step instructions
 # and context fields — give them 40% of the expert context window so
 # detailed plans are not truncated (vs. the default 25% for general output).
 PLAN_OUTPUT_PERCENT = 0.40
@@ -113,10 +112,10 @@ async def _extract_missing_files(
     risks: str,
     llm_client: "LLMClient",
 ) -> str:
-    """Extract the missing file list from Phase 4 risks output.
+    """Extract the missing file list from the gap analysis output.
 
-    Returns a short bullet list of files that Phase 4 identified as
-    required but missing from the plan, or empty string if none.
+    Returns a short bullet list of files that the gap analysis identified
+    as required but missing from the plan, or empty string if none.
     """
     result = await llm_client.chat_raw(
         messages=[
@@ -236,7 +235,7 @@ async def create_plan(
 
     phase_max_tokens = settings.ollama_max_tokens
 
-    # Expert client for reasoning-heavy phases (3-6), falls back to standard
+    # Expert client for reasoning-heavy phases (3-5), falls back to standard
     expert = expert_llm_client or llm_client
     expert_max_tokens = (
         settings.effective_expert_max_tokens
@@ -256,7 +255,7 @@ async def create_plan(
     plan_start = time.monotonic()
     phase_timings: dict[str, float] = {}
 
-    # Load project context for expert phases (3, 5)
+    # Load project context for expert phases (3, 4)
     _pc_path = Path(repo_root) / ".lean_ai" / "project_context.md"
     project_context = ""
     if _pc_path.is_file():
@@ -486,7 +485,7 @@ async def create_plan(
                 "Privacy: stripped %d items from file summary", len(redactions),
             )
 
-    # Phase 3: Change Design
+    # Phase 3: Design + Risk Synthesis
     if expert_llm_client:
         await _send_stage(
             ws,
@@ -495,15 +494,16 @@ async def create_plan(
             model=expert_llm_client.model_name,
         )
         logger.info(
-            "Switching to expert model for phases 3-6: %s",
+            "Switching to expert model for phases 3-5: %s",
             expert_llm_client.model_name,
         )
     await _send_stage(
-        ws, "Phase 3: Designing specific changes...", model=expert.model_name, phase=3,
+        ws, "Phase 3: Designing changes and assessing risks...",
+        model=expert.model_name, phase=3,
     )
-    logger.info("Planning Phase 3: Change design")
+    logger.info("Planning Phase 3: Design + risk synthesis")
     t0 = time.monotonic()
-    change_design = await expert.chat_raw(
+    design_and_risks = await expert.chat_raw(
         messages=[
             {"role": "system", "content": PLAN_SYSTEM_PROMPT},
             {
@@ -516,14 +516,15 @@ async def create_plan(
                         if project_context else ""
                     )
                     + f"FILES IDENTIFIED AND READ:\n{file_summary}\n\n"
-                    "First, list the NAMING CONVENTIONS observed in the "
-                    "existing codebase. For each category below, cite "
-                    "the specific filename where you observed the pattern. "
-                    "If the existing code has no examples for a category, "
-                    "write 'No examples in existing code — use standard "
-                    "framework conventions' instead of inventing examples. "
-                    "NEVER cite files that will be created by this plan as "
-                    "examples:\n"
+                    "Produce THREE sections in order:\n\n"
+                    "─── SECTION 1: NAMING CONVENTIONS ───\n"
+                    "List the naming conventions observed in the existing "
+                    "codebase. For each category below, cite the specific "
+                    "filename where you observed the pattern. If the "
+                    "existing code has no examples for a category, write "
+                    "'No examples in existing code — use standard framework "
+                    "conventions' instead of inventing examples. NEVER cite "
+                    "files that will be created by this plan as examples:\n"
                     "- Variable/property naming: <pattern> (from <filename>: "
                     "<example>)\n"
                     "- Function/method naming: <pattern> (from <filename>: "
@@ -538,9 +539,10 @@ async def create_plan(
                     "<filename>: <example>)\n"
                     "- Import style and organization\n"
                     "All new code MUST follow these conventions.\n\n"
-                    "CHANGE DESIGN (ADDITIVE ONLY):\n"
-                    "Phase 2 already identified the files and read their contents. "
-                    "Do NOT re-describe what Phase 2 already covered.\n"
+                    "─── SECTION 2: CHANGE DESIGN (ADDITIVE ONLY) ───\n"
+                    "Phase 2 already identified the files and read their "
+                    "contents. Do NOT re-describe what Phase 2 already "
+                    "covered.\n"
                     "Output design decisions ONLY for files where the "
                     "implementation approach is non-obvious:\n"
                     "- Complex DB schema: column types, constraints, indexes, "
@@ -555,52 +557,19 @@ async def create_plan(
                     "model fields, standard config entries), write nothing — "
                     "Phase 2's file summary is sufficient for implementation.\n\n"
                     "Keep each file entry to 3-8 lines. Target 300-800 words "
-                    "total across all files. Describe changes at the DESIGN level "
-                    "— method signatures, column types, route patterns. Do NOT "
-                    "write full implementation code, complete file contents, or "
-                    "HTML/template markup.\n\n"
-                    "Do NOT simulate running commands, invent file listings, "
-                    "or fabricate file contents. Base your analysis ONLY on "
-                    "the codebase information provided above."
-                ),
-            },
-        ],
-        max_tokens=expert_max_tokens,
-        stream_callback=on_content,
-        thinking_callback=on_thinking,
-    )
-    if on_content:
-        await _send_content_done(ws, change_design)
-
-    phase_timings["phase_3_change_design"] = time.monotonic() - t0
-    _save_debug_phase(
-        repo_root, session_id, "phase_3_change_design",
-        change_design, phase_timings["phase_3_change_design"],
-    )
-    await _send_stage_done(ws, "Change design complete", model=expert.model_name, phase=3)
-
-    # Phase 4: Risk Assessment
-    await _send_stage(ws, "Phase 4: Assessing risks...", model=expert.model_name, phase=4)
-    logger.info("Planning Phase 4: Risk assessment")
-    t0 = time.monotonic()
-    risks = await expert.chat_raw(
-        messages=[
-            {"role": "system", "content": PLAN_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    f"TASK: {task}\n\n"
-                    f"FILES IDENTIFIED AND READ:\n{file_summary}\n\n"
-                    f"CHANGE DESIGN:\n{change_design}\n\n"
-                    "This is a GAP ANALYSIS — not a design review.\n"
-                    "Your ONLY job: find what Phase 3 missed. Do NOT repeat or "
-                    "paraphrase Phase 2's file summary or Phase 3's change design.\n\n"
-                    "Output ONLY these three sections:\n\n"
+                    "total across all files. Describe changes at the DESIGN "
+                    "level — method signatures, column types, route patterns. "
+                    "Do NOT write full implementation code, complete file "
+                    "contents, or HTML/template markup.\n\n"
+                    "─── SECTION 3: GAP ANALYSIS ───\n"
+                    "After completing the design above, check for gaps: "
+                    "files, dependencies, and risks NOT already covered.\n\n"
                     "MISSING REQUIRED FILES (files that will cause a runtime "
                     "crash if absent):\n"
                     "- Base templates/layouts that views inherit from\n"
                     "- Route files that must register new controllers\n"
-                    "- Config/registration files that must reference new modules\n"
+                    "- Config/registration files that must reference new "
+                    "modules\n"
                     "- DB seed data required for the feature to function\n"
                     "Do NOT suggest optional patterns (repositories, services, "
                     "events, jobs, helpers, decorators) unless the task "
@@ -611,13 +580,13 @@ async def create_plan(
                     "existing first\n"
                     "- Flag config/infrastructure that must exist before any "
                     "feature code runs\n\n"
-                    "CRITICAL RISKS (only risks NOT already addressed in "
-                    "Phase 3's design):\n"
+                    "CRITICAL RISKS (only risks NOT already covered in "
+                    "Section 2):\n"
                     "- Security issues\n"
                     "- Backward-compatibility breaks\n"
                     "- Data integrity risks\n\n"
-                    "Target: 200-400 words total. If nothing is missing or "
-                    "at risk, say so briefly.\n\n"
+                    "Target: 200-400 words for the gap analysis section. "
+                    "If nothing is missing or at risk, say so briefly.\n\n"
                     "Do NOT simulate running commands, invent file listings, "
                     "or fabricate file contents. Base your analysis ONLY on "
                     "the codebase information provided above."
@@ -629,25 +598,27 @@ async def create_plan(
         thinking_callback=on_thinking,
     )
     if on_content:
-        await _send_content_done(ws, risks)
+        await _send_content_done(ws, design_and_risks)
 
-    phase_timings["phase_4_risks"] = time.monotonic() - t0
+    phase_timings["phase_3_design_and_risks"] = time.monotonic() - t0
     _save_debug_phase(
-        repo_root, session_id, "phase_4_risks",
-        risks, phase_timings["phase_4_risks"],
+        repo_root, session_id, "phase_3_design_and_risks",
+        design_and_risks, phase_timings["phase_3_design_and_risks"],
     )
-    await _send_stage_done(ws, "Risk assessment complete", model=expert.model_name, phase=4)
+    await _send_stage_done(
+        ws, "Design and risk synthesis complete", model=expert.model_name, phase=3,
+    )
 
-    # Extract missing files from Phase 4 for explicit injection into Phase 5
-    missing_files = await _extract_missing_files(risks, expert)
+    # Extract missing files from gap analysis for explicit injection into Phase 4
+    missing_files = await _extract_missing_files(design_and_risks, expert)
     if missing_files:
-        logger.info("Extracted %d chars of missing files from Phase 4", len(missing_files))
+        logger.info("Extracted %d chars of missing files from Phase 3", len(missing_files))
 
-    # Phase 5: Structured Plan Assembly
+    # Phase 4: Structured Plan Assembly
     await _send_stage(
-        ws, "Phase 5: Assembling structured plan...", model=expert.model_name, phase=5,
+        ws, "Phase 4: Assembling structured plan...", model=expert.model_name, phase=4,
     )
-    logger.info("Planning Phase 5: Structured plan assembly")
+    logger.info("Planning Phase 4: Structured plan assembly")
     t0 = time.monotonic()
     plan = await expert.chat_structured(
         messages=[
@@ -660,9 +631,9 @@ async def create_plan(
                     # Middle (lower attention): reference material
                     # End (high attention): assembly rules + checklist
                     f"TASK: {task}\n\n"
-                    f"RISKS AND GAPS:\n{risks}\n\n"
-                    f"CHANGE DESIGN (includes naming conventions):\n"
-                    f"{change_design}\n\n"
+                    f"DESIGN AND RISK SYNTHESIS (includes naming "
+                    f"conventions, change design, and gap analysis):\n"
+                    f"{design_and_risks}\n\n"
                     f"FILE SUMMARY:\n{file_summary}\n\n"
                     + (
                         f"PROJECT CONTEXT:\n{project_context}\n\n"
@@ -701,10 +672,10 @@ async def create_plan(
                     "RULES FOR STEPS:\n"
                     "- DEPENDENCY-FIRST: Steps 1 through 5 must be ONLY "
                     "infrastructure, config, and files identified as missing in "
-                    "Phase 4's gap analysis. No feature code (models, "
+                    "Phase 3's gap analysis. No feature code (models, "
                     "controllers, views, services) until all required "
                     "infrastructure is confirmed to exist. Each missing file "
-                    "from Phase 4 gets its own dedicated step in positions 1-5.\n"
+                    "from Phase 3 gets its own dedicated step in positions 1-5.\n"
                     "- Use 'create_file' for new files, 'edit_file' for "
                     "modifications to existing files\n"
                     "- Do NOT include 'run_tests' or 'run_lint' steps — "
@@ -864,9 +835,9 @@ async def create_plan(
         thinking_callback=on_thinking,
     )
 
-    phase_timings["phase_5_plan_assembly"] = time.monotonic() - t0
+    phase_timings["phase_4_plan_assembly"] = time.monotonic() - t0
 
-    # Safety: strip any run_tests/run_lint steps the LLM snuck into Phase 5
+    # Safety: strip any run_tests/run_lint steps the LLM snuck into Phase 4
     verification_tools = {"run_tests", "run_lint", "format_code"}
     impl_steps = [s for s in plan.steps if s.tool not in verification_tools]
     stripped_count = len(plan.steps) - len(impl_steps)
@@ -876,7 +847,7 @@ async def create_plan(
             step.step_number = i
         plan.steps = impl_steps
 
-    # Dedup: if Phase 5 produces multiple steps for the same file path,
+    # Dedup: if Phase 4 produces multiple steps for the same file path,
     # keep only the first one (e.g. edit_file then create_file for same path)
     seen_paths: set[str] = set()
     deduped: list[PlanStep] = []
@@ -892,24 +863,24 @@ async def create_plan(
             step.step_number = i
         plan.steps = deduped
 
-    # Save Phase 5 outputs
+    # Save Phase 4 outputs
     _save_debug_phase(
-        repo_root, session_id, "phase_5_plan",
-        plan.model_dump_json(indent=2), phase_timings["phase_5_plan_assembly"],
+        repo_root, session_id, "phase_4_plan",
+        plan.model_dump_json(indent=2), phase_timings["phase_4_plan_assembly"],
     )
     _save_debug_phase(
-        repo_root, session_id, "phase_5_plan_markdown",
-        plan_to_markdown(plan), phase_timings["phase_5_plan_assembly"],
+        repo_root, session_id, "phase_4_plan_markdown",
+        plan_to_markdown(plan), phase_timings["phase_4_plan_assembly"],
     )
 
     await _send_stage_done(
         ws,
         f"Plan assembled — {len(plan.steps)} steps across "
         f"{len(plan.affected_files)} file(s)",
-        model=expert.model_name, phase=5,
+        model=expert.model_name, phase=4,
     )
 
-    # Phase 6: Verification (only when test_command is available)
+    # Phase 5: Verification (only when test_command is available)
     # Reviews the complete implementation plan and appends test file
     # creation + test execution steps at the end.  Tests should only
     # run after all implementation files are created — running them
@@ -920,12 +891,12 @@ async def create_plan(
     if test_command:
         tdd_mode = settings.enable_tdd
         phase_label = (
-            "Phase 6: Designing TDD test steps..."
+            "Phase 5: Designing TDD test steps..."
             if tdd_mode
-            else "Phase 6: Adding verification steps..."
+            else "Phase 5: Adding verification steps..."
         )
-        await _send_stage(ws, phase_label, model=expert.model_name, phase=6)
-        logger.info("Planning Phase 6: Verification step generation (tdd=%s)", tdd_mode)
+        await _send_stage(ws, phase_label, model=expert.model_name, phase=5)
+        logger.info("Planning Phase 5: Verification step generation (tdd=%s)", tdd_mode)
         t0 = time.monotonic()
 
         impl_plan_md = plan_to_markdown(plan, include_context=False)
@@ -1064,11 +1035,11 @@ async def create_plan(
             if step.file_path and step.file_path not in existing:
                 plan.affected_files.append(step.file_path)
 
-        phase_timings["phase_6_verification"] = time.monotonic() - t0
+        phase_timings["phase_5_verification"] = time.monotonic() - t0
         _save_debug_phase(
-            repo_root, session_id, "phase_6_verification",
+            repo_root, session_id, "phase_5_verification",
             verification.model_dump_json(indent=2),
-            phase_timings["phase_6_verification"],
+            phase_timings["phase_5_verification"],
         )
         test_steps = len(all_verification_steps)
         stage_msg = (
@@ -1076,7 +1047,7 @@ async def create_plan(
             if tdd_mode
             else f"Verification steps added — {test_steps} test step(s)"
         )
-        await _send_stage_done(ws, stage_msg, model=expert.model_name, phase=6)
+        await _send_stage_done(ws, stage_msg, model=expert.model_name, phase=5)
 
     phase_timings["total"] = time.monotonic() - plan_start
 

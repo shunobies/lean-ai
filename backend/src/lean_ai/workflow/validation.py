@@ -185,6 +185,7 @@ async def _run_validation_fix_loop(
     conversation_logger: Callable | None = None,
     expert_llm_client: "LLMClient | None" = None,
     dispatcher: WSMessageDispatcher | None = None,
+    allowed_files: "list[str] | None" = None,
 ) -> dict:
     """Attempt to fix post-validation failures by resubmitting to the LLM.
 
@@ -193,6 +194,10 @@ async def _run_validation_fix_loop(
     1. Builds a focused fix prompt from failure output
     2. Runs ``chat_with_tools`` with a 30-turn budget
     3. Re-runs ``_run_post_validation`` (including auto-fix passes)
+
+    When *allowed_files* is set, the tool executor restricts
+    ``edit_file`` to only those paths (new file creation is still
+    allowed).
 
     Returns the final validation results dict.
     """
@@ -322,7 +327,14 @@ async def _run_validation_fix_loop(
                     "If it still fails, revise your diagnosis and repeat "
                     "from step 2.\n"
                     "Focus ONLY on these specific failures — do not make "
-                    "unrelated changes.\n\n"
+                    "unrelated changes.\n"
+                    + (
+                        "\nFILE SCOPE: Only modify files from this list "
+                        "(new files are allowed):\n"
+                        + "\n".join(f"- {f}" for f in allowed_files)
+                        + "\n\n"
+                        if allowed_files else "\n"
+                    )
                     + failure_text
                 ),
             },
@@ -357,6 +369,7 @@ async def _run_validation_fix_loop(
             dispatcher=dispatcher,
             tdd_protect_tests=tdd_fix_protect,
             on_test_dispute=tdd_fix_dispute,
+            allowed_files=allowed_files,
         )
         executed, explanation = await active_client.chat_with_tools(
             messages=messages,

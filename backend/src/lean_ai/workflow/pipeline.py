@@ -657,43 +657,16 @@ async def _execute_plan(
             naming_conventions=getattr(plan, "naming_conventions", ""),
             name_registry=getattr(plan, "name_registry", ""),
         )
-        tdd_impl_tools = build_tdd_implementation_tools()
-
         for step in plan.steps:
-            dispute_count = 0
-
-            async def _impl_dispute(arguments: dict) -> str:
-                nonlocal dispute_count
-                dispute_count += 1
-                if dispute_count > settings.tdd_max_disputes_per_step:
-                    return (
-                        "ERROR: Maximum dispute limit reached for this "
-                        f"step ({settings.tdd_max_disputes_per_step}). "
-                        "You must find another implementation approach."
-                    )
-                return await evaluate_test_dispute(
-                    test_file=arguments["test_file"],
-                    test_function=arguments["test_function"],
-                    reason=arguments["reason"],
-                    repo_root=repo_root,
-                    expert_client=expert_llm_client,
-                    ws=ws,
-                    session_id=session_id,
-                    dispatcher=dispatcher,
-                    plan_context=plan_context_md,
-                    step_artifacts=step_artifacts,
-                )
-
             impl_executor = make_tool_executor(
                 repo_root, ws, session_id,
                 llm_client=llm_client,
                 dispatcher=dispatcher,
                 tdd_protect_tests=True,
-                on_test_dispute=_impl_dispute,
             )
 
             await _run_step(
-                step, llm_client, tdd_impl_tools,
+                step, llm_client, IMPLEMENTATION_TOOLS,
                 impl_executor, tdd_impl_prompt,
                 label_prefix="[TDD Impl] ",
             )
@@ -736,6 +709,7 @@ async def _execute_plan(
                 conversation_logger=conversation_logger,
                 expert_llm_client=expert_llm_client,
                 dispatcher=dispatcher,
+                allowed_files=plan.affected_files,
             )
 
     # Check for incomplete.md

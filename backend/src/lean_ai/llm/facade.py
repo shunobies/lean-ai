@@ -5,6 +5,8 @@ import hashlib
 import json
 import logging
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
+from enum import Enum, auto
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
@@ -18,15 +20,35 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _looks_like_completion(text: str) -> bool:
-    """Detect if a text-only response is a completion summary.
+# ── Turn supervisor types ─────────────────────────────────────────
 
-    The LLM typically produces a structured summary containing both
-    "Summary of" and "Files Modified".  Checking for both together avoids
-    false positives from casual mid-task mentions.
-    """
-    lower = text.lower()
-    return "summary of" in lower and "files modified" in lower
+
+class TurnVerdict(Enum):
+    """Single decision made after each turn in the tool-calling loop."""
+    CONTINUE = auto()
+    NUDGE = auto()
+    REFRESH = auto()
+    EXIT = auto()
+
+
+@dataclass
+class TurnAction:
+    """Result of evaluating a turn — one verdict with optional payload."""
+    verdict: TurnVerdict
+    message: str = ""
+    exit_reason: str = ""
+
+
+@dataclass
+class _TurnState:
+    """Mutable counters tracked across turns in chat_with_tools."""
+    consecutive_text_only: int = 0
+    consecutive_truncated: int = 0
+    prev_tool_hash: str | None = None
+    consecutive_same_tool: int = 0
+    max_text_only: int = 3
+    max_truncated: int = 5
+    loop_detection_threshold: int = 3
 
 
 class LLMClient:
@@ -171,33 +193,27 @@ class LLMClient:
         on_context_refresh: Callable | None = None,
         dispatcher: "WSMessageDispatcher | None" = None,
     ) -> tuple[list[ToolCall], str]:
-        """Multi-turn tool calling loop.
+        """Multi-turn tool calling loop with unified turn supervisor.
 
         Calls the provider's ``chat_with_tools_single`` in a loop.  When
         the response contains tool calls, executes each one via
-        *tool_executor_fn*, appends results, and calls again.  Repeats
-        until ``task_complete`` is called, too many consecutive text-only
-        responses occur, or *max_turns* is reached.
+        *tool_executor_fn*, appends results, and calls again.  After each
+        turn, ``_evaluate_turn`` makes a single decision: continue, nudge,
+        refresh context, or exit.  Repeats until ``task_complete`` is
+        called, the supervisor decides to exit, or *max_turns* is reached.
         """
         from lean_ai.llm.client import _sanitize_messages
 
-        max_text_only = 3
-        max_truncated = 5
-        tokens = max_tokens or self._provider.max_tokens
-        executed: list[ToolCall] = []
-        explanation_parts: list[str] = []
-        consecutive_text_only: int = 0
-        consecutive_truncated: int = 0
-
-        # Loop detection state
         ld_threshold = (
             loop_detection_threshold
             if loop_detection_threshold is not None
             else settings.loop_detection_threshold
         )
-        prev_tool_hash: str | None = None
-        consecutive_count: int = 0
-        last_refresh_turn: int = -10
+        state = _TurnState(loop_detection_threshold=ld_threshold)
+        tokens = max_tokens or self._provider.max_tokens
+        executed: list[ToolCall] = []
+        explanation_parts: list[str] = []
+        last_prompt_tokens: int | None = None
 
         effective_max = max_turns if max_turns > 0 else 2**31
 
@@ -246,142 +262,102 @@ class LLMClient:
                 if on_content:
                     await on_content(content.strip())
 
+            # ── Process turn results ──────────────────────────────
+            completion_call: ToolCallInfo | None = None
+
             if not tool_calls:
                 messages.append({"role": "assistant", "content": content})
+            else:
+                # Reset text-only/truncation counters on tool use
+                state.consecutive_text_only = 0
+                state.consecutive_truncated = 0
 
-                # Detect truncation: response cut off before tool calls
-                is_truncated = metrics.stop_reason in ("length", "max_tokens")
-
-                if is_truncated:
-                    consecutive_truncated += 1
-                    logger.warning(
-                        "chat_with_tools: response truncated "
-                        "(stop_reason=%s, completion_tokens=%d, "
-                        "truncated_streak=%d)",
-                        metrics.stop_reason, metrics.completion_tokens,
-                        consecutive_truncated,
-                    )
-                    if consecutive_truncated >= max_truncated:
-                        logger.warning(
-                            "chat_with_tools: %d consecutive truncated "
-                            "responses — exiting",
-                            consecutive_truncated,
-                        )
+                # Check for task_complete signal
+                for tc in tool_calls:
+                    if tc.name == "task_complete":
+                        completion_call = tc
                         break
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            "Your previous response was truncated before "
-                            "you could make a tool call. Respond with "
-                            "ONLY the tool call — no explanation, no "
-                            "reasoning, no preamble. Just the tool call."
+
+                # Build assistant message via provider
+                assistant_msg = self._provider.format_assistant_tool_message(
+                    content, tool_calls,
+                )
+                messages.append(assistant_msg)
+
+                # Execute each tool call
+                for tc in tool_calls:
+                    if tc.name == "task_complete":
+                        result_msgs = self._provider.format_tool_result_messages(
+                            tc, "Task marked complete.",
+                        )
+                        messages.extend(result_msgs)
+                        continue
+
+                    if on_tool_call:
+                        await on_tool_call(tc.name, tc.arguments)
+
+                    try:
+                        result_str = await tool_executor_fn(tc.name, tc.arguments)
+                    except Exception as exc:
+                        result_str = f"ERROR: {exc}"
+                        logger.warning(
+                            "chat_with_tools: tool %s raised: %s", tc.name, exc,
+                        )
+
+                    executed.append(ToolCall(
+                        tool_name=tc.name,
+                        parameters=tc.arguments,
+                        description=(
+                            f"{tc.name} "
+                            f"{tc.arguments.get('path', tc.arguments.get('command', ''))}"
                         ),
-                    })
-                    continue
+                    ))
 
-                consecutive_truncated = 0
-                consecutive_text_only += 1
-                if consecutive_text_only >= max_text_only:
-                    logger.warning(
-                        "chat_with_tools: %d consecutive text-only responses "
-                        "without task_complete — exiting",
-                        consecutive_text_only,
-                    )
-                    break
-                # Nudge: completion-aware to avoid pushing the LLM into
-                # unnecessary extra work when it has already summarised.
-                if _looks_like_completion(content):
-                    nudge = (
-                        "Your response looks like a completion summary but you "
-                        "did not call task_complete. Call task_complete now with "
-                        "your summary to signal that you are finished."
-                    )
-                else:
-                    nudge = text_only_nudge or (
-                        "If you have finished all work, call task_complete. "
-                        "Otherwise, you must call a tool now — do not respond "
-                        "with text only."
-                    )
-                messages.append({"role": "user", "content": nudge})
-                continue
+                    if on_tool_result:
+                        await on_tool_result(tc.name, result_str)
 
-            # Reset counters when tools are called
-            consecutive_text_only = 0
-            consecutive_truncated = 0
-
-            # Check for task_complete signal
-            completion_call: ToolCallInfo | None = None
-            for tc in tool_calls:
-                if tc.name == "task_complete":
-                    completion_call = tc
-                    break
-
-            # Build assistant message via provider (format differs per provider)
-            assistant_msg = self._provider.format_assistant_tool_message(
-                content, tool_calls,
-            )
-            messages.append(assistant_msg)
-
-            # Execute each tool call
-            for tc in tool_calls:
-                if tc.name == "task_complete":
                     result_msgs = self._provider.format_tool_result_messages(
-                        tc, "Task marked complete.",
+                        tc, result_str,
                     )
                     messages.extend(result_msgs)
-                    continue
 
-                if on_tool_call:
-                    await on_tool_call(tc.name, tc.arguments)
-
-                try:
-                    result_str = await tool_executor_fn(tc.name, tc.arguments)
-                except Exception as exc:
-                    result_str = f"ERROR: {exc}"
-                    logger.warning("chat_with_tools: tool %s raised: %s", tc.name, exc)
-
-                executed.append(ToolCall(
-                    tool_name=tc.name,
-                    parameters=tc.arguments,
-                    description=(
-                        f"{tc.name} "
-                        f"{tc.arguments.get('path', tc.arguments.get('command', ''))}"
-                    ),
-                ))
-
-                if on_tool_result:
-                    await on_tool_result(tc.name, result_str)
-
-                result_msgs = self._provider.format_tool_result_messages(tc, result_str)
-                messages.extend(result_msgs)
-
-                # Loop detection
-                if ld_threshold > 0:
-                    call_sig = f"{tc.name}:{json.dumps(tc.arguments, sort_keys=True)}"
-                    call_hash = hashlib.sha256(call_sig.encode()).hexdigest()
-                    if call_hash == prev_tool_hash:
-                        consecutive_count += 1
-                    else:
-                        consecutive_count = 1
-                        prev_tool_hash = call_hash
-
-                    if consecutive_count >= ld_threshold:
-                        logger.warning(
-                            "chat_with_tools: loop detected — %s called %d times "
-                            "with identical arguments",
-                            tc.name, consecutive_count,
+                    # Loop detection (inline — can coexist with reminders)
+                    if state.loop_detection_threshold > 0:
+                        call_sig = (
+                            f"{tc.name}:"
+                            f"{json.dumps(tc.arguments, sort_keys=True)}"
                         )
-                        messages.append({
-                            "role": "user",
-                            "content": (
-                                f"You have called {tc.name} with identical arguments "
-                                f"{consecutive_count} times consecutively and it "
-                                f"keeps failing. Try a different approach — read "
-                                f"the file first, check the error, or use different "
-                                f"arguments."
-                            ),
-                        })
-                        consecutive_count = 0
+                        tool_hash = hashlib.sha256(
+                            call_sig.encode(),
+                        ).hexdigest()
+                        if tool_hash == state.prev_tool_hash:
+                            state.consecutive_same_tool += 1
+                        else:
+                            state.consecutive_same_tool = 1
+                            state.prev_tool_hash = tool_hash
+
+                        if (
+                            state.consecutive_same_tool
+                            >= state.loop_detection_threshold
+                        ):
+                            logger.warning(
+                                "chat_with_tools: loop detected — %s "
+                                "called %d times with identical arguments",
+                                tc.name, state.consecutive_same_tool,
+                            )
+                            messages.append({
+                                "role": "user",
+                                "content": (
+                                    f"You have called {tc.name} with "
+                                    f"identical arguments "
+                                    f"{state.consecutive_same_tool} times "
+                                    f"consecutively and it keeps failing. "
+                                    f"Try a different approach — read the "
+                                    f"file first, check the error, or use "
+                                    f"different arguments."
+                                ),
+                            })
+                            state.consecutive_same_tool = 0
 
             # Exit if task_complete was called
             if completion_call:
@@ -391,35 +367,41 @@ class LLMClient:
                 logger.info("chat_with_tools: task_complete called — exiting loop")
                 break
 
-            # Context refresh
-            if turn - last_refresh_turn >= 5:
+            # ── Evaluate turn — single decision point ─────────────
+            action = self._evaluate_turn(
+                turn=turn,
+                has_tool_calls=bool(tool_calls),
+                is_truncated=metrics.stop_reason in ("length", "max_tokens"),
+                prompt_tokens=last_prompt_tokens,
+                state=state,
+                text_only_nudge=text_only_nudge,
+                task_reminder=task_reminder,
+                reminder_interval=reminder_interval,
+                max_turns=effective_max,
+                on_context_refresh=on_context_refresh,
+            )
+
+            if action.verdict == TurnVerdict.EXIT:
+                logger.warning(
+                    "chat_with_tools: exiting — %s", action.exit_reason,
+                )
+                break
+            elif action.verdict == TurnVerdict.REFRESH:
                 refreshed = await self._maybe_refresh_context(
                     messages,
                     threshold=settings.refresh_threshold,
                     prompt_tokens=last_prompt_tokens or None,
                     on_context_refresh=on_context_refresh,
                 )
-                if refreshed:
-                    last_refresh_turn = turn
-                    if on_metrics:
-                        est_new = sum(
-                            len(m.get("content") or "") for m in messages
-                        ) // 4
-                        await on_metrics(est_new, self._provider.context_window)
-
-            # Periodic task reminder
-            if (
-                task_reminder
-                and reminder_interval > 0
-                and (turn + 1) % reminder_interval == 0
-                and turn + 1 < effective_max
-            ):
-                reminder_text = task_reminder() if callable(task_reminder) else task_reminder
-                logger.info(
-                    "chat_with_tools: injecting task reminder at turn %d (%d chars)",
-                    turn + 1, len(reminder_text),
-                )
-                messages.append({"role": "user", "content": reminder_text})
+                if refreshed and on_metrics:
+                    est_new = sum(
+                        len(m.get("content") or "") for m in messages
+                    ) // 4
+                    await on_metrics(est_new, self._provider.context_window)
+            elif action.verdict == TurnVerdict.NUDGE:
+                messages.append({"role": "user", "content": action.message})
+                if not tool_calls:
+                    continue  # Skip to next turn for text-only nudges
         else:
             logger.warning(
                 "chat_with_tools: reached max_turns=%s without completion",
@@ -427,6 +409,97 @@ class LLMClient:
             )
 
         return executed, "\n".join(explanation_parts)
+
+    def _evaluate_turn(
+        self,
+        *,
+        turn: int,
+        has_tool_calls: bool,
+        is_truncated: bool,
+        prompt_tokens: int | None,
+        state: _TurnState,
+        text_only_nudge: str | None,
+        task_reminder: str | Callable[[], str] | None,
+        reminder_interval: int,
+        max_turns: int,
+        on_context_refresh: Callable | None,
+    ) -> TurnAction:
+        """Make ONE decision after each turn.
+
+        Priority: EXIT > REFRESH > NUDGE (reminder) > CONTINUE.
+
+        Loop detection is handled inline during tool execution (not here)
+        so it can coexist with reminders on the same turn.
+
+        Mutates *state* counters as a side effect.
+        """
+        # ── EXIT conditions ───────────────────────────────────────
+        if not has_tool_calls:
+            if is_truncated:
+                state.consecutive_truncated += 1
+                logger.warning(
+                    "chat_with_tools: response truncated (streak=%d)",
+                    state.consecutive_truncated,
+                )
+                if state.consecutive_truncated >= state.max_truncated:
+                    return TurnAction(
+                        verdict=TurnVerdict.EXIT,
+                        exit_reason=(
+                            f"{state.consecutive_truncated} consecutive "
+                            f"truncated responses"
+                        ),
+                    )
+                return TurnAction(
+                    verdict=TurnVerdict.NUDGE,
+                    message=(
+                        "Your previous response was truncated before "
+                        "you could make a tool call. Respond with "
+                        "ONLY the tool call — no explanation, no "
+                        "reasoning, no preamble. Just the tool call."
+                    ),
+                )
+
+            state.consecutive_truncated = 0
+            state.consecutive_text_only += 1
+            if state.consecutive_text_only >= state.max_text_only:
+                return TurnAction(
+                    verdict=TurnVerdict.EXIT,
+                    exit_reason=(
+                        f"{state.consecutive_text_only} consecutive "
+                        f"text-only responses without task_complete"
+                    ),
+                )
+
+            nudge = text_only_nudge or (
+                "If you have finished all work, call task_complete. "
+                "Otherwise, you must call a tool now — do not respond "
+                "with text only."
+            )
+            return TurnAction(verdict=TurnVerdict.NUDGE, message=nudge)
+
+        # ── Context refresh (event-driven by token threshold) ─────
+        if on_context_refresh and prompt_tokens is not None:
+            limit = int(settings.refresh_threshold * self._provider.context_window)
+            if prompt_tokens >= limit:
+                return TurnAction(verdict=TurnVerdict.REFRESH)
+
+        # ── Periodic task reminder ────────────────────────────────
+        if (
+            task_reminder
+            and reminder_interval > 0
+            and (turn + 1) % reminder_interval == 0
+            and turn + 1 < max_turns
+        ):
+            reminder_text = (
+                task_reminder() if callable(task_reminder) else task_reminder
+            )
+            logger.info(
+                "chat_with_tools: injecting task reminder at turn %d (%d chars)",
+                turn + 1, len(reminder_text),
+            )
+            return TurnAction(verdict=TurnVerdict.NUDGE, message=reminder_text)
+
+        return TurnAction(verdict=TurnVerdict.CONTINUE)
 
     async def _maybe_refresh_context(
         self,
