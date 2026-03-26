@@ -32,7 +32,7 @@ _ALWAYS_BLOCK_TOKENS = [
     "mkfs /dev/",
 ]
 
-# Commands that need user approval
+# Commands that need user approval (substring match)
 _APPROVAL_COMMANDS = [
     "rm ",
     "del ",
@@ -58,6 +58,12 @@ _APPROVAL_COMMANDS = [
     "pip uninstall",
 ]
 
+# Tokens that only match at the start of a command (avoids false positives
+# from substring matches — e.g. "dd " inside "git add .").
+_APPROVAL_START_COMMANDS = [
+    "dd ",
+]
+
 
 def check_command(command: str) -> tuple[CommandRisk, str]:
     """Classify a shell command by risk level.
@@ -73,5 +79,10 @@ def check_command(command: str) -> tuple[CommandRisk, str]:
     for token in _APPROVAL_COMMANDS:
         if token in cmd_lower:
             return CommandRisk.REQUIRES_APPROVAL, f"Requires approval: contains '{token.strip()}'"
+
+    for token in _APPROVAL_START_COMMANDS:
+        if cmd_lower.startswith(token):
+            reason = f"Requires approval: starts with '{token.strip()}'"
+            return CommandRisk.REQUIRES_APPROVAL, reason
 
     return CommandRisk.SAFE, ""

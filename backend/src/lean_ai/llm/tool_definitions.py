@@ -156,7 +156,8 @@ IMPLEMENTATION_TOOLS: list[dict] = [
                 "database migration, code generator, package install, or "
                 "asset compilation. Do NOT use this for testing (use run_tests), "
                 "linting (use run_lint), or formatting (use format_code). "
-                "Every command requires user approval before execution."
+                "Destructive commands (rm, dd, chmod, git push, etc.) require "
+                "user approval; other commands execute immediately."
             ),
             "parameters": {
                 "type": "object",

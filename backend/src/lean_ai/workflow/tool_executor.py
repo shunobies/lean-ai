@@ -256,26 +256,23 @@ def make_tool_executor(
             risk, reason = check_command(command)
             if risk == CommandRisk.ALWAYS_BLOCK:
                 return f"ERROR: Command blocked: {reason}"
-            # Always require approval for general-purpose commands
-            if risk == CommandRisk.SAFE:
-                risk = CommandRisk.REQUIRES_APPROVAL
-                reason = "General-purpose command requires approval"
-            await ws_send(ws, "tool_approval_required", {
-                "tool": name, "command": command, "reason": reason,
-            })
-            if dispatcher:
-                from lean_ai.workflow.ws_dispatcher import WorkflowCancelledError
-                try:
-                    approval_msg = await dispatcher.wait_for_approval()
-                except WorkflowCancelledError:
-                    return "ERROR: Workflow cancelled by user"
-            else:
-                from lean_ai.workflow.ws_handler import safe_receive
-                approval_msg = await safe_receive(ws)
-            if approval_msg is None:
-                return "ERROR: WebSocket disconnected — command skipped (requires approval)"
-            if approval_msg.get("type") != "approve_tool":
-                return "ERROR: Command not approved by user"
+            if risk == CommandRisk.REQUIRES_APPROVAL:
+                await ws_send(ws, "tool_approval_required", {
+                    "tool": name, "command": command, "reason": reason,
+                })
+                if dispatcher:
+                    from lean_ai.workflow.ws_dispatcher import WorkflowCancelledError
+                    try:
+                        approval_msg = await dispatcher.wait_for_approval()
+                    except WorkflowCancelledError:
+                        return "ERROR: Workflow cancelled by user"
+                else:
+                    from lean_ai.workflow.ws_handler import safe_receive
+                    approval_msg = await safe_receive(ws)
+                if approval_msg is None:
+                    return "ERROR: WebSocket disconnected — command skipped (requires approval)"
+                if approval_msg.get("type") != "approve_tool":
+                    return "ERROR: Command not approved by user"
 
             result = await shell.run_command(
                 command=command,
