@@ -1004,6 +1004,8 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     openChatInNewWindow(): void {
         if (this.detachedPanel) {
             this.detachedPanel.reveal(vscode.ViewColumn.Two);
+            // Move to a separate OS window so it can go on another monitor
+            vscode.commands.executeCommand("workbench.action.moveEditorToNewWindow");
             return;
         }
 
@@ -1027,6 +1029,9 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         panel.onDidDispose(() => {
             this.detachedPanel = undefined;
         });
+
+        // Move to a separate OS window so it can go on another monitor
+        vscode.commands.executeCommand("workbench.action.moveEditorToNewWindow");
     }
 
     // ── Voice helpers ───────────────────────────────────────────────
