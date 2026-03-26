@@ -760,6 +760,10 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 timestamp: new Date().toISOString(),
             });
             this.postMessage({ type: "chatDone", fullText: fullReply });
+
+            if (this._ttsEnabled) {
+                await this.speakText(fullReply);
+            }
         }
     }
 
