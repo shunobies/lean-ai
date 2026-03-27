@@ -1000,6 +1000,12 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             case "openChatInNewWindow":
                 this.openChatInNewWindow();
                 break;
+            case "returnToSidebar":
+                if (this.detachedPanel) {
+                    this.detachedPanel.dispose();
+                }
+                vscode.commands.executeCommand("lean-ai.chatView.focus");
+                break;
             case "openFileDiff":
                 this.openFileDiff(
                     msg.file as string,
@@ -1063,8 +1069,14 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             this.detachedPanel = undefined;
         });
 
+        // Tell the pop-out to show the "return to sidebar" button
+        panel.webview.postMessage({ type: "setViewMode", mode: "popout" });
+
         // Move to a separate OS window so it can go on another monitor
         vscode.commands.executeCommand("workbench.action.moveEditorToNewWindow");
+
+        // Close the sidebar since the chat is now in the pop-out
+        vscode.commands.executeCommand("workbench.action.closeSidebar");
     }
 
     // ── Voice helpers ───────────────────────────────────────────────

@@ -962,6 +962,7 @@ export function getWebviewHtml(chatFontSize: number): string {
     let runtimeStart = null;
     let lastTimestamp = null;
     let searchMode = false;
+    let viewMode = 'sidebar';
     let savedMessagesHtml = null;
     let searchDebounceTimer = null;
     let currentStreamDiv = null; // AI bubble being filled during chat streaming
@@ -1759,8 +1760,13 @@ export function getWebviewHtml(chatFontSize: number): string {
 
     searchClearBtn.addEventListener('click', closeSearch);
 
-    document.getElementById('popOutBtn').addEventListener('click', () => {
-        vscode.postMessage({ type: 'openChatInNewWindow' });
+    const popOutBtn = document.getElementById('popOutBtn');
+    popOutBtn.addEventListener('click', () => {
+        if (viewMode === 'popout') {
+            vscode.postMessage({ type: 'returnToSidebar' });
+        } else {
+            vscode.postMessage({ type: 'openChatInNewWindow' });
+        }
     });
 
     backBtn.addEventListener('click', () => {
@@ -1818,6 +1824,17 @@ export function getWebviewHtml(chatFontSize: number): string {
 
             case 'metricsReset':
                 resetMetrics();
+                break;
+
+            case 'setViewMode':
+                viewMode = msg.mode;
+                if (msg.mode === 'popout') {
+                    popOutBtn.title = 'Return to sidebar';
+                    popOutBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M0 2.5A1.5 1.5 0 0 1 1.5 1H5v1H1.5a.5.5 0 0 0-.5.5v11a.5.5 0 0 0 .5.5H5v1H1.5A1.5 1.5 0 0 1 0 13.5v-11zM6 1h8.5A1.5 1.5 0 0 1 16 2.5v11a1.5 1.5 0 0 1-1.5 1.5H6V1z"/></svg>';
+                } else {
+                    popOutBtn.title = 'Open chat in new window';
+                    popOutBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 1C.67 1 0 1.67 0 2.5v11c0 .83.67 1.5 1.5 1.5h11c.83 0 1.5-.67 1.5-1.5V10h-1v3.5a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H5V1H1.5zM9 1v1h3.29L7.15 7.15l.7.7L13 2.71V6h1V1H9z"/></svg>';
+                }
                 break;
 
             case 'reply':
