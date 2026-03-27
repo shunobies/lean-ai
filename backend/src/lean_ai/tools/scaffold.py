@@ -119,7 +119,7 @@ class ScaffoldRunner:
         if template.setup_type == "command":
             result = await self._run_command(template, project_name, pkg, parent_dir)
         else:
-            result = self._run_files(template, project_name, pkg, parent_dir)
+            result = await self._run_files(template, project_name, pkg, parent_dir)
 
         if result.success:
             await self._git_init(Path(result.project_dir))
@@ -190,7 +190,7 @@ class ScaffoldRunner:
                 files_created=[], command_output="", success=False, error=str(exc),
             )
 
-    def _run_files(
+    async def _run_files(
         self, template: ScaffoldTemplate, project_name: str, pkg: str, parent_dir: str,
     ) -> ScaffoldResult:
         setup = template.setup
@@ -208,15 +208,33 @@ class ScaffoldRunner:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_text(content, encoding="utf-8")
                 created.append(rel_path)
-            return ScaffoldResult(
-                scaffold_name=template.name, project_dir=str(project_dir),
-                files_created=sorted(created), command_output="", success=True,
-            )
         except Exception as exc:
             return ScaffoldResult(
                 scaffold_name=template.name, project_dir=str(project_dir),
                 files_created=created, command_output="", success=False, error=str(exc),
             )
+
+        # Run optional post-creation commands (e.g. venv setup, dependency install)
+        cmd_output = ""
+        for raw_cmd in setup.get("post_commands") or []:
+            cmd = _substitute(raw_cmd, project_name, pkg)
+            try:
+                proc = await asyncio.create_subprocess_shell(
+                    cmd, cwd=str(project_dir),
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+                )
+                stdout_bytes, _ = await proc.communicate()
+                if stdout_bytes:
+                    cmd_output += stdout_bytes.decode(errors="replace")
+                if proc.returncode != 0:
+                    logger.warning("Post-command failed (code %d): %s", proc.returncode, cmd)
+            except Exception as exc:
+                logger.warning("Post-command error for %s: %s", cmd, exc)
+
+        return ScaffoldResult(
+            scaffold_name=template.name, project_dir=str(project_dir),
+            files_created=sorted(created), command_output=cmd_output, success=True,
+        )
 
 
 _registry: ScaffoldRegistry | None = None

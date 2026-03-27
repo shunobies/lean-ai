@@ -36,6 +36,9 @@ setup:
         name = "{project_name}"
         version = "0.1.0"
         requires-python = ">=3.11"
+
+        [project.optional-dependencies]
+        dev = ["pytest"]
     - path: ".gitignore"
       content: |
         __pycache__/
@@ -43,3 +46,5 @@ setup:
         .venv/
         dist/
         *.egg-info/
+  post_commands:
+    - "python3 -m venv .venv && .venv/bin/pip install -e '.[dev]' --quiet"

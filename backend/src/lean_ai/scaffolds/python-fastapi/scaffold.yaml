@@ -53,3 +53,5 @@ setup:
         .venv/
         dist/
         *.egg-info/
+  post_commands:
+    - "python3 -m venv .venv && .venv/bin/pip install -e '.[dev]' --quiet"
