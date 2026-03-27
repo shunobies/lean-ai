@@ -71,6 +71,27 @@ both the source file to read and the target file to modify.
 
 Use the read_file, list_directory, and directory_tree tools to explore the \
 codebase before finalizing the plan.
+
+EXECUTOR MODEL AWARENESS:
+The plan you produce will be executed step-by-step by a smaller, less capable \
+model. This executor model:
+- Sees only ONE step at a time, not the full plan
+- Does not receive your design reasoning, risk analysis, or gap analysis
+- Has project context but not the file contents you read during exploration
+- Cannot infer intent — it follows instructions literally
+- May struggle with ambiguous or underspecified instructions
+
+Therefore:
+- Write each step as a self-contained instruction that can be executed without \
+understanding the broader plan
+- Include exact code snippets, import paths, and method signatures — not \
+descriptions of what to write
+- Specify the precise location in the file (function name, class, line range) \
+for every edit
+- When a step depends on output from a previous step, include the expected \
+names/paths/signatures in the context field so the executor does not have to \
+guess
+- Never assume the executor will "figure out" relationships between steps
 """
 
 # ── Implementation system prompt (multi-turn, currently unused) ───
