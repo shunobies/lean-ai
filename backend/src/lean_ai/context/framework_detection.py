@@ -405,6 +405,99 @@ async def build_gap_fill_queries_llm(
         return None
 
 
+async def build_section_search_queries_llm(
+    frameworks: list[tuple[str, str]],
+    runtimes: list[tuple[str, str]],
+    section_heading: str,
+    search_topics: list[str],
+    llm_client: LLMClient,
+    cutoff: str | None = None,
+    max_queries: int = 4,
+) -> list[str]:
+    """Generate search queries scoped to a single guide section.
+
+    Returns LLM-generated queries, or falls back to static queries
+    built from the section's ``search_topics`` combined with the
+    framework label.  Always returns a non-empty list.
+    """
+    from lean_ai.context.deprecations import _extract_major_minor
+
+    fw_lines: list[str] = []
+    for name, version in frameworks:
+        v = _extract_major_minor(version)
+        canonical = canonicalize_name(name)
+        label = f"{canonical} {v}" if v else canonical
+        fw_lines.append(label)
+
+    rt_lines: list[str] = []
+    for name, version in runtimes:
+        v = _extract_major_minor(version)
+        canonical = canonicalize_name(name)
+        label = f"{canonical} {v}" if v else canonical
+        rt_lines.append(label)
+
+    fw_text = ", ".join(fw_lines)
+    rt_text = ", ".join(rt_lines) if rt_lines else "not detected"
+    topics_text = "\n".join(f"- {t}" for t in search_topics)
+
+    prompt = (
+        f"Generate {max_queries} web search queries to research "
+        f"{fw_text} (runtime: {rt_text}) specifically about: "
+        f"{section_heading}\n\n"
+        f"Topics to cover:\n{topics_text}\n\n"
+        "Each query should sound like a real developer typing into "
+        "a search engine. Vary the phrasing — some as questions, "
+        "some as keyword phrases. Include the framework version "
+        "number in most queries.\n\n"
+        "IMPORTANT:\n"
+        "- Do NOT include framework-specific CLI command names "
+        "(no 'artisan', 'manage.py', 'rails', etc.)\n"
+        "- Each query should target a different aspect\n"
+        "- Output ONLY the queries, one per line, no numbers or "
+        "bullets\n"
+    )
+
+    try:
+        response = await llm_client.chat_raw(
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=256,
+        )
+
+        queries = [
+            line.strip().strip('"').strip("'")
+            for line in response.strip().split("\n")
+            if line.strip() and len(line.strip()) > 10
+        ]
+
+        if len(queries) >= 2:
+            logger.info(
+                "Framework guide: LLM generated %d section queries "
+                "for %s",
+                len(queries), section_heading,
+            )
+            return queries[:max_queries]
+
+        logger.info(
+            "Framework guide: section query LLM returned too few "
+            "(%d), using static fallback for %s",
+            len(queries), section_heading,
+        )
+    except Exception as exc:
+        logger.info(
+            "Framework guide: section query LLM failed for %s, "
+            "using static fallback: %s",
+            section_heading, exc,
+        )
+
+    # Static fallback: combine each topic with the framework label
+    static = [f"{fw_text} {topic}" for topic in search_topics]
+    if cutoff:
+        static.append(
+            f"{fw_text} changelog breaking changes since {cutoff}"
+        )
+    return static[:max_queries]
+
+
 # ---------------------------------------------------------------------------
 # Project tree (compact, for prompt inclusion)
 # ---------------------------------------------------------------------------

@@ -50,6 +50,192 @@ _REQUIRED_HEADINGS: set[str] = {
     "## Common Patterns and Pitfalls",
 }
 
+# Budget constants for multi-pass (deep) guide generation.
+_RAW_FETCH_CAP = 50_000       # Max raw chars fetched per page before extraction
+_EXTRACTED_PAGE_CAP = 4_000   # Max chars per page after LLM extraction
+_SECTION_PAGE_BUDGET = 20_000  # Total extracted page chars budget per section
+_SECTION_INPUT_CAP = 30_000    # Max user message chars for section generation
+_EXTRACTION_MAX_TOKENS = 1024  # Output token budget for extraction LLM calls
+
+# Per-section specifications for multi-pass guide generation.
+# Each spec maps a required heading to its search topics, extraction focus,
+# and the section-specific generation instructions (extracted from the
+# original monolithic system prompt).
+_SECTION_SPECS: list[dict] = [
+    {
+        "heading": "## Framework Architecture",
+        "search_topics": [
+            "Architecture pattern and request lifecycle",
+            "Middleware and request pipeline",
+        ],
+        "max_queries": 4,
+        "extraction_focus": (
+            "Extract architecture patterns, request lifecycle steps, "
+            "middleware pipeline details, entry points, and component "
+            "initialization order. Include code snippets showing "
+            "request flow, boot sequence, and service providers."
+        ),
+        "section_prompt": (
+            "## Framework Architecture\n"
+            "Explain the framework's architectural pattern (MVC, MVVM, "
+            "component-based, etc.) and the request/render lifecycle for "
+            "THIS version. Describe how a request flows from entry point "
+            "to response as a numbered sequence — which files and classes "
+            "are involved at each stage. Only reference files and classes "
+            "that exist in the detected version."
+        ),
+    },
+    {
+        "heading": "## Component Relationships",
+        "search_topics": [
+            "Route to controller binding",
+            "Model to migration relationship",
+            "Dependency injection and service registration",
+        ],
+        "max_queries": 3,
+        "extraction_focus": (
+            "Extract component connection points: route-to-handler "
+            "binding, model-to-migration links, service registration, "
+            "validation classes, template rendering. Include code "
+            "snippets showing both sides of each relationship."
+        ),
+        "section_prompt": (
+            "## Component Relationships\n"
+            "Identify the major component relationships that exist in the "
+            "detected framework. For EACH relationship show a SHORT code "
+            "snippet demonstrating the exact connection point between the "
+            "two components.\n\n"
+            "Common relationships to cover (skip any that do not apply to "
+            "this framework):\n"
+            "- Data schema to data model (migrations/schema to ORM "
+            "model/entity)\n"
+            "- Route definition to handler (URL routing to controller/"
+            "view function/handler)\n"
+            "- Handler to template/response (controller to view/template/"
+            "serializer)\n"
+            "- Middleware or interceptors in the request pipeline\n"
+            "- Dependency injection or service registration (if the "
+            "framework uses it)\n"
+            "- Request validation (form objects, request classes, schema "
+            "validators)\n\n"
+            "For each relationship:\n"
+            "- Show both sides of the connection as code snippets\n"
+            "- Explain the naming convention or configuration that links "
+            "them\n"
+            "- Note which file(s) each side lives in\n\n"
+            "Do NOT draw ASCII dependency diagrams. Describe the request "
+            "flow as a numbered prose sequence."
+        ),
+    },
+    {
+        "heading": "## Common CLI Commands",
+        "search_topics": [
+            "CLI tools and code generation commands",
+            "Database migration commands",
+        ],
+        "max_queries": 3,
+        "extraction_focus": (
+            "Extract exact CLI command syntax with all flags and "
+            "arguments. Include scaffolding commands, database "
+            "migration commands, development server commands, "
+            "testing commands, and cache/config management."
+        ),
+        "section_prompt": (
+            "## Common CLI Commands\n"
+            "List the essential CLI commands for this EXACT version. Group "
+            "by purpose:\n"
+            "- Project setup and scaffolding\n"
+            "- Database (migrations, seeding, schema inspection)\n"
+            "- Development server and tooling\n"
+            "- Testing and debugging\n"
+            "- Cache, config, and maintenance\n\n"
+            "For each command show the EXACT syntax including all flags.\n\n"
+            "CRITICAL: Only include commands and flags you are CERTAIN "
+            "exist in the detected version:\n"
+            "- Do not mix up flags between different subcommands\n"
+            "- Do not invent commands or flags that do not exist\n"
+            "- If the fetched page content includes CLI documentation, "
+            "use those exact command signatures"
+        ),
+    },
+    {
+        "heading": "## File Organization Conventions",
+        "search_topics": [
+            "Directory structure and file organization",
+            "Project structure conventions",
+        ],
+        "max_queries": 2,
+        "extraction_focus": (
+            "Extract directory structure listings, file naming "
+            "conventions, and which framework concept maps to which "
+            "directory. Include directory trees if present."
+        ),
+        "section_prompt": (
+            "## File Organization Conventions\n"
+            "Describe the standard directory structure for THIS version "
+            "and where each type of component lives. Map directories to "
+            "framework concepts. Only list directories that exist in this "
+            "version — do not carry over directory structures from older "
+            "versions."
+        ),
+    },
+    {
+        "heading": "## Adding a New Feature",
+        "search_topics": [
+            "Step by step adding new feature CRUD",
+            "Scaffolding and code generation workflow",
+        ],
+        "max_queries": 2,
+        "extraction_focus": (
+            "Extract step-by-step workflows for creating new features, "
+            "including which commands to run and which files to create "
+            "or modify. Include code snippets for each step."
+        ),
+        "section_prompt": (
+            "## Adding a New Feature\n"
+            "Provide a step-by-step workflow for adding a typical new "
+            "feature (e.g., a new CRUD resource). IMPORTANT:\n"
+            "- Do NOT create the same artifact twice (e.g., if a command "
+            "creates both a model and migration, do not also run a "
+            "separate migration command)\n"
+            "- Show the SINGLE optimal command that creates the most "
+            "artifacts at once, then list what it generated\n"
+            "- For each step show the exact file(s) created and what to "
+            "add to them\n"
+            "- Show how each new file connects back to previously created "
+            "components"
+        ),
+    },
+    {
+        "heading": "## Common Patterns and Pitfalls",
+        "search_topics": [
+            "Common mistakes and version-specific gotchas",
+            "Upgrade guide migration from previous version",
+            "Breaking changes and new features",
+        ],
+        "max_queries": 3,
+        "extraction_focus": (
+            "Extract version-specific pitfalls, deprecated features, "
+            "breaking changes, migration steps, and new recommended "
+            "patterns. Focus on what changed from the previous major "
+            "version."
+        ),
+        "section_prompt": (
+            "## Common Patterns and Pitfalls\n"
+            "List 5-10 patterns that are easy to get wrong in the "
+            "DETECTED VERSION. Each pattern MUST be specific to this "
+            "version — generic advice that applies to all versions is "
+            "not useful. Focus on:\n"
+            "- What changed in this version vs. the previous major "
+            "version\n"
+            "- Deprecated features that developers might still try to "
+            "use\n"
+            "- New recommended patterns that replace old ones\n"
+            "- Naming conventions the framework enforces implicitly"
+        ),
+    },
+]
+
 
 # ---------------------------------------------------------------------------
 # Post-generation validation — three-phase path checking
@@ -624,7 +810,389 @@ async def _fill_guide_gaps(
 
 
 # ---------------------------------------------------------------------------
-# LLM system prompt
+# Smart page extraction — LLM-based content selection
+# ---------------------------------------------------------------------------
+
+async def _extract_page_content(
+    raw_text: str,
+    url: str,
+    extraction_focus: str,
+    framework_label: str,
+    llm_client: LLMClient,
+    max_output_chars: int = _EXTRACTED_PAGE_CAP,
+) -> str:
+    """Extract the most relevant content from a fetched web page.
+
+    If *raw_text* is shorter than *max_output_chars*, returns it as-is
+    without an LLM call.  Otherwise, asks the LLM to extract focused
+    content (code snippets, API signatures, CLI commands, directory
+    structures) based on the *extraction_focus*.
+
+    Falls back to simple truncation on any failure.
+    """
+    if len(raw_text) <= max_output_chars:
+        return raw_text
+
+    # Cap raw input to avoid overwhelming the LLM
+    capped = raw_text[:_RAW_FETCH_CAP]
+
+    try:
+        extracted = await llm_client.chat_raw(
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        f"Extract the most relevant information from this "
+                        f"web page for a {framework_label} framework guide.\n\n"
+                        f"Focus on: {extraction_focus}\n\n"
+                        "Output ONLY the extracted content — code snippets, "
+                        "API signatures, CLI commands, directory structures, "
+                        "configuration examples. No commentary or summaries. "
+                        f"Maximum {max_output_chars} characters."
+                    ),
+                },
+                {"role": "user", "content": capped},
+            ],
+            max_tokens=_EXTRACTION_MAX_TOKENS,
+        )
+
+        if extracted and extracted.strip():
+            logger.info(
+                "Framework guide: extracted %d chars from %s "
+                "(raw: %d chars)",
+                len(extracted), url, len(raw_text),
+            )
+            return extracted[:max_output_chars]
+    except Exception as exc:
+        logger.info(
+            "Framework guide: extraction failed for %s, "
+            "falling back to truncation: %s",
+            url, exc,
+        )
+
+    return raw_text[:max_output_chars]
+
+
+# ---------------------------------------------------------------------------
+# Per-section search + fetch + extract
+# ---------------------------------------------------------------------------
+
+async def _search_and_fetch_for_section(
+    section_spec: dict,
+    frameworks: list[tuple[str, str]],
+    runtimes: list[tuple[str, str]],
+    framework_label: str,
+    llm_client: LLMClient,
+    cutoff: str | None,
+    search_timeout: int,
+) -> tuple[list[str], list[str]]:
+    """Run searches and fetch pages scoped to one guide section.
+
+    Returns ``(search_snippets, extracted_pages)`` — lists of formatted
+    text blocks ready for inclusion in the LLM prompt.
+    """
+    from lean_ai.context.framework_detection import (
+        build_section_search_queries_llm,
+    )
+    from lean_ai.tools.internet import fetch_url, search_internet
+
+    # 1. Generate queries for this section
+    queries = await build_section_search_queries_llm(
+        frameworks=frameworks,
+        runtimes=runtimes,
+        section_heading=section_spec["heading"],
+        search_topics=section_spec["search_topics"],
+        llm_client=llm_client,
+        cutoff=cutoff,
+        max_queries=section_spec.get("max_queries", 4),
+    )
+
+    # 2. Run web searches
+    search_parts: list[str] = []
+    query_results: list[list[tuple[str, str, str]]] = []
+
+    for i, query in enumerate(queries, 1):
+        extracted: list[tuple[str, str, str]] = []
+        try:
+            result = await asyncio.wait_for(
+                search_internet(query, llm_client=None),
+                timeout=search_timeout,
+            )
+            if result.success and result.output:
+                search_parts.append(
+                    f"=== Search: {query} ===\n{result.output}"
+                )
+                extracted = extract_search_results(result.output)
+                logger.info(
+                    "Framework guide [%s]: search %d/%d %r -> OK "
+                    "(%d chars)",
+                    section_spec["heading"], i, len(queries),
+                    query, len(result.output),
+                )
+            else:
+                logger.info(
+                    "Framework guide [%s]: search %d/%d %r "
+                    "-> no results",
+                    section_spec["heading"], i, len(queries), query,
+                )
+        except asyncio.TimeoutError:
+            logger.info(
+                "Framework guide [%s]: search %d/%d %r -> timed out",
+                section_spec["heading"], i, len(queries), query,
+            )
+        except Exception as exc:
+            logger.info(
+                "Framework guide [%s]: search %d/%d %r -> failed: %s",
+                section_spec["heading"], i, len(queries), query, exc,
+            )
+        query_results.append(extracted)
+
+    # 3. Select and fetch URLs
+    fetch_urls = select_one_per_query(query_results)
+
+    page_parts: list[str] = []
+    page_chars_used = 0
+
+    for j, url_candidates in enumerate(fetch_urls, 1):
+        if page_chars_used >= _SECTION_PAGE_BUDGET:
+            break
+        for url in url_candidates:
+            try:
+                page_result = await asyncio.wait_for(
+                    fetch_url(url, llm_client=None),
+                    timeout=20,
+                )
+                if page_result.success and page_result.output:
+                    # 4. Smart extraction
+                    text = await _extract_page_content(
+                        raw_text=page_result.output,
+                        url=url,
+                        extraction_focus=section_spec["extraction_focus"],
+                        framework_label=framework_label,
+                        llm_client=llm_client,
+                    )
+                    page_parts.append(f"=== Page: {url} ===\n{text}")
+                    page_chars_used += len(text)
+                    logger.info(
+                        "Framework guide [%s]: fetched page %d/%d "
+                        "(%d chars): %s",
+                        section_spec["heading"], j, len(fetch_urls),
+                        len(text), url,
+                    )
+                    break  # Got a page for this query
+                else:
+                    logger.info(
+                        "Framework guide [%s]: page empty: %s",
+                        section_spec["heading"], url,
+                    )
+            except asyncio.TimeoutError:
+                logger.info(
+                    "Framework guide [%s]: page timed out: %s",
+                    section_spec["heading"], url,
+                )
+            except Exception as exc:
+                logger.info(
+                    "Framework guide [%s]: page failed: %s — %s",
+                    section_spec["heading"], url, exc,
+                )
+
+    return search_parts, page_parts
+
+
+# ---------------------------------------------------------------------------
+# Section-specific system prompt
+# ---------------------------------------------------------------------------
+
+def _build_section_system_prompt(
+    frameworks: list[tuple[str, str]],
+    runtimes: list[tuple[str, str]],
+    section_spec: dict,
+    cutoff: str | None = None,
+) -> str:
+    """Build a focused system prompt for generating one guide section."""
+    from lean_ai.context.deprecations import _extract_major_minor
+
+    fw_list = ", ".join(
+        f"{canonicalize_name(name)} {_extract_major_minor(ver)}"
+        if ver else canonicalize_name(name)
+        for name, ver in frameworks
+    )
+    rt_list = ", ".join(
+        f"{canonicalize_name(name)} {_extract_major_minor(ver)}"
+        if ver else canonicalize_name(name)
+        for name, ver in runtimes
+    ) or "not detected"
+
+    cutoff_block = ""
+    if cutoff:
+        cutoff_block = (
+            f"YOUR TRAINING DATA CUTOFF: {cutoff}. Any framework "
+            "changes after this date are NOT in your training data. "
+            "You MUST rely on the web search results and fetched page "
+            "content for information after this date. Do NOT guess "
+            "about post-cutoff features, file locations, or APIs.\n\n"
+        )
+
+    return (
+        f"Generate the {section_spec['heading']} section of a "
+        f"framework guide.\n\n"
+        f"DETECTED FRAMEWORKS: {fw_list}\n"
+        f"DETECTED RUNTIMES: {rt_list}\n\n"
+        f"{cutoff_block}"
+        "The content must be tailored to THIS project's specific "
+        "framework and version. Use the web search results and the "
+        "project file tree to produce content that covers framework "
+        "concepts and this project's actual structure.\n\n"
+        "Use the PROJECT FILE TREE to identify which components this "
+        "project actually uses. Tailor examples to use names from the "
+        "project's actual files rather than generic placeholders.\n\n"
+        "STRUCTURE RULES:\n"
+        "- Every fenced code block MUST have a matching opening "
+        "and closing ``` pair. Never leave a code block unclosed.\n"
+        "- Never put multiple PHP files or multiple code languages "
+        "inside a single fenced code block. Each code example gets "
+        "its own ``` pair with its own language tag.\n"
+        "- Separate every code block from surrounding text with a "
+        "brief prose explanation of what it shows.\n"
+        "- Never leave a subsection heading empty — if a subsection "
+        "has no applicable content, write: \"No information available "
+        "for this version.\"\n"
+        "- Number steps sequentially starting from 1 with no gaps.\n\n"
+        "CONTENT RULES:\n"
+        f"- ONLY cover the detected frameworks: {fw_list}\n"
+        "- Web search results and fetched page content are the "
+        "SOURCE OF TRUTH for version-specific details. If they "
+        "contradict your training knowledge, ALWAYS prefer the "
+        "search results. Frameworks change significantly between "
+        "major versions — do not assume features from older versions "
+        "still exist.\n"
+        "- CROSS-CHECK: Before including any file path, class name, "
+        "or CLI command, verify it appears in either the web search "
+        "results, the fetched page content, or the project file "
+        "tree. If it does not appear in any of these sources and "
+        "the information postdates your training cutoff, DO NOT "
+        "include it.\n"
+        "- NEVER reference files, classes, or commands that do not "
+        "exist in the detected version. If unsure whether something "
+        "exists in this version, omit it rather than guess.\n"
+        "- Use concrete code examples (short snippets, not full "
+        "files).\n"
+        "- Reference actual class names and method names from the "
+        "framework.\n\n"
+        f"SECTION TO GENERATE:\n\n{section_spec['section_prompt']}\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Section generation
+# ---------------------------------------------------------------------------
+
+async def _generate_section(
+    section_spec: dict,
+    frameworks: list[tuple[str, str]],
+    runtimes: list[tuple[str, str]],
+    framework_label: str,
+    project_tree: str,
+    prior_sections: list[str],
+    llm_client: LLMClient,
+    cutoff: str | None,
+    search_timeout: int,
+    max_tokens: int,
+) -> str:
+    """Generate content for one framework guide section.
+
+    Runs a dedicated search/fetch/extract cycle, then calls the LLM
+    with a section-specific prompt.  Prior sections are included as
+    context so the LLM can maintain consistency.
+    """
+    # 1. Search and fetch for this section
+    search_parts, page_parts = await _search_and_fetch_for_section(
+        section_spec=section_spec,
+        frameworks=frameworks,
+        runtimes=runtimes,
+        framework_label=framework_label,
+        llm_client=llm_client,
+        cutoff=cutoff,
+        search_timeout=search_timeout,
+    )
+
+    # 2. Deduplicate search snippets
+    search_parts = _deduplicate_search_parts(search_parts)
+
+    # 3. Build user message
+    user_parts: list[str] = []
+    if search_parts:
+        user_parts.append(
+            "WEB SEARCH RESULTS (snippets):\n\n"
+            + "\n\n".join(search_parts)
+        )
+    if page_parts:
+        user_parts.append(
+            "FULL PAGE CONTENT (from top search results):\n\n"
+            + "\n\n".join(page_parts)
+        )
+    if project_tree:
+        user_parts.append(f"PROJECT FILE TREE:\n{project_tree}")
+    if prior_sections:
+        user_parts.append(
+            "EARLIER SECTIONS (for reference — maintain consistency, "
+            "do not repeat content):\n\n"
+            + "\n\n".join(prior_sections)
+        )
+
+    user_content = (
+        "\n\n".join(user_parts)
+        if user_parts
+        else "Generate based on training knowledge."
+    )
+
+    # 4. Build section system prompt
+    system_prompt = _build_section_system_prompt(
+        frameworks=frameworks,
+        runtimes=runtimes,
+        section_spec=section_spec,
+        cutoff=cutoff,
+    )
+
+    logger.info(
+        "Framework guide: generating section %s "
+        "(%d snippets, %d pages, %d-char prompt)",
+        section_spec["heading"],
+        len(search_parts), len(page_parts),
+        min(len(user_content), _SECTION_INPUT_CAP),
+    )
+
+    # 5. LLM generates the section
+    try:
+        section = await llm_client.chat_raw(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": user_content[:_SECTION_INPUT_CAP],
+                },
+            ],
+            max_tokens=max_tokens,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Framework guide: section generation failed for %s: %s",
+            section_spec["heading"], exc,
+        )
+        return ""
+
+    if not section or not section.strip():
+        logger.info(
+            "Framework guide: LLM returned empty output for %s",
+            section_spec["heading"],
+        )
+        return ""
+
+    return section.strip()
+
+
+# ---------------------------------------------------------------------------
+# LLM system prompt (used by basic mode and post-processing)
 # ---------------------------------------------------------------------------
 
 def _build_guide_system_prompt(
@@ -793,49 +1361,21 @@ def _build_guide_system_prompt(
 # Orchestrator
 # ---------------------------------------------------------------------------
 
-async def generate_framework_guide(
+async def _generate_guide_basic(
     repo_root: str,
     llm_client: LLMClient,
-    max_tokens: int | None = None,
+    frameworks: list[tuple[str, str]],
+    runtimes: list[tuple[str, str]],
+    max_tokens: int,
 ) -> str:
-    """Detect frameworks, search for best practices, and generate a guide.
+    """Single-pass guide generation (basic mode).
 
-    *max_tokens* defaults to 25 % of the active context window (same
-    derivation as project context and implementation turns).
-
-    Returns the guide content as a Markdown string, or ``""`` if no
-    frameworks are detected or any step fails.
+    Original monolithic flow: one set of searches, one LLM call.
     """
     from lean_ai.config import settings
     from lean_ai.tools.internet import fetch_url, search_internet
 
-    if not settings.enable_framework_guide:
-        return ""
-
-    if max_tokens is None:
-        max_tokens = settings.implementation_max_tokens or 4096
-
-    # Step 1: Detect frameworks
-    try:
-        frameworks, runtimes = get_primary_frameworks(repo_root)
-    except Exception as exc:
-        logger.warning("Framework guide: detection failed: %s", exc)
-        return ""
-
-    if not frameworks:
-        logger.info("Framework guide: no frameworks detected, skipping")
-        return ""
-
-    logger.info(
-        "Framework guide: detected %d framework(s): %s",
-        len(frameworks),
-        ", ".join(f"{n} {v}" for n, v in frameworks),
-    )
-
-    # Step 1b + Step 3a: Run cutoff detection and LLM query generation
-    # in parallel — both are independent LLM calls.  The query builder
-    # loses the cutoff topic but we compensate by appending a manual
-    # post-cutoff query after both complete.
+    # Cutoff + query generation in parallel
     cutoff_task = asyncio.create_task(
         get_training_cutoff(llm_client, repo_root),
     )
@@ -848,8 +1388,6 @@ async def generate_framework_guide(
     cutoff = await cutoff_task
     llm_queries = await queries_task
 
-    # Compensate: the LLM query builder didn't have the cutoff, so
-    # append a manual post-cutoff changelog query for each framework.
     if cutoff and llm_queries is not None:
         from lean_ai.context.deprecations import _extract_major_minor
 
@@ -865,19 +1403,14 @@ async def generate_framework_guide(
         frameworks, runtimes, cutoff=cutoff,
     )
 
-    # Step 2: Get project tree for project-specific guide
     project_tree = get_compact_tree(repo_root)
 
-    # Step 3: Web search for current best practices (snippets)
-    # Sequential — primp/lxml are not thread-safe for concurrent use.
+    # Web search (sequential — primp/lxml not thread-safe)
     search_parts: list[str] = []
     query_results: list[list[tuple[str, str, str]]] = []
-
-    # Browser providers need more time: browser init + rate-limit delay +
-    # navigation + consent handling + potential Bing fallback.
     search_timeout = 90 if settings.search_provider in ("google", "bing") else 15
 
-    logger.info("Framework guide: running %d web searches", len(queries))
+    logger.info("Framework guide [basic]: running %d web searches", len(queries))
     for i, query in enumerate(queries, 1):
         extracted: list[tuple[str, str, str]] = []
         try:
@@ -890,100 +1423,31 @@ async def generate_framework_guide(
                     f"=== Search: {query} ===\n{result.output}"
                 )
                 extracted = extract_search_results(result.output)
-                logger.info(
-                    "Framework guide: search %d/%d %r -> OK (%d chars)",
-                    i, len(queries), query, len(result.output),
-                )
-            else:
-                logger.info(
-                    "Framework guide: search %d/%d %r -> no results",
-                    i, len(queries), query,
-                )
-        except asyncio.TimeoutError:
-            logger.info(
-                "Framework guide: search %d/%d %r -> timed out",
-                i, len(queries), query,
-            )
-        except Exception as exc:
-            logger.info(
-                "Framework guide: search %d/%d %r -> failed: %s",
-                i, len(queries), query, exc,
-            )
+        except (asyncio.TimeoutError, Exception):
+            pass
         query_results.append(extracted)
 
-    # Step 3b: Per-category page fetching.
-    # Select one URL per search query (category), preferring documentation
-    # over package registries and repository hosts.
     fetch_urls = select_one_per_query(query_results)
-
-    logger.info(
-        "Framework guide: selected %d URLs (one per search category)",
-        len(fetch_urls),
-    )
-
     page_parts: list[str] = []
-    page_chars_budget = 32000  # Total budget for per-category pages
     page_chars_used = 0
-    per_page_cap = 5000
 
-    if fetch_urls:
-        logger.info(
-            "Framework guide: fetching %d category page(s) for full content",
-            len(fetch_urls),
-        )
     for j, url_candidates in enumerate(fetch_urls, 1):
-        if page_chars_used >= page_chars_budget:
+        if page_chars_used >= 32000:
             break
-        fetched = False
-        for attempt, url in enumerate(url_candidates, 1):
+        for url in url_candidates:
             try:
                 page_result = await asyncio.wait_for(
-                    fetch_url(url, llm_client=None),
-                    timeout=20,
+                    fetch_url(url, llm_client=None), timeout=20,
                 )
                 if page_result.success and page_result.output:
-                    remaining = page_chars_budget - page_chars_used
-                    cap = min(per_page_cap, remaining)
+                    cap = min(5000, 32000 - page_chars_used)
                     text = page_result.output[:cap]
                     page_parts.append(f"=== Page: {url} ===\n{text}")
                     page_chars_used += len(text)
-                    if attempt > 1:
-                        logger.info(
-                            "Framework guide: category %d/%d fetched "
-                            "fallback %d (%d chars): %s",
-                            j, len(fetch_urls), attempt, len(text), url,
-                        )
-                    else:
-                        logger.info(
-                            "Framework guide: fetched page %d/%d "
-                            "(%d chars): %s",
-                            j, len(fetch_urls), len(text), url,
-                        )
-                    fetched = True
                     break
-                else:
-                    logger.info(
-                        "Framework guide: category %d page empty: %s",
-                        j, url,
-                    )
-            except asyncio.TimeoutError:
-                logger.info(
-                    "Framework guide: category %d page timed out: %s",
-                    j, url,
-                )
-            except Exception as exc:
-                logger.info(
-                    "Framework guide: category %d page failed: %s — %s",
-                    j, url, exc,
-                )
-        if not fetched:
-            logger.info(
-                "Framework guide: category %d/%d — all %d URL(s) failed",
-                j, len(fetch_urls), len(url_candidates),
-            )
+            except (asyncio.TimeoutError, Exception):
+                continue
 
-    # Step 4: Deduplicate overlapping search content, then build
-    # the user message with search results + pages + tree.
     search_parts = _deduplicate_search_parts(search_parts)
 
     user_parts: list[str] = []
@@ -1001,19 +1465,10 @@ async def generate_framework_guide(
         user_parts.append(f"PROJECT FILE TREE:\n{project_tree}")
 
     user_content = (
-        "\n\n".join(user_parts)
-        if user_parts
+        "\n\n".join(user_parts) if user_parts
         else "Generate based on training knowledge."
     )
 
-    total_chars = len(user_content)
-    logger.info(
-        "Framework guide: generating via LLM "
-        "(%d snippets, %d pages, %d-char prompt)",
-        len(search_parts), len(page_parts), min(total_chars, 40000),
-    )
-
-    # Step 5: LLM generates the guide
     try:
         guide = await llm_client.chat_raw(
             messages=[
@@ -1028,21 +1483,92 @@ async def generate_framework_guide(
             max_tokens=max_tokens,
         )
     except Exception as exc:
-        logger.warning("Framework guide: LLM generation failed: %s", exc)
+        logger.warning("Framework guide [basic]: LLM generation failed: %s", exc)
         return ""
 
     if not guide.strip():
-        logger.info("Framework guide: LLM returned empty output")
         return ""
 
-    # Step 5a: Repair unfenced code blocks
-    guide = _repair_code_blocks(guide)
+    return await _postprocess_guide(
+        guide, repo_root, llm_client, frameworks, runtimes,
+        cutoff, search_timeout, max_tokens,
+    )
 
-    # Step 5b: Two-pass dedup (reorganize + mechanical heading normalization).
+
+async def _generate_guide_deep(
+    repo_root: str,
+    llm_client: LLMClient,
+    frameworks: list[tuple[str, str]],
+    runtimes: list[tuple[str, str]],
+    max_tokens: int,
+) -> str:
+    """Multi-pass guide generation (deep mode).
+
+    Generates each section independently with its own dedicated
+    search/fetch/extract cycle for deeper, more focused content.
+    """
+    from lean_ai.config import settings
+
+    fw_label = ", ".join(
+        canonicalize_name(name) for name, _ver in frameworks
+    )
+
+    cutoff = await get_training_cutoff(llm_client, repo_root)
+    project_tree = get_compact_tree(repo_root)
+    search_timeout = 90 if settings.search_provider in ("google", "bing") else 15
+
+    # Per-section max_tokens: divide evenly with a floor
+    section_max_tokens = max(2048, max_tokens // len(_SECTION_SPECS))
+
+    generated_sections: list[str] = []
+    for i, spec in enumerate(_SECTION_SPECS):
+        logger.info(
+            "Framework guide [deep]: generating section %d/%d: %s",
+            i + 1, len(_SECTION_SPECS), spec["heading"],
+        )
+        section_content = await _generate_section(
+            section_spec=spec,
+            frameworks=frameworks,
+            runtimes=runtimes,
+            framework_label=fw_label,
+            project_tree=project_tree,
+            prior_sections=generated_sections,
+            llm_client=llm_client,
+            cutoff=cutoff,
+            search_timeout=search_timeout,
+            max_tokens=section_max_tokens,
+        )
+        if section_content.strip():
+            generated_sections.append(section_content)
+
+    if not generated_sections:
+        logger.info("Framework guide [deep]: all sections empty")
+        return ""
+
+    guide = "\n\n".join(generated_sections)
+
+    return await _postprocess_guide(
+        guide, repo_root, llm_client, frameworks, runtimes,
+        cutoff, search_timeout, max_tokens,
+    )
+
+
+async def _postprocess_guide(
+    guide: str,
+    repo_root: str,
+    llm_client: LLMClient,
+    frameworks: list[tuple[str, str]],
+    runtimes: list[tuple[str, str]],
+    cutoff: str | None,
+    search_timeout: int,
+    max_tokens: int,
+) -> str:
+    """Shared post-processing: repair, dedup, validate, gap-fill."""
+    from lean_ai.tools.internet import search_internet
+
+    guide = _repair_code_blocks(guide)
     guide = _deduplicate_sections(guide)
 
-    # Step 5c: Validate file references against project tree
-    # (runs before renumber because LLM surgical fixes can change text)
     try:
         guide = await _validate_guide(
             guide,
@@ -1056,97 +1582,110 @@ async def generate_framework_guide(
             exc,
         )
 
-    # Step 5d: Renumber steps (runs before gap-fill since dedup and
-    # validation can both remove or rewrite content, introducing gaps)
     guide = _renumber_steps(guide)
 
-    # Step 5e: Fill empty subsections with targeted searches.
-    # Detects ### or bold-label headings with no content beneath them,
-    # generates targeted search queries, and asks the LLM to fill just
-    # those gaps.  Max 2 iterations — diminishing returns after that.
+    # Gap-fill: 1 iteration for deep mode (sections are pre-filled),
+    # kept as safety net.
     try:
-        for iteration in range(2):
-            gaps = _find_empty_subsections(guide)
-            if not gaps:
-                break
-
+        gaps = _find_empty_subsections(guide)
+        if gaps:
             logger.info(
-                "Framework guide: gap-fill pass %d — "
-                "%d empty subsection(s): %s",
-                iteration + 1,
-                len(gaps),
-                [sub for _, sub in gaps],
+                "Framework guide: gap-fill — %d empty subsection(s): %s",
+                len(gaps), [sub for _, sub in gaps],
             )
 
             gap_queries = await build_gap_fill_queries_llm(
                 frameworks, runtimes, gaps, llm_client,
             )
-            if not gap_queries:
-                logger.info(
-                    "Framework guide: gap-fill query generation "
-                    "failed, skipping",
-                )
-                break
-
-            gap_search_parts: list[str] = []
-            for qi, query in enumerate(gap_queries, 1):
-                try:
-                    result = await asyncio.wait_for(
-                        search_internet(query, llm_client=None),
-                        timeout=search_timeout,
-                    )
-                    if result.success and result.output:
-                        gap_search_parts.append(
-                            f"=== Search: {query} ===\n"
-                            f"{result.output}"
+            if gap_queries:
+                gap_search_parts: list[str] = []
+                for qi, query in enumerate(gap_queries, 1):
+                    try:
+                        result = await asyncio.wait_for(
+                            search_internet(query, llm_client=None),
+                            timeout=search_timeout,
                         )
-                        logger.info(
-                            "Framework guide: gap-fill search %d/%d "
-                            "%r -> OK (%d chars)",
-                            qi, len(gap_queries), query,
-                            len(result.output),
-                        )
-                    else:
-                        logger.info(
-                            "Framework guide: gap-fill search %d/%d "
-                            "%r -> no results",
-                            qi, len(gap_queries), query,
-                        )
-                except asyncio.TimeoutError:
-                    logger.info(
-                        "Framework guide: gap-fill search %d/%d "
-                        "%r -> timed out",
-                        qi, len(gap_queries), query,
+                        if result.success and result.output:
+                            gap_search_parts.append(
+                                f"=== Search: {query} ===\n"
+                                f"{result.output}"
+                            )
+                    except (asyncio.TimeoutError, Exception):
+                        pass
+
+                if gap_search_parts:
+                    gap_content = "\n\n".join(gap_search_parts)
+                    guide = await _fill_guide_gaps(
+                        guide, gaps, gap_content, llm_client,
+                        frameworks, runtimes, cutoff, max_tokens,
                     )
-                except Exception as exc:
-                    logger.info(
-                        "Framework guide: gap-fill search %d/%d "
-                        "%r -> failed: %s",
-                        qi, len(gap_queries), query, exc,
-                    )
-
-            if not gap_search_parts:
-                logger.info(
-                    "Framework guide: gap-fill searches returned "
-                    "nothing, skipping",
-                )
-                break
-
-            gap_content = "\n\n".join(gap_search_parts)
-            guide = await _fill_guide_gaps(
-                guide, gaps, gap_content, llm_client,
-                frameworks, runtimes, cutoff, max_tokens,
-            )
-
-            guide = _repair_code_blocks(guide)
-            guide = _renumber_steps(guide)
+                    guide = _repair_code_blocks(guide)
+                    guide = _renumber_steps(guide)
     except Exception as exc:
         logger.warning(
-            "Framework guide: gap-fill loop failed (non-blocking): %s",
-            exc,
+            "Framework guide: gap-fill failed (non-blocking): %s", exc,
         )
 
-    # Step 6: Add header
+    return guide
+
+
+async def generate_framework_guide(
+    repo_root: str,
+    llm_client: LLMClient,
+    max_tokens: int | None = None,
+) -> str:
+    """Detect frameworks, search for best practices, and generate a guide.
+
+    *max_tokens* defaults to 25 % of the active context window (same
+    derivation as project context and implementation turns).
+
+    Uses ``LEAN_AI_FRAMEWORK_GUIDE_DEPTH`` to select the generation
+    strategy: ``"basic"`` (single-pass) or ``"deep"`` (multi-pass,
+    per-section searches with smart extraction).
+
+    Returns the guide content as a Markdown string, or ``""`` if no
+    frameworks are detected or any step fails.
+    """
+    from lean_ai.config import settings
+
+    if not settings.enable_framework_guide:
+        return ""
+
+    if max_tokens is None:
+        max_tokens = settings.implementation_max_tokens or 4096
+
+    try:
+        frameworks, runtimes = get_primary_frameworks(repo_root)
+    except Exception as exc:
+        logger.warning("Framework guide: detection failed: %s", exc)
+        return ""
+
+    if not frameworks:
+        logger.info("Framework guide: no frameworks detected, skipping")
+        return ""
+
+    logger.info(
+        "Framework guide: detected %d framework(s): %s",
+        len(frameworks),
+        ", ".join(f"{n} {v}" for n, v in frameworks),
+    )
+
+    depth = (settings.framework_guide_depth or "deep").lower()
+
+    if depth == "basic":
+        logger.info("Framework guide: using basic (single-pass) mode")
+        guide = await _generate_guide_basic(
+            repo_root, llm_client, frameworks, runtimes, max_tokens,
+        )
+    else:
+        logger.info("Framework guide: using deep (multi-pass) mode")
+        guide = await _generate_guide_deep(
+            repo_root, llm_client, frameworks, runtimes, max_tokens,
+        )
+
+    if not guide:
+        return ""
+
     fw_label = ", ".join(
         canonicalize_name(name) for name, _ver in frameworks
     )

@@ -198,6 +198,7 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_SEARCH_DELAY` | `2.0` | Min seconds between searches (all providers, with random jitter) |
 | `LEAN_AI_KNOWLEDGE_DIR` | `.lean_ai/knowledge` | Knowledge documents directory |
 | `LEAN_AI_ENABLE_FRAMEWORK_GUIDE` | `true` | Generate `.lean_ai/framework_guide.md` for detected frameworks |
+| `LEAN_AI_FRAMEWORK_GUIDE_DEPTH` | `deep` | Guide generation strategy: `basic` (single-pass) or `deep` (multi-pass per-section with smart extraction) |
 | `LEAN_AI_NUM_PARALLEL` | `1` | Max concurrent LLM requests — set to match `OLLAMA_NUM_PARALLEL`. Controls parallelism for `/init` expansion batches, context+guide generation, and framework guide internals. `1` = fully sequential |
 | `LEAN_AI_IMPLEMENTATION_MAX_TURNS` | `0` | Max tool-calling turns per session (`0` = unlimited) |
 | `LEAN_AI_IMPLEMENTATION_MAX_TOKENS` | *(derived: 25% of context window)* | Max tokens per LLM turn |

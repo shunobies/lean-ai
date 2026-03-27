@@ -1542,3 +1542,133 @@ class TestFillGuideGaps:
             None, 4096,
         )
         assert result == guide
+
+
+# ---------------------------------------------------------------------------
+# _SECTION_SPECS coverage
+# ---------------------------------------------------------------------------
+
+
+class TestSectionSpecs:
+    def test_section_specs_cover_all_headings(self):
+        from lean_ai.context.framework_guide import (
+            _REQUIRED_HEADINGS,
+            _SECTION_SPECS,
+        )
+
+        spec_headings = {spec["heading"] for spec in _SECTION_SPECS}
+        assert spec_headings == _REQUIRED_HEADINGS
+
+    def test_section_specs_have_required_keys(self):
+        from lean_ai.context.framework_guide import _SECTION_SPECS
+
+        required_keys = {
+            "heading", "search_topics", "max_queries",
+            "extraction_focus", "section_prompt",
+        }
+        for spec in _SECTION_SPECS:
+            assert required_keys.issubset(spec.keys()), (
+                f"Section {spec.get('heading', '?')} missing keys: "
+                f"{required_keys - spec.keys()}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# _extract_page_content
+# ---------------------------------------------------------------------------
+
+
+class TestExtractPageContent:
+    @pytest.mark.asyncio
+    async def test_short_text_passthrough(self):
+        from lean_ai.context.framework_guide import _extract_page_content
+
+        mock_client = AsyncMock()
+        result = await _extract_page_content(
+            raw_text="Short content",
+            url="https://example.com",
+            extraction_focus="test focus",
+            framework_label="Laravel 12",
+            llm_client=mock_client,
+        )
+        assert result == "Short content"
+        mock_client.chat_raw.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_long_text_calls_llm(self):
+        from lean_ai.context.framework_guide import _extract_page_content
+
+        long_text = "x" * 10_000
+        mock_client = AsyncMock()
+        mock_client.chat_raw = AsyncMock(
+            return_value="Extracted content",
+        )
+
+        result = await _extract_page_content(
+            raw_text=long_text,
+            url="https://example.com",
+            extraction_focus="test focus",
+            framework_label="Laravel 12",
+            llm_client=mock_client,
+        )
+        assert result == "Extracted content"
+        mock_client.chat_raw.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_fallback_on_error(self):
+        from lean_ai.context.framework_guide import (
+            _EXTRACTED_PAGE_CAP,
+            _extract_page_content,
+        )
+
+        long_text = "y" * 10_000
+        mock_client = AsyncMock()
+        mock_client.chat_raw = AsyncMock(
+            side_effect=RuntimeError("LLM failed"),
+        )
+
+        result = await _extract_page_content(
+            raw_text=long_text,
+            url="https://example.com",
+            extraction_focus="test focus",
+            framework_label="Laravel 12",
+            llm_client=mock_client,
+        )
+        assert result == long_text[:_EXTRACTED_PAGE_CAP]
+
+
+# ---------------------------------------------------------------------------
+# _build_section_system_prompt
+# ---------------------------------------------------------------------------
+
+
+class TestBuildSectionSystemPrompt:
+    def test_includes_section_prompt(self):
+        from lean_ai.context.framework_guide import (
+            _SECTION_SPECS,
+            _build_section_system_prompt,
+        )
+
+        spec = _SECTION_SPECS[0]
+        prompt = _build_section_system_prompt(
+            frameworks=[("laravel/framework", "12.0")],
+            runtimes=[("php", "8.4")],
+            section_spec=spec,
+        )
+        assert "## Framework Architecture" in prompt
+        assert "Laravel" in prompt
+
+    def test_includes_cutoff_block(self):
+        from lean_ai.context.framework_guide import (
+            _SECTION_SPECS,
+            _build_section_system_prompt,
+        )
+
+        prompt = _build_section_system_prompt(
+            frameworks=[("django", "5.0")],
+            runtimes=[],
+            section_spec=_SECTION_SPECS[0],
+            cutoff="2024-04",
+        )
+        assert "2024-04" in prompt
+        assert "TRAINING DATA CUTOFF" in prompt

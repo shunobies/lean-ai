@@ -165,6 +165,7 @@ class Settings(BaseSettings):
     enable_project_context: bool = True
     enable_multi_round_context: bool = True
     enable_framework_guide: bool = True  # Generate .lean_ai/framework_guide.md
+    framework_guide_depth: str = "deep"  # "basic" (single-pass) or "deep" (multi-pass)
 
     # ── Knowledge base ──
     knowledge_dir: str = ".lean_ai/knowledge"
