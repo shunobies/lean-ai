@@ -1638,7 +1638,7 @@ export function getWebviewHtml(chatFontSize: number): string {
         }
     }
 
-    /** Stop all TTS playback and clear queues. */
+    /** Stop all TTS playback and clear queues (keeps AudioContext alive for reuse). */
     function stopTtsPlayback() {
         for (const src of ttsScheduledSources) {
             try { src.stop(); src.disconnect(); } catch {}
@@ -1648,7 +1648,6 @@ export function getWebviewHtml(chatFontSize: number): string {
         ttsQueue = [];
         ttsPlaying = false;
         ttsNextStartTime = 0;
-        if (audioCtx) { audioCtx.close(); audioCtx = null; }
         stopTtsBtn.style.display = 'none';
     }
 
