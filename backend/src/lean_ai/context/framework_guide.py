@@ -54,8 +54,102 @@ _REQUIRED_HEADINGS: set[str] = {
 _RAW_FETCH_CAP = 50_000       # Max raw chars fetched per page before extraction
 _EXTRACTED_PAGE_CAP = 4_000   # Max chars per page after LLM extraction
 _SECTION_PAGE_BUDGET = 20_000  # Total extracted page chars budget per section
-_SECTION_INPUT_CAP = 30_000    # Max user message chars for section generation
 _EXTRACTION_MAX_TOKENS = 1024  # Output token budget for extraction LLM calls
+
+# Per-component budgets for section user message assembly.
+# Each component is truncated independently so later sections still
+# get full search evidence even when prior sections are large.
+_SEARCH_BUDGET = 10_000        # Web search snippets
+_PAGE_BUDGET = 10_000          # Fetched page content
+_KEY_FILES_BUDGET = 8_000      # Project file contents (see _collect_key_file_contents)
+_KEY_FILE_MAX_SINGLE = 2_000   # Max chars per individual project file
+_TREE_BUDGET = 3_000           # Project file tree
+_PRIOR_SECTIONS_BUDGET = 6_000  # Earlier sections for consistency
+_TOTAL_INPUT_CAP = 40_000      # Safety net for entire user message
+
+# Files to skip when collecting key project file contents.
+_SKIP_KEY_FILE_NAMES = {
+    "composer.lock", "package-lock.json", "yarn.lock",
+    "poetry.lock", "Gemfile.lock", "go.sum", "Cargo.lock",
+    "phpunit.xml", "phpunit.xml.dist", "webpack.mix.js",
+}
+_SKIP_KEY_FILE_EXTS = {".md", ".txt", ".rst", ".lock"}
+
+
+def _collect_key_file_contents(
+    repo_root: str,
+    max_total: int = _KEY_FILES_BUDGET,
+    max_per_file: int = _KEY_FILE_MAX_SINGLE,
+) -> str:
+    """Read framework-structural files for injection into guide prompts.
+
+    Uses the language registry's ``key_files`` and ``entry_points`` to
+    find files that reveal framework architecture (routes, config,
+    bootstrap, entry points).  Returns formatted file contents within
+    *max_total* chars.
+    """
+    from lean_ai.context.constants import _get_entry_points, _get_key_files
+
+    root = Path(repo_root)
+
+    # Merge key_files (relative paths) + entry_points (filenames).
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    for filepath in _get_key_files():
+        name = Path(filepath).name
+        if name in _SKIP_KEY_FILE_NAMES:
+            continue
+        if Path(filepath).suffix in _SKIP_KEY_FILE_EXTS:
+            continue
+        full = root / filepath
+        if full.is_file() and filepath not in seen:
+            candidates.append(filepath)
+            seen.add(filepath)
+
+    # Entry points may be bare filenames — search common locations.
+    for ep_name in _get_entry_points():
+        if ep_name in seen:
+            continue
+        # Try as relative path first, then common web roots.
+        for prefix in ["", "public/"]:
+            candidate = prefix + ep_name if prefix else ep_name
+            if candidate in seen:
+                break
+            full = root / candidate
+            if full.is_file():
+                candidates.append(candidate)
+                seen.add(candidate)
+                break
+
+    # Read and format.
+    parts: list[str] = []
+    total = 0
+    for filepath in candidates:
+        if total >= max_total:
+            break
+        full = root / filepath
+        try:
+            content = full.read_text(encoding="utf-8")[:max_per_file]
+        except Exception:
+            continue
+        # Guess language tag from extension.
+        ext = Path(filepath).suffix.lstrip(".")
+        lang_map = {
+            "php": "php", "py": "python", "js": "javascript",
+            "ts": "typescript", "rb": "ruby", "go": "go",
+            "rs": "rust", "java": "java", "cs": "csharp",
+            "json": "json", "yaml": "yaml", "yml": "yaml",
+        }
+        lang = lang_map.get(ext, "")
+        block = f"--- {filepath} ---\n```{lang}\n{content}\n```"
+        if total + len(block) > max_total:
+            break
+        parts.append(block)
+        total += len(block)
+
+    return "\n\n".join(parts)
+
 
 # Per-section specifications for multi-pass guide generation.
 # Each spec maps a required heading to its search topics, extraction focus,
@@ -64,6 +158,7 @@ _EXTRACTION_MAX_TOKENS = 1024  # Output token budget for extraction LLM calls
 _SECTION_SPECS: list[dict] = [
     {
         "heading": "## Framework Architecture",
+        "weight": 5,
         "search_topics": [
             "Architecture pattern and request lifecycle",
             "Middleware and request pipeline",
@@ -87,6 +182,7 @@ _SECTION_SPECS: list[dict] = [
     },
     {
         "heading": "## Component Relationships",
+        "weight": 4,
         "search_topics": [
             "Route to controller binding",
             "Model to migration relationship",
@@ -129,6 +225,7 @@ _SECTION_SPECS: list[dict] = [
     },
     {
         "heading": "## Common CLI Commands",
+        "weight": 2,
         "search_topics": [
             "CLI tools and code generation commands",
             "Database migration commands",
@@ -160,6 +257,7 @@ _SECTION_SPECS: list[dict] = [
     },
     {
         "heading": "## File Organization Conventions",
+        "weight": 2,
         "search_topics": [
             "Directory structure and file organization",
             "Project structure conventions",
@@ -181,6 +279,7 @@ _SECTION_SPECS: list[dict] = [
     },
     {
         "heading": "## Adding a New Feature",
+        "weight": 4,
         "search_topics": [
             "Step by step adding new feature CRUD",
             "Scaffolding and code generation workflow",
@@ -208,6 +307,7 @@ _SECTION_SPECS: list[dict] = [
     },
     {
         "heading": "## Common Patterns and Pitfalls",
+        "weight": 3,
         "search_topics": [
             "Common mistakes and version-specific gotchas",
             "Upgrade guide migration from previous version",
@@ -427,6 +527,25 @@ _BASH_PREFIXES = (
     "$ ", "php ", "composer ", "npm ", "artisan ",
     "python ", "pip ", "rails ", "bundle ", "cargo ", "go ",
 )
+_PYTHON_PREFIXES = (
+    "import ", "from ", "def ", "class ", "async def ", "async ",
+    "@", "if __name__", "print(",
+)
+_JS_TS_PREFIXES = (
+    "import ", "export ", "const ", "let ", "var ",
+    "function ", "async function ", "module.exports",
+    "require(", "app.", "router.",
+)
+_RUBY_PREFIXES = (
+    "require ", "module ", "Rails.", "gem ",
+)
+_GO_PREFIXES = (
+    "package ", "func ", "type ", "defer ",
+)
+_JAVA_PREFIXES = (
+    "package ", "public class ", "private ", "protected ",
+    "@Override", "@Autowired", "@Bean",
+)
 
 
 def _repair_code_blocks(text: str) -> str:
@@ -472,12 +591,22 @@ def _repair_code_blocks(text: str) -> str:
 
         # Detect code-like lines outside fences.
         # Check bash first — "$ " (bash prompt) must not be caught
-        # by the PHP "$" prefix.
+        # by the PHP "$" prefix.  Then PHP, then others.
         detected_lang = ""
         if stripped.startswith(_BASH_PREFIXES):
             detected_lang = "bash"
         elif stripped.startswith(_PHP_PREFIXES):
             detected_lang = "php"
+        elif stripped.startswith(_PYTHON_PREFIXES):
+            detected_lang = "python"
+        elif stripped.startswith(_JS_TS_PREFIXES):
+            detected_lang = "typescript"
+        elif stripped.startswith(_RUBY_PREFIXES):
+            detected_lang = "ruby"
+        elif stripped.startswith(_GO_PREFIXES):
+            detected_lang = "go"
+        elif stripped.startswith(_JAVA_PREFIXES):
+            detected_lang = "java"
 
         if detected_lang and stripped:
             if code_run and code_lang != detected_lang:
@@ -489,6 +618,69 @@ def _repair_code_blocks(text: str) -> str:
             result.append(line)
 
     _flush_code_run()
+
+    # Close any unclosed code block left open by the LLM.
+    if in_fence:
+        result.append("```")
+
+    return "\n".join(result)
+
+
+def _strip_prompt_echoes(
+    section_output: str,
+    section_spec: dict,
+) -> str:
+    """Remove echoed prompt instructions from LLM section output.
+
+    Detects and strips lines that substantially overlap with the
+    ``section_prompt`` text.  Works on a sentence-level basis to catch
+    partial echoes, not just exact matches.
+    """
+    prompt_text = section_spec.get("section_prompt", "")
+    if not prompt_text:
+        return section_output
+
+    # Build a set of instruction phrases from the prompt (>30 chars).
+    prompt_sentences: set[str] = set()
+    for line in prompt_text.split("\n"):
+        cleaned = line.strip().lstrip("- ").strip()
+        if len(cleaned) > 30:
+            prompt_sentences.add(cleaned.lower())
+
+    if not prompt_sentences:
+        return section_output
+
+    lines = section_output.split("\n")
+    result: list[str] = []
+    stripped_count = 0
+
+    for line in lines:
+        cleaned = line.strip().lstrip("- ").strip()
+        if not cleaned:
+            result.append(line)
+            continue
+
+        is_echo = False
+        cleaned_lower = cleaned.lower()
+        for prompt_sent in prompt_sentences:
+            if prompt_sent in cleaned_lower:
+                is_echo = True
+                break
+            if len(cleaned_lower) > 30 and cleaned_lower in prompt_sent:
+                is_echo = True
+                break
+
+        if is_echo:
+            stripped_count += 1
+        else:
+            result.append(line)
+
+    if stripped_count:
+        logger.info(
+            "Framework guide: stripped %d prompt-echo line(s) from %s",
+            stripped_count, section_spec["heading"],
+        )
+
     return "\n".join(result)
 
 
@@ -1059,6 +1251,9 @@ def _build_section_system_prompt(
         "Use the PROJECT FILE TREE to identify which components this "
         "project actually uses. Tailor examples to use names from the "
         "project's actual files rather than generic placeholders.\n\n"
+        "Use the KEY PROJECT FILES section for actual source code from "
+        "this project. Prefer their content over training knowledge "
+        "when writing code snippets and describing architecture.\n\n"
         "STRUCTURE RULES:\n"
         "- Every fenced code block MUST have a matching opening "
         "and closing ``` pair. Never leave a code block unclosed.\n"
@@ -1092,7 +1287,11 @@ def _build_section_system_prompt(
         "files).\n"
         "- Reference actual class names and method names from the "
         "framework.\n\n"
-        f"SECTION TO GENERATE:\n\n{section_spec['section_prompt']}\n"
+        f"SECTION TO GENERATE:\n\n{section_spec['section_prompt']}\n\n"
+        "IMPORTANT: Write the section content directly. Do NOT echo "
+        "back the instructions above. Do NOT start with phrases like "
+        "'Explain the framework' or 'Identify the major component' "
+        "— just write the content.\n"
     )
 
 
@@ -1107,6 +1306,7 @@ async def _generate_section(
     framework_label: str,
     project_tree: str,
     prior_sections: list[str],
+    key_files_content: str,
     llm_client: LLMClient,
     cutoff: str | None,
     search_timeout: int,
@@ -1132,25 +1332,45 @@ async def _generate_section(
     # 2. Deduplicate search snippets
     search_parts = _deduplicate_search_parts(search_parts)
 
-    # 3. Build user message
+    # 3. Build user message with per-component budgets so that
+    #    prior sections cannot crowd out search evidence.
     user_parts: list[str] = []
     if search_parts:
+        search_text = "\n\n".join(search_parts)
         user_parts.append(
             "WEB SEARCH RESULTS (snippets):\n\n"
-            + "\n\n".join(search_parts)
+            + search_text[:_SEARCH_BUDGET]
         )
     if page_parts:
+        page_text = "\n\n".join(page_parts)
         user_parts.append(
             "FULL PAGE CONTENT (from top search results):\n\n"
-            + "\n\n".join(page_parts)
+            + page_text[:_PAGE_BUDGET]
+        )
+    if key_files_content:
+        user_parts.append(
+            "KEY PROJECT FILES (actual source from this project — "
+            "prefer over training knowledge):\n\n"
+            + key_files_content[:_KEY_FILES_BUDGET]
         )
     if project_tree:
-        user_parts.append(f"PROJECT FILE TREE:\n{project_tree}")
+        user_parts.append(
+            f"PROJECT FILE TREE:\n{project_tree[:_TREE_BUDGET]}"
+        )
     if prior_sections:
+        # Only inject the 2 most recent sections to keep input budget
+        # for search evidence.  Earlier sections are already
+        # synthesised into the newer ones.
+        recent = (
+            prior_sections[-2:]
+            if len(prior_sections) > 2
+            else prior_sections
+        )
+        prior_text = "\n\n".join(recent)
         user_parts.append(
             "EARLIER SECTIONS (for reference — maintain consistency, "
             "do not repeat content):\n\n"
-            + "\n\n".join(prior_sections)
+            + prior_text[:_PRIOR_SECTIONS_BUDGET]
         )
 
     user_content = (
@@ -1158,6 +1378,7 @@ async def _generate_section(
         if user_parts
         else "Generate based on training knowledge."
     )
+    user_content = user_content[:_TOTAL_INPUT_CAP]
 
     # 4. Build section system prompt
     system_prompt = _build_section_system_prompt(
@@ -1172,7 +1393,7 @@ async def _generate_section(
         "(%d snippets, %d pages, %d-char prompt)",
         section_spec["heading"],
         len(search_parts), len(page_parts),
-        min(len(user_content), _SECTION_INPUT_CAP),
+        len(user_content),
     )
 
     # 5. LLM generates the section
@@ -1180,10 +1401,7 @@ async def _generate_section(
         section = await llm_client.chat_raw(
             messages=[
                 {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": user_content[:_SECTION_INPUT_CAP],
-                },
+                {"role": "user", "content": user_content},
             ],
             max_tokens=max_tokens,
         )
@@ -1201,7 +1419,8 @@ async def _generate_section(
         )
         return ""
 
-    return section.strip()
+    section = _strip_prompt_echoes(section.strip(), section_spec)
+    return section
 
 
 # ---------------------------------------------------------------------------
@@ -1537,16 +1756,27 @@ async def _generate_guide_deep(
 
     cutoff = await get_training_cutoff(llm_client, repo_root)
     project_tree = get_compact_tree(repo_root)
+    key_files = _collect_key_file_contents(repo_root)
     search_timeout = 90 if settings.search_provider in ("google", "bing") else 15
 
-    # Per-section max_tokens: divide evenly with a floor
-    section_max_tokens = max(2048, max_tokens // len(_SECTION_SPECS))
+    # Per-section max_tokens: weighted by section complexity
+    min_section_tokens = 2048
+    total_weight = sum(s.get("weight", 3) for s in _SECTION_SPECS)
+    section_budgets = [
+        max(
+            min_section_tokens,
+            (max_tokens * s.get("weight", 3)) // total_weight,
+        )
+        for s in _SECTION_SPECS
+    ]
 
     generated_sections: list[str] = []
     for i, spec in enumerate(_SECTION_SPECS):
         logger.info(
-            "Framework guide [deep]: generating section %d/%d: %s",
+            "Framework guide [deep]: generating section %d/%d: %s "
+            "(%d max_tokens)",
             i + 1, len(_SECTION_SPECS), spec["heading"],
+            section_budgets[i],
         )
         section_content = await _generate_section(
             section_spec=spec,
@@ -1555,10 +1785,11 @@ async def _generate_guide_deep(
             framework_label=fw_label,
             project_tree=project_tree,
             prior_sections=generated_sections,
+            key_files_content=key_files,
             llm_client=llm_client,
             cutoff=cutoff,
             search_timeout=search_timeout,
-            max_tokens=section_max_tokens,
+            max_tokens=section_budgets[i],
         )
         if section_content.strip():
             generated_sections.append(section_content)
