@@ -21,7 +21,6 @@ from lean_ai.context.framework_detection import (
     canonicalize_name,
     get_compact_tree,
     get_primary_frameworks,
-    get_training_cutoff,
 )
 from lean_ai.context.framework_search import (
     extract_search_results,
@@ -1616,20 +1615,11 @@ async def _generate_guide_basic(
     from lean_ai.config import settings
     from lean_ai.tools.internet import fetch_url, search_internet
 
-    # Cutoff + query generation in parallel
-    cutoff_task = asyncio.create_task(
-        get_training_cutoff(llm_client, repo_root),
-    )
-    queries_task = asyncio.create_task(
-        build_guide_search_queries_llm(
-            frameworks, runtimes, llm_client, cutoff=None,
-        ),
+    llm_queries = await build_guide_search_queries_llm(
+        frameworks, runtimes, llm_client, cutoff=None,
     )
 
-    cutoff = await cutoff_task
-    llm_queries = await queries_task
-
-    if cutoff and llm_queries is not None:
+    if llm_queries is not None:
         from lean_ai.context.deprecations import _extract_major_minor
 
         for name, version in frameworks:
@@ -1637,11 +1627,11 @@ async def _generate_guide_basic(
             canonical = canonicalize_name(name)
             label = f"{canonical} {v}" if v else canonical
             llm_queries.append(
-                f"{label} changelog breaking changes new features since {cutoff}",
+                f"{label} changelog breaking changes new features",
             )
 
     queries = llm_queries or build_guide_search_queries(
-        frameworks, runtimes, cutoff=cutoff,
+        frameworks, runtimes, cutoff=None,
     )
 
     project_tree = get_compact_tree(repo_root)
@@ -1716,7 +1706,7 @@ async def _generate_guide_basic(
                 {
                     "role": "system",
                     "content": _build_guide_system_prompt(
-                        frameworks, runtimes, cutoff=cutoff,
+                        frameworks, runtimes, cutoff=None,
                     ),
                 },
                 {"role": "user", "content": user_content[:40000]},
@@ -1732,7 +1722,7 @@ async def _generate_guide_basic(
 
     return await _postprocess_guide(
         guide, repo_root, llm_client, frameworks, runtimes,
-        cutoff, search_timeout, max_tokens,
+        None, search_timeout, max_tokens,
     )
 
 
@@ -1754,7 +1744,6 @@ async def _generate_guide_deep(
         canonicalize_name(name) for name, _ver in frameworks
     )
 
-    cutoff = await get_training_cutoff(llm_client, repo_root)
     project_tree = get_compact_tree(repo_root)
     key_files = _collect_key_file_contents(repo_root)
     search_timeout = 90 if settings.search_provider in ("google", "bing") else 15
@@ -1787,7 +1776,7 @@ async def _generate_guide_deep(
             prior_sections=generated_sections,
             key_files_content=key_files,
             llm_client=llm_client,
-            cutoff=cutoff,
+            cutoff=None,
             search_timeout=search_timeout,
             max_tokens=section_budgets[i],
         )
@@ -1802,7 +1791,7 @@ async def _generate_guide_deep(
 
     return await _postprocess_guide(
         guide, repo_root, llm_client, frameworks, runtimes,
-        cutoff, search_timeout, max_tokens,
+        None, search_timeout, max_tokens,
     )
 
 
