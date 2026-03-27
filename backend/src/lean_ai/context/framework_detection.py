@@ -41,6 +41,18 @@ _CANONICAL_NAMES: dict[str, str] = {
     "@vue/core": "Vue",
     # .NET
     "microsoft.aspnetcore": "ASP.NET Core",
+    # Tooling / integrations
+    "livewire/livewire": "Laravel Livewire",
+    "inertiajs/inertia-laravel": "Inertia.js",
+    "@inertiajs/vue3": "Inertia.js (Vue)",
+    "@inertiajs/react": "Inertia.js (React)",
+    "@inertiajs/svelte": "Inertia.js (Svelte)",
+    "tailwindcss": "Tailwind CSS",
+    "alpinejs": "Alpine.js",
+    "htmx.org": "htmx",
+    "postcss": "PostCSS",
+    "pestphp/pest": "Pest",
+    "@playwright/test": "Playwright",
 }
 
 
@@ -82,12 +94,15 @@ def canonicalize_name(raw_name: str) -> str:
 
 def get_primary_frameworks(
     repo_root: str,
-) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
-    """Detect frameworks and runtimes in the project.
+) -> tuple[
+    list[tuple[str, str]],
+    list[tuple[str, str]],
+    list[tuple[str, str]],
+]:
+    """Detect frameworks, runtimes, and tooling in the project.
 
-    Returns ``(frameworks, runtimes)`` where each is a list of
-    ``(name, version)`` tuples.  Frameworks are capped at 3,
-    runtimes at 2.
+    Returns ``(frameworks, runtimes, tooling)`` where each is a list of
+    ``(name, version)`` tuples.  Capped at 3, 2, and 5 respectively.
     """
     from lean_ai.context.deprecations import _detect_versions
 
@@ -95,8 +110,9 @@ def get_primary_frameworks(
 
     frameworks = [(d.name, d.version) for d in deps if d.category == "framework"]
     runtimes = [(d.name, d.version) for d in deps if d.category == "runtime"]
+    tooling = [(d.name, d.version) for d in deps if d.category == "tooling"]
 
-    return frameworks[:3], runtimes[:2]
+    return frameworks[:3], runtimes[:2], tooling[:5]
 
 
 # ---------------------------------------------------------------------------
@@ -413,12 +429,17 @@ async def build_section_search_queries_llm(
     llm_client: LLMClient,
     cutoff: str | None = None,
     max_queries: int = 4,
+    tooling: list[tuple[str, str]] | None = None,
 ) -> list[str]:
     """Generate search queries scoped to a single guide section.
 
     Returns LLM-generated queries, or falls back to static queries
     built from the section's ``search_topics`` combined with the
     framework label.  Always returns a non-empty list.
+
+    When *tooling* is provided, tooling labels are included in the
+    query context so the LLM generates queries covering build tools
+    and CSS frameworks alongside the primary framework.
     """
     from lean_ai.context.deprecations import _extract_major_minor
 
@@ -436,18 +457,32 @@ async def build_section_search_queries_llm(
         label = f"{canonical} {v}" if v else canonical
         rt_lines.append(label)
 
+    tool_lines: list[str] = []
+    if tooling:
+        for name, version in tooling:
+            v = _extract_major_minor(version)
+            canonical = canonicalize_name(name)
+            label = f"{canonical} {v}" if v else canonical
+            tool_lines.append(label)
+
     fw_text = ", ".join(fw_lines)
     rt_text = ", ".join(rt_lines) if rt_lines else "not detected"
+    tool_text = ", ".join(tool_lines) if tool_lines else "none"
     topics_text = "\n".join(f"- {t}" for t in search_topics)
+
+    stack_desc = f"{fw_text} (runtime: {rt_text}"
+    if tool_lines:
+        stack_desc += f", tooling: {tool_text}"
+    stack_desc += ")"
 
     prompt = (
         f"Generate {max_queries} web search queries to research "
-        f"{fw_text} (runtime: {rt_text}) specifically about: "
+        f"{stack_desc} specifically about: "
         f"{section_heading}\n\n"
         f"Topics to cover:\n{topics_text}\n\n"
         "Each query should sound like a real developer typing into "
         "a search engine. Vary the phrasing — some as questions, "
-        "some as keyword phrases. Include the framework version "
+        "some as keyword phrases. Include the framework/tool version "
         "number in most queries.\n\n"
         "IMPORTANT:\n"
         "- Do NOT include framework-specific CLI command names "
@@ -491,6 +526,12 @@ async def build_section_search_queries_llm(
 
     # Static fallback: combine each topic with the framework label
     static = [f"{fw_text} {topic}" for topic in search_topics]
+    if tooling:
+        for name, version in tooling:
+            v = _extract_major_minor(version)
+            canonical = canonicalize_name(name)
+            label = f"{canonical} {v}" if v else canonical
+            static.append(f"{label} configuration setup guide")
     if cutoff:
         static.append(
             f"{fw_text} changelog breaking changes since {cutoff}"

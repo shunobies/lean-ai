@@ -47,6 +47,7 @@ _REQUIRED_HEADINGS: set[str] = {
     "## File Organization Conventions",
     "## Adding a New Feature",
     "## Common Patterns and Pitfalls",
+    "## Build Tooling & Frontend Stack",
 }
 
 # Budget constants for multi-pass (deep) guide generation.
@@ -331,6 +332,46 @@ _SECTION_SPECS: list[dict] = [
             "use\n"
             "- New recommended patterns that replace old ones\n"
             "- Naming conventions the framework enforces implicitly"
+        ),
+    },
+    {
+        "heading": "## Build Tooling & Frontend Stack",
+        "weight": 3,
+        "tooling_section": True,
+        "search_topics": [
+            "Build tool configuration and plugins",
+            "CSS framework setup and configuration",
+            "Frontend integration with backend framework",
+        ],
+        "max_queries": 4,
+        "extraction_focus": (
+            "Extract build tool configuration patterns (vite.config, "
+            "webpack.config, tailwind.config, postcss.config), plugin "
+            "setup, dev server configuration, asset compilation pipeline, "
+            "CSS utility class patterns, and integration points between "
+            "the build tooling and the application framework. Include "
+            "code snippets showing config files and usage patterns."
+        ),
+        "section_prompt": (
+            "## Build Tooling & Frontend Stack\n"
+            "Document the build tools and frontend tooling detected in "
+            "this project. For EACH detected tool, cover:\n"
+            "- Configuration file location and key options for THIS "
+            "version\n"
+            "- How it integrates with the application framework "
+            "(plugins, middleware, server proxy config)\n"
+            "- Development workflow (dev server, hot reload, build "
+            "command)\n"
+            "- Common configuration patterns (aliases, environment "
+            "variables, plugin order)\n\n"
+            "If a CSS framework is detected (Tailwind CSS, Bootstrap, "
+            "etc.), include:\n"
+            "- Configuration file and content paths\n"
+            "- How to extend the default theme\n"
+            "- Integration with the build tool\n"
+            "- Utility class patterns vs component extraction\n\n"
+            "For each tool show version-specific syntax. Do NOT mix "
+            "configuration formats from different major versions."
         ),
     },
 ]
@@ -1080,6 +1121,7 @@ async def _search_and_fetch_for_section(
     llm_client: LLMClient,
     cutoff: str | None,
     search_timeout: int,
+    tooling: list[tuple[str, str]] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Run searches and fetch pages scoped to one guide section.
 
@@ -1100,6 +1142,7 @@ async def _search_and_fetch_for_section(
         llm_client=llm_client,
         cutoff=cutoff,
         max_queries=section_spec.get("max_queries", 4),
+        tooling=tooling,
     )
 
     # 2. Run web searches
@@ -1203,6 +1246,7 @@ def _build_section_system_prompt(
     runtimes: list[tuple[str, str]],
     section_spec: dict,
     cutoff: str | None = None,
+    tooling: list[tuple[str, str]] | None = None,
 ) -> str:
     """Build a focused system prompt for generating one guide section."""
     from lean_ai.context.deprecations import _extract_major_minor
@@ -1218,6 +1262,14 @@ def _build_section_system_prompt(
         for name, ver in runtimes
     ) or "not detected"
 
+    tool_list = ""
+    if tooling:
+        tool_list = ", ".join(
+            f"{canonicalize_name(name)} {_extract_major_minor(ver)}"
+            if ver else canonicalize_name(name)
+            for name, ver in tooling
+        )
+
     cutoff_block = ""
     if cutoff:
         cutoff_block = (
@@ -1227,6 +1279,10 @@ def _build_section_system_prompt(
             "content for information after this date. Do NOT guess "
             "about post-cutoff features, file locations, or APIs.\n\n"
         )
+
+    tooling_block = ""
+    if tool_list and section_spec.get("tooling_section"):
+        tooling_block = f"DETECTED TOOLING: {tool_list}\n"
 
     return (
         f"Generate the {section_spec['heading']} section of a "
@@ -1241,7 +1297,8 @@ def _build_section_system_prompt(
         "the framework enforces — the agent needs to produce code that "
         "follows these patterns precisely.\n\n"
         f"DETECTED FRAMEWORKS: {fw_list}\n"
-        f"DETECTED RUNTIMES: {rt_list}\n\n"
+        f"DETECTED RUNTIMES: {rt_list}\n"
+        f"{tooling_block}\n"
         f"{cutoff_block}"
         "The content must be tailored to THIS project's specific "
         "framework and version. Use the web search results and the "
@@ -1266,7 +1323,13 @@ def _build_section_system_prompt(
         "for this version.\"\n"
         "- Number steps sequentially starting from 1 with no gaps.\n\n"
         "CONTENT RULES:\n"
-        f"- ONLY cover the detected frameworks: {fw_list}\n"
+        + (
+            f"- Cover BOTH the detected frameworks ({fw_list}) and "
+            f"the detected tooling ({tool_list}), focusing on how "
+            "they integrate\n"
+            if tool_list and section_spec.get("tooling_section")
+            else f"- ONLY cover the detected frameworks: {fw_list}\n"
+        ) +
         "- Web search results and fetched page content are the "
         "SOURCE OF TRUTH for version-specific details. If they "
         "contradict your training knowledge, ALWAYS prefer the "
@@ -1310,6 +1373,7 @@ async def _generate_section(
     cutoff: str | None,
     search_timeout: int,
     max_tokens: int,
+    tooling: list[tuple[str, str]] | None = None,
 ) -> str:
     """Generate content for one framework guide section.
 
@@ -1326,6 +1390,7 @@ async def _generate_section(
         llm_client=llm_client,
         cutoff=cutoff,
         search_timeout=search_timeout,
+        tooling=tooling if section_spec.get("tooling_section") else None,
     )
 
     # 2. Deduplicate search snippets
@@ -1385,6 +1450,7 @@ async def _generate_section(
         runtimes=runtimes,
         section_spec=section_spec,
         cutoff=cutoff,
+        tooling=tooling if section_spec.get("tooling_section") else None,
     )
 
     logger.info(
@@ -1607,6 +1673,7 @@ async def _generate_guide_basic(
     frameworks: list[tuple[str, str]],
     runtimes: list[tuple[str, str]],
     max_tokens: int,
+    tooling: list[tuple[str, str]] | None = None,
 ) -> str:
     """Single-pass guide generation (basic mode).
 
@@ -1732,11 +1799,14 @@ async def _generate_guide_deep(
     frameworks: list[tuple[str, str]],
     runtimes: list[tuple[str, str]],
     max_tokens: int,
+    tooling: list[tuple[str, str]] | None = None,
 ) -> str:
     """Multi-pass guide generation (deep mode).
 
     Generates each section independently with its own dedicated
     search/fetch/extract cycle for deeper, more focused content.
+    Sections marked ``tooling_section: True`` are skipped when no
+    tooling is detected.
     """
     from lean_ai.config import settings
 
@@ -1748,23 +1818,29 @@ async def _generate_guide_deep(
     key_files = _collect_key_file_contents(repo_root)
     search_timeout = 90 if settings.search_provider in ("google", "bing") else 15
 
+    # Skip tooling section when no tooling detected.
+    active_specs = [
+        s for s in _SECTION_SPECS
+        if not s.get("tooling_section") or tooling
+    ]
+
     # Per-section max_tokens: weighted by section complexity
     min_section_tokens = 2048
-    total_weight = sum(s.get("weight", 3) for s in _SECTION_SPECS)
+    total_weight = sum(s.get("weight", 3) for s in active_specs)
     section_budgets = [
         max(
             min_section_tokens,
             (max_tokens * s.get("weight", 3)) // total_weight,
         )
-        for s in _SECTION_SPECS
+        for s in active_specs
     ]
 
     generated_sections: list[str] = []
-    for i, spec in enumerate(_SECTION_SPECS):
+    for i, spec in enumerate(active_specs):
         logger.info(
             "Framework guide [deep]: generating section %d/%d: %s "
             "(%d max_tokens)",
-            i + 1, len(_SECTION_SPECS), spec["heading"],
+            i + 1, len(active_specs), spec["heading"],
             section_budgets[i],
         )
         section_content = await _generate_section(
@@ -1779,6 +1855,7 @@ async def _generate_guide_deep(
             cutoff=None,
             search_timeout=search_timeout,
             max_tokens=section_budgets[i],
+            tooling=tooling,
         )
         if section_content.strip():
             generated_sections.append(section_content)
@@ -1897,7 +1974,7 @@ async def generate_framework_guide(
         max_tokens = settings.implementation_max_tokens or 4096
 
     try:
-        frameworks, runtimes = get_primary_frameworks(repo_root)
+        frameworks, runtimes, tooling = get_primary_frameworks(repo_root)
     except Exception as exc:
         logger.warning("Framework guide: detection failed: %s", exc)
         return ""
@@ -1911,6 +1988,12 @@ async def generate_framework_guide(
         len(frameworks),
         ", ".join(f"{n} {v}" for n, v in frameworks),
     )
+    if tooling:
+        logger.info(
+            "Framework guide: detected %d tool(s): %s",
+            len(tooling),
+            ", ".join(f"{n} {v}" for n, v in tooling),
+        )
 
     depth = (settings.framework_guide_depth or "deep").lower()
 
@@ -1918,11 +2001,13 @@ async def generate_framework_guide(
         logger.info("Framework guide: using basic (single-pass) mode")
         guide = await _generate_guide_basic(
             repo_root, llm_client, frameworks, runtimes, max_tokens,
+            tooling=tooling,
         )
     else:
         logger.info("Framework guide: using deep (multi-pass) mode")
         guide = await _generate_guide_deep(
             repo_root, llm_client, frameworks, runtimes, max_tokens,
+            tooling=tooling,
         )
 
     if not guide:
@@ -1931,8 +2016,15 @@ async def generate_framework_guide(
     fw_label = ", ".join(
         canonicalize_name(name) for name, _ver in frameworks
     )
+    if tooling:
+        tool_label = ", ".join(
+            canonicalize_name(name) for name, _ver in tooling
+        )
+        full_label = f"{fw_label} + {tool_label}"
+    else:
+        full_label = fw_label
     content = (
-        f"# Framework Guide: {fw_label}\n\n"
+        f"# Framework Guide: {full_label}\n\n"
         "_Auto-generated. Edit freely — this file is yours to curate._\n\n"
         f"{guide.strip()}\n"
     )

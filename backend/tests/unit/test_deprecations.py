@@ -192,13 +192,25 @@ class TestDetectVersions:
 
 
 class TestCategorize:
-    def test_vite_is_library(self):
-        assert _categorize("vite") == "library"
+    def test_vite_is_tooling(self):
+        assert _categorize("vite") == "tooling"
+
+    def test_tailwindcss_is_tooling(self):
+        assert _categorize("tailwindcss") == "tooling"
+
+    def test_postcss_is_tooling(self):
+        assert _categorize("postcss") == "tooling"
+
+    def test_vitest_is_tooling(self):
+        assert _categorize("vitest") == "tooling"
 
     def test_laravel_is_framework(self):
         assert _categorize("laravel/framework") == "framework"
 
     def test_react_is_framework(self):
         assert _categorize("react") == "framework"
+
+    def test_lodash_is_library(self):
+        assert _categorize("lodash") == "library"
 
 

@@ -58,13 +58,30 @@ _KNOWN_FRAMEWORKS: frozenset[str] = frozenset({
     "microsoft.aspnetcore",
 })
 
+_KNOWN_TOOLING: frozenset[str] = frozenset({
+    # Build tools
+    "vite", "webpack", "esbuild", "turbopack", "rollup", "parcel",
+    # CSS frameworks / preprocessors
+    "tailwindcss", "bootstrap", "postcss", "sass", "less",
+    # Frontend utilities / integrations
+    "alpinejs", "htmx.org",
+    "livewire/livewire", "inertiajs/inertia-laravel",
+    "@inertiajs/vue3", "@inertiajs/react", "@inertiajs/svelte",
+    # Testing tools with significant config
+    "vitest", "jest", "playwright", "@playwright/test",
+    "cypress", "pestphp/pest",
+})
+
 
 def _categorize(name: str) -> str:
-    """Determine if a dependency is a framework or library."""
+    """Determine if a dependency is a framework, tooling, or library."""
     lower = name.lower().replace("_", "-")
     for fw in _KNOWN_FRAMEWORKS:
         if lower == fw or lower.startswith(fw):
             return "framework"
+    for tool in _KNOWN_TOOLING:
+        if lower == tool or lower.startswith(tool):
+            return "tooling"
     return "library"
 
 

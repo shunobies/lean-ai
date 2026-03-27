@@ -68,7 +68,7 @@ class TestGetPrimaryFrameworks:
         comp.write_text(json.dumps({
             "require": {"php": "^8.4", "laravel/framework": "^12.0"},
         }))
-        frameworks, runtimes = _get_primary_frameworks(str(tmp_path))
+        frameworks, runtimes, _tooling = _get_primary_frameworks(str(tmp_path))
         fw_names = [n for n, _v in frameworks]
         rt_names = [n for n, _v in runtimes]
         assert "laravel/framework" in fw_names
@@ -80,7 +80,7 @@ class TestGetPrimaryFrameworks:
             '[project]\nrequires-python = ">=3.12"\n'
             'dependencies = ["django>=5.0"]\n'
         )
-        frameworks, runtimes = _get_primary_frameworks(str(tmp_path))
+        frameworks, runtimes, _tooling = _get_primary_frameworks(str(tmp_path))
         fw_names = [n for n, _v in frameworks]
         assert "django" in fw_names
 
@@ -89,7 +89,7 @@ class TestGetPrimaryFrameworks:
         pkg.write_text(json.dumps({
             "dependencies": {"react": "^18.2.0", "next": "^14.0.0"},
         }))
-        frameworks, runtimes = _get_primary_frameworks(str(tmp_path))
+        frameworks, runtimes, _tooling = _get_primary_frameworks(str(tmp_path))
         fw_names = [n for n, _v in frameworks]
         assert "react" in fw_names or "next" in fw_names
 
@@ -100,18 +100,18 @@ class TestGetPrimaryFrameworks:
             "ruby '3.2.0'\n"
             "gem 'rails', '~> 7.1'\n"
         )
-        frameworks, runtimes = _get_primary_frameworks(str(tmp_path))
+        frameworks, runtimes, _tooling = _get_primary_frameworks(str(tmp_path))
         fw_names = [n for n, _v in frameworks]
         assert "rails" in fw_names
 
     def test_no_frameworks(self, tmp_path):
         req = tmp_path / "requirements.txt"
         req.write_text("requests>=2.31\nhttpx>=0.25\n")
-        frameworks, runtimes = _get_primary_frameworks(str(tmp_path))
+        frameworks, runtimes, _tooling = _get_primary_frameworks(str(tmp_path))
         assert frameworks == []
 
     def test_empty_project(self, tmp_path):
-        frameworks, runtimes = _get_primary_frameworks(str(tmp_path))
+        frameworks, runtimes, _tooling = _get_primary_frameworks(str(tmp_path))
         assert frameworks == []
         assert runtimes == []
 
@@ -126,7 +126,7 @@ class TestGetPrimaryFrameworks:
                 "svelte": "^4.0.0",
             },
         }))
-        frameworks, _runtimes = _get_primary_frameworks(str(tmp_path))
+        frameworks, _runtimes, _tooling = _get_primary_frameworks(str(tmp_path))
         assert len(frameworks) <= 3
 
 
@@ -1136,15 +1136,49 @@ class TestCheckInvalidPathsPhp:
 # ---------------------------------------------------------------------------
 
 
-class TestViteNotFramework:
-    def test_vite_not_detected_as_framework(self, tmp_path):
+class TestToolingDetection:
+    def test_vite_detected_as_tooling(self, tmp_path):
         pkg = tmp_path / "package.json"
         pkg.write_text(json.dumps({
             "devDependencies": {"vite": "^7.0.0"},
         }))
-        frameworks, _runtimes = _get_primary_frameworks(str(tmp_path))
+        frameworks, _runtimes, tooling = _get_primary_frameworks(str(tmp_path))
         fw_names = [n for n, _v in frameworks]
+        tool_names = [n for n, _v in tooling]
         assert "vite" not in fw_names
+        assert "vite" in tool_names
+
+    def test_tailwind_detected_as_tooling(self, tmp_path):
+        pkg = tmp_path / "package.json"
+        pkg.write_text(json.dumps({
+            "devDependencies": {"tailwindcss": "^4.0.0", "postcss": "^8.4.0"},
+        }))
+        _fw, _rt, tooling = _get_primary_frameworks(str(tmp_path))
+        tool_names = [n for n, _v in tooling]
+        assert "tailwindcss" in tool_names
+        assert "postcss" in tool_names
+
+    def test_tooling_capped_at_five(self, tmp_path):
+        pkg = tmp_path / "package.json"
+        pkg.write_text(json.dumps({
+            "devDependencies": {
+                "vite": "^8.0.0", "tailwindcss": "^4.0.0",
+                "postcss": "^8.4.0", "vitest": "^3.0.0",
+                "playwright": "^1.40.0", "jest": "^29.0.0",
+                "esbuild": "^0.20.0",
+            },
+        }))
+        _fw, _rt, tooling = _get_primary_frameworks(str(tmp_path))
+        assert len(tooling) <= 5
+
+    def test_unknown_stays_library(self, tmp_path):
+        pkg = tmp_path / "package.json"
+        pkg.write_text(json.dumps({
+            "dependencies": {"lodash": "^4.17.0"},
+        }))
+        _fw, _rt, tooling = _get_primary_frameworks(str(tmp_path))
+        tool_names = [n for n, _v in tooling]
+        assert "lodash" not in tool_names
 
 
 # ---------------------------------------------------------------------------
