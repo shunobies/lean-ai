@@ -836,6 +836,12 @@ export function getSettingsPanelHtml(): string {
             <input type="number" id="ttsSpeed" min="0.5" max="2.0" step="0.1" placeholder="1.0">
         </div>
     </div>
+    <div class="field-row">
+        <div class="field">
+            <label>TTS CPU threads <span class="hint">0 = auto</span></label>
+            <input type="number" id="ttsCpuThreads" min="0" max="32" step="1" placeholder="0">
+        </div>
+    </div>
     <div class="field-check">
         <input type="checkbox" id="enableWakeWord">
         <div>
@@ -1350,6 +1356,7 @@ export function getSettingsPanelHtml(): string {
             enableTts:             val('enableTts'),
             ttsVoice:              val('ttsVoice'),
             ttsSpeed:              val('ttsSpeed'),
+            ttsCpuThreads:         val('ttsCpuThreads'),
             enableWakeWord:        val('enableWakeWord'),
 
             // Advanced
@@ -1491,6 +1498,7 @@ export function getSettingsPanelHtml(): string {
         setVal('enableTts',             v.enableTts);
         setVal('ttsVoice',              v.ttsVoice);
         setVal('ttsSpeed',              v.ttsSpeed);
+        setVal('ttsCpuThreads',         v.ttsCpuThreads);
         setVal('enableWakeWord',        v.enableWakeWord);
 
         // Advanced

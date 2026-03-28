@@ -409,6 +409,13 @@
           "maximum": 2,
           "markdownDescription": "**Voice TTS** — Speech rate multiplier. `1.0` = normal speed, `0.5` = half speed, `2.0` = double speed."
         },
+        "lean-ai.ttsCpuThreads": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 32,
+          "markdownDescription": "**Voice TTS** — ONNX inference threads for Kokoro TTS. `0` = auto (`min(CPU count, 8)`). Higher values may improve synthesis speed on multi-core systems. Requires backend restart."
+        },
         "lean-ai.enableWakeWord": {
           "type": "boolean",
           "default": false,

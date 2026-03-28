@@ -145,6 +145,7 @@ class Settings(BaseSettings):
     tts_voice: str = "af_heart"  # kokoro-onnx voice ID
     tts_speed: float = 1.0  # 0.5–2.0
     tts_model_quality: str = "fp16"  # fp32, fp16, or int8
+    tts_cpu_threads: int = 0  # ONNX intra-op threads (0 = auto: min(cpu_count, 8))
 
     # ── Voice — Wake word (openWakeWord, always local) ──
     enable_wake_word: bool = False

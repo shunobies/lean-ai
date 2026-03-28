@@ -704,11 +704,13 @@ export class BackendClient {
         text: string,
         voice?: string,
         speed?: number,
+        signal?: AbortSignal,
     ): Promise<{ audio_base64: string; duration_seconds: number }> {
         const resp = await fetch(`${this.baseUrl}/api/voice/tts`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text, voice: voice || "", speed: speed || 0 }),
+            signal,
         });
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
@@ -722,11 +724,13 @@ export class BackendClient {
         voice: string | undefined,
         speed: number | undefined,
         onChunk: (base64: string) => void,
+        signal?: AbortSignal,
     ): Promise<void> {
         const resp = await fetch(`${this.baseUrl}/api/voice/tts/stream`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text, voice: voice || "", speed: speed || 0 }),
+            signal,
         });
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
@@ -759,11 +763,13 @@ export class BackendClient {
         voice: string | undefined,
         speed: number | undefined,
         onChunk: (pcmBase64: string, sampleRate: number) => void,
+        signal?: AbortSignal,
     ): Promise<void> {
         const resp = await fetch(`${this.baseUrl}/api/voice/tts/stream-pcm`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text, voice: voice || "", speed: speed || 0 }),
+            signal,
         });
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };

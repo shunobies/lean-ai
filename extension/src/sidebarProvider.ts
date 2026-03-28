@@ -71,6 +71,8 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     private _wakeWordActive = false;
     private _ttsSentenceQueue: string[] = [];
     private _ttsSpeaking = false;
+    private _ttsCancelled = false;
+    private _ttsAbortController: AbortController | undefined;
     private _ttsSentenceAccumulator = "";
     private _ttsInCodeFence = false;
     private _lastDebugStop?: { reason: string; text?: string; threadId?: number };
@@ -1035,6 +1037,16 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 this.handleVoiceToggle(msg.feature as string, !!(msg.enabled));
                 break;
             case "ttsStop":
+                // Kill the entire TTS pipeline — sentence queue + active stream
+                this._ttsCancelled = true;
+                this._ttsSentenceQueue = [];
+                this._ttsSpeaking = false;
+                this._ttsSentenceAccumulator = "";
+                this._ttsInCodeFence = false;
+                if (this._ttsAbortController) {
+                    this._ttsAbortController.abort();
+                    this._ttsAbortController = undefined;
+                }
                 break;
             case "voiceConfigChange":
                 if (msg.voice) {
@@ -1200,23 +1212,29 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     async speakText(text: string): Promise<void> {
         try {
             const cleaned = LeanAISidebarProvider._stripCodeForTts(text);
-            if (!cleaned) { return; }
+            if (!cleaned || this._ttsCancelled) { return; }
+
+            // Create an AbortController so the stop button can kill the active fetch
+            const ac = new AbortController();
+            this._ttsAbortController = ac;
+
             // Always use PCM streaming for lower latency — falls back to WAV on error
             try {
                 await this.client.ttsStreamPcm(cleaned, undefined, undefined, (pcmBase64, sampleRate) => {
                     this.postMessage({ type: "ttsAudio", audio: pcmBase64, isPcm: true, sampleRate });
-                });
-            } catch {
+                }, ac.signal);
+            } catch (e) {
+                if (ac.signal.aborted) { return; } // User pressed stop — not an error
                 // Fallback: WAV streaming or non-streaming
                 if (cleaned.length < 500) {
-                    const result = await this.client.ttsSynthesize(cleaned);
+                    const result = await this.client.ttsSynthesize(cleaned, undefined, undefined, ac.signal);
                     if (result.audio_base64) {
                         this.postMessage({ type: "ttsAudio", audio: result.audio_base64 });
                     }
                 } else {
                     await this.client.ttsStream(cleaned, undefined, undefined, (chunk) => {
                         this.postMessage({ type: "ttsAudio", audio: chunk });
-                    });
+                    }, ac.signal);
                 }
             }
         } catch (err) {
@@ -1226,8 +1244,10 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
 
     /** Queue a sentence for sequential TTS playback. Fire-and-forget safe. */
     speakSentence(text: string): void {
+        if (this._ttsCancelled) { return; }
         this._ttsSentenceQueue.push(text);
         if (!this._ttsSpeaking) {
+            this._ttsCancelled = false;
             this._processTtsSentenceQueue();
         }
     }
@@ -1236,7 +1256,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         if (this._ttsSpeaking) { return; }
         this._ttsSpeaking = true;
         try {
-            while (this._ttsSentenceQueue.length > 0) {
+            while (this._ttsSentenceQueue.length > 0 && !this._ttsCancelled) {
                 const sentence = this._ttsSentenceQueue.shift()!;
                 await this.speakText(sentence);
             }
@@ -1285,7 +1305,13 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         this._ttsInCodeFence = false;
         this._ttsSentenceQueue = [];
         this._ttsSpeaking = false;
+        this._ttsCancelled = false;
+        if (this._ttsAbortController) {
+            this._ttsAbortController.abort();
+            this._ttsAbortController = undefined;
+        }
         this.postMessage({ type: "ttsStopPlayback" });
+        this.postMessage({ type: "ttsClearReplay" });
     }
 
     /** Send voiceAvailable + voice list to the webview. */

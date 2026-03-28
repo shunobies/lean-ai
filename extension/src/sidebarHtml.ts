@@ -749,6 +749,18 @@ export function getWebviewHtml(chatFontSize: number): string {
     .voice-stop-tts:hover {
         background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
     }
+    .voice-replay-tts {
+        background: none;
+        border: 1px solid var(--vscode-input-border);
+        color: var(--vscode-foreground);
+        border-radius: 3px;
+        padding: 1px 6px;
+        cursor: pointer;
+        font-size: 10px;
+    }
+    .voice-replay-tts:hover {
+        background: var(--vscode-inputValidation-infoBackground, #063b49);
+    }
     .voice-setup-hint {
         font-size: 11px;
         color: var(--vscode-editorWarning-foreground, #cca700);
@@ -918,6 +930,7 @@ export function getWebviewHtml(chatFontSize: number): string {
     <input type="range" id="speedSlider" class="voice-speed" min="0.5" max="2.0" step="0.1" value="1.0" title="TTS Speed" style="display:none;">
     <span id="speedLabel" class="voice-speed-label" style="display:none;">1.0x</span>
     <button class="voice-stop-tts" id="stopTtsBtn" style="display:none;" title="Stop speaking">&#9724;</button>
+    <button class="voice-replay-tts" id="replayTtsBtn" style="display:none;" title="Replay last response">&#9654;</button>
     <span id="voiceSetupHint" class="voice-setup-hint" style="display:none;">&#9888; Deps missing &mdash; <a href="#" id="voiceSetupLink">setup steps</a></span>
 </div>
 
@@ -978,6 +991,7 @@ export function getWebviewHtml(chatFontSize: number): string {
     const wakeWordToggle = document.getElementById('wakeWordToggle');
     const micBtn = document.getElementById('micBtn');
     const stopTtsBtn = document.getElementById('stopTtsBtn');
+    const replayTtsBtn = document.getElementById('replayTtsBtn');
     const voiceSelect = document.getElementById('voiceSelect');
     const speedSlider = document.getElementById('speedSlider');
     const speedLabel = document.getElementById('speedLabel');
@@ -990,6 +1004,7 @@ export function getWebviewHtml(chatFontSize: number): string {
     let wakeWordTriggered = false;
     let ttsPlaying = false;
     let ttsQueue = [];
+    let ttsReplayCache = []; // Accumulated AudioBuffer objects for replay
     // Web Audio API — bypasses autoplay restrictions in webview iframes
     let audioCtx = null;
     // Gapless playback state
@@ -1566,7 +1581,7 @@ export function getWebviewHtml(chatFontSize: number): string {
     }
 
     /** Schedule a decoded AudioBuffer for gapless playback. */
-    function scheduleBuffer(buffer) {
+    function scheduleBuffer(buffer, isReplay) {
         const ctx = ensureAudioCtx();
         const source = ctx.createBufferSource();
         source.buffer = buffer;
@@ -1583,7 +1598,13 @@ export function getWebviewHtml(chatFontSize: number): string {
 
         ttsPlaying = true;
         stopTtsBtn.style.display = '';
+        replayTtsBtn.style.display = 'none';
         ttsScheduledSources.push(source);
+
+        // Cache buffer for replay (skip if this IS a replay)
+        if (!isReplay) {
+            ttsReplayCache.push(buffer);
+        }
 
         source.onended = () => {
             const idx = ttsScheduledSources.indexOf(source);
@@ -1592,6 +1613,10 @@ export function getWebviewHtml(chatFontSize: number): string {
             if (ttsScheduledSources.length === 0 && ttsQueue.length === 0 && ttsDecodedQueue.length === 0) {
                 ttsPlaying = false;
                 stopTtsBtn.style.display = 'none';
+                // Show replay button if we have cached audio
+                if (ttsReplayCache.length > 0) {
+                    replayTtsBtn.style.display = '';
+                }
             }
         };
     }
@@ -1649,11 +1674,24 @@ export function getWebviewHtml(chatFontSize: number): string {
         ttsPlaying = false;
         ttsNextStartTime = 0;
         stopTtsBtn.style.display = 'none';
+        // Show replay if we have cached audio
+        if (ttsReplayCache.length > 0) {
+            replayTtsBtn.style.display = '';
+        }
     }
 
     stopTtsBtn.addEventListener('click', () => {
         stopTtsPlayback();
         vscode.postMessage({ type: 'ttsStop' });
+    });
+
+    replayTtsBtn.addEventListener('click', () => {
+        if (ttsReplayCache.length === 0) { return; }
+        replayTtsBtn.style.display = 'none';
+        ttsNextStartTime = 0;
+        for (const buffer of ttsReplayCache) {
+            scheduleBuffer(buffer, true);
+        }
     });
 
     function autoResize() {
@@ -2123,6 +2161,11 @@ export function getWebviewHtml(chatFontSize: number): string {
 
             case 'ttsStopPlayback':
                 stopTtsPlayback();
+                break;
+
+            case 'ttsClearReplay':
+                ttsReplayCache = [];
+                replayTtsBtn.style.display = 'none';
                 break;
 
             case 'wakeWordDetected':

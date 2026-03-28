@@ -262,6 +262,7 @@ export class SettingsPanel {
             enableTts:                "lean-ai.enableTts",
             ttsVoice:                 "lean-ai.ttsVoice",
             ttsSpeed:                 "lean-ai.ttsSpeed",
+            ttsCpuThreads:            "lean-ai.ttsCpuThreads",
             enableWakeWord:           "lean-ai.enableWakeWord",
         };
 
@@ -274,7 +275,7 @@ export class SettingsPanel {
             "ollamaRequestRepeatPenalty", "ollamaRequestMaxTokens",
             "openaiContextWindow", "anthropicContextWindow",
             "searchDelay", "postValidationMaxRetries", "postValidationFixTurns",
-            "implementationMaxTurns", "refreshThreshold", "numParallel", "ttsSpeed",
+            "implementationMaxTurns", "refreshThreshold", "numParallel", "ttsSpeed", "ttsCpuThreads",
             "ollamaTemperature", "ollamaTopP", "ollamaTopK", "ollamaRepeatPenalty",
             "openaiTemperature", "anthropicTemperature",
         ]);
@@ -433,6 +434,7 @@ export class SettingsPanel {
             enableTts:                 config.get("lean-ai.enableTts", false),
             ttsVoice:                  config.get("lean-ai.ttsVoice", "af_heart"),
             ttsSpeed:                  config.get("lean-ai.ttsSpeed", 1.0),
+            ttsCpuThreads:             config.get("lean-ai.ttsCpuThreads", 0),
             enableWakeWord:            config.get("lean-ai.enableWakeWord", false),
 
             // Search

@@ -172,7 +172,11 @@ class TTSService:
         sess_opts.graph_optimization_level = (
             ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         )
-        sess_opts.intra_op_num_threads = min(os.cpu_count() or 4, 8)
+        auto_threads = min(os.cpu_count() or 4, 8)
+        sess_opts.intra_op_num_threads = (
+            settings.tts_cpu_threads if settings.tts_cpu_threads > 0
+            else auto_threads
+        )
         sess_opts.inter_op_num_threads = 1
         session = ort.InferenceSession(
             model_path,

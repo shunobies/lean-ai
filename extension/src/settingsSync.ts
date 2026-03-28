@@ -85,6 +85,7 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.enableTts":                 "LEAN_AI_ENABLE_TTS",
     "lean-ai.ttsVoice":                  "LEAN_AI_TTS_VOICE",
     "lean-ai.ttsSpeed":                  "LEAN_AI_TTS_SPEED",
+    "lean-ai.ttsCpuThreads":             "LEAN_AI_TTS_CPU_THREADS",
     "lean-ai.enableWakeWord":            "LEAN_AI_ENABLE_WAKE_WORD",
 
     // Search
