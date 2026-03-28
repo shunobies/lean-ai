@@ -94,6 +94,56 @@ guess
 - Never assume the executor will "figure out" relationships between steps
 """
 
+# ── Plan assembly system prompt (Phase 4 only) ───────────────────
+
+PLAN_ASSEMBLY_SYSTEM_PROMPT = """\
+Use your knowledge of programming and software architecture to assemble \
+a structured implementation plan from the design materials provided.
+
+Convert the design synthesis, file summary, and scope analysis into a \
+concrete sequence of implementation steps. Each step maps to exactly \
+one tool call that the executor model will perform.
+
+VALID STEP TOOLS:
+- create_file — for files that do not exist yet
+- edit_file — for modifications to existing files
+- read_file — for reading a file before editing or for context
+- run_command — for build commands, migrations, code generators
+- run_tests — for running tests
+- run_lint — for running linters
+- format_code — for running formatters
+
+Do NOT produce steps using list_directory, directory_tree, grep_files, \
+search_internet, fetch_url, or update_scratchpad. Codebase exploration \
+was completed in earlier phases — the file summary below contains \
+everything you need.
+
+Focus the plan on implementation: the majority of steps should be \
+create_file and edit_file. Use read_file only when the executor needs \
+to verify file state before editing.
+
+EXECUTOR MODEL AWARENESS:
+The plan you produce will be executed step-by-step by a smaller, less capable \
+model. This executor model:
+- Sees only ONE step at a time, not the full plan
+- Does not receive your design reasoning, risk analysis, or gap analysis
+- Has project context but not the file contents read during exploration
+- Cannot infer intent — it follows instructions literally
+- May struggle with ambiguous or underspecified instructions
+
+Therefore:
+- Write each step as a self-contained instruction that can be executed without \
+understanding the broader plan
+- Include exact code snippets, import paths, and method signatures — not \
+descriptions of what to write
+- Specify the precise location in the file (function name, class, line range) \
+for every edit
+- When a step depends on output from a previous step, include the expected \
+names/paths/signatures in the context field so the executor does not have to \
+guess
+- Never assume the executor will "figure out" relationships between steps
+"""
+
 # ── Implementation system prompt (multi-turn, currently unused) ───
 
 IMPLEMENTATION_SYSTEM_PROMPT = """\
@@ -112,6 +162,10 @@ PROGRESS:
 
 STEP_EXECUTION_SYSTEM_PROMPT = """\
 Execute the step below. Call EXACTLY the tool specified on the file specified.
+
+AVAILABLE TOOLS: create_file, edit_file, read_file, run_tests, run_lint, \
+format_code, run_command, list_directory, directory_tree, grep_files, \
+update_scratchpad, search_internet, fetch_url, task_complete
 
 RULES:
 1. If the step includes context (file content from the planner's investigation), \
@@ -133,7 +187,11 @@ names, and inconsistent references are the hardest bugs to find.
 # ── Fix mode system prompt ────────────────────────────────────────
 
 FIX_SYSTEM_PROMPT = """\
-Diagnose and apply a minimal fix. You have full tool access.
+Diagnose and apply a minimal fix.
+
+AVAILABLE TOOLS: create_file, edit_file, read_file, run_tests, run_lint, \
+format_code, run_command, list_directory, directory_tree, grep_files, \
+update_scratchpad, search_internet, fetch_url, task_complete
 
 RULES:
 """ + TOOL_POLICY + """
@@ -149,6 +207,9 @@ PROGRESS:
 
 FIX_INVESTIGATION_PROMPT = """\
 MODE: READ-ONLY (no edit_file, no create_file)
+
+AVAILABLE TOOLS: read_file, list_directory, directory_tree, grep_files, \
+run_tests, run_lint, search_internet, fetch_url, update_scratchpad, task_complete
 
 Investigate the reported issue before making any changes. Your goal is to \
 understand the problem fully before fixing it.
@@ -173,8 +234,12 @@ task_complete to move on to making changes.
 # ── Request mode system prompt ────────────────────────────────────
 
 REQUEST_SYSTEM_PROMPT = """\
-Complete the task described by the user. You have full tool access — infer \
-what is needed from the task description and start working immediately.
+Complete the task described by the user. Infer what is needed from the task \
+description and start working immediately.
+
+AVAILABLE TOOLS: create_file, edit_file, read_file, run_tests, run_lint, \
+format_code, run_command, list_directory, directory_tree, grep_files, \
+update_scratchpad, search_internet, fetch_url, task_complete
 
 RULES:
 """ + TOOL_POLICY + """

@@ -272,7 +272,16 @@ All under `/api` prefix:
 
 ## Commit After Every Change
 
-Always commit after completing a change without waiting to be asked. Each logical change gets its own commit.
+Always commit after completing a change without waiting to be asked. Each logical change gets its own commit. When an approved plan's changes are complete and tests pass, commit immediately — do not wait for the user to ask.
+
+## Test Modification Policy
+
+Do not modify existing tests. Tests are only changed in two cases:
+
+1. **Adding new tests** for new features.
+2. **A feature change genuinely requires a test update** — in this case, stop and explain: "I think I need to modify this test because [reason tied to the feature change]." Wait for approval before touching the test.
+
+If your code does not pass an existing test, fix your code — not the test.
 
 ## No Stubs Rule
 

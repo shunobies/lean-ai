@@ -5,7 +5,23 @@ The executor iterates through steps, feeding each to a constrained LLM
 that translates the detailed instruction into a single tool invocation.
 """
 
-from pydantic import BaseModel
+import logging
+
+from pydantic import BaseModel, field_validator
+
+logger = logging.getLogger(__name__)
+
+# Tools valid in implementation plan steps (Phase 4 output).
+# Includes read_file (executor reads before editing), run_tests, run_lint,
+# format_code — only truly non-plan tools (list_directory, directory_tree,
+# grep_files, search_internet, etc.) are filtered out.
+IMPLEMENTATION_STEP_TOOLS = {
+    "create_file", "edit_file", "run_command", "read_file",
+    "run_tests", "run_lint", "format_code",
+}
+
+# Alias — all tools that may appear in any PlanStep.
+ALL_VALID_STEP_TOOLS = IMPLEMENTATION_STEP_TOOLS
 
 
 class PlanStep(BaseModel):
@@ -20,6 +36,16 @@ class PlanStep(BaseModel):
     tool: str
     """Tool to call: ``create_file``, ``edit_file``, ``run_command``,
     ``run_tests``, ``run_lint``, ``format_code``."""
+
+    @field_validator("tool")
+    @classmethod
+    def warn_non_standard_tool(cls, v: str) -> str:
+        if v not in ALL_VALID_STEP_TOOLS:
+            logger.warning(
+                "PlanStep has non-standard tool '%s' — expected one of %s",
+                v, ALL_VALID_STEP_TOOLS,
+            )
+        return v
 
     file_path: str
     """Target file path (relative to repo root).

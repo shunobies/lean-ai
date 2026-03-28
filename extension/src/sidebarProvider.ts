@@ -1018,6 +1018,8 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 if (this.detachedPanel) {
                     this.detachedPanel.dispose();
                 }
+                // Re-open the secondary sidebar and focus the chat view
+                vscode.commands.executeCommand("workbench.action.focusAuxiliaryBar");
                 vscode.commands.executeCommand("lean-ai.chatView.focus");
                 break;
             case "openFileDiff":
@@ -1067,8 +1069,6 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     openChatInNewWindow(): void {
         if (this.detachedPanel) {
             this.detachedPanel.reveal(vscode.ViewColumn.Two);
-            // Move to a separate OS window so it can go on another monitor
-            vscode.commands.executeCommand("workbench.action.moveEditorToNewWindow");
             return;
         }
 
@@ -1096,11 +1096,8 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
         // Tell the pop-out to show the "return to sidebar" button
         panel.webview.postMessage({ type: "setViewMode", mode: "popout" });
 
-        // Move to a separate OS window so it can go on another monitor
-        vscode.commands.executeCommand("workbench.action.moveEditorToNewWindow");
-
-        // Close the sidebar since the chat is now in the pop-out
-        vscode.commands.executeCommand("workbench.action.closeSidebar");
+        // Close the secondary sidebar since the chat is now in the pop-out panel
+        vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar");
     }
 
     // ── Voice helpers ───────────────────────────────────────────────

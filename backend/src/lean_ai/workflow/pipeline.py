@@ -472,7 +472,7 @@ async def _execute_plan(
                 f"{step_label}: {explanation.strip()}"
             )
         completed_descriptions.append(
-            f"{step_label}: {step.instruction[:100]}"
+            f"{step_label}: {step.instruction}"
         )
 
         # Collect files created/modified for cross-step context

@@ -23,13 +23,18 @@ from fastapi import WebSocket
 
 from lean_ai.config import settings
 from lean_ai.llm.plan_schema import (
+    IMPLEMENTATION_STEP_TOOLS,
     ExecutionPlan,
-    PlanStep,
     VerificationPlan,
     plan_to_markdown,
 )
-from lean_ai.llm.prompts import CLARIFICATION_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT
+from lean_ai.llm.prompts import (
+    CLARIFICATION_SYSTEM_PROMPT,
+    PLAN_ASSEMBLY_SYSTEM_PROMPT,
+    PLAN_SYSTEM_PROMPT,
+)
 from lean_ai.llm.tool_definitions import PLANNING_TOOLS
+from lean_ai.routers.context_helpers import load_full_context
 
 if TYPE_CHECKING:
     from lean_ai.llm.client import LLMClient
@@ -255,13 +260,9 @@ async def create_plan(
     plan_start = time.monotonic()
     phase_timings: dict[str, float] = {}
 
-    # Load project context for expert phases (3, 4)
-    _pc_path = Path(repo_root) / ".lean_ai" / "project_context.md"
-    project_context = ""
-    if _pc_path.is_file():
-        project_context = _pc_path.read_text(
-            encoding="utf-8", errors="replace",
-        ).strip()
+    # Load full context for expert phases (3, 4) — includes project_context.md,
+    # framework_guide.md, and custom steering docs from .lean_ai/context/
+    project_context = load_full_context(repo_root)
 
     # Phase 1: Scope Analysis
     await _send_stage(ws, "Phase 1: Analyzing scope...", model=llm_client.model_name, phase=1)
@@ -391,7 +392,14 @@ async def create_plan(
                 "FILES READ FOR CONTEXT (not modified, but content informs changes):\n"
                 "1. path/to/source — what it contains\n\n"
                 "MISSING INFRASTRUCTURE (assumed by the task but not found):\n"
-                "1. what is missing — why it is needed"
+                "1. what is missing — why it is needed\n\n"
+                "CRITICAL: Your text output IS the file summary that downstream "
+                "phases use to produce implementation steps. Tool call results "
+                "are NOT passed forward — only your text responses are. You MUST "
+                "include the relevant file content (key sections, 15-25 lines "
+                "each) IN YOUR TEXT RESPONSES for every file to be modified, not "
+                "just in tool calls. If you read a file, summarize its structure "
+                "and include the critical code sections in your output above."
             ),
         },
     ]
@@ -584,7 +592,7 @@ async def create_plan(
     t0 = time.monotonic()
     plan = await expert.chat_structured(
         messages=[
-            {"role": "system", "content": PLAN_SYSTEM_PROMPT},
+            {"role": "system", "content": PLAN_ASSEMBLY_SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": (
@@ -800,31 +808,26 @@ async def create_plan(
 
     phase_timings["phase_4_plan_assembly"] = time.monotonic() - t0
 
-    # Safety: strip any run_tests/run_lint steps the LLM snuck into Phase 4
-    verification_tools = {"run_tests", "run_lint", "format_code"}
-    impl_steps = [s for s in plan.steps if s.tool not in verification_tools]
+    # Safety: strip exploration tools (list_directory, grep_files, etc.)
+    # that have no business in an implementation plan.
+    impl_steps = [s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS]
     stripped_count = len(plan.steps) - len(impl_steps)
     if stripped_count:
-        logger.info("Stripped %d mid-plan verification steps", stripped_count)
+        stripped_tools = [s.tool for s in plan.steps if s.tool not in IMPLEMENTATION_STEP_TOOLS]
+        logger.warning(
+            "Stripped %d non-implementation steps from Phase 4 plan: %s",
+            stripped_count, stripped_tools,
+        )
         for i, step in enumerate(impl_steps, 1):
             step.step_number = i
         plan.steps = impl_steps
-
-    # Dedup: if Phase 4 produces multiple steps for the same file path,
-    # keep only the first one (e.g. edit_file then create_file for same path)
-    seen_paths: set[str] = set()
-    deduped: list[PlanStep] = []
-    for step in plan.steps:
-        if step.file_path and step.file_path in seen_paths:
-            logger.info("Stripped duplicate step for %s", step.file_path)
-            continue
-        if step.file_path:
-            seen_paths.add(step.file_path)
-        deduped.append(step)
-    if len(deduped) < len(plan.steps):
-        for i, step in enumerate(deduped, 1):
-            step.step_number = i
-        plan.steps = deduped
+    if not plan.steps and stripped_count:
+        logger.error(
+            "Phase 4 produced zero implementation steps — all %d steps "
+            "were exploration/verification tools. file_summary may be "
+            "insufficient.",
+            stripped_count,
+        )
 
     # Save Phase 4 outputs
     _save_debug_phase(
@@ -1079,7 +1082,7 @@ async def _revise_plan(
     logger.info("Plan revision")
     plan = await expert.chat_structured(
         messages=[
-            {"role": "system", "content": PLAN_SYSTEM_PROMPT},
+            {"role": "system", "content": PLAN_ASSEMBLY_SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": (
@@ -1097,6 +1100,18 @@ async def _revise_plan(
         max_tokens=plan_max_tokens,
         thinking_callback=on_thinking,
     )
+    # Safety: strip non-implementation steps (same as Phase 4)
+    impl_steps = [s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS]
+    if len(impl_steps) < len(plan.steps):
+        stripped_count = len(plan.steps) - len(impl_steps)
+        stripped_tools = [s.tool for s in plan.steps if s.tool not in IMPLEMENTATION_STEP_TOOLS]
+        logger.warning(
+            "Stripped %d non-implementation steps from revised plan: %s",
+            stripped_count, stripped_tools,
+        )
+        for i, step in enumerate(impl_steps, 1):
+            step.step_number = i
+        plan.steps = impl_steps
     logger.info(
         "Plan revised: %d steps, %d affected files",
         len(plan.steps), len(plan.affected_files),

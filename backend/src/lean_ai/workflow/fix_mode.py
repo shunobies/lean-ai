@@ -178,7 +178,8 @@ async def _run_fix(
             "role": "user",
             "content": (
                 "MODE: IMPLEMENTATION\n"
-                "Write tools now available: edit_file, create_file.\n"
+                "All tools now available: create_file, edit_file, "
+                "run_command, format_code (plus all investigation tools).\n"
                 "Use your scratchpad diagnosis. Make the minimal fix. "
                 "Do not continue investigating."
             ),
