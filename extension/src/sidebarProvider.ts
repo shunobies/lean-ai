@@ -56,6 +56,11 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
     // Persisted in globalState so it survives window reloads.
     private lastCompletedSessionId: string | undefined;
 
+    // Backup of the session ID set at workflow start — used by clearSession as
+    // fallback when this.sessionId has already been cleared by the time the
+    // "complete" WebSocket message arrives.
+    private _wsSessionId: string | undefined;
+
     // Set by extension.ts when a scaffold was just created and this window is the new project
     private _pendingInit = false;
 
@@ -575,8 +580,13 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             postMessage: (m) => this.postMessage(m),
             closeWebSocket: () => this.closeWebSocket(),
             clearSession: () => {
-                this.lastCompletedSessionId = this.sessionId;
+                const sid = this.sessionId || this._wsSessionId;
+                if (!sid) {
+                    console.warn("[Lean AI] clearSession: no sessionId available");
+                }
+                this.lastCompletedSessionId = sid;
                 this.sessionId = undefined;
+                this._wsSessionId = undefined;
                 this.context.globalState.update(
                     "lean-ai.lastCompletedSessionId",
                     this.lastCompletedSessionId,
@@ -826,6 +836,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
 
         // Get or create session
         const sessionId = await this.ensureSession();
+        this._wsSessionId = sessionId;
 
         // Ensure WebSocket is connected
         const ws = this.ensureWebSocket(sessionId);
@@ -922,6 +933,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 const hasMessages = this.chatHistory.length > 0;
                 this.closeWebSocket();
                 this.sessionId = undefined;
+                this._wsSessionId = undefined;
                 this.lastCompletedSessionId = undefined;
                 this.context.globalState.update("lean-ai.lastCompletedSessionId", undefined);
                 this.chatHistory = [];

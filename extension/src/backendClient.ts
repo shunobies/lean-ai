@@ -463,6 +463,26 @@ export class BackendClient {
         return resp.json() as Promise<Record<string, unknown>>;
     }
 
+    /**
+     * Find the most recent session that can be rejected/approved (has a branch,
+     * status is completed/cancelled/active). Used as fallback when the extension
+     * lost track of the session ID.
+     */
+    async getLatestRejectableSession(repoRoot: string): Promise<string | undefined> {
+        const params = new URLSearchParams({ repo_root: repoRoot });
+        const resp = await fetch(`${this.baseUrl}/api/sessions?${params}`);
+        if (!resp.ok) { return undefined; }
+        const sessions = await resp.json() as Array<Record<string, unknown>>;
+        // Sessions are returned newest-first. Find the first with a branch
+        // in a rejectable state.
+        const rejectable = sessions.find(
+            (s) =>
+                s.plan_branch &&
+                ["completed", "cancelled", "active"].includes(s.session_status as string),
+        );
+        return rejectable?.session_id as string | undefined;
+    }
+
     async deleteSession(sessionId: string, repoRoot: string): Promise<void> {
         const params = new URLSearchParams({ repo_root: repoRoot });
         const resp = await fetch(`${this.baseUrl}/api/sessions/${sessionId}?${params}`, {

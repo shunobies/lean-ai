@@ -705,7 +705,11 @@ export async function handleApproveCommand(
     ctx: SlashCommandContext,
     _args: string,
 ): Promise<void> {
-    const sessionId = ctx.getLastCompletedSessionId();
+    let sessionId = ctx.getLastCompletedSessionId();
+    if (!sessionId) {
+        // Fallback: query backend for the most recent rejectable session
+        sessionId = await ctx.client.getLatestRejectableSession(ctx.getRepoRoot());
+    }
     if (!sessionId) {
         ctx.postMessage({
             type: "error",
@@ -739,7 +743,11 @@ export async function handleRejectCommand(
     ctx: SlashCommandContext,
     _args: string,
 ): Promise<void> {
-    const sessionId = ctx.getLastCompletedSessionId();
+    let sessionId = ctx.getLastCompletedSessionId();
+    if (!sessionId) {
+        // Fallback: query backend for the most recent rejectable session
+        sessionId = await ctx.client.getLatestRejectableSession(ctx.getRepoRoot());
+    }
     if (!sessionId) {
         ctx.postMessage({
             type: "error",
