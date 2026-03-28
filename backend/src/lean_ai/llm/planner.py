@@ -205,6 +205,7 @@ async def create_plan(
     test_command: str = "",
     session_id: str = "",
     expert_llm_client: "LLMClient | None" = None,
+    request_llm_client: "LLMClient | None" = None,
     on_content: "Callable | None" = None,
     on_thinking: "Callable | None" = None,
     on_tool_call: "Callable | None" = None,
@@ -222,6 +223,8 @@ async def create_plan(
         ws: Optional WebSocket for streaming stage progress.
         refiner: Optional local refiner for privacy-stripping file summaries.
         test_command: If set, planner includes test creation steps.
+        request_llm_client: Optional request model for phases 1-2 (codebase
+            exploration). Falls back to llm_client when not configured.
         on_content: Streaming callback for content tokens.
         on_thinking: Streaming callback for thinking tokens.
         on_tool_call: Callback for tool call events (phase 2).
@@ -238,7 +241,14 @@ async def create_plan(
             on_thinking=on_thinking,
         )
 
-    phase_max_tokens = settings.ollama_max_tokens
+    # Explorer client for phases 1-2 (scope + file identification),
+    # falls back to primary when no request model is configured
+    explorer = request_llm_client or llm_client
+    phase_max_tokens = (
+        settings.effective_request_max_tokens
+        if request_llm_client
+        else settings.ollama_max_tokens
+    )
 
     # Expert client for reasoning-heavy phases (3-5), falls back to standard
     expert = expert_llm_client or llm_client
@@ -265,10 +275,10 @@ async def create_plan(
     project_context = load_full_context(repo_root)
 
     # Phase 1: Scope Analysis
-    await _send_stage(ws, "Phase 1: Analyzing scope...", model=llm_client.model_name, phase=1)
-    logger.info("Planning Phase 1: Scope analysis")
+    await _send_stage(ws, "Phase 1: Analyzing scope...", model=explorer.model_name, phase=1)
+    logger.info("Planning Phase 1: Scope analysis (model=%s)", explorer.model_name)
     t0 = time.monotonic()
-    scope = await llm_client.chat_raw(
+    scope = await explorer.chat_raw(
         messages=[
             {"role": "system", "content": PLAN_SYSTEM_PROMPT},
             {
@@ -306,12 +316,12 @@ async def create_plan(
     _save_debug_phase(
         repo_root, session_id, "phase_1_scope", scope, phase_timings["phase_1_scope"],
     )
-    await _send_stage_done(ws, "Scope analysis complete", model=llm_client.model_name, phase=1)
+    await _send_stage_done(ws, "Scope analysis complete", model=explorer.model_name, phase=1)
 
     # Phase 2: File Identification + Content Reading (with tool access)
     await _send_stage(
         ws, "Phase 2: Exploring codebase and reading files...",
-        model=llm_client.model_name, phase=2,
+        model=explorer.model_name, phase=2,
     )
     logger.info("Planning Phase 2: File identification and reading")
     t0 = time.monotonic()
@@ -453,7 +463,7 @@ async def create_plan(
             return "Exploration marked complete."
         return f"Unknown tool: {name}"
 
-    tool_calls, file_identification = await llm_client.chat_with_tools(
+    tool_calls, file_identification = await explorer.chat_with_tools(
         messages=phase2_messages,
         tools=PLANNING_TOOLS,
         tool_executor_fn=_read_only_executor,
@@ -479,7 +489,7 @@ async def create_plan(
         file_identification, phase_timings["phase_2_file_identification"],
     )
     await _send_stage_done(
-        ws, "Codebase exploration complete", model=llm_client.model_name, phase=2,
+        ws, "Codebase exploration complete", model=explorer.model_name, phase=2,
     )
 
     # Pass exploration results directly to downstream phases

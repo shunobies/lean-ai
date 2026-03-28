@@ -123,7 +123,10 @@ async def run_workflow(
         )
 
     # ── Phase 1: Clarify (optional) ──────────────────────────────
-    task_with_answers = await _clarify_task(task, ws, llm_client, context, dispatcher=dispatcher)
+    clarify_client = request_llm_client or llm_client
+    task_with_answers = await _clarify_task(
+        task, ws, clarify_client, context, dispatcher=dispatcher,
+    )
 
     # ── Phase 2: Plan ────────────────────────────────────────────
     await ws_send(ws, "stage_change", {"stage": "planning"})
@@ -177,6 +180,7 @@ async def run_workflow(
         test_command=plan_commands.get("test", ""),
         session_id=session_id,
         expert_llm_client=expert_llm_client,
+        request_llm_client=request_llm_client,
         on_content=on_planning_content,
         on_thinking=on_planning_thinking,
         on_tool_call=on_planning_tool_call,
@@ -195,6 +199,7 @@ async def run_workflow(
         refiner=refiner,
         test_command=plan_commands.get("test", ""),
         expert_llm_client=expert_llm_client,
+        request_llm_client=request_llm_client,
         dispatcher=dispatcher,
     )
 
@@ -268,6 +273,7 @@ async def _wait_for_approval(
     refiner: "PromptRefiner | None" = None,
     test_command: str = "",
     expert_llm_client: "LLMClient | None" = None,
+    request_llm_client: "LLMClient | None" = None,
     dispatcher: WSMessageDispatcher | None = None,
 ) -> ExecutionPlan:
     """Send the plan for user approval. Handle feedback/revision loop.
@@ -325,6 +331,7 @@ async def _wait_for_approval(
                 refiner=refiner,
                 test_command=test_command,
                 expert_llm_client=expert_llm_client,
+                request_llm_client=request_llm_client,
             )
             plan_md = plan_to_markdown(plan)
             await ws_send(ws, "plan_revision", {
