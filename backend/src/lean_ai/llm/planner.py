@@ -176,7 +176,8 @@ async def assess_clarity(
     )
 
     stripped = response.strip()
-    if stripped.upper().startswith("CLEAR"):
+    upper = stripped.upper()
+    if upper.startswith("CLEAR") or upper in ("OK", "YES", "N/A", "NONE", "-"):
         return None
 
     # Try to parse as JSON array of questions
@@ -193,7 +194,13 @@ async def assess_clarity(
         for ln in stripped.splitlines()
         if ln.strip() and "?" in ln
     ]
-    return lines[:5] if lines else [stripped]
+    if lines:
+        return lines[:5]
+    # Short non-question responses (e.g. "-", "OK", "N/A") = task is clear
+    if len(stripped) < 20 and "?" not in stripped:
+        logger.info("Treating short non-question response as CLEAR: %r", stripped)
+        return None
+    return [stripped]
 
 
 async def create_plan(
