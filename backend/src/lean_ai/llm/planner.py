@@ -31,10 +31,12 @@ from lean_ai.llm.plan_schema import (
 from lean_ai.llm.prompts import (
     CLARIFICATION_SYSTEM_PROMPT,
     PLAN_ASSEMBLY_SYSTEM_PROMPT,
-    PLAN_SYSTEM_PROMPT,
+    PLAN_DESIGN_SYSTEM_PROMPT,
+    PLAN_EXPLORATION_SYSTEM_PROMPT,
+    PLAN_SCOPE_SYSTEM_PROMPT,
+    PLAN_VERIFICATION_SYSTEM_PROMPT,
 )
 from lean_ai.llm.tool_definitions import PLANNING_TOOLS
-from lean_ai.routers.context_helpers import load_full_context
 
 if TYPE_CHECKING:
     from lean_ai.llm.client import LLMClient
@@ -270,9 +272,10 @@ async def create_plan(
     plan_start = time.monotonic()
     phase_timings: dict[str, float] = {}
 
-    # Load full context for expert phases (3, 4) — includes project_context.md,
-    # framework_guide.md, and custom steering docs from .lean_ai/context/
-    project_context = load_full_context(repo_root)
+    # Expert phases (3, 4) need project context for architectural awareness.
+    # Reuse the context parameter (already loaded by the workflow router)
+    # rather than re-reading from disk.
+    project_context = context
 
     # Phase 1: Scope Analysis
     await _send_stage(ws, "Phase 1: Analyzing scope...", model=explorer.model_name, phase=1)
@@ -280,7 +283,7 @@ async def create_plan(
     t0 = time.monotonic()
     scope = await explorer.chat_raw(
         messages=[
-            {"role": "system", "content": PLAN_SYSTEM_PROMPT},
+            {"role": "system", "content": PLAN_SCOPE_SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": (
@@ -297,8 +300,6 @@ async def create_plan(
                     "<what this task does NOT touch>\n\n"
                     "ASSUMPTIONS:\n"
                     "<key assumptions, 2-3 bullets>\n\n"
-                    "PATTERNS TO FOLLOW:\n"
-                    "<existing codebase patterns to match>\n\n"
                     "IMPORTANT: If the task mentions specific files, "
                     "treat that as a STARTING POINT — the codebase "
                     "may have additional dependent files."
@@ -326,10 +327,15 @@ async def create_plan(
     logger.info("Planning Phase 2: File identification and reading")
     t0 = time.monotonic()
     phase2_messages = [
-        {"role": "system", "content": PLAN_SYSTEM_PROMPT},
+        {"role": "system", "content": PLAN_EXPLORATION_SYSTEM_PROMPT},
         {
             "role": "user",
             "content": (
+                "IMPORTANT: Your text output IS the file summary that "
+                "downstream phases use. Tool call results are NOT passed "
+                "forward — only your text responses are. You MUST include "
+                "relevant file content (key sections, 15-25 lines each) IN "
+                "YOUR TEXT RESPONSES for every file to be modified.\n\n"
                 f"TASK: {task}\n\n"
                 f"SCOPE ANALYSIS:\n{scope}\n\n"
                 f"CODEBASE CONTEXT:\n{context}\n\n"
@@ -402,14 +408,7 @@ async def create_plan(
                 "FILES READ FOR CONTEXT (not modified, but content informs changes):\n"
                 "1. path/to/source — what it contains\n\n"
                 "MISSING INFRASTRUCTURE (assumed by the task but not found):\n"
-                "1. what is missing — why it is needed\n\n"
-                "CRITICAL: Your text output IS the file summary that downstream "
-                "phases use to produce implementation steps. Tool call results "
-                "are NOT passed forward — only your text responses are. You MUST "
-                "include the relevant file content (key sections, 15-25 lines "
-                "each) IN YOUR TEXT RESPONSES for every file to be modified, not "
-                "just in tool calls. If you read a file, summarize its structure "
-                "and include the critical code sections in your output above."
+                "1. what is missing — why it is needed"
             ),
         },
     ]
@@ -524,7 +523,7 @@ async def create_plan(
     t0 = time.monotonic()
     design_and_risks = await expert.chat_raw(
         messages=[
-            {"role": "system", "content": PLAN_SYSTEM_PROMPT},
+            {"role": "system", "content": PLAN_DESIGN_SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": (
@@ -910,7 +909,7 @@ async def create_plan(
 
         verification = await expert.chat_structured(
             messages=[
-                {"role": "system", "content": PLAN_SYSTEM_PROMPT},
+                {"role": "system", "content": PLAN_VERIFICATION_SYSTEM_PROMPT},
                 {
                     "role": "user",
                     "content": (

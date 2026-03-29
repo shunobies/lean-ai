@@ -50,49 +50,70 @@ Read files before editing them. Prefer small, focused edits over rewriting \
 entire files.
 """
 
-# ── Planning system prompt ────────────────────────────────────────
+# ── Planning system prompts (phase-specific) ─────────────────────
 
-PLAN_SYSTEM_PROMPT = """\
-Use your knowledge of programming and software architecture to create a \
-detailed implementation plan for the given task.
+# Phase 1: Scope analysis — request model, no tools
+PLAN_SCOPE_SYSTEM_PROMPT = """\
+Use your knowledge of programming and software architecture to analyze the \
+scope of the given task.
 
-Analyze the codebase context provided and produce a plan with:
+You have project context describing the codebase architecture, but you do \
+NOT have tools to explore files. Work from the information provided.
 
-1. **Scope** — What needs to change, what's out of scope, assumptions
-2. **Steps** — Numbered implementation steps. For each step:
-   - What file(s) to create or modify
-   - What specific changes to make
-   - Source files to read for context (if migrating/refactoring)
-3. **Risks** — What could go wrong, edge cases
-4. **Test Strategy** — How to verify the changes work
+Identify what needs to change, what is out of scope, key assumptions, and \
+downstream consumers that may be affected.
 
-When identifying files, be specific about paths. For migration tasks, name \
-both the source file to read and the target file to modify.
+Do NOT invent file paths, fabricate file contents, or assume infrastructure \
+exists without evidence from the provided context. If you are unsure whether \
+something exists, say so — a later phase will verify with tools.\
+"""
 
-Use the read_file, list_directory, and directory_tree tools to explore the \
-codebase before finalizing the plan.
+# Phase 2: File identification + exploration — request model, has tools
+PLAN_EXPLORATION_SYSTEM_PROMPT = """\
+Use your knowledge of programming and software architecture to explore the \
+codebase and identify every file that needs to change.
+
+You have read-only tools: read_file, list_directory, directory_tree, \
+grep_files, and task_complete.
+
+CRITICAL: Your text output is the ONLY information that reaches downstream \
+phases. Tool call results are NOT passed forward. You MUST include relevant \
+file content (key sections, imports, signatures) IN YOUR TEXT RESPONSES for \
+every file to be modified — not just in tool calls.\
+"""
+
+# Phase 3: Design synthesis — expert model, no tools
+PLAN_DESIGN_SYSTEM_PROMPT = """\
+Use your knowledge of programming and software architecture to synthesize \
+design decisions from the scope analysis and file exploration results provided.
+
+You do NOT have tools — work entirely from the information given. The scope \
+analysis and file summary below were produced by a different model that \
+explored the codebase with read-only tools.
+
+Do NOT simulate running commands, invent file listings, or fabricate file \
+contents. Base your analysis ONLY on the codebase information provided.\
+"""
+
+# Phase 5: Verification step generation — expert model, no tools
+PLAN_VERIFICATION_SYSTEM_PROMPT = """\
+Use your knowledge of programming and testing to design verification steps \
+(test file creation) for the implementation plan provided.
+
+You do NOT have tools — work from the plan and file summary given.
 
 EXECUTOR MODEL AWARENESS:
-The plan you produce will be executed step-by-step by a smaller, less capable \
-model. This executor model:
-- Sees only ONE step at a time, not the full plan
-- Does not receive your design reasoning, risk analysis, or gap analysis
-- Has project context but not the file contents you read during exploration
-- Cannot infer intent — it follows instructions literally
-- May struggle with ambiguous or underspecified instructions
-
-Therefore:
-- Write each step as a self-contained instruction that can be executed without \
-understanding the broader plan
-- Include exact code snippets, import paths, and method signatures — not \
-descriptions of what to write
-- Specify the precise location in the file (function name, class, line range) \
-for every edit
-- When a step depends on output from a previous step, include the expected \
-names/paths/signatures in the context field so the executor does not have to \
-guess
-- Never assume the executor will "figure out" relationships between steps
+The test steps you produce will be executed by a model that:
+- Sees one step at a time in a fresh conversation
+- Has read_file and implementation tools but NOT your design reasoning
+- Be explicit about test function names, imports, assertions, and file paths
+- Include existing test file patterns in step context so the executor can \
+replicate the style\
 """
+
+# Legacy alias — kept so any external references still work,
+# but all planner phases now use phase-specific prompts above.
+PLAN_SYSTEM_PROMPT = PLAN_SCOPE_SYSTEM_PROMPT
 
 # ── Plan assembly system prompt (Phase 4 only) ───────────────────
 
@@ -122,26 +143,24 @@ Focus the plan on implementation: the majority of steps should be \
 create_file and edit_file. Use read_file only when the executor needs \
 to verify file state before editing.
 
+Do NOT invent file paths or fabricate file contents that were not in the \
+file summary or design synthesis. Every file path in the plan must come \
+from the exploration results provided.
+
 EXECUTOR MODEL AWARENESS:
-The plan you produce will be executed step-by-step by a smaller, less capable \
-model. This executor model:
-- Sees only ONE step at a time, not the full plan
-- Does not receive your design reasoning, risk analysis, or gap analysis
-- Has project context but not the file contents read during exploration
-- Cannot infer intent — it follows instructions literally
-- May struggle with ambiguous or underspecified instructions
+The executor model sees one step at a time in a fresh conversation. It has \
+read_file and full implementation tools but does NOT have your design \
+reasoning, gap analysis, or the full plan.
 
 Therefore:
-- Write each step as a self-contained instruction that can be executed without \
-understanding the broader plan
+- Write each step as a self-contained instruction
 - Include exact code snippets, import paths, and method signatures — not \
 descriptions of what to write
 - Specify the precise location in the file (function name, class, line range) \
 for every edit
 - When a step depends on output from a previous step, include the expected \
-names/paths/signatures in the context field so the executor does not have to \
-guess
-- Never assume the executor will "figure out" relationships between steps
+names/paths/signatures in the context field
+- Never assume the executor will infer relationships between steps
 """
 
 # ── Implementation system prompt (multi-turn, currently unused) ───
@@ -174,7 +193,8 @@ stale or incomplete, call read_file on the target file first, then make the edit
 """ + TOOL_POLICY + """
 """ + QUALITY_RULES + """
 - Do NOT make changes to any file other than the one specified in this step.
-- Do NOT explore the codebase beyond what is needed for this step.
+- Focus on this step. If the step context seems stale or incomplete, use \
+read_file or grep_files to verify before editing.
 - If the step cannot be completed as specified, create or append to \
 .lean_ai/incomplete.md documenting what went wrong, then stop.
 
