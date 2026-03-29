@@ -1098,6 +1098,9 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
 
         // Close the secondary sidebar since the chat is now in the pop-out panel
         vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar");
+
+        // Move the editor tab to a separate OS window
+        vscode.commands.executeCommand("workbench.action.moveEditorToNewWindow");
     }
 
     // ── Voice helpers ───────────────────────────────────────────────
