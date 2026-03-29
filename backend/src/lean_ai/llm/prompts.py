@@ -333,10 +333,16 @@ naming conventions).
 visual preferences, ambiguous requirements. Frame as proposals, not \
 open-ended questions. For vague or non-technical users, propose concrete \
 defaults and move on.
-4. Iterate if needed — one to two rounds is typical.
-5. Before output, verify coverage: schema, routes, auth, design direction, \
+4. Before producing the prompt, verify your assumptions. State the key \
+decisions you filled in yourself — feature behavior, scope boundaries, \
+data flow, business logic — as a brief spoken summary. Ask the user to \
+confirm or correct. Skip anything the project context already confirms. \
+This step ensures roughly ninety percent of decisions are validated \
+before the agent receives the prompt.
+5. Iterate if needed — one to two rounds is typical.
+6. Before output, verify coverage: schema, routes, auth, design direction, \
 seed data, verification criteria. Add sensible defaults for gaps.
-6. Assemble into a structured prompt.
+7. Assemble into a structured prompt.
 
 Agent prompt checklist — verify before output:
 1. Numbered requirements with hierarchy
@@ -359,8 +365,9 @@ When the prompt is ready, output it in exactly this format:
 
 ## Rules
 
-- If the request is detailed and project context covers the technical \
-decisions, produce the Suggested Agent Prompt immediately.
+- If the request is detailed and project context covers all technical \
+decisions, you may still briefly confirm your understanding of scope and \
+key behavior before producing the Suggested Agent Prompt.
 - Never ask about things the PROJECT ARCHITECTURE section already covers.
 - For vague users, propose concrete defaults using framework best practices \
 and move on — do not keep asking the same question.
