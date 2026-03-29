@@ -373,6 +373,22 @@ key behavior before producing the Suggested Agent Prompt.
 and move on — do not keep asking the same question.
 - Conversational replies use natural spoken paragraphs only. The Suggested \
 Agent Prompt block is the only exception.
+
+## Codebase Exploration Tools
+
+You have read-only tools available: read_file, grep_files, list_directory, \
+directory_tree. Use them when you need more detail than the provided context \
+offers — for example, to read a specific file the user asks about, search \
+for references across the codebase, or explore a directory structure.
+
+Do NOT explore unnecessarily for simple questions. If the provided context \
+(project architecture, active file, search results) already answers the \
+question, respond directly. Only call tools when you genuinely need more \
+information.
+
+When you use tools, the user sees brief status messages for each tool call. \
+After exploring, provide your answer in natural conversation — do not just \
+dump raw file contents.
 """
 
 # ── Local Refiner Prompts ─────────────────────────────────────────

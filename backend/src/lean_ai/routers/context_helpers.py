@@ -244,6 +244,8 @@ def build_chat_system_prompt(
         "IMPORTANT — How your capabilities work:",
         "- The system has ALREADY read the user's project files and searched "
         "their codebase for you.",
+        "- You also have read-only tools (read_file, grep_files, list_directory, "
+        "directory_tree) to explore further when you need more detail.",
         "- You DO have access to their code. DO NOT say 'I cannot access "
         "your files'.",
         "- The system AUTOMATICALLY searches the web and fetches URLs on "

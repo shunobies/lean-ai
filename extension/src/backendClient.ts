@@ -256,6 +256,8 @@ export class BackendClient {
         userName?: string,
         skipWebSearch?: boolean,
         onVisionDescription?: (desc: string) => void,
+        onToolCall?: (name: string, description: string) => void,
+        onToolResult?: (name: string, success: boolean) => void,
     ): Promise<{ receivedDone: boolean }> {
         return new Promise((resolve, reject) => {
             const fullUrl = new URL(`${this.baseUrl}/api/chat/stream`);
@@ -307,6 +309,10 @@ export class BackendClient {
                                 onThinking(data["content"] as string);
                             } else if (data["type"] === "vision_description" && data["descriptions"] && onVisionDescription) {
                                 onVisionDescription(data["descriptions"] as string);
+                            } else if (data["type"] === "tool_call" && data["name"] && onToolCall) {
+                                onToolCall(data["name"] as string, (data["description"] as string) || "");
+                            } else if (data["type"] === "tool_result" && data["name"] && onToolResult) {
+                                onToolResult(data["name"] as string, data["success"] as boolean);
                             } else if (data["type"] === "done") {
                                 resolved = true;
                                 resolve({ receivedDone: true });

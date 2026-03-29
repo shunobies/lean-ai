@@ -716,6 +716,10 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                     text: `<details class="vision-desc"><summary>Vision model description</summary>\n\n${desc}\n</details>`,
                     cls: "msg-system",
                 });
+            }, (name, description) => {
+                this.postMessage({ type: "chatToolActivity", name, description });
+            }, (name, success) => {
+                this.postMessage({ type: "chatToolResult", name, success });
             }));
         } finally {
             this.sessionTreeProvider?.resumeRefresh();

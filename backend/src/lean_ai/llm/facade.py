@@ -185,6 +185,8 @@ class LLMClient:
         reminder_interval: int = 10,
         loop_detection_threshold: int | None = None,
         text_only_nudge: str | None = None,
+        text_only_exit_count: int = 3,
+        stream_content: bool = False,
         on_tool_call: Callable | None = None,
         on_tool_result: Callable | None = None,
         on_content: Callable | None = None,
@@ -201,6 +203,15 @@ class LLMClient:
         turn, ``_evaluate_turn`` makes a single decision: continue, nudge,
         refresh context, or exit.  Repeats until ``task_complete`` is
         called, the supervisor decides to exit, or *max_turns* is reached.
+
+        When *text_only_exit_count* is 1 the loop exits immediately on
+        the first text-only response (no nudge).  Default is 3.
+
+        When *stream_content* is True and *on_content* / *on_thinking*
+        callbacks are provided, content and thinking tokens are streamed
+        to the callbacks as they arrive from the provider (token-level
+        streaming).  The bulk ``on_content`` call after each turn is
+        skipped to avoid double-delivery.
         """
         from lean_ai.llm.client import _sanitize_messages
 
@@ -210,6 +221,7 @@ class LLMClient:
             else settings.loop_detection_threshold
         )
         state = _TurnState(loop_detection_threshold=ld_threshold)
+        state.max_text_only = text_only_exit_count
         tokens = max_tokens or self._provider.max_tokens
         executed: list[ToolCall] = []
         explanation_parts: list[str] = []
@@ -245,8 +257,20 @@ class LLMClient:
                 len(messages),
             )
 
+            # Build streaming callbacks when stream_content is enabled
+            _stream_cb = on_content if stream_content and on_content else None
+            _think_cb = on_thinking if stream_content and on_thinking else None
+            _streamed_content: list[str] = []
+
+            async def _stream_wrapper(token: str) -> None:
+                _streamed_content.append(token)
+                if on_content:
+                    await on_content(token)
+
             content, tool_calls, metrics = await self._provider.chat_with_tools_single(
                 messages, tools, max_tokens=tokens,
+                stream_callback=_stream_wrapper if _stream_cb else None,
+                thinking_callback=_think_cb,
             )
 
             last_prompt_tokens = metrics.prompt_tokens
@@ -254,12 +278,14 @@ class LLMClient:
             if on_metrics and last_prompt_tokens:
                 await on_metrics(last_prompt_tokens, self._provider.context_window)
 
-            if on_thinking and metrics.thinking:
+            # Deliver thinking in bulk when not streamed
+            if not _think_cb and on_thinking and metrics.thinking:
                 await on_thinking(metrics.thinking)
 
             if content.strip():
                 explanation_parts.append(content.strip())
-                if on_content:
+                # Deliver content in bulk when not streamed
+                if not _stream_cb and on_content:
                     await on_content(content.strip())
 
             # ── Process turn results ──────────────────────────────

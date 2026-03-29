@@ -35,7 +35,8 @@ class FakeProvider(LLMProvider):
     async def chat_structured(self, messages, schema, temperature=None, max_tokens=None):
         raise NotImplementedError
 
-    async def chat_with_tools_single(self, messages, tools, max_tokens=None):
+    async def chat_with_tools_single(self, messages, tools, max_tokens=None, *,
+                                         stream_callback=None, thinking_callback=None):
         self.messages_at_each_call.append(list(messages))
         if self.call_count < len(self.responses):
             resp = self.responses[self.call_count]

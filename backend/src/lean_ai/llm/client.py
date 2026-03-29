@@ -397,27 +397,87 @@ class OllamaProvider(LLMProvider):
         messages: list[dict],
         tools: list[dict],
         max_tokens: int | None = None,
+        *,
+        stream_callback=None,
+        thinking_callback=None,
     ) -> tuple[str, list[ToolCallInfo], LLMMetrics]:
         tokens = max_tokens or self._max_tokens_val
 
-        async def _chat():
+        if not stream_callback and not thinking_callback:
+            # Non-streaming path (unchanged)
+            async def _chat():
+                return await self._client.chat(
+                    model=self._model,
+                    messages=messages,
+                    tools=tools,
+                    options=self._build_options(max_tokens=tokens),
+                    think=self._enable_thinking,
+                )
+
+            response = await self._retry_with_backoff(
+                _chat, label="chat_with_tools_single",
+            )
+
+            msg = response["message"]
+            content = msg.get("content") or ""
+            raw_tool_calls = msg.get("tool_calls") or []
+            thinking = msg.get("thinking") or None
+            metrics = self._extract_metrics(response)
+            metrics.thinking = thinking
+
+            tool_calls = [
+                ToolCallInfo(
+                    name=tc["function"]["name"],
+                    arguments=dict(tc["function"].get("arguments") or {}),
+                )
+                for tc in raw_tool_calls
+            ]
+            return content, tool_calls, metrics
+
+        # Streaming path — stream content/thinking tokens via callbacks
+        async def _start_stream():
             return await self._client.chat(
                 model=self._model,
                 messages=messages,
                 tools=tools,
+                stream=True,
                 options=self._build_options(max_tokens=tokens),
                 think=self._enable_thinking,
             )
 
-        response = await self._retry_with_backoff(
-            _chat, label="chat_with_tools_single",
+        stream = await self._retry_with_backoff(
+            _start_stream, label="chat_with_tools_single(stream)",
         )
 
-        msg = response["message"]
-        content = msg.get("content") or ""
-        raw_tool_calls = msg.get("tool_calls") or []
-        thinking = msg.get("thinking") or None
-        metrics = self._extract_metrics(response)
+        content_parts: list[str] = []
+        thinking_parts: list[str] = []
+        last_chunk: dict = {}
+        raw_tool_calls: list = []
+
+        async for chunk in stream:
+            msg = chunk.get("message") or {}
+            thinking_token = msg.get("thinking") or ""
+            content_token = msg.get("content") or ""
+
+            if thinking_token:
+                thinking_parts.append(thinking_token)
+                if thinking_callback:
+                    await thinking_callback(thinking_token)
+
+            if content_token:
+                content_parts.append(content_token)
+                if stream_callback:
+                    await stream_callback(content_token)
+
+            if msg.get("tool_calls"):
+                raw_tool_calls = msg["tool_calls"]
+
+            if chunk.get("done"):
+                last_chunk = chunk
+
+        content = "".join(content_parts)
+        thinking = "".join(thinking_parts) or None
+        metrics = self._extract_metrics(last_chunk) if last_chunk else LLMMetrics()
         metrics.thinking = thinking
 
         tool_calls = [
@@ -427,7 +487,6 @@ class OllamaProvider(LLMProvider):
             )
             for tc in raw_tool_calls
         ]
-
         return content, tool_calls, metrics
 
     async def chat_stream(

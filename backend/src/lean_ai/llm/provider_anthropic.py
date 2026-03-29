@@ -258,6 +258,9 @@ class AnthropicProvider(LLMProvider):
         messages: list[dict],
         tools: list[dict],
         max_tokens: int | None = None,
+        *,
+        stream_callback=None,
+        thinking_callback=None,
     ) -> tuple[str, list[ToolCallInfo], LLMMetrics]:
         tokens = max_tokens or self._max_tokens_val
         system_prompt, filtered_messages = _split_system(messages)
@@ -273,13 +276,33 @@ class AnthropicProvider(LLMProvider):
         if system_prompt:
             kwargs["system"] = system_prompt
 
-        async def _chat():
-            async with self._client.messages.stream(**kwargs) as stream:
-                return await stream.get_final_message()
+        if not stream_callback and not thinking_callback:
+            # Non-streaming path (unchanged)
+            async def _chat():
+                async with self._client.messages.stream(**kwargs) as stream:
+                    return await stream.get_final_message()
 
-        response = await self._retry_with_backoff(
-            _chat, label="chat_with_tools_single",
-        )
+            response = await self._retry_with_backoff(
+                _chat, label="chat_with_tools_single",
+            )
+        else:
+            # Streaming path — forward content tokens via callback
+            streamed_parts: list[str] = []
+
+            async def _chat_streaming():
+                async with self._client.messages.stream(**kwargs) as stream:
+                    async for event in stream:
+                        if hasattr(event, "type") and event.type == "content_block_delta":
+                            delta = getattr(event, "delta", None)
+                            if delta and hasattr(delta, "text"):
+                                streamed_parts.append(delta.text)
+                                if stream_callback:
+                                    await stream_callback(delta.text)
+                    return await stream.get_final_message()
+
+            response = await self._retry_with_backoff(
+                _chat_streaming, label="chat_with_tools_single(stream)",
+            )
 
         metrics = self._extract_metrics(
             response, stop_reason=getattr(response, "stop_reason", None),

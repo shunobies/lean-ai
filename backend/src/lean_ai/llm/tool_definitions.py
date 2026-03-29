@@ -442,6 +442,15 @@ PLANNING_TOOLS: list[dict] = [
     )
 ]
 
+# Read-only tools for chat exploration (no task_complete — text exit)
+CHAT_TOOLS: list[dict] = [
+    tool
+    for tool in IMPLEMENTATION_TOOLS
+    if tool["function"]["name"] in (
+        "read_file", "list_directory", "directory_tree", "grep_files",
+    )
+]
+
 # Read-only + diagnostic tools for fix-mode investigation phase
 INVESTIGATION_TOOLS: list[dict] = [
     tool

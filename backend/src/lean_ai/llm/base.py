@@ -114,11 +114,19 @@ class LLMProvider(ABC):
         messages: list[dict],
         tools: list[dict],
         max_tokens: int | None = None,
+        *,
+        stream_callback: StreamCallback | None = None,
+        thinking_callback: StreamCallback | None = None,
     ) -> tuple[str, list[ToolCallInfo], LLMMetrics]:
         """Single-turn LLM call that may return tool calls.
 
         Returns (content, tool_calls, metrics).  Tool definitions use
         the OpenAI-compatible format that the codebase already uses.
+
+        When *stream_callback* is provided, content tokens are forwarded
+        to the callback as they arrive (the full text is still returned).
+        When *thinking_callback* is provided, thinking/reasoning tokens
+        are forwarded similarly.
         """
 
     @abstractmethod

@@ -5,12 +5,14 @@ import json
 import logging
 import re
 from collections.abc import AsyncGenerator
+from pathlib import Path
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from lean_ai.config import settings
 from lean_ai.llm.refiner import RefinerResult
+from lean_ai.llm.tool_definitions import CHAT_TOOLS
 from lean_ai.routers.context_helpers import (
     build_chat_system_prompt,
     extract_urls,
@@ -26,6 +28,9 @@ from lean_ai.tools import internet
 logger = logging.getLogger(__name__)
 
 chat_router = APIRouter()
+
+# Max tool-calling turns for chat exploration
+_CHAT_MAX_TURNS = 20
 
 # Words that carry no search value — conversational filler + English stop words
 _STOP_WORDS = frozenset(
@@ -88,6 +93,63 @@ def _get_chat_max_tokens() -> int:
             return settings.anthropic_max_tokens
         return settings.ollama_max_tokens
     return settings.effective_request_max_tokens
+
+
+# ── Read-only tool executor for chat ────────────────────────────────
+
+
+def _make_chat_tool_executor(repo_root: str):
+    """Create a read-only tool executor for chat exploration."""
+
+    async def _executor(name: str, arguments: dict) -> str:
+        from lean_ai.tools.file_ops import grep_files, read_file
+
+        if name == "read_file":
+            result = await read_file(
+                path=arguments.get("path", ""),
+                repo_root=repo_root,
+                start_line=arguments.get("start_line"),
+                end_line=arguments.get("end_line"),
+            )
+            return result.output if result.success else result.error or "Error"
+        elif name == "grep_files":
+            result = await grep_files(
+                pattern=arguments.get("pattern", ""),
+                repo_root=repo_root,
+                file_glob=arguments.get("file_glob"),
+            )
+            return result.output if result.success else result.error or "Error"
+        elif name == "list_directory":
+            target = Path(repo_root) / arguments.get("path", "")
+            if not target.is_dir():
+                return f"Not a directory: {arguments.get('path', '')}"
+            max_entries = arguments.get("max_entries", 100)
+            entries = sorted(target.iterdir())[:max_entries]
+            lines = []
+            for e in entries:
+                prefix = "d" if e.is_dir() else "f"
+                lines.append(f"  {prefix}  {e.name}")
+            return "\n".join(lines) or "(empty)"
+        elif name == "directory_tree":
+            from lean_ai.indexer.tree import list_repo_tree
+
+            sub_path = arguments.get("path", "")
+            tree_root = f"{repo_root}/{sub_path}" if sub_path else repo_root
+            tree_entries = list_repo_tree(tree_root)
+            max_depth = arguments.get("max_depth", 3)
+            lines = []
+            for e in tree_entries[:200]:
+                depth = e.path.count("/")
+                if depth <= max_depth:
+                    indent = "  " * depth
+                    lines.append(f"{indent}{e.path.split('/')[-1]}")
+            return "\n".join(lines) or "(empty)"
+        return f"Unknown tool: {name}"
+
+    return _executor
+
+
+# ── Context building ────────────────────────────────────────────────
 
 
 async def _build_chat_messages(
@@ -259,21 +321,43 @@ async def _build_chat_messages(
     return messages, refiner_result, image_descriptions
 
 
+# ── Blocking chat endpoint ──────────────────────────────────────────
+
+
 @chat_router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """Lightweight read-only chat with workspace context.
+    """Read-only chat with workspace context and optional tool exploration.
 
-    Gathers workspace context (file tree, project architecture, active file,
-    search results, web search) and sends to the LLM. No FSM, no database,
-    no tool execution.
+    When a workspace root is available, the LLM has access to read-only
+    tools (read_file, grep_files, list_directory, directory_tree) to
+    explore the codebase on demand.
     """
     try:
         messages, refiner_result, image_desc = await _build_chat_messages(request)
         _chat_client = _get_chat_client()
-        reply = await _chat_client.chat_raw(
-            messages,
-            max_tokens=_get_chat_max_tokens(),
+
+        repo_root = (
+            request.workspace.workspace_root
+            if request.workspace and request.workspace.workspace_root
+            else None
         )
+
+        if repo_root:
+            executor = _make_chat_tool_executor(repo_root)
+            _, reply = await _chat_client.chat_with_tools(
+                messages=messages,
+                tools=CHAT_TOOLS,
+                tool_executor_fn=executor,
+                max_turns=_CHAT_MAX_TURNS,
+                max_tokens=_get_chat_max_tokens(),
+                text_only_exit_count=1,
+            )
+        else:
+            reply = await _chat_client.chat_raw(
+                messages,
+                max_tokens=_get_chat_max_tokens(),
+            )
+
         metrics = _chat_client.last_chat_metrics or {}
         return ChatResponse(
             reply=reply,
@@ -291,21 +375,129 @@ async def chat(request: ChatRequest):
         return ChatResponse(reply=f"Error: {e}")
 
 
+# ── Streaming helpers ───────────────────────────────────────────────
+
+
+async def _stream_chat_simple(messages: list[dict]) -> AsyncGenerator[str, None]:
+    """Stream LLM response without tools (no workspace available)."""
+    thinking_queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def _on_thinking(token: str) -> None:
+        await thinking_queue.put(token)
+
+    async def _drain_thinking():
+        while not thinking_queue.empty():
+            t = thinking_queue.get_nowait()
+            if t is not None:
+                yield f"data: {json.dumps({'type': 'thinking', 'content': t})}\n\n"
+
+    async for token in _get_chat_client().chat_stream(
+        messages, max_tokens=_get_chat_max_tokens(),
+        thinking_callback=_on_thinking,
+    ):
+        async for sse in _drain_thinking():
+            yield sse
+        yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+    async for sse in _drain_thinking():
+        yield sse
+
+    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+
+async def _stream_chat_with_tools(
+    messages: list[dict],
+    repo_root: str,
+) -> AsyncGenerator[str, None]:
+    """Stream LLM response with read-only tool exploration.
+
+    Runs ``chat_with_tools`` in a background task. Content and thinking
+    tokens are streamed via callbacks that push to an asyncio queue.
+    The SSE generator pulls events from the queue.
+    """
+    queue: asyncio.Queue[dict | None] = asyncio.Queue()
+
+    async def _on_content(token: str) -> None:
+        await queue.put({"type": "token", "content": token})
+
+    async def _on_thinking(token: str) -> None:
+        await queue.put({"type": "thinking", "content": token})
+
+    async def _on_tool_call(name: str, args: dict) -> None:
+        desc = name
+        if name == "read_file":
+            desc = f"Reading {args.get('path', '...')}"
+        elif name == "grep_files":
+            desc = f"Searching for '{args.get('pattern', '...')}'"
+        elif name == "list_directory":
+            desc = f"Listing {args.get('path', '') or '.'}"
+        elif name == "directory_tree":
+            desc = f"Tree of {args.get('path', '') or '.'}"
+        await queue.put({"type": "tool_call", "name": name, "description": desc})
+
+    async def _on_tool_result(name: str, result: str) -> None:
+        success = not result.startswith("ERROR:")
+        await queue.put({"type": "tool_result", "name": name, "success": success})
+
+    executor = _make_chat_tool_executor(repo_root)
+
+    async def _run():
+        try:
+            await _get_chat_client().chat_with_tools(
+                messages=messages,
+                tools=CHAT_TOOLS,
+                tool_executor_fn=executor,
+                max_turns=_CHAT_MAX_TURNS,
+                max_tokens=_get_chat_max_tokens(),
+                text_only_exit_count=1,
+                stream_content=True,
+                on_content=_on_content,
+                on_thinking=_on_thinking,
+                on_tool_call=_on_tool_call,
+                on_tool_result=_on_tool_result,
+            )
+        except Exception as e:
+            await queue.put({"type": "error", "message": str(e)})
+        finally:
+            await queue.put(None)  # sentinel
+
+    task = asyncio.create_task(_run())
+
+    try:
+        while True:
+            event = await queue.get()
+            if event is None:
+                break
+            yield f"data: {json.dumps(event)}\n\n"
+    except asyncio.CancelledError:
+        task.cancel()
+        raise
+
+    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+
+# ── Streaming chat endpoint ─────────────────────────────────────────
+
+
 @chat_router.post("/chat/stream")
 async def chat_stream_endpoint(request: ChatRequest):
     """Chat with workspace context, streaming tokens via Server-Sent Events.
 
-    Identical context gathering to ``/chat`` but returns a text/event-stream
-    response so the client sees tokens as they arrive rather than waiting for
-    the full response.
+    When a workspace root is available the LLM can explore the codebase
+    with read-only tools. Tool activity is streamed as SSE events alongside
+    content and thinking tokens.
 
     Event format::
 
         data: {"type": "token", "content": "..."}\n\n
-        data: {"type": "thinking", "content": "..."}\n\n  # reasoning tokens
+        data: {"type": "thinking", "content": "..."}\n\n
+        data: {"type": "tool_call", "name": "...", "description": "..."}\n\n
+        data: {"type": "tool_result", "name": "...", "success": true}\n\n
+        data: {"type": "vision_description", "descriptions": "..."}\n\n
         data: {"type": "done"}\n\n
-        data: {"type": "error", "message": "..."}\n\n     # only on failure
+        data: {"type": "error", "message": "..."}\n\n
     """
+
     async def generate() -> AsyncGenerator[str, None]:
         try:
             messages, _, image_desc = await _build_chat_messages(request)
@@ -321,35 +513,19 @@ async def chat_stream_endpoint(request: ChatRequest):
                 prompt_chars, prompt_chars // 4, settings._active_context_window,
             )
 
-            # Thinking tokens arrive via callback while content tokens
-            # are yielded by the async generator.  Use a queue so the
-            # SSE generator can interleave both event types.
-            thinking_queue: asyncio.Queue[str | None] = asyncio.Queue()
+            repo_root = (
+                request.workspace.workspace_root
+                if request.workspace and request.workspace.workspace_root
+                else None
+            )
 
-            async def _on_thinking(token: str) -> None:
-                await thinking_queue.put(token)
+            if repo_root:
+                async for sse_event in _stream_chat_with_tools(messages, repo_root):
+                    yield sse_event
+            else:
+                async for sse_event in _stream_chat_simple(messages):
+                    yield sse_event
 
-            async def _drain_thinking():
-                """Yield all queued thinking tokens as SSE events."""
-                while not thinking_queue.empty():
-                    t = thinking_queue.get_nowait()
-                    if t is not None:
-                        yield f"data: {json.dumps({'type': 'thinking', 'content': t})}\n\n"
-
-            async for token in _get_chat_client().chat_stream(
-                messages, max_tokens=_get_chat_max_tokens(),
-                thinking_callback=_on_thinking,
-            ):
-                # Flush any thinking tokens that arrived before this content token
-                async for sse in _drain_thinking():
-                    yield sse
-                yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
-
-            # Flush any remaining thinking tokens after the stream ends
-            async for sse in _drain_thinking():
-                yield sse
-
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as e:
             logger.exception("Chat stream failed")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"

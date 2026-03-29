@@ -255,6 +255,9 @@ class OpenAIProvider(LLMProvider):
         messages: list[dict],
         tools: list[dict],
         max_tokens: int | None = None,
+        *,
+        stream_callback=None,
+        thinking_callback=None,
     ) -> tuple[str, list[ToolCallInfo], LLMMetrics]:
         tokens = max_tokens or self._max_tokens_val
 
@@ -277,6 +280,10 @@ class OpenAIProvider(LLMProvider):
         metrics = self._extract_metrics(
             response, stop_reason=choice.finish_reason,
         )
+
+        # Graceful fallback: deliver full content via callback after response
+        if stream_callback and content:
+            await stream_callback(content)
 
         tool_calls: list[ToolCallInfo] = []
         for tc in raw_tool_calls:

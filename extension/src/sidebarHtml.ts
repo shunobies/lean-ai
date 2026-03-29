@@ -195,6 +195,15 @@ export function getWebviewHtml(chatFontSize: number): string {
         opacity: 0.7;
         font-style: italic;
     }
+    .msg-tool-activity {
+        color: var(--vscode-descriptionForeground);
+        font-size: 0.85em;
+        padding: 2px 10px;
+        opacity: 0.8;
+    }
+    .msg-tool-activity .tool-done {
+        color: var(--vscode-testing-iconPassed);
+    }
 
     /* First-boot setup guide */
     .setup-guide {
@@ -1959,6 +1968,26 @@ export function getWebviewHtml(chatFontSize: number): string {
                         scrollToBottom();
                     }
                 }
+                break;
+            }
+
+            case 'chatToolActivity': {
+                // Show tool exploration status (e.g. "Reading src/config.py")
+                const actDiv = document.createElement('div');
+                actDiv.className = 'msg msg-tool-activity';
+                actDiv.innerHTML = '<em>' + escapeHtml(msg.description) + '</em>';
+                messagesEl.appendChild(actDiv);
+                scrollToBottom();
+                break;
+            }
+
+            case 'chatToolResult': {
+                // Mark the last tool activity as done
+                const lastAct = messagesEl.querySelector('.msg-tool-activity:last-child');
+                if (lastAct) {
+                    lastAct.innerHTML += ' <span class="tool-done">\u2713</span>';
+                }
+                scrollToBottom();
                 break;
             }
 
