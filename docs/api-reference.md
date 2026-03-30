@@ -201,6 +201,72 @@ Index documents in the knowledge directory for domain document retrieval.
 }
 ```
 
+### Prompts
+
+#### `GET /api/prompts?repo_root=/path/to/project`
+
+Return all registered prompts with defaults, current values, override status, and metadata.
+
+**Response:**
+```json
+{
+  "prompts": [
+    {
+      "key": "policy.tool",
+      "category": "Core Policy",
+      "name": "Tool Policy",
+      "description": "Rules for how tools are called during implementation.",
+      "default_text": "...",
+      "current_text": "...",
+      "is_overridden": false,
+      "template_vars": [],
+      "warning": ""
+    }
+  ],
+  "categories": ["Core Policy", "Planning", "Execution", "Fix Mode", "Chat & Refinement", "Context Generation", "Framework Guide", "TDD & Vision", "Advanced"]
+}
+```
+
+#### `PUT /api/prompts`
+
+Save prompt overrides to `.lean_ai/prompts.yaml`. Validates that required template variables are preserved.
+
+**Request:**
+```json
+{
+  "repo_root": "/path/to/project",
+  "overrides": {
+    "policy.quality": "- No stubs...\n- Follow team conventions..."
+  }
+}
+```
+
+**Response:**
+```json
+{"status": "saved"}
+```
+
+Returns 422 if required template variables are missing from any override.
+
+#### `POST /api/prompts/reset`
+
+Reset prompt overrides. Pass specific keys to reset individually, or omit `keys` to reset all.
+
+**Request:**
+```json
+{
+  "repo_root": "/path/to/project",
+  "keys": ["policy.quality"]
+}
+```
+
+**Response:**
+```json
+{"status": "reset"}
+```
+
+See the [Prompt Customization](prompt-customization.md) guide for details on the override system.
+
 ### Models
 
 #### `GET /api/models`

@@ -4,6 +4,12 @@ The Lean AI extension provides a sidebar chat panel, inline predictions, session
 
 ## Installation
 
+### From Marketplace (Recommended)
+
+Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=lean-ai.lean-ai) or [OpenVSX](https://open-vsx.org/extension/lean-ai/lean-ai).
+
+On first activation, the extension automatically creates a Python virtual environment and installs the backend server. The only prerequisite is [Ollama](https://ollama.com) with a pulled model (e.g. `ollama pull qwen3-coder:30b`).
+
 ### From Source
 
 ```bash
@@ -14,6 +20,8 @@ npx vsce package --no-dependencies
 ```
 
 Then install the generated `.vsix` file: **Extensions** sidebar > `...` menu > **Install from VSIX...**
+
+When building from source, set `lean-ai.backendDir` or `lean-ai.pythonPath` in the extension settings — the automatic installer is skipped when either setting is explicitly configured.
 
 ### Development
 
@@ -163,6 +171,7 @@ All commands are also available from the VSCode command palette (`Ctrl+Shift+P` 
 | `Lean AI: Reject Plan` | Reject the current plan |
 | `Lean AI: Focus Chat Panel` | Focus the chat panel |
 | `Lean AI: Open Settings` | Open the Lean AI settings panel |
+| `Lean AI: Edit Prompts` | Open the [prompt customization](prompt-customization.md) panel |
 | `Lean AI: Restart Backend Server` | Restart the Python backend |
 | `Lean AI: Stop Backend Server` | Stop the Python backend |
 | `Lean AI: Refresh Sessions` | Refresh the sessions list |

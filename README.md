@@ -22,7 +22,27 @@ Run it fully local with [Ollama](https://ollama.com), or connect to OpenAI and A
 
 ## Quick Start
 
-### 1. Install the backend
+### 1. Install the extension
+
+Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=lean-ai.lean-ai) or [OpenVSX](https://open-vsx.org/extension/lean-ai/lean-ai). On first activation, the extension automatically creates a Python virtual environment and installs the backend server — no manual setup required.
+
+### 2. Install Ollama and pull a model
+
+Download [Ollama](https://ollama.com) and pull a model:
+
+```bash
+ollama pull qwen3-coder:30b
+```
+
+### 3. Open a project and run `/init`
+
+Type `/init` in the chat panel to index your workspace and generate project context. Then describe what you want built.
+
+## Building from Source
+
+If you prefer to build from source instead of installing from the marketplace:
+
+### Backend
 
 ```bash
 cd backend
@@ -31,24 +51,22 @@ pip install -e ".[dev]"
 
 Need cloud providers or knowledge base support? See [optional extras](docs/configuration.md#installation-extras).
 
-### 2. Start the server
+Start the server manually:
 
 ```bash
 uvicorn lean_ai.main:app --reload --port 8422
 ```
 
-### 3. Install the extension
+### Extension
 
 ```bash
 cd extension && npm install && npm run build
 npx vsce package --no-dependencies
 ```
 
-Install the `.vsix` in VSCodium/VSCode: **Extensions** sidebar > `...` menu > **Install from VSIX...**
+Install the generated `.vsix` file: **Extensions** sidebar > `...` menu > **Install from VSIX...**
 
-### 4. Open a project and start chatting
-
-The sidebar chat panel is your entry point. Describe what you want built, and the agent handles the rest.
+When building from source, set `lean-ai.backendDir` or `lean-ai.pythonPath` in the extension settings — the automatic installer is skipped when either setting is explicitly configured.
 
 ## How It Works
 
@@ -165,6 +183,7 @@ See the [full configuration reference](docs/configuration.md) for all options.
 | [Knowledge Base & Refiner](docs/knowledge-base.md) | Private docs, RAG enrichment, and cloud privacy |
 | [API Reference](docs/api-reference.md) | REST endpoints and WebSocket protocol |
 | [Extension Guide](docs/extension.md) | VSCode/VSCodium setup, commands, and settings |
+| [Prompt Customization](docs/prompt-customization.md) | Customizing LLM prompts per project |
 | [Modelfile Guide](docs/modelfile.md) | Customizing Ollama models with persistent rules |
 | [llama-server Guide](docs/llama-server.md) | Using llama.cpp as an alternative to Ollama |
 
