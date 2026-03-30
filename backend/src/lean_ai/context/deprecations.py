@@ -56,6 +56,9 @@ _KNOWN_FRAMEWORKS: frozenset[str] = frozenset({
     "actix-web", "axum", "rocket",
     # C#
     "microsoft.aspnetcore",
+    # Infrastructure / IaC
+    "ansible", "docker", "docker-compose", "terraform", "kubernetes",
+    "helm", "pulumi", "packer",
 })
 
 _KNOWN_TOOLING: frozenset[str] = frozenset({
@@ -453,6 +456,155 @@ def _detect_csharp_versions(root: Path) -> list[DetectedDependency]:
 
 
 # ---------------------------------------------------------------------------
+# Infrastructure / IaC version helpers
+# ---------------------------------------------------------------------------
+
+def _extract_compose_version(path: Path) -> str:
+    """Extract version from a Docker Compose file (e.g. ``version: "3.8"``)."""
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines()[:10]:
+            stripped = line.strip()
+            if stripped.startswith("version:"):
+                value = stripped[len("version:"):].strip().strip("'\"")
+                if value and value[0].isdigit():
+                    return value
+    except Exception:
+        pass
+    return ""
+
+
+def _extract_terraform_version(tf_files: list[Path]) -> str:
+    """Scan .tf files for ``required_version`` inside a terraform block."""
+    for tf in tf_files:
+        try:
+            content = tf.read_text(encoding="utf-8")
+            idx = content.find("required_version")
+            if idx < 0:
+                continue
+            # Walk forward past '=' and whitespace to find the version string
+            rest = content[idx + len("required_version"):]
+            eq = rest.find("=")
+            if eq < 0:
+                continue
+            after_eq = rest[eq + 1:].lstrip()
+            # Extract quoted version
+            if after_eq and after_eq[0] in "\"'":
+                quote = after_eq[0]
+                end = after_eq.find(quote, 1)
+                if end > 0:
+                    return after_eq[1:end]
+        except Exception:
+            pass
+    return ""
+
+
+def _extract_helm_api_version(path: Path) -> str:
+    """Extract apiVersion from Chart.yaml (``v1`` or ``v2``)."""
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines()[:10]:
+            stripped = line.strip()
+            if stripped.startswith("apiVersion:"):
+                return stripped[len("apiVersion:"):].strip()
+    except Exception:
+        pass
+    return ""
+
+
+# Kubernetes kind values used to disambiguate from other YAML files
+_K8S_KINDS: frozenset[str] = frozenset({
+    "deployment", "service", "pod", "statefulset", "daemonset",
+    "namespace", "configmap", "secret", "ingress", "job", "cronjob",
+    "replicaset", "persistentvolumeclaim", "persistentvolume",
+    "serviceaccount", "role", "rolebinding", "clusterrole",
+    "clusterrolebinding", "networkpolicy", "horizontalpodautoscaler",
+})
+
+
+def _detect_infrastructure_versions(root: Path) -> list[DetectedDependency]:
+    """Detect IaC tools via marker files (no package manager needed)."""
+    deps: list[DetectedDependency] = []
+
+    # --- Ansible ---
+    ansible_markers = [
+        root / "ansible.cfg",
+        root / "playbook.yml",
+        root / "playbook.yaml",
+        root / "site.yml",
+        root / "site.yaml",
+    ]
+    has_ansible = any(m.is_file() for m in ansible_markers)
+    if not has_ansible and (root / "roles").is_dir():
+        has_ansible = True
+    if not has_ansible:
+        req_yml = root / "requirements.yml"
+        if req_yml.is_file():
+            try:
+                content = req_yml.read_text(encoding="utf-8")
+                if "collections:" in content or "roles:" in content:
+                    has_ansible = True
+            except Exception:
+                pass
+    if has_ansible:
+        deps.append(DetectedDependency("ansible", "", "framework"))
+
+    # --- Docker ---
+    if (root / "Dockerfile").is_file():
+        deps.append(DetectedDependency("docker", "", "framework"))
+
+    # --- Docker Compose ---
+    for name in ("docker-compose.yml", "docker-compose.yaml",
+                 "compose.yml", "compose.yaml"):
+        compose_path = root / name
+        if compose_path.is_file():
+            version = _extract_compose_version(compose_path)
+            deps.append(DetectedDependency("docker-compose", version, "framework"))
+            break
+
+    # --- Terraform ---
+    tf_files = list(root.glob("*.tf"))
+    if tf_files:
+        version = _extract_terraform_version(tf_files)
+        deps.append(DetectedDependency("terraform", version, "framework"))
+
+    # --- Kubernetes ---
+    has_k8s = (root / "k8s").is_dir() or (root / "kubernetes").is_dir()
+    if not has_k8s:
+        for yml in list(root.glob("*.yml")) + list(root.glob("*.yaml")):
+            try:
+                head = yml.read_text(encoding="utf-8")[:1000]
+                if "apiVersion:" in head:
+                    for line in head.splitlines():
+                        stripped = line.strip()
+                        if stripped.startswith("kind:"):
+                            kind_val = stripped[len("kind:"):].strip()
+                            if kind_val.lower() in _K8S_KINDS:
+                                has_k8s = True
+                                break
+                if has_k8s:
+                    break
+            except Exception:
+                pass
+    if has_k8s:
+        deps.append(DetectedDependency("kubernetes", "", "framework"))
+
+    # --- Helm ---
+    chart_yaml = root / "Chart.yaml"
+    if chart_yaml.is_file():
+        version = _extract_helm_api_version(chart_yaml)
+        deps.append(DetectedDependency("helm", version, "framework"))
+
+    # --- Pulumi ---
+    if (root / "Pulumi.yaml").is_file():
+        deps.append(DetectedDependency("pulumi", "", "framework"))
+
+    # --- Packer ---
+    if list(root.glob("*.pkr.hcl")) or (root / "packer.json").is_file():
+        deps.append(DetectedDependency("packer", "", "framework"))
+
+    return deps
+
+
+# ---------------------------------------------------------------------------
 # Aggregate version detection
 # ---------------------------------------------------------------------------
 
@@ -473,6 +625,7 @@ def _detect_versions(repo_root: str) -> list[DetectedDependency]:
         _detect_java_versions,
         _detect_rust_versions,
         _detect_csharp_versions,
+        _detect_infrastructure_versions,
     ):
         try:
             deps.extend(detector(root))

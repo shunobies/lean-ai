@@ -53,6 +53,15 @@ _CANONICAL_NAMES: dict[str, str] = {
     "postcss": "PostCSS",
     "pestphp/pest": "Pest",
     "@playwright/test": "Playwright",
+    # Infrastructure / IaC
+    "ansible": "Ansible",
+    "docker": "Docker",
+    "docker-compose": "Docker Compose",
+    "terraform": "Terraform",
+    "kubernetes": "Kubernetes",
+    "helm": "Helm",
+    "pulumi": "Pulumi",
+    "packer": "Packer",
 }
 
 

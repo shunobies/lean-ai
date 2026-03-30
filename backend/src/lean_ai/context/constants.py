@@ -26,6 +26,13 @@ _UNIVERSAL_KEY_FILES = [
     "docker-compose.yml",
     "docker-compose.yaml",
     ".env.example",
+    # Infrastructure / IaC
+    "ansible.cfg",
+    "site.yml",
+    "playbook.yml",
+    "main.tf",
+    "Chart.yaml",
+    "Pulumi.yaml",
 ]
 
 

@@ -213,4 +213,184 @@ class TestCategorize:
     def test_lodash_is_library(self):
         assert _categorize("lodash") == "library"
 
+    def test_ansible_is_framework(self):
+        assert _categorize("ansible") == "framework"
+
+    def test_docker_is_framework(self):
+        assert _categorize("docker") == "framework"
+
+    def test_docker_compose_is_framework(self):
+        assert _categorize("docker-compose") == "framework"
+
+    def test_terraform_is_framework(self):
+        assert _categorize("terraform") == "framework"
+
+    def test_kubernetes_is_framework(self):
+        assert _categorize("kubernetes") == "framework"
+
+    def test_helm_is_framework(self):
+        assert _categorize("helm") == "framework"
+
+    def test_pulumi_is_framework(self):
+        assert _categorize("pulumi") == "framework"
+
+    def test_packer_is_framework(self):
+        assert _categorize("packer") == "framework"
+
+
+# ---------------------------------------------------------------------------
+# _detect_infrastructure_versions — IaC marker file detection
+# ---------------------------------------------------------------------------
+
+
+class TestDetectInfrastructureVersions:
+    def test_ansible_via_ansible_cfg(self, tmp_path):
+        (tmp_path / "ansible.cfg").write_text("[defaults]\n")
+        deps = _detect_versions(str(tmp_path))
+        names = [d.name for d in deps]
+        assert "ansible" in names
+
+    def test_ansible_via_playbook_yml(self, tmp_path):
+        (tmp_path / "playbook.yml").write_text("---\n- hosts: all\n")
+        deps = _detect_versions(str(tmp_path))
+        names = [d.name for d in deps]
+        assert "ansible" in names
+
+    def test_ansible_via_roles_dir(self, tmp_path):
+        (tmp_path / "roles").mkdir()
+        deps = _detect_versions(str(tmp_path))
+        names = [d.name for d in deps]
+        assert "ansible" in names
+
+    def test_ansible_via_requirements_yml_collections(self, tmp_path):
+        (tmp_path / "requirements.yml").write_text(
+            "---\ncollections:\n  - name: ansible.builtin\n"
+        )
+        deps = _detect_versions(str(tmp_path))
+        names = [d.name for d in deps]
+        assert "ansible" in names
+
+    def test_ansible_via_requirements_yml_roles(self, tmp_path):
+        (tmp_path / "requirements.yml").write_text(
+            "---\nroles:\n  - name: geerlingguy.docker\n"
+        )
+        deps = _detect_versions(str(tmp_path))
+        names = [d.name for d in deps]
+        assert "ansible" in names
+
+    def test_requirements_yml_without_ansible_keys(self, tmp_path):
+        (tmp_path / "requirements.yml").write_text("---\nsomething: else\n")
+        deps = _detect_versions(str(tmp_path))
+        names = [d.name for d in deps]
+        assert "ansible" not in names
+
+    def test_docker_via_dockerfile(self, tmp_path):
+        (tmp_path / "Dockerfile").write_text("FROM python:3.12\n")
+        deps = _detect_versions(str(tmp_path))
+        names = [d.name for d in deps]
+        assert "docker" in names
+
+    def test_docker_compose_via_compose_yml(self, tmp_path):
+        (tmp_path / "docker-compose.yml").write_text(
+            'version: "3.8"\nservices:\n  web:\n    image: nginx\n'
+        )
+        deps = _detect_versions(str(tmp_path))
+        names = [d.name for d in deps]
+        assert "docker-compose" in names
+        compose_dep = [d for d in deps if d.name == "docker-compose"][0]
+        assert compose_dep.version == "3.8"
+
+    def test_docker_compose_modern_no_version(self, tmp_path):
+        (tmp_path / "compose.yaml").write_text(
+            "services:\n  web:\n    image: nginx\n"
+        )
+        deps = _detect_versions(str(tmp_path))
+        names = [d.name for d in deps]
+        assert "docker-compose" in names
+        compose_dep = [d for d in deps if d.name == "docker-compose"][0]
+        assert compose_dep.version == ""
+
+    def test_terraform_via_main_tf(self, tmp_path):
+        (tmp_path / "main.tf").write_text(
+            'terraform {\n  required_version = ">= 1.5.0"\n}\n'
+        )
+        deps = _detect_versions(str(tmp_path))
+        names = [d.name for d in deps]
+        assert "terraform" in names
+        tf_dep = [d for d in deps if d.name == "terraform"][0]
+        assert tf_dep.version == ">= 1.5.0"
+
+    def test_terraform_without_version(self, tmp_path):
+        (tmp_path / "variables.tf").write_text(
+            'variable "region" {\n  default = "us-east-1"\n}\n'
+        )
+        deps = _detect_versions(str(tmp_path))
+        names = [d.name for d in deps]
+        assert "terraform" in names
+        tf_dep = [d for d in deps if d.name == "terraform"][0]
+        assert tf_dep.version == ""
+
+    def test_kubernetes_via_k8s_dir(self, tmp_path):
+        (tmp_path / "k8s").mkdir()
+        deps = _detect_versions(str(tmp_path))
+        names = [d.name for d in deps]
+        assert "kubernetes" in names
+
+    def test_kubernetes_via_manifest_file(self, tmp_path):
+        (tmp_path / "deployment.yaml").write_text(
+            "apiVersion: apps/v1\nkind: Deployment\n"
+        )
+        deps = _detect_versions(str(tmp_path))
+        names = [d.name for d in deps]
+        assert "kubernetes" in names
+
+    def test_no_kubernetes_for_non_k8s_yaml(self, tmp_path):
+        (tmp_path / "config.yaml").write_text(
+            "apiVersion: v1\nkind: SomeCustomThing\n"
+        )
+        deps = _detect_versions(str(tmp_path))
+        names = [d.name for d in deps]
+        assert "kubernetes" not in names
+
+    def test_helm_via_chart_yaml(self, tmp_path):
+        (tmp_path / "Chart.yaml").write_text(
+            "apiVersion: v2\nname: my-chart\nversion: 0.1.0\n"
+        )
+        deps = _detect_versions(str(tmp_path))
+        names = [d.name for d in deps]
+        assert "helm" in names
+        helm_dep = [d for d in deps if d.name == "helm"][0]
+        assert helm_dep.version == "v2"
+
+    def test_pulumi_via_pulumi_yaml(self, tmp_path):
+        (tmp_path / "Pulumi.yaml").write_text(
+            "name: my-project\nruntime: python\n"
+        )
+        deps = _detect_versions(str(tmp_path))
+        names = [d.name for d in deps]
+        assert "pulumi" in names
+
+    def test_packer_via_pkr_hcl(self, tmp_path):
+        (tmp_path / "image.pkr.hcl").write_text(
+            'source "amazon-ebs" "example" {}\n'
+        )
+        deps = _detect_versions(str(tmp_path))
+        names = [d.name for d in deps]
+        assert "packer" in names
+
+    def test_no_iac_in_empty_dir(self, tmp_path):
+        deps = _detect_versions(str(tmp_path))
+        assert deps == []
+
+    def test_multiple_iac_tools(self, tmp_path):
+        (tmp_path / "ansible.cfg").write_text("[defaults]\n")
+        (tmp_path / "Dockerfile").write_text("FROM ubuntu:22.04\n")
+        (tmp_path / "main.tf").write_text('provider "aws" {}\n')
+        deps = _detect_versions(str(tmp_path))
+        names = [d.name for d in deps]
+        assert "ansible" in names
+        assert "docker" in names
+        assert "terraform" in names
+        assert all(d.category == "framework" for d in deps)
+
 
