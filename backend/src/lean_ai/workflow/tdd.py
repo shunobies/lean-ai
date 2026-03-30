@@ -10,6 +10,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from lean_ai.config import settings
+from lean_ai.llm.prompt_registry import registry
 from lean_ai.llm.tool_definitions import IMPLEMENTATION_TOOLS
 from lean_ai.workflow.ws_handler import ws_send_nowait
 
@@ -22,28 +23,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-DISPUTE_EVALUATION_PROMPT = """\
-Evaluate a test dispute from the implementation model.  The implementor \
-claims a test is flawed and cannot be satisfied by a correct implementation.
+def _get_dispute_prompt() -> str:
+    return registry.get("tdd.dispute_evaluation")
 
-RULES:
-1. Read the test file to see the current test code.
-2. Evaluate the implementor's reason carefully and objectively.
-3. If the dispute is VALID (the test has a genuine flaw — wrong assertion, \
-tests an implementation detail, impossible precondition, wrong import path, \
-tests out-of-scope behavior):
-   - Fix the test using edit_file.  Preserve the test's documentation \
-(docstrings, comments) and update them to reflect the fix.
-   - Call task_complete with a summary starting with "ACCEPTED: " followed \
-by what you changed and why.
-4. If the dispute is INVALID (the test is correct and the implementor \
-needs to find a different approach):
-   - Call task_complete with a summary starting with "REJECTED: " followed \
-by: why the test is correct, what behaviour the test is validating, and \
-what implementation approach would satisfy it.
-5. Do NOT add new tests or remove existing ones — only fix the disputed \
-test function if the dispute is valid.
-"""
+
+# Module-level alias for backward compat
+DISPUTE_EVALUATION_PROMPT = _get_dispute_prompt()
 
 
 async def evaluate_test_dispute(

@@ -18,6 +18,7 @@ import { BackendClient } from "./backendClient";
 import { startBackend, stopBackend, restartBackend, clearManagedInstallCache } from "./backendProcess";
 import { resetBackend } from "./backendInstaller";
 import { SettingsPanel } from "./settingsPanel";
+import { PromptsPanel } from "./promptsPanel";
 import { initNotifications } from "./notifications";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -115,6 +116,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
         vscode.commands.registerCommand("lean-ai.openSettings", () => {
             SettingsPanel.createOrShow(context);
+        }),
+        vscode.commands.registerCommand("lean-ai.editPrompts", () => {
+            PromptsPanel.createOrShow(context);
         }),
         vscode.commands.registerCommand("lean-ai.openChatInNewWindow", () => {
             sidebarProvider.openChatInNewWindow();

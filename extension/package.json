@@ -97,6 +97,11 @@
         "icon": "$(settings-gear)"
       },
       {
+        "command": "lean-ai.editPrompts",
+        "title": "Lean AI: Edit Prompts",
+        "icon": "$(edit)"
+      },
+      {
         "command": "lean-ai.reinstallBackend",
         "title": "Lean AI: Reinstall Backend"
       },

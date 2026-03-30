@@ -21,6 +21,7 @@ import type { Attachment, WSMessage } from "./types";
 import { handleWsMessage } from "./wsHandler";
 import type { WsHandlerContext } from "./wsHandler";
 import { SettingsPanel } from "./settingsPanel";
+import { PromptsPanel } from "./promptsPanel";
 import { BACKEND_SETTING_MAP, clearEnvSetting, resolveEnvFilePath, writeEnvSetting } from "./settingsSync";
 import { addExtras } from "./backendInstaller";
 import { restartBackend } from "./backendProcess";
@@ -1004,6 +1005,9 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 break;
             case "openSettings":
                 SettingsPanel.createOrShow(this.context);
+                break;
+            case "openEditPrompts":
+                PromptsPanel.createOrShow(this.context);
                 break;
             case "openExternal":
                 vscode.env.openExternal(vscode.Uri.parse(msg.url as string));

@@ -28,6 +28,7 @@ from lean_ai.llm.plan_schema import (
     VerificationPlan,
     plan_to_markdown,
 )
+from lean_ai.llm.prompt_registry import registry
 from lean_ai.llm.prompts import (
     CLARIFICATION_SYSTEM_PROMPT,
     PLAN_ASSEMBLY_SYSTEM_PROMPT,
@@ -293,23 +294,8 @@ async def create_plan(
             {"role": "system", "content": PLAN_SCOPE_SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": (
-                    f"TASK: {task}\n\n"
-                    f"CODEBASE CONTEXT:\n{context}\n\n"
-                    "Analyze scope. Output these sections:\n\n"
-                    "CHANGES NEEDED:\n"
-                    "<what must change, 3-5 bullets>\n\n"
-                    "DOWNSTREAM CONSUMERS:\n"
-                    "<for every model/table/schema being modified, "
-                    "list who reads it: controllers, views, API "
-                    "resources, forms, tests>\n\n"
-                    "OUT OF SCOPE:\n"
-                    "<what this task does NOT touch>\n\n"
-                    "ASSUMPTIONS:\n"
-                    "<key assumptions, 2-3 bullets>\n\n"
-                    "IMPORTANT: If the task mentions specific files, "
-                    "treat that as a STARTING POINT — the codebase "
-                    "may have additional dependent files."
+                "content": registry.format(
+                    "planning.scope_user", task=task, context=context,
                 ),
             },
         ],
@@ -337,80 +323,9 @@ async def create_plan(
         {"role": "system", "content": PLAN_EXPLORATION_SYSTEM_PROMPT},
         {
             "role": "user",
-            "content": (
-                "IMPORTANT: Your text output IS the file summary that "
-                "downstream phases use. Tool call results are NOT passed "
-                "forward — only your text responses are. You MUST include "
-                "relevant file content (key sections, 15-25 lines each) IN "
-                "YOUR TEXT RESPONSES for every file to be modified.\n\n"
-                "DO NOT IMPLEMENT: You are exploring, not implementing. Do "
-                "NOT write fixed versions of files, implementation code, or "
-                "'Changes Made' summaries. Your output must be a structured "
-                "file summary in the format specified below. If you find "
-                "yourself writing code that should go into a file, STOP — "
-                "that is Phase 4's job.\n\n"
-                f"TASK: {task}\n\n"
-                f"SCOPE ANALYSIS:\n{scope}\n\n"
-                f"CODEBASE CONTEXT:\n{context}\n\n"
-                "Identify EVERY file that needs to be created or modified.\n\n"
-                "CRITICAL — TRACE ALL CONSUMERS:\n"
-                "Before finalizing the file list, use grep_files to search for "
-                "references to every entity being modified. For example, if you "
-                "are modifying a component, search for its name across the "
-                "codebase to find consumers, dependents, configuration files, "
-                "and tests that reference it. Files that read, display, or "
-                "depend on the entities you are changing almost certainly need "
-                "updates too.\n\n"
-                "Do NOT treat file lists in the task description as exhaustive. "
-                "The task may mention only some files but omit dependent files "
-                "that also need changes.\n\n"
-                "EXPLORATION STEPS:\n"
-                "1. Use grep_files to find all references to modified entities\n"
-                "2. Use directory_tree / list_directory to understand project structure\n"
-                "3. Use read_file to read the FULL CONTENT of every file you "
-                "plan to modify — the content will be included in the plan so "
-                "the executor can make accurate edits without re-reading\n"
-                "4. Also read files that contain patterns the executor should "
-                "follow when creating new files\n"
-                "5. VERIFY ASSUMPTIONS: If the task depends on specific "
-                "infrastructure (packages, frameworks, shared configs, base "
-                "files), verify it actually exists in the codebase. Use "
-                "grep_files and list_directory to check. If the task mentions "
-                "features that require installed packages or scaffolding, "
-                "search the dependency file (package.json, composer.json, "
-                "Gemfile, requirements.txt, go.mod, Cargo.toml, "
-                "pyproject.toml, etc.) to confirm they are present. "
-                "List any assumed infrastructure that is MISSING — these "
-                "gaps must be addressed in the plan.\n"
-                "6. EXISTING STATE CHECK: For each entity the task introduces "
-                "or modifies, search the codebase to determine if it ALREADY "
-                "EXISTS. Check if files, configurations, or definitions that "
-                "the task references are already present. Note the results in "
-                "the output — this determines whether the plan should CREATE "
-                "new files or MODIFY existing ones.\n"
-                "7. READ REGISTRATION FILES: Read any files where new "
-                "components must be registered or referenced — configuration "
-                "files, entry points, bootstrap files, index/barrel files, "
-                "etc. The executor needs to know WHERE and HOW to register "
-                "new components. Include these files in your output under "
-                "FILES READ FOR CONTEXT.\n\n"
-                "EFFICIENCY: You can call multiple tools in a single response. "
-                "For example, call read_file on several files at once instead "
-                "of reading them one at a time.\n\n"
-                "OUTPUT FORMAT:\n\n"
-                "CONTENT LENGTH LIMIT: When including file content in your "
-                "output, include ONLY the 15-25 most relevant lines per file. "
-                "Use '[...]' to mark omitted sections. Do NOT dump entire file "
-                "contents — downstream phases receive your summary as context "
-                "and it must stay concise.\n\n"
-                "FILES TO MODIFY (include key content you read):\n"
-                "1. path/to/file — reason — relevant sections read\n\n"
-                "FILES TO CREATE:\n"
-                "1. path/to/new/file — purpose — patterns to follow\n\n"
-                "FILES READ FOR CONTEXT (not modified, but content informs changes):\n"
-                "1. path/to/source — what it contains\n\n"
-                "MISSING INFRASTRUCTURE (assumed by the task but not found):\n"
-                "1. what is missing — why it is needed"
+            "content": registry.format(
+                "planning.exploration_user",
+                task=task, scope=scope, context=context,
             ),
         },
     ]
@@ -470,12 +385,7 @@ async def create_plan(
         tool_executor_fn=_read_only_executor,
         max_turns=settings.implementation_max_turns,
         max_tokens=phase_max_tokens,
-        task_reminder=(
-            f"REMINDER — You are exploring the codebase for this task: {task}\n\n"
-            "Have you used grep_files to trace ALL consumers of modified "
-            "entities? Do NOT finalize until you have searched for every "
-            "model/class being changed and read every file that references it."
-        ),
+        task_reminder=registry.format("planning.task_reminder", task=task),
         reminder_interval=15,
         on_tool_call=on_tool_call,
         on_tool_result=on_tool_result,
@@ -528,49 +438,15 @@ async def create_plan(
             {"role": "system", "content": PLAN_DESIGN_SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": (
-                    f"TASK: {task}\n\n"
-                    f"SCOPE:\n{scope}\n\n"
-                    + (
+                "content": registry.format(
+                    "planning.design_user",
+                    task=task,
+                    scope=scope,
+                    project_context=(
                         f"PROJECT CONTEXT:\n{project_context}\n\n"
                         if project_context else ""
-                    )
-                    + f"FILES IDENTIFIED AND READ:\n{file_summary}\n\n"
-                    "Produce THREE sections in order:\n\n"
-                    "─── SECTION 1: NAMING CONVENTIONS (100-200 words) ───\n"
-                    "List conventions observed in the existing codebase as a "
-                    "structured table. NEVER cite files that will be created "
-                    "by this plan. If no examples exist for a category, write "
-                    "'standard framework conventions'.\n\n"
-                    "Format: one line per category:\n"
-                    "  category | pattern | source_file\n"
-                    "Categories: variables, functions, classes, files, "
-                    "routes, DB tables/columns, imports\n\n"
-                    "─── SECTION 2: CHANGE DESIGN (300-800 words) ───\n"
-                    "Design decisions ONLY for non-obvious files. Phase 2 "
-                    "already identified files and read their contents — "
-                    "do NOT re-describe that.\n"
-                    "Cover: complex DB schemas, non-trivial method "
-                    "signatures, multi-component wiring, pattern deviations.\n"
-                    "Skip straightforward files (simple CRUD, basic models, "
-                    "standard config). 3-8 lines per file entry.\n"
-                    "Do NOT write full implementation code or template "
-                    "markup.\n\n"
-                    "─── SECTION 3: GAP ANALYSIS (100-300 words) ───\n"
-                    "Check for gaps not already covered. Use structured "
-                    "lists:\n\n"
-                    "MISSING FILES (runtime crash if absent):\n"
-                    "  missing_file | purpose | blocking?\n"
-                    "Do NOT suggest optional patterns unless the task "
-                    "explicitly requests them.\n\n"
-                    "DEPENDENCY ORDER:\n"
-                    "  file | depends_on | reason\n\n"
-                    "CRITICAL RISKS:\n"
-                    "  risk | severity | mitigation\n\n"
-                    "If nothing is missing or at risk, say so briefly.\n\n"
-                    "Do NOT simulate running commands, invent file listings, "
-                    "or fabricate file contents. Base your analysis ONLY on "
-                    "the codebase information provided above."
+                    ),
+                    file_summary=file_summary,
                 ),
             },
         ],
@@ -606,192 +482,24 @@ async def create_plan(
             {"role": "system", "content": PLAN_ASSEMBLY_SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": (
-                    # -- U-curve optimized ordering --
-                    # Start (high attention): task + risks (actionable)
-                    # Middle (lower attention): reference material
-                    # End (high attention): assembly rules + checklist
-                    f"TASK: {task}\n\n"
-                    f"DESIGN AND RISK SYNTHESIS (includes naming "
-                    f"conventions, change design, and gap analysis):\n"
-                    f"{design_and_risks}\n\n"
-                    f"FILE SUMMARY:\n{file_summary}\n\n"
-                    + (
+                "content": registry.format(
+                    "planning.assembly_user",
+                    task=task,
+                    design_and_risks=design_and_risks,
+                    file_summary=file_summary,
+                    project_context=(
                         f"PROJECT CONTEXT:\n{project_context}\n\n"
                         if project_context else ""
-                    )
-                    + f"SCOPE:\n{scope}\n\n"
-                    "Assemble the final execution plan as structured JSON. "
-                    "Each step must represent ONE tool call.\n\n"
-                    "NAMING CONVENTIONS: The change design above lists naming "
-                    "conventions observed in the codebase. Extract them into "
-                    "the 'naming_conventions' field of the plan. All step "
-                    "instructions must follow these conventions.\n\n"
-                    "NAME REGISTRY: Populate the 'name_registry' field with "
-                    "every NEW entity introduced by this plan and its "
-                    "canonical names across the full stack. Use this format:\n"
-                    "Entity \"<Name>\":\n"
-                    "  model/class: <ExactClassName>\n"
-                    "  namespace/module: <exact.namespace.path>\n"
-                    "  import: <exact import statement>\n"
-                    "  table/collection: <exact_table_name>\n"
-                    "  file: <exact/file/path>\n"
-                    "  route/endpoint: </exact/route>\n"
-                    "  registered in: <config/file1, routes/file2>\n"
-                    "  test: <exact/test/file>\n"
-                    "Include ONLY the rows that apply to each entity. The "
-                    "namespace/module and import rows are critical — the "
-                    "executor uses them for import statements in other files. "
-                    "The 'registered in' row lists files where this entity "
-                    "must be registered — each one must have a corresponding "
-                    "edit_file step.\n\n"
-                    "IMPORTANT: If the risk assessment identified missing files "
-                    "(files that consume or depend on the modified entities but "
-                    "were not in the original change design), you MUST include "
-                    "steps to update those files too. The plan must cover the "
-                    "full change flow end-to-end.\n\n"
-                    "RULES FOR STEPS:\n"
-                    "- DEPENDENCY-FIRST: Steps 1 through 5 must be ONLY "
-                    "infrastructure, config, and files identified as missing in "
-                    "Phase 3's gap analysis. No feature code until all "
-                    "required infrastructure is confirmed to exist. Each "
-                    "missing file "
-                    "from Phase 3 gets its own dedicated step in positions 1-5.\n"
-                    "- Use 'create_file' for new files, 'edit_file' for "
-                    "modifications to existing files, 'run_command' for "
-                    "build commands, migrations, or code generators\n"
-                    "- Do NOT include 'run_tests' or 'run_lint' steps — "
-                    "verification will be appended automatically after "
-                    "all implementation steps are complete\n"
-                    "- For edit_file steps: the instruction field must specify: "
-                    "(a) The exact location in the file (function name, class "
-                    "name, or line range from the files read during exploration). "
-                    "(b) What currently exists at that location. "
-                    "(c) The exact new code to add — write out the literal "
-                    "code, not a description like 'add a handler'. "
-                    "(d) What surrounding code looks like (so the executor can "
-                    "build accurate search blocks). "
-                    "In the context field, include the relevant section of the "
-                    "actual file content (10+ lines around the modification "
-                    "point) as read during exploration.\n"
-                    "- For create_file steps: the instruction field must be a "
-                    "DETAILED SPECIFICATION, not a brief description. Include: "
-                    "(a) The exact type of file — be specific (e.g., 'task "
-                    "file for role X' not just 'task file'; 'migration to add "
-                    "columns' not just 'migration'). "
-                    "(b) If this entity already exists (found during "
-                    "exploration), state that explicitly and describe how the "
-                    "new file relates to the existing one. "
-                    "(c) The exact namespace/module path for the new file. "
-                    "(d) Every import statement the file will need. "
-                    "(e) For data-definition files: every field with its type "
-                    "and constraints. "
-                    "(f) For code files: method/function signatures with "
-                    "parameter types and return types. "
-                    "(g) The exact existing file whose pattern to follow, by "
-                    "name. "
-                    "In the context field, include: "
-                    "(1) A substantial code snippet (15+ lines) from the "
-                    "pattern file showing the exact structure to replicate — "
-                    "imports, class declaration, key methods. Do NOT "
-                    "abbreviate with '...'. "
-                    "(2) All design details: field types with constraints, "
-                    "signatures, relationships with exact syntax. "
-                    "(3) If modifying existing infrastructure: include what "
-                    "currently exists so the executor knows the starting "
-                    "state. "
-                    "Do NOT use generic template comments like "
-                    "'// Example migration structure'. Provide concrete, "
-                    "copy-ready details — not placeholders or abstractions.\n"
-                    "- Order steps so dependencies come first\n"
-                    "- EXISTING INFRASTRUCTURE: If the file summary shows "
-                    "that a resource already exists, do NOT create a "
-                    "duplicate. Modify the existing file with edit_file "
-                    "instead of creating a new one. For any infrastructure "
-                    "that already exists, extend it rather than recreating "
-                    "it.\n\n"
-                    "EXAMPLE STEP (edit_file):\n"
-                    '{\n'
-                    '  "step_number": 5,\n'
-                    '  "tool": "edit_file",\n'
-                    '  "file_path": "src/config/handlers.ext",\n'
-                    '  "instruction": "Add the new handler registration '
-                    "AFTER the existing entries (around line 34). Add "
-                    "exactly: <the literal code to insert>. Also add the "
-                    "import/include at the top of the file: <exact import "
-                    "statement>. The import should go after the existing "
-                    'imports on line 8.",\n'
-                    '  "context": "Current file lines 5-12 and 30-36:\\n'
-                    "<actual file content from exploration showing the "
-                    'surrounding code at both modification points>"\n'
-                    "}\n\n"
-                    "EXAMPLE STEP (create_file):\n"
-                    '{\n'
-                    '  "step_number": 3,\n'
-                    '  "tool": "create_file",\n'
-                    '  "file_path": "src/models/review.ext",\n'
-                    '  "instruction": "Create the Review component. '
-                    "Fields: user_id (reference), item_id (reference), "
-                    "rating (integer), text (string, optional). "
-                    "Relationships: belongs to User, belongs to Item. "
-                    "Imports: <every import needed>. Follow the exact "
-                    'pattern from src/models/item.ext.",\n'
-                    '  "context": "Pattern from src/models/item.ext:\\n'
-                    "<15+ lines of actual content from the pattern file "
-                    "showing imports, structure, fields, and methods — "
-                    'NOT abbreviated with ...>"\n'
-                    "}\n\n"
-                    + (
+                    ),
+                    scope=scope,
+                    missing_files=(
                         "REQUIRED MISSING FILES — these were identified "
                         "during risk assessment as files that MUST exist "
                         "for the app to work. Each one MUST have a "
                         "corresponding create_file or edit_file step in "
                         f"the plan:\n{missing_files}\n\n"
                         if missing_files else ""
-                    )
-                    + "FINAL CHECKLIST — verify before producing the plan:\n"
-                    "- Every file listed under CHANGE DESIGN that describes a "
-                    "modification has a corresponding edit_file step, and "
-                    "every file described as new has a create_file step. A "
-                    "read_file step is NOT a substitute — if the design says "
-                    "to change a file, there MUST be an edit_file or "
-                    "create_file step for that file\n"
-                    "- Every file identified in the risk assessment as missing "
-                    "is included as a step\n"
-                    "- The plan covers the complete change flow end-to-end "
-                    "across all layers involved\n"
-                    "- Each edit_file step has specific line references and "
-                    "context\n"
-                    "- Steps are ordered so dependencies come first\n"
-                    "- All new names follow the naming conventions extracted "
-                    "from existing code\n"
-                    "- If any file depends on a shared base file or template "
-                    "that does not yet exist, there is a step to create it\n"
-                    "- Every entry point or handler introduced in the design "
-                    "has a corresponding implementation step\n"
-                    "- If new components are created, there is a step to "
-                    "register them wherever the project's framework requires "
-                    "registration\n"
-                    "- If the task requires infrastructure identified as "
-                    "missing during exploration, those setup steps come "
-                    "FIRST\n"
-                    "- No duplicate infrastructure: if a resource already "
-                    "exists, the plan modifies it (not recreates it)\n"
-                    "- Every new component has a registration step if the "
-                    "project requires it (check the exploration results for "
-                    "registration patterns)\n"
-                    "- All references (imports, includes, paths) use the "
-                    "project's observed conventions\n\n"
-                    "USER SUMMARY — populate the `user_summary` field with up to "
-                    "1000 words of plain English explaining: (1) what problem this "
-                    "plan solves and the overall approach, (2) why specific "
-                    "architectural decisions were made — what existing structures "
-                    "are being extended and why, (3) any design trade-offs or "
-                    "assumptions the user should be aware of before approving. "
-                    "Write for a developer who may not know the codebase deeply but "
-                    "needs to understand what load-bearing walls are being touched "
-                    "and why. Do NOT list file paths or step numbers — describe "
-                    "intent and reasoning in prose."
+                    ),
                 ),
             },
         ],

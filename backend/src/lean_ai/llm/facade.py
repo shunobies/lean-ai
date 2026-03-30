@@ -371,13 +371,13 @@ class LLMClient:
                                 "called %d times with identical arguments",
                                 tc.name, state.consecutive_same_tool,
                             )
+                            from lean_ai.llm.prompt_registry import registry
                             messages.append({
                                 "role": "user",
-                                "content": (
-                                    f"Loop detected: {tc.name} called "
-                                    f"{state.consecutive_same_tool} times "
-                                    f"with same args. Use a different "
-                                    f"approach."
+                                "content": registry.format(
+                                    "nudge.loop_detected",
+                                    tool_name=tc.name,
+                                    count=str(state.consecutive_same_tool),
                                 ),
                             })
                             state.consecutive_same_tool = 0
@@ -472,12 +472,10 @@ class LLMClient:
                             f"truncated responses"
                         ),
                     )
+                from lean_ai.llm.prompt_registry import registry
                 return TurnAction(
                     verdict=TurnVerdict.NUDGE,
-                    message=(
-                        "Response truncated. Output ONLY the tool "
-                        "call, nothing else."
-                    ),
+                    message=registry.get("nudge.truncation"),
                 )
 
             state.consecutive_truncated = 0
@@ -491,9 +489,11 @@ class LLMClient:
                     ),
                 )
 
-            nudge = text_only_nudge or (
-                "Call task_complete if done, otherwise call your next tool."
-            )
+            if text_only_nudge:
+                nudge = text_only_nudge
+            else:
+                from lean_ai.llm.prompt_registry import registry
+                nudge = registry.get("nudge.text_only")
             return TurnAction(verdict=TurnVerdict.NUDGE, message=nudge)
 
         # ── Context refresh (event-driven by token threshold) ─────

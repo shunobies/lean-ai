@@ -960,6 +960,40 @@ export class BackendClient {
         }
     }
 
+    // --- Prompts ---
+
+    async getPrompts(repoRoot: string): Promise<{ prompts: unknown[]; categories: string[] }> {
+        const params = new URLSearchParams({ repo_root: repoRoot });
+        const resp = await fetch(`${this.baseUrl}/api/prompts?${params}`);
+        if (!resp.ok) {
+            throw new Error(`Failed to load prompts: ${resp.statusText}`);
+        }
+        return resp.json() as Promise<{ prompts: unknown[]; categories: string[] }>;
+    }
+
+    async updatePrompts(repoRoot: string, overrides: Record<string, string>): Promise<void> {
+        const resp = await fetch(`${this.baseUrl}/api/prompts`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ repo_root: repoRoot, overrides }),
+        });
+        if (!resp.ok) {
+            const body = await resp.text();
+            throw new Error(`Failed to save prompts: ${resp.statusText} — ${body}`);
+        }
+    }
+
+    async resetPrompts(repoRoot: string, keys?: string[]): Promise<void> {
+        const resp = await fetch(`${this.baseUrl}/api/prompts/reset`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ repo_root: repoRoot, keys: keys ?? null }),
+        });
+        if (!resp.ok) {
+            throw new Error(`Failed to reset prompts: ${resp.statusText}`);
+        }
+    }
+
     // --- WebSocket ---
 
     connectWebSocket(
