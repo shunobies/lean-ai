@@ -314,6 +314,68 @@ Create a new project from a scaffold recipe.
 }
 ```
 
+### Notes
+
+#### `POST /api/notes`
+
+Create a new note. The note is indexed for full-text search and queued for background LLM categorization (project, tags, TODOs).
+
+**Request:**
+```json
+{
+  "content": "Need to refactor the auth middleware to support JWT refresh tokens",
+  "source_workspace": "my-project"
+}
+```
+
+#### `GET /api/notes?project=my-project&limit=20&offset=0`
+
+List notes, optionally filtered by project.
+
+#### `GET /api/notes/search?q=auth&project=my-project`
+
+Full-text search across all notes.
+
+#### `GET /api/notes/projects`
+
+List all unique project names that have notes.
+
+#### `GET /api/notes/{note_id}`
+
+Get a single note with its TODOs.
+
+#### `PUT /api/notes/{note_id}`
+
+Update a note's content, project, or tags.
+
+#### `DELETE /api/notes/{note_id}`
+
+Delete a note and its associated TODOs.
+
+#### `GET /api/notes/todos?project=my-project&status=pending`
+
+List TODOs across all notes, optionally filtered by project and status (`pending`, `done`).
+
+#### `POST /api/notes/{note_id}/todos`
+
+Add a TODO item to a note.
+
+**Request:**
+```json
+{
+  "text": "Implement JWT refresh token rotation",
+  "status": "pending"
+}
+```
+
+#### `PUT /api/notes/todos/{todo_id}`
+
+Update a TODO's text or status.
+
+#### `DELETE /api/notes/todos/{todo_id}`
+
+Delete a TODO item.
+
 ### Health
 
 #### `GET /api/health`

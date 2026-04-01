@@ -2,6 +2,21 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.3.33] - 2026-03-31
+
+### Added
+- **YAML configuration** — settings are now saved to `backend/config.yaml` instead of `backend/.env`. YAML format with field names (e.g. `ollama_url` instead of `LEAN_AI_OLLAMA_URL`). The `.env` file continues to work as a fallback.
+- **Encrypted API keys** — API keys in `config.yaml` can be Fernet-encrypted with an `enc:` prefix so leaked config files don't expose raw credentials. CLI tool: `python -m lean_ai encrypt-key <key>`. Extension users are unaffected — API keys remain in the OS keychain.
+- **CLI config tools** — `python -m lean_ai` commands for key encryption (`encrypt-key`), `.env` migration (`migrate-env`), and config template generation (`generate-config`).
+
+## [0.3.32] - 2026-03-31
+
+### Added
+- **Notes & TODOs** — cross-project notes system with `/note` slash command. Notes are stored globally (`~/.lean_ai/notes/`), auto-categorized by project and tagged via background LLM analysis. The chat LLM has `save_note` and `list_project_todos` tools for in-conversation note-taking and TODO tracking. A dedicated Notes & TODOs webview panel provides full CRUD, search, and filtering.
+
+### Changed
+- **Chat prompt** — the chat assistant now acts as a general-purpose coding assistant by default, only entering prompt-building mode when explicitly asked. Responses are conversational rather than always producing a Suggested Agent Prompt.
+
 ## [0.3.31] - 2026-03-25
 
 ### Added

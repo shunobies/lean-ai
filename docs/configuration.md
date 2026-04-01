@@ -1,6 +1,57 @@
 # Configuration Reference
 
-All Lean AI settings use the `LEAN_AI_` prefix and can be set via environment variables or in a `backend/.env` file. Settings are defined in `backend/src/lean_ai/config.py` using pydantic-settings.
+Lean AI supports three configuration sources, applied in priority order:
+
+1. **Environment variables** (`LEAN_AI_*`) — highest priority, always wins
+2. **`backend/config.yaml`** — YAML format using field names (e.g. `ollama_url`)
+3. **`backend/.env`** — legacy dotenv format using `LEAN_AI_*` names
+
+Settings are defined in `backend/src/lean_ai/config.py` using pydantic-settings. The YAML file is the recommended configuration format; `.env` continues to work as a fallback.
+
+### Configuration File Formats
+
+**config.yaml** (recommended):
+```yaml
+llm_provider: ollama
+ollama_url: "http://localhost:11434"
+ollama_model: "qwen3-coder:30b"
+ollama_context_window: 128
+
+# API keys can be encrypted — see "Encrypted API Keys" below
+openai_api_key: "enc:gAAAAABf..."
+```
+
+**.env** (legacy):
+```env
+LEAN_AI_LLM_PROVIDER=ollama
+LEAN_AI_OLLAMA_URL=http://localhost:11434
+LEAN_AI_OLLAMA_MODEL=qwen3-coder:30b
+```
+
+### Encrypted API Keys
+
+API keys stored in `config.yaml` can be Fernet-encrypted so the file doesn't expose raw credentials if leaked. Encrypted values use an `enc:` prefix.
+
+```bash
+# Encrypt a key (auto-creates .lean_ai/.keyfile on first use)
+python -m lean_ai encrypt-key sk-your-api-key-here
+# Output: enc:gAAAAABf...
+
+# Paste the output into config.yaml
+```
+
+The encryption key is stored in `.lean_ai/.keyfile` with owner-only permissions (0600). Plain-text keys in config.yaml still work — encryption is optional.
+
+**CLI tools:**
+
+| Command | Description |
+|---|---|
+| `python -m lean_ai encrypt-key <key>` | Encrypt an API key for config.yaml |
+| `python -m lean_ai decrypt-key <value>` | Decrypt an encrypted value (debugging) |
+| `python -m lean_ai migrate-env` | Convert existing `.env` to `config.yaml` with auto-encryption |
+| `python -m lean_ai generate-config` | Generate a documented config.yaml template |
+
+> **Extension users:** The VSCode extension stores API keys in your OS keychain (never in config files) and handles config.yaml automatically. The encryption feature is for standalone backend users who edit config files manually.
 
 ### Context Window Shorthand
 
@@ -101,15 +152,15 @@ Leave all expert settings empty to use the primary model for everything.
 
 This is the recommended setup for saving cloud tokens while still getting strong reasoning for planning:
 
-```env
-# Primary: fast local model handles all exploration and implementation
-LEAN_AI_LLM_PROVIDER=ollama
-LEAN_AI_OLLAMA_MODEL=qwen3-coder:30b
+```yaml
+# config.yaml
+llm_provider: ollama
+ollama_model: "qwen3-coder:30b"
 
 # Expert: Claude for planning phases 3-5 and final validation fix retry
-LEAN_AI_EXPERT_LLM_PROVIDER=anthropic
-LEAN_AI_ANTHROPIC_API_KEY=sk-ant-...
-LEAN_AI_ANTHROPIC_EXPERT_MODEL=claude-opus-4-6
+expert_llm_provider: anthropic
+anthropic_api_key: "enc:gAAAAABf..."  # encrypt with: python -m lean_ai encrypt-key <key>
+anthropic_expert_model: "claude-opus-4-6"
 ```
 
 With this configuration, cloud API calls only happen during planning (change design, risk assessment, plan assembly, verification steps) and on the final retry of any validation fix loop. All codebase exploration, code execution, and routine tool calls use the local model.
@@ -118,18 +169,18 @@ With this configuration, cloud API calls only happen during planning (change des
 
 Use three different local models matched to each role's requirements:
 
-```env
-# Primary: coding-tuned model for exploration and implementation
-LEAN_AI_LLM_PROVIDER=ollama
-LEAN_AI_OLLAMA_MODEL=qwen3-coder:30b
+```yaml
+# config.yaml
+llm_provider: ollama
+ollama_model: "qwen3-coder:30b"
 
 # Expert: larger model for planning phases 3-5, TDD disputes, final validation
-LEAN_AI_OLLAMA_MODEL_EXPERT=qwen3-coder-next:80b
+ollama_model_expert: "qwen3-coder-next:80b"
 
 # Request: smaller model for chat conversation and prompt building
-LEAN_AI_REQUEST_LLM_PROVIDER=openai
-LEAN_AI_OPENAI_BASE_URL=http://localhost:11434/v1
-LEAN_AI_OPENAI_REQUEST_MODEL=gpt-oss:20b
+request_llm_provider: openai
+openai_base_url: "http://localhost:11434/v1"
+openai_request_model: "gpt-oss:20b"
 ```
 
 This keeps everything local while using the right model for each task — the 20B model handles conversational chat, the 30B handles code execution, and the 80B handles complex reasoning during planning.

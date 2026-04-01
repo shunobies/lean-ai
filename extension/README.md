@@ -17,6 +17,7 @@ Run it fully local with [Ollama](https://ollama.com), or connect to OpenAI and A
 - **Knowledge base** — drop internal docs (PDF, EPUB, Word, Markdown) into `.lean_ai/knowledge/` for context-aware plans.
 - **Git-native** — every task runs on its own branch. Approve to merge, reject to discard.
 - **19 scaffold recipes** — bootstrap new projects with `/scaffold`.
+- **Notes & TODOs** — save notes from chat with `/note`, and the LLM can save notes and track project TODOs via built-in tools. Notes are auto-categorized by project with tags and searchable from the Notes panel.
 - **Voice interaction** — optional Speech-to-Text, Text-to-Speech, and wake word detection for hands-free coding (see [Voice](#voice) below).
 - **Vision support** — paste or drag-and-drop screenshots and images into the chat. A vision model describes visual content so the LLM can reason about UI mockups, error screenshots, and diagrams (see [Vision](#vision) below).
 
@@ -54,6 +55,7 @@ If you prefer to manage the backend yourself, set `lean-ai.backendDir` or `lean-
 | `/reject` | Discard the agent's branch |
 | `/scaffold` | Bootstrap a new project from a recipe |
 | `/guide` | Regenerate framework guide |
+| `/note` | Save a note from the chat (auto-categorized by project) |
 | `/reboot` | Restart the backend server |
 
 ## Vision
@@ -146,7 +148,7 @@ Open the settings panel (gear icon in the chat header) to configure:
 - **Vision model** — Ollama vision-language model for image understanding
 - **Voice** — STT, TTS, and wake word settings
 
-API keys for OpenAI and Anthropic are stored securely in your OS keychain.
+Settings are saved to `backend/config.yaml`. API keys for OpenAI and Anthropic are stored securely in your OS keychain — never written to config files. For standalone backend usage, API keys can be [encrypted](https://github.com/shunobies/lean-ai/blob/main/docs/configuration.md#encrypted-api-keys) in the YAML file.
 
 ## Requirements
 

@@ -108,47 +108,41 @@ See [Architecture](docs/architecture.md) for the full breakdown.
 | `/reject` | Discard the agent's branch |
 | `/guide` | Regenerate framework guide |
 | `/style` | Generate style guide from CSS/templates |
+| `/note` | Save a note (auto-categorized by project) |
 | `/scaffold` | Bootstrap a new project |
 | `/reboot` | Restart the backend server |
 
 ## Configuration
 
-Create a `backend/.env` file:
+Create a `backend/config.yaml` file (or use the extension's settings panel):
 
-```env
-# Provider — "ollama", "openai", or "anthropic"
-LEAN_AI_LLM_PROVIDER=ollama
+```yaml
+# Provider: ollama, openai, or anthropic
+llm_provider: ollama
 
 # Local model (default)
-LEAN_AI_OLLAMA_MODEL=qwen3-coder:30b
-LEAN_AI_OLLAMA_CONTEXT_WINDOW=128      # 128k — shorthand for 131072
+ollama_model: "qwen3-coder:30b"
+ollama_context_window: 128  # 128k — shorthand for 131072
 
-# Cloud providers (optional — add API keys to enable)
-LEAN_AI_OPENAI_API_KEY=sk-...
-LEAN_AI_ANTHROPIC_API_KEY=sk-ant-...
+# Cloud API keys — encrypt with: python -m lean_ai encrypt-key <key>
+openai_api_key: "enc:gAAAAABf..."
+anthropic_api_key: "enc:gAAAAABf..."
 ```
+
+Environment variables (`LEAN_AI_*`) and legacy `.env` files also work. See [configuration priority](docs/configuration.md).
 
 ### Dual-model setup (save cloud tokens)
 
 Use a local model for the bulk of the work and a cloud model only for planning and complex fixes:
 
-```env
-# Primary: fast local model for exploration and implementation
-LEAN_AI_LLM_PROVIDER=ollama
-LEAN_AI_OLLAMA_MODEL=qwen3-coder:30b
+```yaml
+llm_provider: ollama
+ollama_model: "qwen3-coder:30b"
 
 # Expert: cloud model for planning phases 3-5 and final fix retry
-LEAN_AI_EXPERT_LLM_PROVIDER=anthropic
-LEAN_AI_ANTHROPIC_API_KEY=sk-ant-...
-LEAN_AI_ANTHROPIC_EXPERT_MODEL=claude-opus-4-6
-```
-
-Or with OpenAI:
-
-```env
-LEAN_AI_EXPERT_LLM_PROVIDER=openai
-LEAN_AI_OPENAI_API_KEY=sk-...
-LEAN_AI_OPENAI_EXPERT_MODEL=gpt-4o
+expert_llm_provider: anthropic
+anthropic_api_key: "enc:gAAAAABf..."
+anthropic_expert_model: "claude-opus-4-6"
 ```
 
 The expert model only runs for planning phases 3–5 (design + risk synthesis, plan assembly, verification) and the final validation fix retry. All codebase exploration, implementation, and routine tool calls use the primary local model.
@@ -159,17 +153,16 @@ The expert model only runs for planning phases 3–5 (design + risk synthesis, p
 
 Use three different local models matched to each role:
 
-```env
-# Primary: coding-tuned model for exploration and implementation
-LEAN_AI_OLLAMA_MODEL=qwen3-coder:30b
+```yaml
+ollama_model: "qwen3-coder:30b"
 
 # Expert: larger model for planning and complex reasoning
-LEAN_AI_OLLAMA_MODEL_EXPERT=qwen3-coder-next:80b
+ollama_model_expert: "qwen3-coder-next:80b"
 
 # Request: smaller model for chat conversation and prompt building
-LEAN_AI_REQUEST_LLM_PROVIDER=openai
-LEAN_AI_OPENAI_BASE_URL=http://localhost:11434/v1
-LEAN_AI_OPENAI_REQUEST_MODEL=gpt-oss:20b
+request_llm_provider: openai
+openai_base_url: "http://localhost:11434/v1"
+openai_request_model: "gpt-oss:20b"
 ```
 
 See the [full configuration reference](docs/configuration.md) for all options.
