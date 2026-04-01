@@ -64,7 +64,7 @@ Context window values accept compact notation — enter `128` instead of `131072
 | `256` | 262144 |
 | `131072` | 131072 (values > 10000 are used as-is) |
 
-This applies to `OLLAMA_CONTEXT_WINDOW`, `OLLAMA_EXPERT_CONTEXT_WINDOW`, `OLLAMA_REQUEST_CONTEXT_WINDOW`, `OPENAI_CONTEXT_WINDOW`, `ANTHROPIC_CONTEXT_WINDOW`, and `INLINE_CONTEXT_WINDOW`.
+This applies to `OLLAMA_CONTEXT_WINDOW`, `OLLAMA_EXPERT_CONTEXT_WINDOW`, `OLLAMA_REQUEST_CONTEXT_WINDOW`, `OPENAI_CONTEXT_WINDOW`, `ANTHROPIC_CONTEXT_WINDOW`, `SERVE_CONTEXT_WINDOW`, and `INLINE_CONTEXT_WINDOW`.
 
 ## Installation Extras
 
@@ -75,7 +75,7 @@ The base install covers Ollama-only usage. Add extras for additional features:
 pip install -e ".[dev]"
 
 # Cloud providers
-pip install -e ".[dev,openai]"        # OpenAI (GPT-4o, etc.)
+pip install -e ".[dev,openai]"        # OpenAI (GPT-4o, etc.) or Lean AI Serve
 pip install -e ".[dev,anthropic]"     # Anthropic (Claude, etc.)
 
 # Knowledge base document support (EPUB, PDF, Word)
@@ -92,7 +92,7 @@ pip install -e ".[dev,openai,anthropic,knowledge,google]"
 
 | Variable | Default | Description |
 |---|---|---|
-| `LEAN_AI_LLM_PROVIDER` | `ollama` | Active provider: `ollama`, `openai`, or `anthropic` |
+| `LEAN_AI_LLM_PROVIDER` | `ollama` | Active provider: `ollama`, `openai`, `anthropic`, or `serve` |
 
 Switch providers at any time by changing this value and restarting the server (or via the extension's model dropdown for runtime switching).
 
@@ -121,17 +121,19 @@ The expert model can be a different provider from the primary — for example, r
 
 | Variable | Default | Description |
 |---|---|---|
-| `LEAN_AI_EXPERT_LLM_PROVIDER` | *(empty)* | Provider for expert model: `ollama`, `openai`, or `anthropic`. Empty = auto-detect (Ollama expert when `OLLAMA_MODEL_EXPERT` is set and primary provider is Ollama) |
+| `LEAN_AI_EXPERT_LLM_PROVIDER` | *(empty)* | Provider for expert model: `ollama`, `openai`, `anthropic`, or `serve`. Empty = auto-detect (Ollama expert when `OLLAMA_MODEL_EXPERT` is set and primary provider is Ollama) |
 | `LEAN_AI_OPENAI_EXPERT_MODEL` | *(falls back to OPENAI_MODEL)* | OpenAI model for expert phases (e.g. `gpt-4o`) |
 | `LEAN_AI_ANTHROPIC_EXPERT_MODEL` | *(falls back to ANTHROPIC_MODEL)* | Anthropic model for expert phases (e.g. `claude-opus-4-6`) |
+| `LEAN_AI_SERVE_EXPERT_MODEL` | *(falls back to SERVE_MODEL)* | Lean AI Serve model for expert phases |
 
-When using OpenAI or Anthropic as the expert provider, the existing API key, temperature, context window, and max tokens settings for that provider are used. The relevant API key must be set even if the primary provider is Ollama.
+When using OpenAI, Anthropic, or Lean AI Serve as the expert provider, the existing API key, temperature, context window, and max tokens settings for that provider are used. The relevant API key must be set even if the primary provider is Ollama.
 
-> **Package requirement:** The provider's Python SDK must be installed. If your primary provider is Ollama but you want Anthropic or OpenAI as the expert, install the matching extra:
+> **Package requirement:** The provider's Python SDK must be installed. If your primary provider is Ollama but you want Anthropic, OpenAI, or Lean AI Serve as the expert, install the matching extra:
 > ```bash
 > pip install -e ".[dev,anthropic]"   # for Anthropic expert
-> pip install -e ".[dev,openai]"      # for OpenAI expert
+> pip install -e ".[dev,openai]"      # for OpenAI or Serve expert
 > ```
+> Lean AI Serve uses the OpenAI SDK under the hood, so the `openai` extra is sufficient.
 > Without this, the expert client will fail to initialise at startup and the server will log a warning.
 
 ### Ollama Expert Model
@@ -210,9 +212,10 @@ An optional separate model for `/request` mode (open-ended tasks like writing gu
 
 | Variable | Default | Description |
 |---|---|---|
-| `LEAN_AI_REQUEST_LLM_PROVIDER` | *(empty)* | Provider for request model: `ollama`, `openai`, or `anthropic`. Empty = auto-detect |
+| `LEAN_AI_REQUEST_LLM_PROVIDER` | *(empty)* | Provider for request model: `ollama`, `openai`, `anthropic`, or `serve`. Empty = auto-detect |
 | `LEAN_AI_OPENAI_REQUEST_MODEL` | *(falls back to OPENAI_MODEL)* | OpenAI model for /request mode |
 | `LEAN_AI_ANTHROPIC_REQUEST_MODEL` | *(falls back to ANTHROPIC_MODEL)* | Anthropic model for /request mode |
+| `LEAN_AI_SERVE_REQUEST_MODEL` | *(falls back to SERVE_MODEL)* | Lean AI Serve model for /request mode |
 
 ### Ollama Request Model
 
@@ -262,6 +265,24 @@ Set `LEAN_AI_OPENAI_BASE_URL` to use OpenAI-compatible providers like Together A
 | `LEAN_AI_ANTHROPIC_TEMPERATURE` | `0.7` | Sampling temperature |
 | `LEAN_AI_ANTHROPIC_CONTEXT_WINDOW` | `200000` | Context window size — [shorthand](#context-window-shorthand) accepted |
 | `LEAN_AI_ANTHROPIC_MAX_TOKENS` | *25% of context window* | Max output tokens |
+
+## Lean AI Serve
+
+Lean AI Serve is a separate vLLM inference wrapper that exposes a 100% OpenAI-compatible API. It uses API key authentication (Bearer token, keys prefixed `las-`) and defaults to port 8420. Since the API is OpenAI-compatible, it reuses the OpenAI provider internally — the `openai` Python extra must be installed.
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEAN_AI_SERVE_URL` | `http://localhost:8420` | Lean AI Serve API endpoint |
+| `LEAN_AI_SERVE_API_KEY` | *(empty)* | API key (required to enable Serve) |
+| `LEAN_AI_SERVE_MODEL` | *(empty)* | Model name (required to enable Serve) |
+| `LEAN_AI_SERVE_TEMPERATURE` | `0.7` | Sampling temperature |
+| `LEAN_AI_SERVE_CONTEXT_WINDOW` | `131072` | Context window size — [shorthand](#context-window-shorthand) accepted |
+| `LEAN_AI_SERVE_MAX_TOKENS` | *25% of context window* | Max output tokens |
+
+```bash
+# Install with Serve support (uses the OpenAI SDK)
+pip install -e ".[dev,openai]"
+```
 
 ## Inline Predictions
 
@@ -335,7 +356,7 @@ See [Knowledge Base & Refiner](knowledge-base.md) for details on document format
 | `LEAN_AI_REFINER_ENABLE_PRIVACY` | `true` | Strip sensitive data before cloud transmission |
 | `LEAN_AI_REFINER_KNOWLEDGE_CHUNKS` | `5` | Max knowledge chunks to inject |
 
-The refiner only activates when using cloud providers (OpenAI or Anthropic). See [Knowledge Base & Refiner](knowledge-base.md#local-refiner) for how it works.
+The refiner only activates when using cloud providers (OpenAI, Anthropic, or Lean AI Serve). See [Knowledge Base & Refiner](knowledge-base.md#local-refiner) for how it works.
 
 ## Implementation
 
