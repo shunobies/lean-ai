@@ -11,12 +11,27 @@ instead of ``131072``.  The rules:
 - Values ≤ 10 000 are treated as **k** (× 1024).  ``128`` → 131 072.
 - An explicit ``k`` suffix also works: ``"128k"`` → 131 072.
 - Values > 10 000 are used as-is for backwards compatibility.
+
+Configuration sources (highest priority first)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+1. Environment variables (``LEAN_AI_*``)
+2. ``config.yaml`` (YAML field names, e.g. ``ollama_url``)
+3. ``.env`` file (legacy fallback, ``LEAN_AI_*`` names)
+4. Field defaults
+
+API keys in ``config.yaml`` may be Fernet-encrypted with an ``enc:`` prefix.
+Use ``python -m lean_ai encrypt-key <key>`` to generate encrypted values.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
+from typing import Any
 
 from pydantic import model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+
+from lean_ai.crypto import decrypt_value
 
 # Fields that accept the k-shorthand notation.
 _CONTEXT_WINDOW_FIELDS = frozenset({
@@ -46,8 +61,62 @@ def _expand_ctx(raw: int | str) -> int:
     return n * 1024 if n <= 10_000 else n
 
 
+def _default_keyfile_path() -> Path:
+    """Resolve the default keyfile path relative to cwd."""
+    return Path.cwd() / ".lean_ai" / ".keyfile"
+
+
+class _DecryptingYamlSource(PydanticBaseSettingsSource):
+    """YAML settings source that decrypts ``enc:``-prefixed API key values.
+
+    Wraps pydantic-settings' built-in ``YamlConfigSettingsSource`` and
+    post-processes secret fields through :func:`decrypt_value`.
+    """
+
+    _SECRET_FIELDS = frozenset({"openai_api_key", "anthropic_api_key", "search_api_key"})
+
+    def __init__(self, settings_cls: type[BaseSettings], yaml_file: str = "config.yaml") -> None:
+        super().__init__(settings_cls)
+        from pydantic_settings import YamlConfigSettingsSource
+        self._yaml_source = YamlConfigSettingsSource(settings_cls, yaml_file=yaml_file)
+
+    def get_field_value(
+        self, field: Any, field_name: str
+    ) -> tuple[Any, str, bool]:
+        return self._yaml_source.get_field_value(field, field_name)
+
+    def __call__(self) -> dict[str, Any]:
+        data = self._yaml_source()
+        keyfile = _default_keyfile_path()
+        for field_name in self._SECRET_FIELDS:
+            if field_name in data and isinstance(data[field_name], str):
+                data[field_name] = decrypt_value(data[field_name], keyfile)
+        return data
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="LEAN_AI_", env_file=".env")
+    model_config = SettingsConfigDict(
+        env_prefix="LEAN_AI_",
+        env_file=".env",
+    )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Priority: env vars > config.yaml > .env > defaults."""
+        return (
+            init_settings,
+            env_settings,
+            _DecryptingYamlSource(settings_cls),
+            dotenv_settings,
+            file_secret_settings,
+        )
 
     # ── LLM Provider ──
     llm_provider: str = "ollama"  # "ollama", "openai", "anthropic"
@@ -238,7 +307,7 @@ class Settings(BaseSettings):
         return data
 
     @model_validator(mode="after")
-    def _validate_positive_fields(self) -> "Settings":
+    def _validate_positive_fields(self) -> Settings:
         """Ensure critical numeric settings are positive."""
         for field_name in (
             "ollama_context_window", "openai_context_window",
@@ -262,7 +331,7 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _derive_from_context_window(self) -> "Settings":
+    def _derive_from_context_window(self) -> Settings:
         """Fill in token limits that weren't explicitly set."""
         if self.ollama_max_tokens is None:
             self.ollama_max_tokens = self.ollama_context_window // 4

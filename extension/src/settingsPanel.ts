@@ -13,9 +13,9 @@ import { getSettingsPanelHtml } from "./settingsPanelHtml";
 import {
     BACKEND_SETTING_MAP,
     SECRET_KEYS,
-    clearEnvSetting,
-    resolveEnvFilePath,
-    writeEnvSetting,
+    clearYamlSetting,
+    resolveConfigFilePath,
+    writeYamlSetting,
 } from "./settingsSync";
 
 /** Fetch available model names from Ollama's /api/tags endpoint. Returns [] on failure. */
@@ -326,21 +326,20 @@ export class SettingsPanel {
             }
         }
 
-        // Write to .env using the coerced values directly (not from config)
-        // so manually-set .env values aren't overwritten with stale config.
+        // Write to config.yaml using the coerced values directly (not from config)
+        // so manually-set config values aren't overwritten with stale config.
         const backendDir = config.get<string>("lean-ai.backendDir", "");
-        const envPath = resolveEnvFilePath(backendDir || undefined, this._context.globalStorageUri.fsPath);
-        if (envPath) {
+        const configPath = resolveConfigFilePath(backendDir || undefined, this._context.globalStorageUri.fsPath);
+        if (configPath) {
             for (const [field, settingKey] of Object.entries(fieldToSetting)) {
                 if (!(field in values)) { continue; }
                 const envVar = BACKEND_SETTING_MAP[settingKey];
                 if (!envVar) { continue; }
                 const val = coercedMap.get(field);
                 if (val !== undefined && val !== null && String(val) !== "") {
-                    writeEnvSetting(envPath, envVar, String(val));
+                    writeYamlSetting(configPath, envVar, String(val));
                 } else {
-                    // Clear stale .env entry so backend uses its default
-                    clearEnvSetting(envPath, envVar);
+                    clearYamlSetting(configPath, envVar);
                 }
             }
         }

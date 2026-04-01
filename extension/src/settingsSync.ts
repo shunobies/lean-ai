@@ -1,7 +1,8 @@
 /**
  * Settings synchronisation — maps VSCode settings to LEAN_AI_* env vars and
- * writes non-secret settings to backend/.env. API keys are handled separately
- * via VSCode SecretStorage (OS keychain), never written to .env.
+ * writes non-secret settings to backend/config.yaml (falling back to .env for
+ * legacy installs).  API keys are handled separately via VSCode SecretStorage
+ * (OS keychain), never written to config files.
  */
 
 import * as vscode from "vscode";
@@ -242,7 +243,7 @@ export function clearEnvSetting(envFilePath: string, envKey: string): void {
 }
 
 /**
- * Resolve the backend .env file path.
+ * Resolve the backend .env file path (legacy fallback).
  * Priority: explicit backendDir → workspace backend/ → globalStorageDir (managed mode).
  */
 export function resolveEnvFilePath(backendDir?: string, globalStorageDir?: string): string | null {
@@ -258,6 +259,105 @@ export function resolveEnvFilePath(backendDir?: string, globalStorageDir?: strin
     }
     if (globalStorageDir) {
         return path.join(globalStorageDir, ".env");
+    }
+    return null;
+}
+
+// ── YAML config file support ────────────────────────────────────────────────
+
+/**
+ * Convert a LEAN_AI_* env var name to a YAML field name.
+ * e.g. "LEAN_AI_OLLAMA_URL" → "ollama_url"
+ */
+export function envVarToFieldName(envVar: string): string {
+    return envVar.replace(/^LEAN_AI_/, "").toLowerCase();
+}
+
+/** Return true if *value* needs quoting in YAML. */
+function needsYamlQuoting(value: string): boolean {
+    if (!value) { return false; }
+    if (/[:#{}[\]|>&*!%@`]/.test(value)) { return true; }
+    if (["true", "false", "null", "yes", "no", "on", "off"].includes(value.toLowerCase())) {
+        return true;
+    }
+    return false;
+}
+
+/** Format a value for YAML output. */
+function yamlValue(value: string): string {
+    if (needsYamlQuoting(value)) {
+        return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+    }
+    return value;
+}
+
+/**
+ * Write or update a single field in the backend config.yaml file.
+ * Preserves existing comments and unrelated lines. Creates the file if missing.
+ */
+export function writeYamlSetting(
+    yamlFilePath: string,
+    envVar: string,
+    value: string,
+): void {
+    const fieldName = envVarToFieldName(envVar);
+    let lines: string[] = [];
+    if (fs.existsSync(yamlFilePath)) {
+        lines = fs.readFileSync(yamlFilePath, "utf-8").split("\n");
+    }
+
+    const prefix = `${fieldName}:`;
+    const commentedRe = new RegExp(`^#\\s*${fieldName}:`);
+    const idx = lines.findIndex(
+        (l) => l.startsWith(prefix) || commentedRe.test(l),
+    );
+
+    const newLine = `${fieldName}: ${yamlValue(value)}`;
+    if (idx >= 0) {
+        lines[idx] = newLine;
+    } else {
+        if (lines.length > 0 && lines[lines.length - 1] !== "") {
+            lines.push("");
+        }
+        lines.push(newLine);
+    }
+
+    fs.mkdirSync(path.dirname(yamlFilePath), { recursive: true });
+    fs.writeFileSync(yamlFilePath, lines.join("\n"), "utf-8");
+}
+
+/**
+ * Comment out a field in the backend config.yaml file.
+ * No-op if the field is already absent or commented.
+ */
+export function clearYamlSetting(yamlFilePath: string, envVar: string): void {
+    if (!fs.existsSync(yamlFilePath)) { return; }
+    const fieldName = envVarToFieldName(envVar);
+    const lines = fs.readFileSync(yamlFilePath, "utf-8").split("\n");
+    const prefix = `${fieldName}:`;
+    const idx = lines.findIndex((l) => l.startsWith(prefix));
+    if (idx < 0) { return; }
+    lines[idx] = `# ${lines[idx]}`;
+    fs.writeFileSync(yamlFilePath, lines.join("\n"), "utf-8");
+}
+
+/**
+ * Resolve the backend config.yaml file path.
+ * Priority: explicit backendDir → workspace backend/ → globalStorageDir.
+ */
+export function resolveConfigFilePath(backendDir?: string, globalStorageDir?: string): string | null {
+    if (backendDir) {
+        return path.join(backendDir, "config.yaml");
+    }
+    const folders = vscode.workspace.workspaceFolders;
+    if (folders && folders.length > 0) {
+        const candidate = path.join(folders[0].uri.fsPath, "backend");
+        if (fs.existsSync(candidate)) {
+            return path.join(candidate, "config.yaml");
+        }
+    }
+    if (globalStorageDir) {
+        return path.join(globalStorageDir, "config.yaml");
     }
     return null;
 }

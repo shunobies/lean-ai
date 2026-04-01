@@ -12,7 +12,8 @@ dependencies = [
     "uvicorn[standard]>=0.34.0,<1.0",
     "aiosqlite>=0.20.0,<1.0",
     "pydantic>=2.10.0,<3.0",
-    "pydantic-settings>=2.7.0,<3.0",
+    "pydantic-settings[yaml]>=2.7.0,<3.0",
+    "cryptography>=44.0.0",
     "ollama>=0.4.0,<1.0",
     "whoosh>=2.7.4,<3.0",
     "beautifulsoup4>=4.12.0,<5.0",
@@ -64,6 +65,9 @@ dev = [
     "pytest-asyncio>=0.24.0,<2.0",
     "ruff>=0.8.0,<1.0",
 ]
+
+[project.scripts]
+lean-ai = "lean_ai.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lean_ai"]

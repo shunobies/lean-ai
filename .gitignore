@@ -21,8 +21,10 @@ venv/
 .lean_ai_index/
 .lean_ai_knowledge_index/
 
-# Environment
+# Environment & config
 .env
+config.yaml
+.keyfile
 *.db
 
 # Node

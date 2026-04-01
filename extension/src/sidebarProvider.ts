@@ -22,7 +22,7 @@ import { handleWsMessage } from "./wsHandler";
 import type { WsHandlerContext } from "./wsHandler";
 import { SettingsPanel } from "./settingsPanel";
 import { PromptsPanel } from "./promptsPanel";
-import { BACKEND_SETTING_MAP, clearEnvSetting, resolveEnvFilePath, writeEnvSetting } from "./settingsSync";
+import { BACKEND_SETTING_MAP, clearYamlSetting, resolveConfigFilePath, writeYamlSetting } from "./settingsSync";
 import { addExtras } from "./backendInstaller";
 import { restartBackend } from "./backendProcess";
 import {
@@ -229,20 +229,20 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 this.postMessage({ type: "setFontSize", size: newSize });
             }
 
-            // Sync any changed backend settings to .env and offer restart
+            // Sync any changed backend settings to config.yaml and offer restart
             const changedKeys = Object.keys(BACKEND_SETTING_MAP).filter(k => e.affectsConfiguration(k));
             if (changedKeys.length > 0) {
                 const config = vscode.workspace.getConfiguration();
                 const backendDirSetting = config.get<string>("lean-ai.backendDir", "");
-                const envPath = resolveEnvFilePath(backendDirSetting || undefined, this.context.globalStorageUri.fsPath);
-                if (envPath) {
+                const configPath = resolveConfigFilePath(backendDirSetting || undefined, this.context.globalStorageUri.fsPath);
+                if (configPath) {
                     for (const key of changedKeys) {
                         const envVar = BACKEND_SETTING_MAP[key];
                         const val = config.get<unknown>(key);
                         if (val !== undefined && val !== null && String(val) !== "") {
-                            writeEnvSetting(envPath, envVar, String(val));
+                            writeYamlSetting(configPath, envVar, String(val));
                         } else {
-                            clearEnvSetting(envPath, envVar);
+                            clearYamlSetting(configPath, envVar);
                         }
                     }
                 }

@@ -416,7 +416,7 @@ export function getSettingsPanelHtml(): string {
 <body>
 <h1>&#9881; Lean AI Settings</h1>
 <p class="subtitle">
-    Changes are saved to <code>backend/.env</code> and take effect after a backend restart. &nbsp;
+    Changes are saved to <code>backend/config.yaml</code> and take effect after a backend restart. &nbsp;
     <a href="#" class="github-link">View documentation on GitHub ↗</a>
     &nbsp;·&nbsp;
     <a href="#" id="openVscodeSettingsLink">Python path &amp; backend directory ↗ VSCode Settings</a>
@@ -502,7 +502,7 @@ export function getSettingsPanelHtml(): string {
         <div class="field">
             <label>API Key</label>
             <div id="openai-key-widget"></div>
-            <div class="key-hint">Stored securely in your OS keychain — never written to settings.json or .env</div>
+            <div class="key-hint">Stored securely in your OS keychain — never written to settings.json or config files</div>
         </div>
         <div class="field-row">
             <div class="field">
@@ -531,7 +531,7 @@ export function getSettingsPanelHtml(): string {
         <div class="field">
             <label>API Key</label>
             <div id="anthropic-key-widget"></div>
-            <div class="key-hint">Stored securely in your OS keychain — never written to settings.json or .env</div>
+            <div class="key-hint">Stored securely in your OS keychain — never written to settings.json or config files</div>
         </div>
         <div class="field-row">
             <div class="field">
