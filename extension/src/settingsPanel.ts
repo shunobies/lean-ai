@@ -142,10 +142,13 @@ export class SettingsPanel {
                 const provider = msg.provider as string;
                 const value = msg.value as string;
                 if (!value) { break; }
-                const secretKey =
-                    provider === "openai"
-                        ? SECRET_KEYS.openaiApiKey
-                        : SECRET_KEYS.anthropicApiKey;
+                const secretKeyMap: Record<string, string> = {
+                    openai: SECRET_KEYS.openaiApiKey,
+                    anthropic: SECRET_KEYS.anthropicApiKey,
+                    serve: SECRET_KEYS.serveApiKey,
+                };
+                const secretKey = secretKeyMap[provider];
+                if (!secretKey) { break; }
                 await this._context.secrets.store(secretKey, value);
                 // Refresh the key-set status in the webview (still no value sent)
                 await this._sendCurrentSettings();
@@ -154,10 +157,13 @@ export class SettingsPanel {
 
             case "clearApiKey": {
                 const provider = msg.provider as string;
-                const secretKey =
-                    provider === "openai"
-                        ? SECRET_KEYS.openaiApiKey
-                        : SECRET_KEYS.anthropicApiKey;
+                const clearKeyMap: Record<string, string> = {
+                    openai: SECRET_KEYS.openaiApiKey,
+                    anthropic: SECRET_KEYS.anthropicApiKey,
+                    serve: SECRET_KEYS.serveApiKey,
+                };
+                const secretKey = clearKeyMap[provider];
+                if (!secretKey) { break; }
                 await this._context.secrets.delete(secretKey);
                 await this._sendCurrentSettings();
                 break;
@@ -233,6 +239,13 @@ export class SettingsPanel {
             anthropicTemperature:     "lean-ai.anthropicTemperature",
             anthropicContextWindow:   "lean-ai.anthropicContextWindow",
             anthropicExpertModel:     "lean-ai.anthropicExpertModel",
+            serveUrl:                 "lean-ai.serveUrl",
+            serveModel:               "lean-ai.serveModel",
+            serveTemperature:         "lean-ai.serveTemperature",
+            serveContextWindow:       "lean-ai.serveContextWindow",
+            serveMaxTokens:           "lean-ai.serveMaxTokens",
+            serveExpertModel:         "lean-ai.serveExpertModel",
+            serveRequestModel:        "lean-ai.serveRequestModel",
             inlineModel:              "lean-ai.inlineModel",
             inlineOllamaUrl:          "lean-ai.inlineOllamaUrl",
             embeddingModel:           "lean-ai.embeddingModel",
@@ -274,6 +287,7 @@ export class SettingsPanel {
             "ollamaRequestTopP", "ollamaRequestTopK",
             "ollamaRequestRepeatPenalty", "ollamaRequestMaxTokens",
             "openaiContextWindow", "anthropicContextWindow",
+            "serveContextWindow", "serveTemperature", "serveMaxTokens",
             "searchDelay", "postValidationMaxRetries", "postValidationFixTurns",
             "implementationMaxTurns", "refreshThreshold", "numParallel", "ttsSpeed", "ttsCpuThreads",
             "ollamaTemperature", "ollamaTopP", "ollamaTopK", "ollamaRepeatPenalty",
@@ -289,6 +303,7 @@ export class SettingsPanel {
             "ollamaRequestRepeatPenalty", "ollamaRequestContextWindow", "ollamaRequestMaxTokens",
             "ollamaMaxTokens", "ollamaContextWindow",
             "openaiContextWindow", "anthropicContextWindow",
+            "serveContextWindow", "serveMaxTokens",
         ]);
 
         const booleanFields = new Set([
@@ -362,6 +377,7 @@ export class SettingsPanel {
 
         const openaiKeySet  = !!(await this._context.secrets.get(SECRET_KEYS.openaiApiKey));
         const anthropicKeySet = !!(await this._context.secrets.get(SECRET_KEYS.anthropicApiKey));
+        const serveKeySet = !!(await this._context.secrets.get(SECRET_KEYS.serveApiKey));
 
         const values = {
             // Provider
@@ -415,6 +431,16 @@ export class SettingsPanel {
             anthropicTemperature:      config.get("lean-ai.anthropicTemperature", ""),
             anthropicContextWindow:    config.get("lean-ai.anthropicContextWindow", ""),
             anthropicExpertModel:      config.get("lean-ai.anthropicExpertModel", ""),
+
+            // Lean AI Serve (no key value — boolean only)
+            serveKeySet,
+            serveUrl:                  config.get("lean-ai.serveUrl", ""),
+            serveModel:                config.get("lean-ai.serveModel", ""),
+            serveTemperature:          config.get("lean-ai.serveTemperature", ""),
+            serveContextWindow:        config.get("lean-ai.serveContextWindow", ""),
+            serveMaxTokens:            config.get("lean-ai.serveMaxTokens", ""),
+            serveExpertModel:          config.get("lean-ai.serveExpertModel", ""),
+            serveRequestModel:         config.get("lean-ai.serveRequestModel", ""),
 
             // Inline & embeddings
             inlineModel:               config.get("lean-ai.inlineModel", ""),

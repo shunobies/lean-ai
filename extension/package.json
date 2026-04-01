@@ -199,12 +199,14 @@
           "enum": [
             "ollama",
             "openai",
-            "anthropic"
+            "anthropic",
+            "serve"
           ],
           "enumDescriptions": [
             "Use a local Ollama instance (no API key required)",
             "Use OpenAI API (requires API key stored in OS keychain)",
-            "Use Anthropic Claude API (requires API key stored in OS keychain)"
+            "Use Anthropic Claude API (requires API key stored in OS keychain)",
+            "Use Lean AI Serve — vLLM inference wrapper (requires API key)"
           ],
           "markdownDescription": "LLM provider for the main agent. API keys are stored securely in the OS keychain — use the ⚙ settings panel to configure them. Default: `ollama`"
         },
@@ -258,13 +260,15 @@
             "",
             "ollama",
             "openai",
-            "anthropic"
+            "anthropic",
+            "serve"
           ],
           "enumDescriptions": [
             "Auto-detect from ollamaModelExpert (empty = use primary provider)",
             "Use Ollama for expert phases",
             "Use OpenAI for expert phases (e.g. gpt-4o for planning)",
-            "Use Anthropic for expert phases (e.g. claude-opus-4-6 for planning)"
+            "Use Anthropic for expert phases (e.g. claude-opus-4-6 for planning)",
+            "Use Lean AI Serve for expert phases"
           ],
           "markdownDescription": "**Expert Model** — Provider for reasoning-heavy planning phases. Leave empty to auto-detect. Mix providers: use a fast Ollama model for coding and a cloud model for planning."
         },
@@ -280,13 +284,15 @@
             "",
             "ollama",
             "openai",
-            "anthropic"
+            "anthropic",
+            "serve"
           ],
           "enumDescriptions": [
             "Auto-detect (empty = use primary provider)",
             "Use Ollama for /request mode",
             "Use OpenAI for /request mode",
-            "Use Anthropic for /request mode"
+            "Use Anthropic for /request mode",
+            "Use Lean AI Serve for /request mode"
           ],
           "markdownDescription": "**Request Model** — Provider for `/request` mode (open-ended tasks). Leave empty to auto-detect."
         },
@@ -340,6 +346,38 @@
           "type": "string",
           "default": "",
           "markdownDescription": "**Anthropic Expert** — Override model for expert planning phases. Falls back to `lean-ai.anthropicModel` if empty. Example: `claude-opus-4-6`"
+        },
+        "lean-ai.serveUrl": {
+          "type": "string",
+          "default": "http://localhost:8420",
+          "markdownDescription": "**Lean AI Serve** — URL of the lean-ai-serve vLLM wrapper. Default: `http://localhost:8420`"
+        },
+        "lean-ai.serveModel": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Lean AI Serve** — Model name served by lean-ai-serve. Must match the model loaded in vLLM."
+        },
+        "lean-ai.serveTemperature": {
+          "type": "number",
+          "markdownDescription": "**Lean AI Serve** — Sampling temperature. Default: `0.7`"
+        },
+        "lean-ai.serveContextWindow": {
+          "type": "number",
+          "markdownDescription": "**Lean AI Serve** — Context window size in tokens. Accepts shorthand: `128` = 128k. Default: `131072`"
+        },
+        "lean-ai.serveMaxTokens": {
+          "type": "number",
+          "markdownDescription": "**Lean AI Serve** — Maximum output tokens. Defaults to 25% of context window."
+        },
+        "lean-ai.serveExpertModel": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Lean AI Serve Expert** — Override model for expert planning phases. Falls back to `lean-ai.serveModel` if empty."
+        },
+        "lean-ai.serveRequestModel": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Lean AI Serve Request** — Override model for `/request` mode. Falls back to `lean-ai.serveModel` if empty."
         },
         "lean-ai.inlineModel": {
           "type": "string",

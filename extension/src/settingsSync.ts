@@ -14,6 +14,7 @@ import * as path from "path";
 export const SECRET_KEYS = {
     openaiApiKey:    "lean-ai.openaiApiKey",
     anthropicApiKey: "lean-ai.anthropicApiKey",
+    serveApiKey:     "lean-ai.serveApiKey",
 } as const;
 
 // ── Non-secret setting → env var mapping ────────────────────────────────────
@@ -68,6 +69,15 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.anthropicTemperature":      "LEAN_AI_ANTHROPIC_TEMPERATURE",
     "lean-ai.anthropicContextWindow":    "LEAN_AI_ANTHROPIC_CONTEXT_WINDOW",
     "lean-ai.anthropicExpertModel":      "LEAN_AI_ANTHROPIC_EXPERT_MODEL",
+
+    // Lean AI Serve (no API key — stored in SecretStorage)
+    "lean-ai.serveUrl":                  "LEAN_AI_SERVE_URL",
+    "lean-ai.serveModel":               "LEAN_AI_SERVE_MODEL",
+    "lean-ai.serveTemperature":          "LEAN_AI_SERVE_TEMPERATURE",
+    "lean-ai.serveContextWindow":        "LEAN_AI_SERVE_CONTEXT_WINDOW",
+    "lean-ai.serveMaxTokens":            "LEAN_AI_SERVE_MAX_TOKENS",
+    "lean-ai.serveExpertModel":          "LEAN_AI_SERVE_EXPERT_MODEL",
+    "lean-ai.serveRequestModel":         "LEAN_AI_SERVE_REQUEST_MODEL",
 
     // Inline predictions & embeddings
     "lean-ai.inlineModel":               "LEAN_AI_INLINE_MODEL",
@@ -151,6 +161,10 @@ const ZERO_MEANS_UNSET: ReadonlySet<string> = new Set([
     // Anthropic
     "lean-ai.anthropicContextWindow",
     "lean-ai.anthropicTemperature",
+    // Lean AI Serve
+    "lean-ai.serveContextWindow",
+    "lean-ai.serveTemperature",
+    "lean-ai.serveMaxTokens",
 ]);
 
 // ── Env building helpers ─────────────────────────────────────────────────────
@@ -184,8 +198,10 @@ export async function buildFullBackendEnv(
     const env = buildBackendEnv();
     const openaiKey    = await secrets.get(SECRET_KEYS.openaiApiKey);
     const anthropicKey = await secrets.get(SECRET_KEYS.anthropicApiKey);
+    const serveKey     = await secrets.get(SECRET_KEYS.serveApiKey);
     if (openaiKey)    { env["LEAN_AI_OPENAI_API_KEY"]    = openaiKey; }
     if (anthropicKey) { env["LEAN_AI_ANTHROPIC_API_KEY"] = anthropicKey; }
+    if (serveKey)     { env["LEAN_AI_SERVE_API_KEY"]     = serveKey; }
     return env;
 }
 

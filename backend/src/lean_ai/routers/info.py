@@ -24,6 +24,8 @@ def _get_default_model_name() -> str:
         return settings.openai_model
     if p == "anthropic":
         return settings.anthropic_model
+    if p == "serve":
+        return settings.serve_model
     return settings.ollama_model
 
 
@@ -34,6 +36,8 @@ def _get_active_max_tokens() -> int:
         return settings.openai_max_tokens
     if p == "anthropic":
         return settings.anthropic_max_tokens
+    if p == "serve":
+        return settings.serve_max_tokens
     return settings.ollama_max_tokens
 
 
@@ -84,6 +88,15 @@ async def list_models():
             model=settings.anthropic_model,
             display_name=f"Anthropic: {settings.anthropic_model}",
             is_default=settings.llm_provider == "anthropic",
+        ))
+
+    # Lean AI Serve: show if API key and model configured
+    if settings.serve_api_key and settings.serve_model:
+        models.append(ModelInfo(
+            provider="serve",
+            model=settings.serve_model,
+            display_name=f"Serve: {settings.serve_model}",
+            is_default=settings.llm_provider == "serve",
         ))
 
     return ModelsResponse(

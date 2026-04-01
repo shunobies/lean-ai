@@ -55,9 +55,28 @@ def _create_provider() -> LLMProvider:
             temperature=settings.anthropic_temperature,
         )
 
+    if provider == "serve":
+        if not settings.serve_api_key:
+            raise ValueError(
+                "LEAN_AI_SERVE_API_KEY must be set when LEAN_AI_LLM_PROVIDER=serve"
+            )
+        if not settings.serve_model:
+            raise ValueError(
+                "LEAN_AI_SERVE_MODEL must be set when LEAN_AI_LLM_PROVIDER=serve"
+            )
+        from lean_ai.llm.provider_openai import OpenAIProvider
+        return OpenAIProvider(
+            api_key=settings.serve_api_key,
+            model=settings.serve_model,
+            max_tokens=settings.serve_max_tokens,
+            context_window=settings.serve_context_window,
+            temperature=settings.serve_temperature,
+            base_url=f"{settings.serve_url.rstrip('/')}/v1",
+        )
+
     raise ValueError(
         f"Unknown LLM provider: {provider!r}. "
-        f"Supported: ollama, openai, anthropic"
+        f"Supported: ollama, openai, anthropic, serve"
     )
 
 
@@ -86,7 +105,7 @@ _inline_client: LLMClient = (
 # Local refiner — active only when using a cloud provider
 refiner: PromptRefiner | None = None
 if (
-    settings.llm_provider.lower() in ("openai", "anthropic")
+    settings.llm_provider.lower() in ("openai", "anthropic", "serve")
     and settings.enable_refiner
 ):
     try:
@@ -168,6 +187,30 @@ elif _expert_p == "anthropic":
         logger.warning(
             "Expert provider is 'anthropic' but %s — expert model disabled",
             "ANTHROPIC_API_KEY is not set" if not settings.anthropic_api_key
+            else "no model name resolved",
+        )
+
+elif _expert_p == "serve":
+    _expert_model = settings.serve_expert_model or settings.serve_model
+    if _expert_model and settings.serve_api_key:
+        try:
+            from lean_ai.llm.provider_openai import OpenAIProvider as _ServeExpert
+            _expert_provider = _ServeExpert(
+                api_key=settings.serve_api_key,
+                model=_expert_model,
+                base_url=f"{settings.serve_url.rstrip('/')}/v1",
+                temperature=settings.serve_temperature,
+                context_window=settings.serve_context_window,
+                max_tokens=settings.serve_max_tokens,
+            )
+            expert_llm_client = LLMClient(provider=_expert_provider)
+            logger.info("Expert model enabled (Serve): %s", _expert_model)
+        except Exception as e:
+            logger.warning("Could not create expert LLM client (Serve): %s", e)
+    else:
+        logger.warning(
+            "Expert provider is 'serve' but %s — expert model disabled",
+            "SERVE_API_KEY is not set" if not settings.serve_api_key
             else "no model name resolved",
         )
 
@@ -254,6 +297,33 @@ elif _request_p == "anthropic":
         logger.warning(
             "Request provider is 'anthropic' but %s — request model disabled",
             "ANTHROPIC_API_KEY is not set" if not settings.anthropic_api_key
+            else "no model name resolved",
+        )
+
+elif _request_p == "serve":
+    _request_model = settings.serve_request_model or settings.serve_model
+    if _request_model and settings.serve_api_key:
+        try:
+            from lean_ai.llm.provider_openai import OpenAIProvider as _ReqServe
+            _request_provider = _ReqServe(
+                api_key=settings.serve_api_key,
+                model=_request_model,
+                base_url=f"{settings.serve_url.rstrip('/')}/v1",
+                temperature=settings.serve_temperature,
+                context_window=settings.serve_context_window,
+                max_tokens=settings.serve_max_tokens,
+            )
+            request_llm_client = LLMClient(
+                provider=_request_provider,
+                concurrency_semaphore=_llm_semaphore,
+            )
+            logger.info("Request model enabled (Serve): %s", _request_model)
+        except Exception as e:
+            logger.warning("Could not create request LLM client (Serve): %s", e)
+    else:
+        logger.warning(
+            "Request provider is 'serve' but %s — request model disabled",
+            "SERVE_API_KEY is not set" if not settings.serve_api_key
             else "no model name resolved",
         )
 

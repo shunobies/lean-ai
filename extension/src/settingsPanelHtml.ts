@@ -447,6 +447,13 @@ export function getSettingsPanelHtml(): string {
                 <span class="radio-desc">— Claude Sonnet, Opus, Haiku</span>
             </span>
         </label>
+        <label class="radio-option" id="opt-serve">
+            <input type="radio" name="provider" value="serve">
+            <span>
+                <span class="radio-label">Lean AI Serve</span>
+                <span class="radio-desc">— vLLM inference wrapper, API key required</span>
+            </span>
+        </label>
     </div>
 
     <!-- Ollama fields -->
@@ -548,6 +555,39 @@ export function getSettingsPanelHtml(): string {
             <input type="number" id="anthropicContextWindow" min="1000" step="1000" placeholder="200000">
         </div>
     </div>
+
+    <!-- Lean AI Serve fields -->
+    <div class="provider-section indent" id="serve-fields">
+        <div class="field">
+            <label>API Key</label>
+            <div id="serve-key-widget"></div>
+            <div class="key-hint">Stored securely in your OS keychain — never written to settings.json or config files</div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Server URL</label>
+                <input type="text" id="serveUrl" placeholder="http://localhost:8420">
+            </div>
+            <div class="field">
+                <label>Model <span class="hint">must match vLLM loaded model</span></label>
+                <input type="text" id="serveModel" placeholder="">
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Temperature <span class="hint">0–2</span></label>
+                <input type="number" id="serveTemperature" min="0" max="2" step="0.05" placeholder="0.7">
+            </div>
+            <div class="field">
+                <label>Context Window <span class="hint">tokens, e.g. 131072 or 128</span></label>
+                <input type="text" id="serveContextWindow" placeholder="131072">
+            </div>
+        </div>
+        <div class="field">
+            <label>Max Tokens <span class="hint">0 = auto (25% of context window)</span></label>
+            <input type="number" id="serveMaxTokens" min="0" step="256" placeholder="0">
+        </div>
+    </div>
 </div>
 
 <!-- ── Expert Model ── -->
@@ -573,6 +613,10 @@ export function getSettingsPanelHtml(): string {
             <label class="radio-option" id="xopt-anthropic">
                 <input type="radio" name="expertProvider" value="anthropic">
                 <span><span class="radio-label">Anthropic</span></span>
+            </label>
+            <label class="radio-option" id="xopt-serve">
+                <input type="radio" name="expertProvider" value="serve">
+                <span><span class="radio-label">Lean AI Serve</span></span>
             </label>
         </div>
         <div class="indent">
@@ -642,6 +686,13 @@ export function getSettingsPanelHtml(): string {
                     <input type="text" id="anthropicExpertModel" placeholder="claude-opus-4-6">
                 </div>
             </div>
+            <!-- Expert Lean AI Serve fields -->
+            <div class="provider-section" id="expert-serve-fields">
+                <div class="field">
+                    <label>Expert Serve Model <span class="hint">falls back to primary Serve model</span></label>
+                    <input type="text" id="serveExpertModel" placeholder="">
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -669,6 +720,10 @@ export function getSettingsPanelHtml(): string {
             <label class="radio-option" id="ropt-anthropic">
                 <input type="radio" name="requestProvider" value="anthropic">
                 <span><span class="radio-label">Anthropic</span></span>
+            </label>
+            <label class="radio-option" id="ropt-serve">
+                <input type="radio" name="requestProvider" value="serve">
+                <span><span class="radio-label">Lean AI Serve</span></span>
             </label>
         </div>
         <div class="indent">
@@ -736,6 +791,13 @@ export function getSettingsPanelHtml(): string {
                 <div class="field">
                     <label>Request Anthropic Model <span class="hint">e.g. claude-sonnet-4-20250514</span></label>
                     <input type="text" id="anthropicRequestModel" placeholder="claude-sonnet-4-20250514">
+                </div>
+            </div>
+            <!-- Request Lean AI Serve fields -->
+            <div class="provider-section" id="request-serve-fields">
+                <div class="field">
+                    <label>Request Serve Model <span class="hint">falls back to primary Serve model</span></label>
+                    <input type="text" id="serveRequestModel" placeholder="">
                 </div>
             </div>
         </div>
@@ -1042,6 +1104,7 @@ export function getSettingsPanelHtml(): string {
 
     renderKeyWidget('openai-key-widget', 'openai');
     renderKeyWidget('anthropic-key-widget', 'anthropic');
+    renderKeyWidget('serve-key-widget', 'serve');
 
     // ── Provider radio group logic ─────────────────────────────────────────
 
@@ -1311,6 +1374,13 @@ export function getSettingsPanelHtml(): string {
             anthropicTemperature:  val('anthropicTemperature'),
             anthropicContextWindow:val('anthropicContextWindow'),
 
+            // Lean AI Serve
+            serveUrl:              val('serveUrl'),
+            serveModel:            val('serveModel'),
+            serveTemperature:      val('serveTemperature'),
+            serveContextWindow:    val('serveContextWindow'),
+            serveMaxTokens:        val('serveMaxTokens'),
+
             // Expert model
             expertLlmProvider:     expertChecked ? expertProvider : '',
             ollamaModelExpert:     expertChecked && expertProvider === 'ollama' ? val('ollamaModelExpert') : '',
@@ -1323,6 +1393,7 @@ export function getSettingsPanelHtml(): string {
             enableThinkingExpert:      expertChecked && expertProvider === 'ollama' ? val('enableThinkingExpert') : '',
             openaiExpertModel:     expertChecked && expertProvider === 'openai' ? val('openaiExpertModel') : '',
             anthropicExpertModel:  expertChecked && expertProvider === 'anthropic' ? val('anthropicExpertModel') : '',
+            serveExpertModel:      expertChecked && expertProvider === 'serve' ? val('serveExpertModel') : '',
 
             // Request model
             requestLlmProvider:       requestChecked ? requestProvider : '',
@@ -1336,6 +1407,7 @@ export function getSettingsPanelHtml(): string {
             enableThinkingRequest:      requestChecked && requestProvider === 'ollama' ? val('enableThinkingRequest') : '',
             openaiRequestModel:       requestChecked && requestProvider === 'openai' ? val('openaiRequestModel') : '',
             anthropicRequestModel:    requestChecked && requestProvider === 'anthropic' ? val('anthropicRequestModel') : '',
+            serveRequestModel:        requestChecked && requestProvider === 'serve' ? val('serveRequestModel') : '',
 
             // TDD mode
             enableTdd:             val('enableTdd'),
@@ -1435,6 +1507,16 @@ export function getSettingsPanelHtml(): string {
             document.getElementById('anthropic-key-widget')._renderSet();
         }
 
+        // Lean AI Serve fields
+        setVal('serveUrl',              v.serveUrl);
+        setVal('serveModel',            v.serveModel);
+        setVal('serveTemperature',      v.serveTemperature);
+        setVal('serveContextWindow',    v.serveContextWindow);
+        setVal('serveMaxTokens',        v.serveMaxTokens);
+        if (v.serveKeySet) {
+            document.getElementById('serve-key-widget')._renderSet();
+        }
+
         // Expert model
         const hasExpert = !!(v.expertLlmProvider || v.ollamaModelExpert);
         document.getElementById('useExpertModel').checked = hasExpert;
@@ -1456,6 +1538,7 @@ export function getSettingsPanelHtml(): string {
         setVal('enableThinkingExpert',     v.enableThinkingExpert);
         setVal('openaiExpertModel',        v.openaiExpertModel);
         setVal('anthropicExpertModel',     v.anthropicExpertModel);
+        setVal('serveExpertModel',         v.serveExpertModel);
 
         // Request model
         const hasRequest = !!(v.requestLlmProvider || v.ollamaModelRequest);
@@ -1478,6 +1561,7 @@ export function getSettingsPanelHtml(): string {
         setVal('enableThinkingRequest',   v.enableThinkingRequest);
         setVal('openaiRequestModel',      v.openaiRequestModel);
         setVal('anthropicRequestModel',   v.anthropicRequestModel);
+        setVal('serveRequestModel',       v.serveRequestModel);
 
         // TDD mode
         setVal('enableTdd',                v.enableTdd);

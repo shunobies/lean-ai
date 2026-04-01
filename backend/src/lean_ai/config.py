@@ -40,6 +40,7 @@ _CONTEXT_WINDOW_FIELDS = frozenset({
     "ollama_request_context_window",
     "openai_context_window",
     "anthropic_context_window",
+    "serve_context_window",
     "inline_context_window",
 })
 
@@ -73,7 +74,9 @@ class _DecryptingYamlSource(PydanticBaseSettingsSource):
     post-processes secret fields through :func:`decrypt_value`.
     """
 
-    _SECRET_FIELDS = frozenset({"openai_api_key", "anthropic_api_key", "search_api_key"})
+    _SECRET_FIELDS = frozenset({
+        "openai_api_key", "anthropic_api_key", "serve_api_key", "search_api_key",
+    })
 
     def __init__(self, settings_cls: type[BaseSettings], yaml_file: str = "config.yaml") -> None:
         super().__init__(settings_cls)
@@ -155,8 +158,20 @@ class Settings(BaseSettings):
     anthropic_context_window: int = 200000  # Accepts shorthand: 200 = 204800
     anthropic_max_tokens: int | None = None  # Derived: 25% of context window
 
+    # ── Lean AI Serve (vLLM wrapper, OpenAI-compatible) ──
+    serve_url: str = "http://localhost:8420"
+    serve_api_key: str = ""
+    serve_model: str = ""
+    serve_temperature: float = 0.7
+    serve_context_window: int = 131072  # Accepts shorthand: 128 = 128k = 131072
+    serve_max_tokens: int | None = None  # Derived: 25% of context window
+
+    # ── Lean AI Serve — expert/request model overrides ──
+    serve_expert_model: str = ""  # Falls back to serve_model when empty
+    serve_request_model: str = ""  # Falls back to serve_model when empty
+
     # ── Expert model — provider selection ──
-    # "openai", "anthropic", "ollama", or "" (auto-detect from OLLAMA_MODEL_EXPERT)
+    # "openai", "anthropic", "ollama", "serve", or "" (auto-detect from OLLAMA_MODEL_EXPERT)
     expert_llm_provider: str = ""
 
     # ── OpenAI — expert model ──
@@ -168,7 +183,7 @@ class Settings(BaseSettings):
     anthropic_expert_model: str = ""
 
     # ── Request model — for /request mode ──
-    request_llm_provider: str = ""  # "ollama", "openai", "anthropic", or "" (auto-detect)
+    request_llm_provider: str = ""  # "ollama", "openai", "anthropic", "serve", or "" (auto-detect)
     ollama_model_request: str = ""  # e.g. "qwen3.5:27b"
     ollama_request_temperature: float | None = None  # Falls back to ollama_temperature
     ollama_request_top_p: float | None = None  # Falls back to ollama_top_p
@@ -311,8 +326,8 @@ class Settings(BaseSettings):
         """Ensure critical numeric settings are positive."""
         for field_name in (
             "ollama_context_window", "openai_context_window",
-            "anthropic_context_window", "tool_timeout_seconds",
-            "stt_cpu_threads",
+            "anthropic_context_window", "serve_context_window",
+            "tool_timeout_seconds", "stt_cpu_threads",
         ):
             val = getattr(self, field_name, None)
             if val is not None and val <= 0:
@@ -339,6 +354,8 @@ class Settings(BaseSettings):
             self.openai_max_tokens = self.openai_context_window // 4
         if self.anthropic_max_tokens is None:
             self.anthropic_max_tokens = self.anthropic_context_window // 4
+        if self.serve_max_tokens is None:
+            self.serve_max_tokens = self.serve_context_window // 4
         if self.ollama_model_expert:
             if self.ollama_expert_context_window is None:
                 self.ollama_expert_context_window = self.ollama_context_window
@@ -365,6 +382,8 @@ class Settings(BaseSettings):
             return self.openai_context_window
         if provider == "anthropic":
             return self.anthropic_context_window
+        if provider == "serve":
+            return self.serve_context_window
         return self.ollama_context_window
 
     @property
@@ -407,6 +426,8 @@ class Settings(BaseSettings):
             return self.openai_context_window
         elif ep == "anthropic":
             return self.anthropic_context_window
+        elif ep == "serve":
+            return self.serve_context_window
         else:  # ollama (default / backwards-compat)
             return self.ollama_expert_context_window or self.ollama_context_window
 
@@ -418,6 +439,8 @@ class Settings(BaseSettings):
             return self.openai_max_tokens or (self.openai_context_window // 4)
         elif ep == "anthropic":
             return self.anthropic_max_tokens or (self.anthropic_context_window // 4)
+        elif ep == "serve":
+            return self.serve_max_tokens or (self.serve_context_window // 4)
         else:  # ollama (default / backwards-compat)
             return self.ollama_expert_max_tokens or (self.ollama_context_window // 4)
 
@@ -449,6 +472,8 @@ class Settings(BaseSettings):
             return self.openai_max_tokens or (self.openai_context_window // 4)
         elif rp == "anthropic":
             return self.anthropic_max_tokens or (self.anthropic_context_window // 4)
+        elif rp == "serve":
+            return self.serve_max_tokens or (self.serve_context_window // 4)
         else:  # ollama
             return self.ollama_request_max_tokens or (self.ollama_context_window // 4)
 
