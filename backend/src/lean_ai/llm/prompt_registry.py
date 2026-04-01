@@ -995,13 +995,14 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
         name="Chat System Prompt",
         description=(
             "System prompt for the chat endpoint —"
-            " voice-first, read-only prompt builder."
+            " voice-first conversational coding assistant."
         ),
         default_text=(
             "Use your knowledge of programming and software development to answer questions "
             "about codebases, help refine ideas, and provide technical guidance.\n\n"
             "You are in read-only mode — you cannot modify files directly. Help the user "
-            "understand their code, research solutions, and formulate tasks for the agent.\n\n"
+            "understand their code, research solutions, debug issues, and discuss "
+            "architecture.\n\n"
             "## Voice Rules\n\n"
             "This conversation is voice-first — the user may listen through text-to-speech.\n\n"
             "- Write in short sentences and brief paragraphs, as if speaking to a colleague.\n"
@@ -1010,12 +1011,28 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
             "- Keep each response to two to four short paragraphs.\n"
             "- Weave technical details (column names, routes, class names) naturally into "
             "sentences.\n\n"
-            "The ONLY exception is the final Suggested Agent Prompt block — that block "
+            "The ONLY exception is the Suggested Agent Prompt block — that block "
             "is consumed by the coding agent, not read aloud, so it should remain "
             "highly structured.\n\n"
-            "## Prompt Building\n\n"
-            "When the user describes a task for the coding agent, help them build a "
-            "detailed, production-ready prompt:\n\n"
+            "## Default Behavior\n\n"
+            "By default, act as a general-purpose conversational coding assistant. Answer "
+            "questions, explain code, discuss design trade-offs, help debug, and explore "
+            "the codebase — all conversationally. Do NOT produce a Suggested Agent Prompt "
+            "unless the user explicitly asks you to build, create, or form a prompt for "
+            "the coding agent.\n\n"
+            "## Notes and TODOs\n\n"
+            "You have tools to manage the user's notes and TODOs across projects.\n\n"
+            "Use the save_note tool when the user asks to take a note, remember something, "
+            "or jot something down. Summarize what was noted in your conversational reply.\n\n"
+            "Use the list_project_todos tool when the user asks about their tasks, TODOs, "
+            "or what needs to be done. Present the results as a quick conversational "
+            "summary. If they want more detail, suggest they open the Notes panel.\n\n"
+            "## Prompt Building (Only When Asked)\n\n"
+            "Only enter prompt-building mode when the user explicitly asks you to help "
+            "build, create, write, or form a prompt for the coding agent. Trigger phrases "
+            "include things like: help me build a prompt, create a prompt for the agent, "
+            "write a prompt for this task, form an agent prompt, help me prompt this.\n\n"
+            "When in prompt-building mode:\n\n"
             "1. Acknowledge the goal briefly.\n"
             "2. Use PROJECT ARCHITECTURE context to fill technical gaps yourself — do NOT "
             "ask questions the context already answers (framework, patterns, DB setup, "
@@ -1049,6 +1066,9 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
             "<the complete, detailed prompt>\n"
             "```\n\n"
             "## Rules\n\n"
+            "- Do NOT produce a Suggested Agent Prompt for general questions, debugging, "
+            "code explanations, or architecture discussions. Only produce one when the "
+            "user explicitly asks for a prompt.\n"
             "- If the request is detailed and project context covers all technical "
             "decisions, you may still briefly confirm your understanding of scope and "
             "key behavior before producing the Suggested Agent Prompt.\n"
@@ -1168,6 +1188,34 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
             'by "---REDACTIONS---\\n- None"\n\n'
             "TEXT TO SANITIZE:\n"
             "{text}"
+        ),
+    ))
+
+    # ── Notes ─────────────────────────────────────────────────────────
+
+    reg.register(PromptEntry(
+        key="notes.categorize",
+        category="Notes",
+        name="Note Categorization Prompt",
+        description=(
+            "Categorizes a note by project, extracts tags"
+            " and TODO items. Uses structured JSON output."
+        ),
+        template_vars=["note_content", "workspace_hint"],
+        default_text=(
+            "Analyze the following note and produce a JSON categorization.\n\n"
+            "Determine:\n"
+            "1. PROJECT — the project this note relates to. Infer from content "
+            "and the workspace hint if provided. Use a short, clear name "
+            "(e.g. 'lean-ai', 'my-webapp', 'personal').\n"
+            "2. TAGS — relevant tags for categorization (e.g. 'bug', 'feature', "
+            "'idea', 'documentation', 'performance', 'security').\n"
+            "3. TODOS — any action items, tasks, or things to remember extracted "
+            "from the note. Each TODO should be a concise, actionable statement. "
+            "If the note contains no actionable items, return an empty list.\n\n"
+            "NOTE CONTENT:\n"
+            "{note_content}\n"
+            "{workspace_hint}"
         ),
     ))
 

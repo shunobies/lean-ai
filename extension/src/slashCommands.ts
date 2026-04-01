@@ -45,6 +45,7 @@ export function createSlashCommands(
     map.set("/approve",  (args) => handleApproveCommand(ctx, args));
     map.set("/reject",   (args) => handleRejectCommand(ctx, args));
     map.set("/resume",   (args) => handleResumeCommand(ctx, args));
+    map.set("/note",     (args) => handleNoteCommand(ctx, args));
     return map;
 }
 
@@ -837,5 +838,49 @@ export async function handleResumeCommand(
         ctx.postMessage({ type: "thinking", show: false });
         const error = e instanceof Error ? e.message : String(e);
         ctx.postMessage({ type: "error", text: `Resume failed: ${error}` });
+    }
+}
+
+// ── /note — save a quick note ─────────────────────────────────────────
+
+export async function handleNoteCommand(
+    ctx: SlashCommandContext,
+    args: string,
+): Promise<void> {
+    const content = args.trim();
+    if (!content) {
+        ctx.postMessage({
+            type: "reply",
+            text: "Usage: `/note <your note text>`\n\nExample: `/note Remember to add rate limiting to the API`",
+            cls: "msg-system",
+        });
+        return;
+    }
+
+    ctx.postMessage({ type: "thinking", show: true, text: "Saving note..." });
+
+    const healthy = await ctx.client.healthCheck();
+    if (!healthy) {
+        ctx.postMessage({ type: "thinking", show: false });
+        ctx.postMessage({
+            type: "error",
+            text: "Backend not available. Start the server:\ncd backend && uvicorn lean_ai.main:app --reload --port 8422",
+        });
+        return;
+    }
+
+    try {
+        const repoRoot = ctx.getRepoRoot();
+        const note = await ctx.client.createNote(content, repoRoot);
+        ctx.postMessage({ type: "thinking", show: false });
+        ctx.postMessage({
+            type: "reply",
+            text: `Note saved (id: ${note.id}). AI is categorizing it in the background.`,
+            cls: "msg-system",
+        });
+    } catch (e) {
+        ctx.postMessage({ type: "thinking", show: false });
+        const error = e instanceof Error ? e.message : String(e);
+        ctx.postMessage({ type: "error", text: `Failed to save note: ${error}` });
     }
 }

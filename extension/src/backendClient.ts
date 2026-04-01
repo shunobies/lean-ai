@@ -994,6 +994,119 @@ export class BackendClient {
         }
     }
 
+    // --- Notes ---
+
+    async createNote(
+        content: string,
+        sourceWorkspace?: string,
+    ): Promise<{ id: string; content: string; project: string | null; tags: string[] }> {
+        const resp = await fetch(`${this.baseUrl}/api/notes`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content, source_workspace: sourceWorkspace || null }),
+        });
+        if (!resp.ok) {
+            throw new Error(`Failed to create note: ${resp.statusText}`);
+        }
+        return resp.json() as Promise<{ id: string; content: string; project: string | null; tags: string[] }>;
+    }
+
+    async listNotes(project?: string): Promise<unknown[]> {
+        const params = new URLSearchParams();
+        if (project) { params.set("project", project); }
+        const qs = params.toString();
+        const resp = await fetch(`${this.baseUrl}/api/notes${qs ? `?${qs}` : ""}`);
+        if (!resp.ok) {
+            throw new Error(`Failed to list notes: ${resp.statusText}`);
+        }
+        return resp.json() as Promise<unknown[]>;
+    }
+
+    async getNote(noteId: string): Promise<unknown> {
+        const resp = await fetch(`${this.baseUrl}/api/notes/${noteId}`);
+        if (!resp.ok) {
+            throw new Error(`Failed to get note: ${resp.statusText}`);
+        }
+        return resp.json();
+    }
+
+    async updateNote(
+        noteId: string,
+        data: { content?: string; project?: string; tags?: string[] },
+    ): Promise<unknown> {
+        const resp = await fetch(`${this.baseUrl}/api/notes/${noteId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+        });
+        if (!resp.ok) {
+            throw new Error(`Failed to update note: ${resp.statusText}`);
+        }
+        return resp.json();
+    }
+
+    async deleteNote(noteId: string): Promise<void> {
+        const resp = await fetch(`${this.baseUrl}/api/notes/${noteId}`, {
+            method: "DELETE",
+        });
+        if (!resp.ok) {
+            throw new Error(`Failed to delete note: ${resp.statusText}`);
+        }
+    }
+
+    async searchNotes(query: string): Promise<unknown[]> {
+        const params = new URLSearchParams({ q: query });
+        const resp = await fetch(`${this.baseUrl}/api/notes/search?${params}`);
+        if (!resp.ok) {
+            throw new Error(`Failed to search notes: ${resp.statusText}`);
+        }
+        return resp.json() as Promise<unknown[]>;
+    }
+
+    async listNoteProjects(): Promise<string[]> {
+        const resp = await fetch(`${this.baseUrl}/api/notes/projects`);
+        if (!resp.ok) {
+            throw new Error(`Failed to list projects: ${resp.statusText}`);
+        }
+        return resp.json() as Promise<string[]>;
+    }
+
+    async updateTodo(
+        todoId: number,
+        data: { description?: string; completed?: boolean },
+    ): Promise<unknown> {
+        const resp = await fetch(`${this.baseUrl}/api/notes/todos/${todoId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+        });
+        if (!resp.ok) {
+            throw new Error(`Failed to update todo: ${resp.statusText}`);
+        }
+        return resp.json();
+    }
+
+    async deleteTodo(todoId: number): Promise<void> {
+        const resp = await fetch(`${this.baseUrl}/api/notes/todos/${todoId}`, {
+            method: "DELETE",
+        });
+        if (!resp.ok) {
+            throw new Error(`Failed to delete todo: ${resp.statusText}`);
+        }
+    }
+
+    async addTodo(noteId: string, description: string): Promise<unknown> {
+        const resp = await fetch(`${this.baseUrl}/api/notes/${noteId}/todos`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ description }),
+        });
+        if (!resp.ok) {
+            throw new Error(`Failed to add todo: ${resp.statusText}`);
+        }
+        return resp.json();
+    }
+
     // --- WebSocket ---
 
     connectWebSocket(

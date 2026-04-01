@@ -109,6 +109,11 @@
         "command": "lean-ai.openChatInNewWindow",
         "title": "Lean AI: Open Chat in New Window",
         "icon": "$(link-external)"
+      },
+      {
+        "command": "lean-ai.openNotes",
+        "title": "Lean AI: Open Notes & TODOs",
+        "icon": "$(note)"
       }
     ],
     "menus": {

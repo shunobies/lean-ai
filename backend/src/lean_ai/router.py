@@ -13,6 +13,7 @@ from lean_ai.routers.dependencies import llm_client  # noqa: F401
 from lean_ai.routers.generation import generation_router
 from lean_ai.routers.info import info_router
 from lean_ai.routers.knowledge_endpoints import knowledge_router
+from lean_ai.routers.notes import notes_router
 from lean_ai.routers.prompts import prompts_router
 from lean_ai.routers.scaffold_endpoints import scaffold_router
 from lean_ai.routers.sessions import sessions_router
@@ -27,5 +28,6 @@ router.include_router(chat_router)
 router.include_router(info_router)
 router.include_router(scaffold_router)
 router.include_router(knowledge_router)
+router.include_router(notes_router)
 router.include_router(prompts_router)
 router.include_router(voice_router)

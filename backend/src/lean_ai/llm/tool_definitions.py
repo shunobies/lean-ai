@@ -449,6 +449,50 @@ CHAT_TOOLS: list[dict] = [
     if tool["function"]["name"] in (
         "read_file", "list_directory", "directory_tree", "grep_files",
     )
+] + [
+    {
+        "type": "function",
+        "function": {
+            "name": "save_note",
+            "description": (
+                "Save a note for the user. Use when the user asks to take a note, "
+                "remember something, or jot something down."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "The note content to save",
+                    },
+                },
+                "required": ["content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_project_todos",
+            "description": (
+                "List TODOs for the current project. Use when the user asks about "
+                "their todos, tasks, or what they need to work on."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": (
+                            "Project name to filter by. "
+                            "Leave empty to use the current workspace."
+                        ),
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 # Read-only + diagnostic tools for fix-mode investigation phase

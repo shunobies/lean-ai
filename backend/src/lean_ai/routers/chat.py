@@ -144,6 +144,47 @@ def _make_chat_tool_executor(repo_root: str):
                     indent = "  " * depth
                     lines.append(f"{indent}{e.path.split('/')[-1]}")
             return "\n".join(lines) or "(empty)"
+        elif name == "save_note":
+            from lean_ai.notes_db import create_note as _create_note
+            from lean_ai.notes_db import get_notes_db
+            from lean_ai.notes_index import index_note
+            from lean_ai.notes_llm import schedule_categorization
+
+            content = arguments.get("content", "")
+            db = await get_notes_db()
+            try:
+                note = await _create_note(db, content, repo_root or None)
+                index_note(note_id=note["id"], content=content)
+                schedule_categorization(
+                    llm_client, note["id"], content, repo_root or None
+                )
+                return f"Note saved (id: {note['id']}). Categorization in progress."
+            finally:
+                await db.close()
+        elif name == "list_project_todos":
+            from lean_ai.notes_db import get_notes_db, list_todos_by_project
+
+            project = arguments.get("project", "")
+            db = await get_notes_db()
+            try:
+                todos = await list_todos_by_project(
+                    db,
+                    project=project or None,
+                    source_workspace=repo_root or None,
+                    pending_only=True,
+                )
+                if not todos:
+                    return "No pending TODOs found for this project."
+                lines = []
+                for t in todos:
+                    status = "done" if t["completed"] else "pending"
+                    lines.append(
+                        f"- [{status}] {t['description']} "
+                        f"(from note: {t['note_content']}...)"
+                    )
+                return "\n".join(lines)
+            finally:
+                await db.close()
         return f"Unknown tool: {name}"
 
     return _executor

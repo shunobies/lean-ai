@@ -74,13 +74,16 @@ def _tool_response(name: str, args: dict, content: str = "") -> tuple[str, list,
 # ── CHAT_TOOLS constant tests ──────────────────────────────────────
 
 
-def test_chat_tools_contains_exactly_four_tools():
-    assert len(CHAT_TOOLS) == 4
+def test_chat_tools_contains_expected_tools():
+    assert len(CHAT_TOOLS) == 6
 
 
 def test_chat_tools_names():
     names = {t["function"]["name"] for t in CHAT_TOOLS}
-    assert names == {"read_file", "list_directory", "directory_tree", "grep_files"}
+    assert names == {
+        "read_file", "list_directory", "directory_tree", "grep_files",
+        "save_note", "list_project_todos",
+    }
 
 
 def test_chat_tools_excludes_task_complete():
