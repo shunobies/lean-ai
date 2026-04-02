@@ -69,7 +69,7 @@ cd extension && npm install && npm run build
 
 8. **Language Registry** (`languages/`) — 13 language definitions in YAML. Tree-sitter AST parsing (no regex patterns). Generic extraction engine for classes, functions, imports.
 
-9. **Knowledge Base** (`knowledge/`) — Domain document indexing (EPUB, PDF, Word, Markdown, HTML, text). Prose-aware paragraph chunker. Separate Whoosh index. Incremental updates via SHA-256 manifest.
+9. **Knowledge Base** (`knowledge/`) — Domain document indexing (EPUB, PDF, Word, Markdown, HTML, text). Prose-aware paragraph chunker. Separate Whoosh index. Incremental updates via SHA-256 manifest. **MediaWiki integration** (`tools/wiki.py`) — complements the local knowledge base with real-time search of an internal MediaWiki instance. Two tools: `search_wiki` (full-text search via `action=query&list=search`) and `fetch_wiki_page` (page content via `action=parse`). Uses the MediaWiki Action API with optional bot-account authentication (lazy login, session cookies cached). HTML stripped to plain text; long pages paginated to disk like `fetch_url`. Gated by `LEAN_AI_WIKI_URL` — when empty, wiki tools are excluded from all tool lists. Configurable from the extension's Advanced Settings tab (URL, API path, username, password in OS keychain).
 
 10. **Scaffolding** (`scaffolds/`) — 19 YAML scaffold recipes for project bootstrapping.
 
