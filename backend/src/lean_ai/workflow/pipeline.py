@@ -788,6 +788,10 @@ async def _execute_plan(
                 "summary": f"Project context update failed: {exc}",
             })
 
+    # ── Auto-push to linked integrations (fire-and-forget) ──
+    if settings.enable_integrations and settings.integration_auto_push:
+        asyncio.create_task(_auto_push_integration(repo_root, session_id))
+
     complete_data: dict = {"summary": summary, "files_modified": files_modified}
     if branch_name:
         complete_data["plan_branch"] = branch_name
@@ -805,3 +809,44 @@ async def _execute_plan(
     if files_modified:
         commit_msg += f"\n\nFiles modified: {', '.join(files_modified)}"
     return commit_msg
+
+
+async def _auto_push_integration(repo_root: str, session_id: str) -> None:
+    """Push session summary to any linked external tasks (best-effort)."""
+    try:
+        from lean_ai.integrations.db import get_integrations_db, get_linked_tasks
+        from lean_ai.integrations.registry import get_integration
+        from lean_ai.integrations.summary import build_session_summary
+
+        db = await get_integrations_db()
+        try:
+            links = await get_linked_tasks(db, session_id=session_id)
+        finally:
+            await db.close()
+
+        if not links:
+            return
+
+        summary = await build_session_summary(repo_root, session_id)
+        if not summary:
+            return
+
+        for link in links:
+            integration = get_integration(link["integration_name"])
+            if integration:
+                try:
+                    await integration.push_session_summary(
+                        link["external_id"], summary,
+                    )
+                    logger.info(
+                        "Auto-pushed session %s to %s/%s",
+                        session_id, link["integration_name"], link["external_id"],
+                    )
+                except Exception:
+                    logger.debug(
+                        "Auto-push failed for %s/%s",
+                        link["integration_name"], link["external_id"],
+                        exc_info=True,
+                    )
+    except Exception:
+        logger.debug("Auto-push integration failed (non-fatal)", exc_info=True)
