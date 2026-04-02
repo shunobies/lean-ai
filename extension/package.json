@@ -717,5 +717,9 @@
   },
   "dependencies": {
     "ws": "^8.18.0"
+  },
+  "overrides": {
+    "lodash": ">=4.18.0",
+    "brace-expansion": ">=1.1.13"
   }
 }
