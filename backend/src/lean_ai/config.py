@@ -40,6 +40,7 @@ _CONTEXT_WINDOW_FIELDS = frozenset({
     "ollama_request_context_window",
     "openai_context_window",
     "anthropic_context_window",
+    "gemini_context_window",
     "serve_context_window",
     "inline_context_window",
 })
@@ -75,7 +76,8 @@ class _DecryptingYamlSource(PydanticBaseSettingsSource):
     """
 
     _SECRET_FIELDS = frozenset({
-        "openai_api_key", "anthropic_api_key", "serve_api_key", "search_api_key",
+        "openai_api_key", "anthropic_api_key", "gemini_api_key",
+        "serve_api_key", "search_api_key",
     })
 
     def __init__(self, settings_cls: type[BaseSettings], yaml_file: str = "config.yaml") -> None:
@@ -157,6 +159,17 @@ class Settings(BaseSettings):
     anthropic_temperature: float = 0.7
     anthropic_context_window: int = 200000  # Accepts shorthand: 200 = 204800
     anthropic_max_tokens: int | None = None  # Derived: 25% of context window
+
+    # ── Gemini ──
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
+    gemini_temperature: float = 0.7
+    gemini_context_window: int = 1048576  # ~1M tokens, accepts shorthand
+    gemini_max_tokens: int | None = None  # Derived: 25% of context window
+
+    # ── Gemini — expert/request model overrides ──
+    gemini_expert_model: str = ""  # Falls back to gemini_model when empty
+    gemini_request_model: str = ""  # Falls back to gemini_model when empty
 
     # ── Lean AI Serve (vLLM wrapper, OpenAI-compatible) ──
     serve_url: str = "http://localhost:8420"
@@ -291,6 +304,10 @@ class Settings(BaseSettings):
     post_validation_max_retries: int = 2  # Max LLM fix attempts (0 = no retries)
     post_validation_fix_turns: int = 30  # Tool-calling turns per fix attempt
 
+    # ── Integrations (Jira, ServiceNow, etc.) ──
+    enable_integrations: bool = False  # Master switch for external integrations
+    integration_auto_push: bool = True  # Auto-push session summaries on completion
+
     # ── Debug / Testing ──
     debug_planning: bool = False  # Save all planning phase outputs to disk
 
@@ -326,7 +343,8 @@ class Settings(BaseSettings):
         """Ensure critical numeric settings are positive."""
         for field_name in (
             "ollama_context_window", "openai_context_window",
-            "anthropic_context_window", "serve_context_window",
+            "anthropic_context_window", "gemini_context_window",
+            "serve_context_window",
             "tool_timeout_seconds", "stt_cpu_threads",
         ):
             val = getattr(self, field_name, None)
@@ -354,6 +372,8 @@ class Settings(BaseSettings):
             self.openai_max_tokens = self.openai_context_window // 4
         if self.anthropic_max_tokens is None:
             self.anthropic_max_tokens = self.anthropic_context_window // 4
+        if self.gemini_max_tokens is None:
+            self.gemini_max_tokens = self.gemini_context_window // 4
         if self.serve_max_tokens is None:
             self.serve_max_tokens = self.serve_context_window // 4
         if self.ollama_model_expert:
@@ -382,6 +402,8 @@ class Settings(BaseSettings):
             return self.openai_context_window
         if provider == "anthropic":
             return self.anthropic_context_window
+        if provider == "gemini":
+            return self.gemini_context_window
         if provider == "serve":
             return self.serve_context_window
         return self.ollama_context_window
@@ -426,6 +448,8 @@ class Settings(BaseSettings):
             return self.openai_context_window
         elif ep == "anthropic":
             return self.anthropic_context_window
+        elif ep == "gemini":
+            return self.gemini_context_window
         elif ep == "serve":
             return self.serve_context_window
         else:  # ollama (default / backwards-compat)
@@ -439,6 +463,8 @@ class Settings(BaseSettings):
             return self.openai_max_tokens or (self.openai_context_window // 4)
         elif ep == "anthropic":
             return self.anthropic_max_tokens or (self.anthropic_context_window // 4)
+        elif ep == "gemini":
+            return self.gemini_max_tokens or (self.gemini_context_window // 4)
         elif ep == "serve":
             return self.serve_max_tokens or (self.serve_context_window // 4)
         else:  # ollama (default / backwards-compat)
@@ -472,6 +498,8 @@ class Settings(BaseSettings):
             return self.openai_max_tokens or (self.openai_context_window // 4)
         elif rp == "anthropic":
             return self.anthropic_max_tokens or (self.anthropic_context_window // 4)
+        elif rp == "gemini":
+            return self.gemini_max_tokens or (self.gemini_context_window // 4)
         elif rp == "serve":
             return self.serve_max_tokens or (self.serve_context_window // 4)
         else:  # ollama

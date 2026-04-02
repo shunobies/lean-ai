@@ -145,6 +145,7 @@ export class SettingsPanel {
                 const secretKeyMap: Record<string, string> = {
                     openai: SECRET_KEYS.openaiApiKey,
                     anthropic: SECRET_KEYS.anthropicApiKey,
+                    gemini: SECRET_KEYS.geminiApiKey,
                     serve: SECRET_KEYS.serveApiKey,
                 };
                 const secretKey = secretKeyMap[provider];
@@ -160,6 +161,7 @@ export class SettingsPanel {
                 const clearKeyMap: Record<string, string> = {
                     openai: SECRET_KEYS.openaiApiKey,
                     anthropic: SECRET_KEYS.anthropicApiKey,
+                    gemini: SECRET_KEYS.geminiApiKey,
                     serve: SECRET_KEYS.serveApiKey,
                 };
                 const secretKey = clearKeyMap[provider];
@@ -230,6 +232,7 @@ export class SettingsPanel {
             requestLlmProvider:       "lean-ai.requestLlmProvider",
             openaiRequestModel:       "lean-ai.openaiRequestModel",
             anthropicRequestModel:    "lean-ai.anthropicRequestModel",
+            geminiRequestModel:       "lean-ai.geminiRequestModel",
             openaiModel:              "lean-ai.openaiModel",
             openaiBaseUrl:            "lean-ai.openaiBaseUrl",
             openaiTemperature:        "lean-ai.openaiTemperature",
@@ -239,6 +242,10 @@ export class SettingsPanel {
             anthropicTemperature:     "lean-ai.anthropicTemperature",
             anthropicContextWindow:   "lean-ai.anthropicContextWindow",
             anthropicExpertModel:     "lean-ai.anthropicExpertModel",
+            geminiModel:              "lean-ai.geminiModel",
+            geminiTemperature:        "lean-ai.geminiTemperature",
+            geminiContextWindow:      "lean-ai.geminiContextWindow",
+            geminiExpertModel:        "lean-ai.geminiExpertModel",
             serveUrl:                 "lean-ai.serveUrl",
             serveModel:               "lean-ai.serveModel",
             serveTemperature:         "lean-ai.serveTemperature",
@@ -255,6 +262,8 @@ export class SettingsPanel {
             searchProvider:           "lean-ai.searchProvider",
             searchApiUrl:             "lean-ai.searchApiUrl",
             searchDelay:              "lean-ai.searchDelay",
+            enableIntegrations:       "lean-ai.enableIntegrations",
+            integrationAutoPush:      "lean-ai.integrationAutoPush",
             enableTdd:                "lean-ai.enableTdd",
             enablePostValidation:     "lean-ai.enablePostValidation",
             postFormatCommand:        "lean-ai.postFormatCommand",
@@ -287,6 +296,7 @@ export class SettingsPanel {
             "ollamaRequestTopP", "ollamaRequestTopK",
             "ollamaRequestRepeatPenalty", "ollamaRequestMaxTokens",
             "openaiContextWindow", "anthropicContextWindow",
+            "geminiContextWindow", "geminiTemperature",
             "serveContextWindow", "serveTemperature", "serveMaxTokens",
             "searchDelay", "postValidationMaxRetries", "postValidationFixTurns",
             "implementationMaxTurns", "refreshThreshold", "numParallel", "ttsSpeed", "ttsCpuThreads",
@@ -303,11 +313,13 @@ export class SettingsPanel {
             "ollamaRequestRepeatPenalty", "ollamaRequestContextWindow", "ollamaRequestMaxTokens",
             "ollamaMaxTokens", "ollamaContextWindow",
             "openaiContextWindow", "anthropicContextWindow",
+            "geminiContextWindow",
             "serveContextWindow", "serveMaxTokens",
         ]);
 
         const booleanFields = new Set([
-            "enableEmbeddings", "enableTdd", "enablePostValidation",
+            "enableEmbeddings", "enableIntegrations", "integrationAutoPush",
+            "enableTdd", "enablePostValidation",
             "enableFrameworkGuide", "debugPlanning", "enableThinking",
             "enableThinkingExpert", "enableThinkingRequest",
             "enableStt", "enableTts", "enableWakeWord",
@@ -377,6 +389,7 @@ export class SettingsPanel {
 
         const openaiKeySet  = !!(await this._context.secrets.get(SECRET_KEYS.openaiApiKey));
         const anthropicKeySet = !!(await this._context.secrets.get(SECRET_KEYS.anthropicApiKey));
+        const geminiKeySet = !!(await this._context.secrets.get(SECRET_KEYS.geminiApiKey));
         const serveKeySet = !!(await this._context.secrets.get(SECRET_KEYS.serveApiKey));
 
         const values = {
@@ -416,6 +429,7 @@ export class SettingsPanel {
             requestLlmProvider:        config.get("lean-ai.requestLlmProvider", ""),
             openaiRequestModel:        config.get("lean-ai.openaiRequestModel", ""),
             anthropicRequestModel:     config.get("lean-ai.anthropicRequestModel", ""),
+            geminiRequestModel:        config.get("lean-ai.geminiRequestModel", ""),
 
             // OpenAI (no key value — boolean only)
             openaiKeySet,
@@ -431,6 +445,13 @@ export class SettingsPanel {
             anthropicTemperature:      config.get("lean-ai.anthropicTemperature", ""),
             anthropicContextWindow:    config.get("lean-ai.anthropicContextWindow", ""),
             anthropicExpertModel:      config.get("lean-ai.anthropicExpertModel", ""),
+
+            // Gemini (no key value — boolean only)
+            geminiKeySet,
+            geminiModel:               config.get("lean-ai.geminiModel", ""),
+            geminiTemperature:         config.get("lean-ai.geminiTemperature", ""),
+            geminiContextWindow:       config.get("lean-ai.geminiContextWindow", ""),
+            geminiExpertModel:         config.get("lean-ai.geminiExpertModel", ""),
 
             // Lean AI Serve (no key value — boolean only)
             serveKeySet,
@@ -466,6 +487,10 @@ export class SettingsPanel {
             searchProvider:            config.get("lean-ai.searchProvider", "duckduckgo"),
             searchApiUrl:              config.get("lean-ai.searchApiUrl", ""),
             searchDelay:               config.get("lean-ai.searchDelay", ""),
+
+            // Integrations
+            enableIntegrations:        config.get("lean-ai.enableIntegrations", false),
+            integrationAutoPush:       config.get("lean-ai.integrationAutoPush", true),
 
             // TDD mode
             enableTdd:                 config.get("lean-ai.enableTdd", false),

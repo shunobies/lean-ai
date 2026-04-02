@@ -14,6 +14,7 @@ import * as path from "path";
 export const SECRET_KEYS = {
     openaiApiKey:    "lean-ai.openaiApiKey",
     anthropicApiKey: "lean-ai.anthropicApiKey",
+    geminiApiKey:    "lean-ai.geminiApiKey",
     serveApiKey:     "lean-ai.serveApiKey",
 } as const;
 
@@ -70,6 +71,13 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.anthropicContextWindow":    "LEAN_AI_ANTHROPIC_CONTEXT_WINDOW",
     "lean-ai.anthropicExpertModel":      "LEAN_AI_ANTHROPIC_EXPERT_MODEL",
 
+    // Gemini (no API key — stored in SecretStorage)
+    "lean-ai.geminiModel":              "LEAN_AI_GEMINI_MODEL",
+    "lean-ai.geminiTemperature":        "LEAN_AI_GEMINI_TEMPERATURE",
+    "lean-ai.geminiContextWindow":      "LEAN_AI_GEMINI_CONTEXT_WINDOW",
+    "lean-ai.geminiExpertModel":        "LEAN_AI_GEMINI_EXPERT_MODEL",
+    "lean-ai.geminiRequestModel":       "LEAN_AI_GEMINI_REQUEST_MODEL",
+
     // Lean AI Serve (no API key — stored in SecretStorage)
     "lean-ai.serveUrl":                  "LEAN_AI_SERVE_URL",
     "lean-ai.serveModel":               "LEAN_AI_SERVE_MODEL",
@@ -116,6 +124,10 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.postValidationMaxRetries":  "LEAN_AI_POST_VALIDATION_MAX_RETRIES",
     "lean-ai.postValidationFixTurns":    "LEAN_AI_POST_VALIDATION_FIX_TURNS",
 
+    // Integrations
+    "lean-ai.enableIntegrations":       "LEAN_AI_ENABLE_INTEGRATIONS",
+    "lean-ai.integrationAutoPush":      "LEAN_AI_INTEGRATION_AUTO_PUSH",
+
     // Advanced / misc
     "lean-ai.enableFrameworkGuide":      "LEAN_AI_ENABLE_FRAMEWORK_GUIDE",
     "lean-ai.numParallel":               "LEAN_AI_NUM_PARALLEL",
@@ -161,6 +173,9 @@ const ZERO_MEANS_UNSET: ReadonlySet<string> = new Set([
     // Anthropic
     "lean-ai.anthropicContextWindow",
     "lean-ai.anthropicTemperature",
+    // Gemini
+    "lean-ai.geminiContextWindow",
+    "lean-ai.geminiTemperature",
     // Lean AI Serve
     "lean-ai.serveContextWindow",
     "lean-ai.serveTemperature",
@@ -198,9 +213,11 @@ export async function buildFullBackendEnv(
     const env = buildBackendEnv();
     const openaiKey    = await secrets.get(SECRET_KEYS.openaiApiKey);
     const anthropicKey = await secrets.get(SECRET_KEYS.anthropicApiKey);
+    const geminiKey    = await secrets.get(SECRET_KEYS.geminiApiKey);
     const serveKey     = await secrets.get(SECRET_KEYS.serveApiKey);
     if (openaiKey)    { env["LEAN_AI_OPENAI_API_KEY"]    = openaiKey; }
     if (anthropicKey) { env["LEAN_AI_ANTHROPIC_API_KEY"] = anthropicKey; }
+    if (geminiKey)    { env["LEAN_AI_GEMINI_API_KEY"]    = geminiKey; }
     if (serveKey)     { env["LEAN_AI_SERVE_API_KEY"]     = serveKey; }
     return env;
 }

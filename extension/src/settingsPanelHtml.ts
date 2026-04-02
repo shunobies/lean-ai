@@ -447,6 +447,13 @@ export function getSettingsPanelHtml(): string {
                 <span class="radio-desc">— Claude Sonnet, Opus, Haiku</span>
             </span>
         </label>
+        <label class="radio-option" id="opt-gemini">
+            <input type="radio" name="provider" value="gemini">
+            <span>
+                <span class="radio-label">Gemini</span>
+                <span class="radio-desc">— Google Gemini API (1M+ context window)</span>
+            </span>
+        </label>
         <label class="radio-option" id="opt-serve">
             <input type="radio" name="provider" value="serve">
             <span>
@@ -556,6 +563,29 @@ export function getSettingsPanelHtml(): string {
         </div>
     </div>
 
+    <!-- Gemini fields -->
+    <div class="provider-section indent" id="gemini-fields">
+        <div class="field">
+            <label>API Key</label>
+            <div id="gemini-key-widget"></div>
+            <div class="key-hint">Stored securely in your OS keychain — never written to settings.json or config files</div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Model <span class="hint">e.g. gemini-2.5-flash</span></label>
+                <input type="text" id="geminiModel" placeholder="gemini-2.5-flash">
+            </div>
+            <div class="field">
+                <label>Temperature <span class="hint">0–2</span></label>
+                <input type="number" id="geminiTemperature" min="0" max="2" step="0.05" placeholder="0.7">
+            </div>
+        </div>
+        <div class="field">
+            <label>Context Window <span class="hint">tokens, Gemini supports up to 1M+</span></label>
+            <input type="number" id="geminiContextWindow" min="1000" step="1000" placeholder="1048576">
+        </div>
+    </div>
+
     <!-- Lean AI Serve fields -->
     <div class="provider-section indent" id="serve-fields">
         <div class="field">
@@ -613,6 +643,10 @@ export function getSettingsPanelHtml(): string {
             <label class="radio-option" id="xopt-anthropic">
                 <input type="radio" name="expertProvider" value="anthropic">
                 <span><span class="radio-label">Anthropic</span></span>
+            </label>
+            <label class="radio-option" id="xopt-gemini">
+                <input type="radio" name="expertProvider" value="gemini">
+                <span><span class="radio-label">Gemini</span></span>
             </label>
             <label class="radio-option" id="xopt-serve">
                 <input type="radio" name="expertProvider" value="serve">
@@ -686,6 +720,13 @@ export function getSettingsPanelHtml(): string {
                     <input type="text" id="anthropicExpertModel" placeholder="claude-opus-4-6">
                 </div>
             </div>
+            <!-- Expert Gemini fields -->
+            <div class="provider-section" id="expert-gemini-fields">
+                <div class="field">
+                    <label>Expert Gemini Model <span class="hint">e.g. gemini-2.5-pro</span></label>
+                    <input type="text" id="geminiExpertModel" placeholder="gemini-2.5-pro">
+                </div>
+            </div>
             <!-- Expert Lean AI Serve fields -->
             <div class="provider-section" id="expert-serve-fields">
                 <div class="field">
@@ -720,6 +761,10 @@ export function getSettingsPanelHtml(): string {
             <label class="radio-option" id="ropt-anthropic">
                 <input type="radio" name="requestProvider" value="anthropic">
                 <span><span class="radio-label">Anthropic</span></span>
+            </label>
+            <label class="radio-option" id="ropt-gemini">
+                <input type="radio" name="requestProvider" value="gemini">
+                <span><span class="radio-label">Gemini</span></span>
             </label>
             <label class="radio-option" id="ropt-serve">
                 <input type="radio" name="requestProvider" value="serve">
@@ -793,6 +838,13 @@ export function getSettingsPanelHtml(): string {
                     <input type="text" id="anthropicRequestModel" placeholder="claude-sonnet-4-20250514">
                 </div>
             </div>
+            <!-- Request Gemini fields -->
+            <div class="provider-section" id="request-gemini-fields">
+                <div class="field">
+                    <label>Request Gemini Model <span class="hint">e.g. gemini-2.5-pro</span></label>
+                    <input type="text" id="geminiRequestModel" placeholder="gemini-2.5-pro">
+                </div>
+            </div>
             <!-- Request Lean AI Serve fields -->
             <div class="provider-section" id="request-serve-fields">
                 <div class="field">
@@ -800,6 +852,25 @@ export function getSettingsPanelHtml(): string {
                     <input type="text" id="serveRequestModel" placeholder="">
                 </div>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Integrations ── -->
+<div class="section">
+    <h2>Integrations</h2>
+    <div class="field-check">
+        <input type="checkbox" id="enableIntegrations">
+        <div>
+            <label for="enableIntegrations">Enable Integrations</label>
+            <span class="hint">Enable external service integrations (Jira, ServiceNow, etc.) for two-way task sync</span>
+        </div>
+    </div>
+    <div class="field-check">
+        <input type="checkbox" id="integrationAutoPush">
+        <div>
+            <label for="integrationAutoPush">Auto-push session summaries</label>
+            <span class="hint">Automatically push session data to linked external tasks on completion</span>
         </div>
     </div>
 </div>
@@ -1104,6 +1175,7 @@ export function getSettingsPanelHtml(): string {
 
     renderKeyWidget('openai-key-widget', 'openai');
     renderKeyWidget('anthropic-key-widget', 'anthropic');
+    renderKeyWidget('gemini-key-widget', 'gemini');
     renderKeyWidget('serve-key-widget', 'serve');
 
     // ── Provider radio group logic ─────────────────────────────────────────
@@ -1374,6 +1446,11 @@ export function getSettingsPanelHtml(): string {
             anthropicTemperature:  val('anthropicTemperature'),
             anthropicContextWindow:val('anthropicContextWindow'),
 
+            // Gemini
+            geminiModel:           val('geminiModel'),
+            geminiTemperature:     val('geminiTemperature'),
+            geminiContextWindow:   val('geminiContextWindow'),
+
             // Lean AI Serve
             serveUrl:              val('serveUrl'),
             serveModel:            val('serveModel'),
@@ -1393,6 +1470,7 @@ export function getSettingsPanelHtml(): string {
             enableThinkingExpert:      expertChecked && expertProvider === 'ollama' ? val('enableThinkingExpert') : '',
             openaiExpertModel:     expertChecked && expertProvider === 'openai' ? val('openaiExpertModel') : '',
             anthropicExpertModel:  expertChecked && expertProvider === 'anthropic' ? val('anthropicExpertModel') : '',
+            geminiExpertModel:     expertChecked && expertProvider === 'gemini' ? val('geminiExpertModel') : '',
             serveExpertModel:      expertChecked && expertProvider === 'serve' ? val('serveExpertModel') : '',
 
             // Request model
@@ -1407,7 +1485,12 @@ export function getSettingsPanelHtml(): string {
             enableThinkingRequest:      requestChecked && requestProvider === 'ollama' ? val('enableThinkingRequest') : '',
             openaiRequestModel:       requestChecked && requestProvider === 'openai' ? val('openaiRequestModel') : '',
             anthropicRequestModel:    requestChecked && requestProvider === 'anthropic' ? val('anthropicRequestModel') : '',
+            geminiRequestModel:       requestChecked && requestProvider === 'gemini' ? val('geminiRequestModel') : '',
             serveRequestModel:        requestChecked && requestProvider === 'serve' ? val('serveRequestModel') : '',
+
+            // Integrations
+            enableIntegrations:    val('enableIntegrations'),
+            integrationAutoPush:   val('integrationAutoPush'),
 
             // TDD mode
             enableTdd:             val('enableTdd'),
@@ -1507,6 +1590,14 @@ export function getSettingsPanelHtml(): string {
             document.getElementById('anthropic-key-widget')._renderSet();
         }
 
+        // Gemini fields
+        setVal('geminiModel',           v.geminiModel);
+        setVal('geminiTemperature',     v.geminiTemperature);
+        setVal('geminiContextWindow',   v.geminiContextWindow);
+        if (v.geminiKeySet) {
+            document.getElementById('gemini-key-widget')._renderSet();
+        }
+
         // Lean AI Serve fields
         setVal('serveUrl',              v.serveUrl);
         setVal('serveModel',            v.serveModel);
@@ -1538,6 +1629,7 @@ export function getSettingsPanelHtml(): string {
         setVal('enableThinkingExpert',     v.enableThinkingExpert);
         setVal('openaiExpertModel',        v.openaiExpertModel);
         setVal('anthropicExpertModel',     v.anthropicExpertModel);
+        setVal('geminiExpertModel',        v.geminiExpertModel);
         setVal('serveExpertModel',         v.serveExpertModel);
 
         // Request model
@@ -1561,7 +1653,12 @@ export function getSettingsPanelHtml(): string {
         setVal('enableThinkingRequest',   v.enableThinkingRequest);
         setVal('openaiRequestModel',      v.openaiRequestModel);
         setVal('anthropicRequestModel',   v.anthropicRequestModel);
+        setVal('geminiRequestModel',      v.geminiRequestModel);
         setVal('serveRequestModel',       v.serveRequestModel);
+
+        // Integrations
+        setVal('enableIntegrations',       v.enableIntegrations);
+        setVal('integrationAutoPush',      v.integrationAutoPush);
 
         // TDD mode
         setVal('enableTdd',                v.enableTdd);

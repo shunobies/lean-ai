@@ -24,6 +24,8 @@ def _get_default_model_name() -> str:
         return settings.openai_model
     if p == "anthropic":
         return settings.anthropic_model
+    if p == "gemini":
+        return settings.gemini_model
     if p == "serve":
         return settings.serve_model
     return settings.ollama_model
@@ -36,6 +38,8 @@ def _get_active_max_tokens() -> int:
         return settings.openai_max_tokens
     if p == "anthropic":
         return settings.anthropic_max_tokens
+    if p == "gemini":
+        return settings.gemini_max_tokens
     if p == "serve":
         return settings.serve_max_tokens
     return settings.ollama_max_tokens
@@ -88,6 +92,15 @@ async def list_models():
             model=settings.anthropic_model,
             display_name=f"Anthropic: {settings.anthropic_model}",
             is_default=settings.llm_provider == "anthropic",
+        ))
+
+    # Gemini: show if API key configured
+    if settings.gemini_api_key:
+        models.append(ModelInfo(
+            provider="gemini",
+            model=settings.gemini_model,
+            display_name=f"Gemini: {settings.gemini_model}",
+            is_default=settings.llm_provider == "gemini",
         ))
 
     # Lean AI Serve: show if API key and model configured

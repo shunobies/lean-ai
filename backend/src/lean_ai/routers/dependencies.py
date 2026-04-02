@@ -74,9 +74,23 @@ def _create_provider() -> LLMProvider:
             base_url=f"{settings.serve_url.rstrip('/')}/v1",
         )
 
+    if provider == "gemini":
+        if not settings.gemini_api_key:
+            raise ValueError(
+                "LEAN_AI_GEMINI_API_KEY must be set when LEAN_AI_LLM_PROVIDER=gemini"
+            )
+        from lean_ai.llm.provider_gemini import GeminiProvider
+        return GeminiProvider(
+            api_key=settings.gemini_api_key,
+            model=settings.gemini_model,
+            max_tokens=settings.gemini_max_tokens,
+            context_window=settings.gemini_context_window,
+            temperature=settings.gemini_temperature,
+        )
+
     raise ValueError(
         f"Unknown LLM provider: {provider!r}. "
-        f"Supported: ollama, openai, anthropic, serve"
+        f"Supported: ollama, openai, anthropic, gemini, serve"
     )
 
 
@@ -105,7 +119,7 @@ _inline_client: LLMClient = (
 # Local refiner — active only when using a cloud provider
 refiner: PromptRefiner | None = None
 if (
-    settings.llm_provider.lower() in ("openai", "anthropic", "serve")
+    settings.llm_provider.lower() in ("openai", "anthropic", "gemini", "serve")
     and settings.enable_refiner
 ):
     try:
@@ -211,6 +225,29 @@ elif _expert_p == "serve":
         logger.warning(
             "Expert provider is 'serve' but %s — expert model disabled",
             "SERVE_API_KEY is not set" if not settings.serve_api_key
+            else "no model name resolved",
+        )
+
+elif _expert_p == "gemini":
+    _expert_model = settings.gemini_expert_model or settings.gemini_model
+    if _expert_model and settings.gemini_api_key:
+        try:
+            from lean_ai.llm.provider_gemini import GeminiProvider as _GeminiExpert
+            _expert_provider = _GeminiExpert(
+                api_key=settings.gemini_api_key,
+                model=_expert_model,
+                temperature=settings.gemini_temperature,
+                context_window=settings.gemini_context_window,
+                max_tokens=settings.gemini_max_tokens,
+            )
+            expert_llm_client = LLMClient(provider=_expert_provider)
+            logger.info("Expert model enabled (Gemini): %s", _expert_model)
+        except Exception as e:
+            logger.warning("Could not create expert LLM client (Gemini): %s", e)
+    else:
+        logger.warning(
+            "Expert provider is 'gemini' but %s — expert model disabled",
+            "GEMINI_API_KEY is not set" if not settings.gemini_api_key
             else "no model name resolved",
         )
 
@@ -324,6 +361,32 @@ elif _request_p == "serve":
         logger.warning(
             "Request provider is 'serve' but %s — request model disabled",
             "SERVE_API_KEY is not set" if not settings.serve_api_key
+            else "no model name resolved",
+        )
+
+elif _request_p == "gemini":
+    _request_model = settings.gemini_request_model or settings.gemini_model
+    if _request_model and settings.gemini_api_key:
+        try:
+            from lean_ai.llm.provider_gemini import GeminiProvider as _ReqGemini
+            _request_provider = _ReqGemini(
+                api_key=settings.gemini_api_key,
+                model=_request_model,
+                temperature=settings.gemini_temperature,
+                context_window=settings.gemini_context_window,
+                max_tokens=settings.gemini_max_tokens,
+            )
+            request_llm_client = LLMClient(
+                provider=_request_provider,
+                concurrency_semaphore=_llm_semaphore,
+            )
+            logger.info("Request model enabled (Gemini): %s", _request_model)
+        except Exception as e:
+            logger.warning("Could not create request LLM client (Gemini): %s", e)
+    else:
+        logger.warning(
+            "Request provider is 'gemini' but %s — request model disabled",
+            "GEMINI_API_KEY is not set" if not settings.gemini_api_key
             else "no model name resolved",
         )
 

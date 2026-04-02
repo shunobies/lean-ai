@@ -50,6 +50,9 @@ knowledge = [
     "pypdf>=5.0.0,<6.0",
     "python-docx>=1.1.0,<2.0",
 ]
+gemini = [
+    "google-genai>=1.0.0,<2.0",
+]
 google = [
     "selenium>=4.25.0,<5.0",
 ]

@@ -200,12 +200,14 @@
             "ollama",
             "openai",
             "anthropic",
+            "gemini",
             "serve"
           ],
           "enumDescriptions": [
             "Use a local Ollama instance (no API key required)",
             "Use OpenAI API (requires API key stored in OS keychain)",
             "Use Anthropic Claude API (requires API key stored in OS keychain)",
+            "Use Google Gemini API (requires API key stored in OS keychain)",
             "Use Lean AI Serve — vLLM inference wrapper (requires API key)"
           ],
           "markdownDescription": "LLM provider for the main agent. API keys are stored securely in the OS keychain — use the ⚙ settings panel to configure them. Default: `ollama`"
@@ -261,6 +263,7 @@
             "ollama",
             "openai",
             "anthropic",
+            "gemini",
             "serve"
           ],
           "enumDescriptions": [
@@ -268,6 +271,7 @@
             "Use Ollama for expert phases",
             "Use OpenAI for expert phases (e.g. gpt-4o for planning)",
             "Use Anthropic for expert phases (e.g. claude-opus-4-6 for planning)",
+            "Use Gemini for expert phases (e.g. gemini-2.5-pro for planning)",
             "Use Lean AI Serve for expert phases"
           ],
           "markdownDescription": "**Expert Model** — Provider for reasoning-heavy planning phases. Leave empty to auto-detect. Mix providers: use a fast Ollama model for coding and a cloud model for planning."
@@ -285,6 +289,7 @@
             "ollama",
             "openai",
             "anthropic",
+            "gemini",
             "serve"
           ],
           "enumDescriptions": [
@@ -292,6 +297,7 @@
             "Use Ollama for /request mode",
             "Use OpenAI for /request mode",
             "Use Anthropic for /request mode",
+            "Use Gemini for /request mode",
             "Use Lean AI Serve for /request mode"
           ],
           "markdownDescription": "**Request Model** — Provider for `/request` mode (open-ended tasks). Leave empty to auto-detect."
@@ -305,6 +311,11 @@
           "type": "string",
           "default": "",
           "markdownDescription": "**Anthropic Request Model** — Model for `/request` mode when using Anthropic provider."
+        },
+        "lean-ai.geminiRequestModel": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Gemini Request Model** — Model for `/request` mode when using Gemini provider."
         },
         "lean-ai.openaiModel": {
           "type": "string",
@@ -346,6 +357,24 @@
           "type": "string",
           "default": "",
           "markdownDescription": "**Anthropic Expert** — Override model for expert planning phases. Falls back to `lean-ai.anthropicModel` if empty. Example: `claude-opus-4-6`"
+        },
+        "lean-ai.geminiModel": {
+          "type": "string",
+          "default": "gemini-2.5-flash",
+          "markdownDescription": "**Gemini** — Model name. Examples: `gemini-2.5-flash`, `gemini-2.5-pro`. Default: `gemini-2.5-flash`"
+        },
+        "lean-ai.geminiTemperature": {
+          "type": "number",
+          "markdownDescription": "**Gemini** — Sampling temperature. Default: `0.7`"
+        },
+        "lean-ai.geminiContextWindow": {
+          "type": "number",
+          "markdownDescription": "**Gemini** — Context window size in tokens. Default: `1048576` (1M)"
+        },
+        "lean-ai.geminiExpertModel": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Gemini Expert** — Override model for expert planning phases. Falls back to `lean-ai.geminiModel` if empty. Example: `gemini-2.5-pro`"
         },
         "lean-ai.serveUrl": {
           "type": "string",
@@ -500,6 +529,16 @@
           "type": "number",
           "default": 2,
           "markdownDescription": "**Search** — Minimum seconds between search requests (with random jitter). Increase to avoid rate limiting. Default: `2.0`"
+        },
+        "lean-ai.enableIntegrations": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Integrations** — Enable external service integrations (Jira, ServiceNow, etc.) for two-way task sync and time tracking. Default: `false`"
+        },
+        "lean-ai.integrationAutoPush": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "**Integrations** — Automatically push session summaries (duration, files changed, commits) to linked external tasks when a session completes. Default: `true`"
         },
         "lean-ai.enableTdd": {
           "type": "boolean",
