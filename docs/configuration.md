@@ -64,7 +64,7 @@ Context window values accept compact notation — enter `128` instead of `131072
 | `256` | 262144 |
 | `131072` | 131072 (values > 10000 are used as-is) |
 
-This applies to `OLLAMA_CONTEXT_WINDOW`, `OLLAMA_EXPERT_CONTEXT_WINDOW`, `OLLAMA_REQUEST_CONTEXT_WINDOW`, `OPENAI_CONTEXT_WINDOW`, `ANTHROPIC_CONTEXT_WINDOW`, `SERVE_CONTEXT_WINDOW`, and `INLINE_CONTEXT_WINDOW`.
+This applies to `OLLAMA_CONTEXT_WINDOW`, `OLLAMA_EXPERT_CONTEXT_WINDOW`, `OLLAMA_REQUEST_CONTEXT_WINDOW`, `OPENAI_CONTEXT_WINDOW`, `ANTHROPIC_CONTEXT_WINDOW`, `GEMINI_CONTEXT_WINDOW`, `SERVE_CONTEXT_WINDOW`, and `INLINE_CONTEXT_WINDOW`.
 
 ## Installation Extras
 
@@ -77,6 +77,7 @@ pip install -e ".[dev]"
 # Cloud providers
 pip install -e ".[dev,openai]"        # OpenAI (GPT-4o, etc.) or Lean AI Serve
 pip install -e ".[dev,anthropic]"     # Anthropic (Claude, etc.)
+pip install -e ".[dev,gemini]"        # Google Gemini (Gemini 2.5 Flash/Pro, etc.)
 
 # Knowledge base document support (EPUB, PDF, Word)
 pip install -e ".[dev,knowledge]"
@@ -85,14 +86,14 @@ pip install -e ".[dev,knowledge]"
 pip install -e ".[dev,google]"
 
 # Everything
-pip install -e ".[dev,openai,anthropic,knowledge,google]"
+pip install -e ".[dev,openai,anthropic,gemini,knowledge,google]"
 ```
 
 ## LLM Provider
 
 | Variable | Default | Description |
 |---|---|---|
-| `LEAN_AI_LLM_PROVIDER` | `ollama` | Active provider: `ollama`, `openai`, `anthropic`, or `serve` |
+| `LEAN_AI_LLM_PROVIDER` | `ollama` | Active provider: `ollama`, `openai`, `anthropic`, `gemini`, or `serve` |
 
 Switch providers at any time by changing this value and restarting the server (or via the extension's model dropdown for runtime switching).
 
@@ -121,17 +122,19 @@ The expert model can be a different provider from the primary — for example, r
 
 | Variable | Default | Description |
 |---|---|---|
-| `LEAN_AI_EXPERT_LLM_PROVIDER` | *(empty)* | Provider for expert model: `ollama`, `openai`, `anthropic`, or `serve`. Empty = auto-detect (Ollama expert when `OLLAMA_MODEL_EXPERT` is set and primary provider is Ollama) |
+| `LEAN_AI_EXPERT_LLM_PROVIDER` | *(empty)* | Provider for expert model: `ollama`, `openai`, `anthropic`, `gemini`, or `serve`. Empty = auto-detect (Ollama expert when `OLLAMA_MODEL_EXPERT` is set and primary provider is Ollama) |
 | `LEAN_AI_OPENAI_EXPERT_MODEL` | *(falls back to OPENAI_MODEL)* | OpenAI model for expert phases (e.g. `gpt-4o`) |
 | `LEAN_AI_ANTHROPIC_EXPERT_MODEL` | *(falls back to ANTHROPIC_MODEL)* | Anthropic model for expert phases (e.g. `claude-opus-4-6`) |
+| `LEAN_AI_GEMINI_EXPERT_MODEL` | *(falls back to GEMINI_MODEL)* | Gemini model for expert phases (e.g. `gemini-2.5-pro`) |
 | `LEAN_AI_SERVE_EXPERT_MODEL` | *(falls back to SERVE_MODEL)* | Lean AI Serve model for expert phases |
 
-When using OpenAI, Anthropic, or Lean AI Serve as the expert provider, the existing API key, temperature, context window, and max tokens settings for that provider are used. The relevant API key must be set even if the primary provider is Ollama.
+When using OpenAI, Anthropic, Gemini, or Lean AI Serve as the expert provider, the existing API key, temperature, context window, and max tokens settings for that provider are used. The relevant API key must be set even if the primary provider is Ollama.
 
-> **Package requirement:** The provider's Python SDK must be installed. If your primary provider is Ollama but you want Anthropic, OpenAI, or Lean AI Serve as the expert, install the matching extra:
+> **Package requirement:** The provider's Python SDK must be installed. If your primary provider is Ollama but you want a cloud expert, install the matching extra:
 > ```bash
 > pip install -e ".[dev,anthropic]"   # for Anthropic expert
 > pip install -e ".[dev,openai]"      # for OpenAI or Serve expert
+> pip install -e ".[dev,gemini]"      # for Gemini expert
 > ```
 > Lean AI Serve uses the OpenAI SDK under the hood, so the `openai` extra is sufficient.
 > Without this, the expert client will fail to initialise at startup and the server will log a warning.
@@ -212,9 +215,10 @@ An optional separate model for `/request` mode (open-ended tasks like writing gu
 
 | Variable | Default | Description |
 |---|---|---|
-| `LEAN_AI_REQUEST_LLM_PROVIDER` | *(empty)* | Provider for request model: `ollama`, `openai`, `anthropic`, or `serve`. Empty = auto-detect |
+| `LEAN_AI_REQUEST_LLM_PROVIDER` | *(empty)* | Provider for request model: `ollama`, `openai`, `anthropic`, `gemini`, or `serve`. Empty = auto-detect |
 | `LEAN_AI_OPENAI_REQUEST_MODEL` | *(falls back to OPENAI_MODEL)* | OpenAI model for /request mode |
 | `LEAN_AI_ANTHROPIC_REQUEST_MODEL` | *(falls back to ANTHROPIC_MODEL)* | Anthropic model for /request mode |
+| `LEAN_AI_GEMINI_REQUEST_MODEL` | *(falls back to GEMINI_MODEL)* | Gemini model for /request mode |
 | `LEAN_AI_SERVE_REQUEST_MODEL` | *(falls back to SERVE_MODEL)* | Lean AI Serve model for /request mode |
 
 ### Ollama Request Model
@@ -265,6 +269,23 @@ Set `LEAN_AI_OPENAI_BASE_URL` to use OpenAI-compatible providers like Together A
 | `LEAN_AI_ANTHROPIC_TEMPERATURE` | `0.7` | Sampling temperature |
 | `LEAN_AI_ANTHROPIC_CONTEXT_WINDOW` | `200000` | Context window size — [shorthand](#context-window-shorthand) accepted |
 | `LEAN_AI_ANTHROPIC_MAX_TOKENS` | *25% of context window* | Max output tokens |
+
+## Gemini
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEAN_AI_GEMINI_API_KEY` | *(empty)* | API key (required to enable Gemini) |
+| `LEAN_AI_GEMINI_MODEL` | `gemini-2.5-flash` | Model name |
+| `LEAN_AI_GEMINI_TEMPERATURE` | `0.7` | Sampling temperature |
+| `LEAN_AI_GEMINI_CONTEXT_WINDOW` | `1048576` (~1M tokens) | Context window size — [shorthand](#context-window-shorthand) accepted |
+| `LEAN_AI_GEMINI_MAX_TOKENS` | *25% of context window* | Max output tokens |
+
+Gemini uses the `google-genai` SDK (unified Google GenAI SDK). Gemini models support very large context windows (1M+ tokens).
+
+```bash
+# Install with Gemini support
+pip install -e ".[dev,gemini]"
+```
 
 ## Lean AI Serve
 
@@ -429,6 +450,40 @@ Several settings are automatically derived from the active provider's context wi
 - `implementation_max_tokens` = 25% of the active provider's context window
 
 Override any derived value by setting it explicitly.
+
+## Integrations
+
+External service integrations enable two-way sync between Lean AI sessions and task tracking systems. Gated by `LEAN_AI_ENABLE_INTEGRATIONS`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEAN_AI_ENABLE_INTEGRATIONS` | `false` | Enable external service integrations |
+| `LEAN_AI_INTEGRATION_AUTO_PUSH` | `true` | Auto-push session summaries to linked tasks on completion |
+
+### Jira Cloud
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEAN_AI_JIRA_URL` | *(empty)* | Jira instance URL (e.g. `https://yourorg.atlassian.net`) |
+| `LEAN_AI_JIRA_EMAIL` | *(empty)* | Jira account email |
+| `LEAN_AI_JIRA_API_TOKEN` | *(empty)* | Jira API token ([generate one](https://id.atlassian.com/manage-profile/security/api-tokens)) |
+
+When all three Jira settings are configured and integrations are enabled, the Jira provider auto-initializes at startup. It uses Jira Cloud REST API v3 with Basic Auth.
+
+Features: list/search/get issues, push session summaries as comments with worklogs, update issue status via transitions, receive webhooks.
+
+### ServiceNow
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEAN_AI_SERVICENOW_URL` | *(empty)* | ServiceNow instance URL (e.g. `https://yourorg.service-now.com`) |
+| `LEAN_AI_SERVICENOW_USERNAME` | *(empty)* | ServiceNow username |
+| `LEAN_AI_SERVICENOW_PASSWORD` | *(empty)* | ServiceNow password |
+| `LEAN_AI_SERVICENOW_TABLE` | `incident` | ServiceNow table name |
+
+When all three ServiceNow credentials are configured and integrations are enabled, the ServiceNow provider auto-initializes at startup. It uses the ServiceNow Table API with Basic Auth.
+
+Features: list/search/get records, push session summaries as work notes, update record state, receive webhooks. Transparently handles both INC numbers and 32-character hex sys_ids.
 
 ## Extension Settings
 

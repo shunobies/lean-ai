@@ -188,9 +188,10 @@ Click the **⚙ gear button** in the Lean AI sidebar header to open the guided s
 
 The panel is organised into sections:
 
-- **Provider** — Radio group: Ollama / OpenAI / Anthropic. Only the fields relevant to your chosen provider are shown.
+- **Provider** — Radio group: Ollama / OpenAI / Anthropic / Gemini. Only the fields relevant to your chosen provider are shown.
 - **Expert Model** — Optional separate model for reasoning-heavy planning phases (phases 3–5). Can use a different provider than the main model — e.g. fast local Ollama for coding, cloud model for planning.
 - **Post-Validation** — Commands for format/lint/test to run automatically after agent changes.
+- **Integrations** — Configure external task tracking services (Jira Cloud, ServiceNow) for two-way sync between sessions and issues/incidents.
 - **Advanced** — Inline prediction model, embedding model, search provider, context thresholds.
 
 **Ollama Model Dropdowns**
@@ -203,7 +204,7 @@ The search provider field uses a custom dropdown (native `<select>` elements don
 
 **API Key Security**
 
-API keys for OpenAI and Anthropic are stored in the **OS keychain** (macOS Keychain / Windows Credential Manager / Linux libsecret) via VSCode's SecretStorage — not in `settings.json` or `.env`. The settings panel shows only whether a key is configured ("✓ Key configured"), never the value itself.
+API keys for OpenAI, Anthropic, and Gemini, as well as Jira API tokens and ServiceNow passwords, are stored in the **OS keychain** (macOS Keychain / Windows Credential Manager / Linux libsecret) via VSCode's SecretStorage — not in `settings.json` or `.env`. The settings panel shows only whether a key is configured ("✓ Key configured"), never the value itself.
 
 When the backend subprocess starts, the extension injects API keys from the OS keychain as environment variables. Keys you place directly in `backend/.env` also work — Pydantic reads them on startup.
 
@@ -226,7 +227,7 @@ All settings are also available via VSCode's native settings UI (**Settings** > 
 
 | Setting | Default | Description |
 |---|---|---|
-| `lean-ai.llmProvider` | `ollama` | LLM provider: `ollama`, `openai`, or `anthropic` |
+| `lean-ai.llmProvider` | `ollama` | LLM provider: `ollama`, `openai`, `anthropic`, or `gemini` |
 | `lean-ai.ollamaUrl` | `http://localhost:11434` | Ollama API endpoint |
 | `lean-ai.ollamaModel` | `qwen3-coder:30b` | Primary Ollama model |
 | `lean-ai.ollamaContextWindow` | `131072` | Context window in tokens (accepts `128` = 128k) |
@@ -237,7 +238,7 @@ All settings are also available via VSCode's native settings UI (**Settings** > 
 | `lean-ai.ollamaMaxTokens` | *(25% of ctx)* | Max output tokens |
 | `lean-ai.ollamaModelExpert` | *(empty)* | Separate Ollama model for planning phases 3–5 |
 | `lean-ai.ollamaExpertContextWindow` | *(inherit)* | Context window for the expert model |
-| `lean-ai.expertLlmProvider` | *(auto)* | Provider for expert phases: `ollama`, `openai`, or `anthropic` |
+| `lean-ai.expertLlmProvider` | *(auto)* | Provider for expert phases: `ollama`, `openai`, `anthropic`, or `gemini` |
 | `lean-ai.openaiModel` | `gpt-4o` | OpenAI model name |
 | `lean-ai.openaiBaseUrl` | *(empty)* | Custom base URL for OpenAI-compatible APIs (Groq, Together AI, vLLM) |
 | `lean-ai.openaiTemperature` | `0.7` | OpenAI sampling temperature |
@@ -247,6 +248,10 @@ All settings are also available via VSCode's native settings UI (**Settings** > 
 | `lean-ai.anthropicTemperature` | `0.7` | Anthropic sampling temperature |
 | `lean-ai.anthropicContextWindow` | `200000` | Anthropic context window |
 | `lean-ai.anthropicExpertModel` | *(inherit)* | Anthropic model override for expert phases |
+| `lean-ai.geminiModel` | `gemini-2.5-flash` | Gemini model name |
+| `lean-ai.geminiTemperature` | `0.7` | Gemini sampling temperature |
+| `lean-ai.geminiContextWindow` | `1048576` | Gemini context window (~1M tokens) |
+| `lean-ai.geminiExpertModel` | *(inherit)* | Gemini model override for expert phases |
 | `lean-ai.inlineModel` | *(empty)* | Separate Ollama model for inline predictions |
 | `lean-ai.inlineOllamaUrl` | *(inherit)* | Ollama instance for the inline model |
 | `lean-ai.embeddingModel` | `qwen3-embedding:0.6b` | Ollama model for semantic search |
@@ -264,6 +269,13 @@ All settings are also available via VSCode's native settings UI (**Settings** > 
 | `lean-ai.implementationMaxTurns` | `0` | Max tool-calling turns per session (`0` = unlimited) |
 | `lean-ai.refreshThreshold` | `0.7` | Refresh context at this fraction of the context window |
 | `lean-ai.debugPlanning` | `false` | Save planning phase outputs to `.lean_ai/plan_debug/` |
+| `lean-ai.enableIntegrations` | `false` | Enable external service integrations (Jira, ServiceNow) |
+| `lean-ai.integrationAutoPush` | `true` | Auto-push session summaries to linked tasks |
+| `lean-ai.jiraUrl` | *(empty)* | Jira instance URL |
+| `lean-ai.jiraEmail` | *(empty)* | Jira account email |
+| `lean-ai.servicenowUrl` | *(empty)* | ServiceNow instance URL |
+| `lean-ai.servicenowUsername` | *(empty)* | ServiceNow username |
+| `lean-ai.servicenowTable` | `incident` | ServiceNow table name |
 | `lean-ai.enableOsNotifications` | `true` | Send OS-level notifications (notify-send / osascript / mshta) when the agent needs attention |
 
 ### Auto-Start Backend

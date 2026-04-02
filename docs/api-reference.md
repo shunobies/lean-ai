@@ -376,6 +376,124 @@ Update a TODO's text or status.
 
 Delete a TODO item.
 
+### Integrations
+
+Integration endpoints are available when `LEAN_AI_ENABLE_INTEGRATIONS=true`. Replace `{name}` with the integration name (`jira` or `servicenow`).
+
+#### `GET /api/integrations`
+
+List all registered integrations and their status.
+
+**Response:**
+```json
+[
+  {
+    "name": "jira",
+    "display_name": "Jira Cloud",
+    "active": true
+  }
+]
+```
+
+#### `GET /api/integrations/{name}/health`
+
+Check health of a specific integration.
+
+**Response:**
+```json
+{"name": "jira", "healthy": true}
+```
+
+#### `GET /api/integrations/{name}/tasks`
+
+Fetch tasks from an external service. Supports optional query parameters: `project`, `status` (`open`, `in_progress`, `done`, `blocked`), `assignee`, `limit` (default 50).
+
+**Response:**
+```json
+[
+  {
+    "external_id": "PROJ-42",
+    "title": "Fix login bug",
+    "description": "Users cannot log in with SSO",
+    "status": "in_progress",
+    "priority": "high",
+    "assignee": "Alice",
+    "labels": ["bug"],
+    "url": "https://yourorg.atlassian.net/browse/PROJ-42",
+    "source": "jira",
+    "created_at": "2024-01-15T10:30:00",
+    "updated_at": "2024-01-16T14:20:00"
+  }
+]
+```
+
+#### `GET /api/integrations/{name}/tasks/{external_id}`
+
+Fetch a single task by its external ID (e.g. `PROJ-42` for Jira, `INC0012345` for ServiceNow).
+
+#### `GET /api/integrations/{name}/search?q=login+bug&limit=20`
+
+Search tasks by text query.
+
+#### `POST /api/integrations/{name}/push`
+
+Push a session summary to an external task. For Jira, this creates a comment and optional worklog. For ServiceNow, this updates the work_notes field.
+
+**Request:**
+```json
+{
+  "repo_root": "/path/to/project",
+  "session_id": "uuid-string",
+  "external_id": "PROJ-42"
+}
+```
+
+**Response:**
+```json
+{"success": true}
+```
+
+#### `POST /api/integrations/{name}/link`
+
+Link an external task to a session or workspace.
+
+**Request:**
+```json
+{
+  "external_id": "PROJ-42",
+  "session_id": "uuid-string",
+  "workspace": "/path/to/project"
+}
+```
+
+#### `POST /api/integrations/{name}/unlink`
+
+Unlink an external task.
+
+**Request:**
+```json
+{
+  "link_id": "uuid-string"
+}
+```
+
+#### `GET /api/integrations/linked/all`
+
+Get all linked external tasks. Supports optional query parameters: `workspace`, `integration_name`.
+
+#### `POST /api/integrations/{name}/webhook`
+
+Receive a webhook event from an external service.
+
+**Request:**
+```json
+{
+  "event_type": "issue_updated",
+  "external_id": "PROJ-42",
+  "payload": {}
+}
+```
+
 ### Health
 
 #### `GET /api/health`

@@ -10,10 +10,10 @@ Lean AI is a linear pipeline — no state machine, no complex orchestration. Tas
 │  Extension   │◀────│   Backend    │◀────│  (Provider)  │
 └──────────────┘     └──────────────┘     └──────────────┘
    WebSocket /         REST + WS            Ollama / OpenAI
-   HTTP REST                                / Anthropic
+   HTTP REST                                / Anthropic / Gemini
 ```
 
-The extension communicates with the backend over HTTP (chat, sessions) and WebSocket (workflow streaming). The backend delegates LLM calls through a provider abstraction that supports Ollama, OpenAI, and Anthropic.
+The extension communicates with the backend over HTTP (chat, sessions) and WebSocket (workflow streaming). The backend delegates LLM calls through a provider abstraction that supports Ollama, OpenAI, Anthropic, and Gemini.
 
 ## Workflow Modes
 
@@ -90,6 +90,7 @@ The `LLMClient` facade (`llm/facade.py`) handles multi-turn tool-calling orchest
 - **Ollama** (`llm/client.py`) — Local inference via the Ollama API. Handles native tool calling, FIM completions, and embeddings.
 - **OpenAI** (`llm/provider_openai.py`) — OpenAI API and compatible providers (Together, Groq, vLLM via `LEAN_AI_OPENAI_BASE_URL`).
 - **Anthropic** (`llm/provider_anthropic.py`) — Claude API with tool use support.
+- **Gemini** (`llm/provider_gemini.py`) — Google Gemini API via the `google-genai` SDK. Supports large context windows (1M+ tokens).
 
 Inline predictions (Copilot-style completions) and embeddings always use Ollama regardless of the active provider.
 
@@ -200,6 +201,36 @@ When a test command is available (auto-detected or manually configured), the LLM
 - **Plan mode** — the planner's final checklist requires test steps for new modules
 
 This only activates when a test command exists — projects without tests are not forced into a testing pattern.
+
+## Integrations
+
+The integrations system (`integrations/`) provides two-way sync between Lean AI sessions and external task tracking services. It is gated by `LEAN_AI_ENABLE_INTEGRATIONS`.
+
+### Architecture
+
+- **`IntegrationProvider`** (`base.py`) — Abstract base class defining the provider contract: health check, pull (list/get/search tasks), push (session summaries, status updates), and webhook handling.
+- **Registry** (`registry.py`) — `@register_integration` decorator registers providers at import time. Manages provider lifecycle (init, health check, shutdown).
+- **Persistence** (`db.py`) — SQLite database at `~/.lean_ai/integrations/integrations.db` stores task links, sync logs, and configuration.
+- **Summary builder** (`summary.py`) — Extracts duration, files changed, and commits from session data to build `SessionSummary` objects for push operations.
+- **REST endpoints** (`routers/integrations.py`) — Full CRUD API for all integration operations.
+- **Auto-push hook** — Fires in `workflow/pipeline.py` on session completion to push summaries to linked tasks.
+
+### Providers
+
+**Jira Cloud** (`integrations/jira.py`) — Connects to Jira Cloud REST API v3 with Basic Auth (email + API token). Pushes session summaries as ADF-formatted comments with worklogs for time tracking. Updates issue status via Jira's transition system.
+
+**ServiceNow** (`integrations/servicenow.py`) — Connects to the ServiceNow Table API with Basic Auth. Pushes session summaries as work notes. Updates record state directly. Transparently handles both human-readable INC numbers and 32-character hex sys_ids.
+
+Both providers auto-initialize at server startup when credentials are configured.
+
+### Data Flow
+
+```
+Session completes → build_session_summary() → push to linked external tasks
+                                              (comment/worklog or work_notes)
+
+External service → webhook → handle_webhook() → process changes
+```
 
 ## Scaffolding
 
