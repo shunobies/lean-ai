@@ -2,6 +2,11 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.3.34] - 2026-04-02
+
+### Added
+- **MediaWiki integration** — new `search_wiki` and `fetch_wiki_page` tools let the agent search and read pages from an internal MediaWiki instance while working on tasks. Supports both authenticated (bot account login) and public wikis. Configure from the Advanced Settings tab: Wiki URL, API path, username, and password (stored in OS keychain). Tools are automatically available in all workflow modes (plan, fix, request) when a wiki URL is configured.
+
 ## [0.3.33] - 2026-03-31
 
 ### Added

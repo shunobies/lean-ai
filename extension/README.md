@@ -15,6 +15,8 @@ Run it fully local with [Ollama](https://ollama.com), or connect to OpenAI and A
 - **Dual-model pipeline** — use a fast local model for exploration and implementation, hand off to a cloud model for reasoning-heavy planning phases.
 - **Built-in code quality** — auto-runs your linter and tests after every change, with LLM self-correction on failure.
 - **Knowledge base** — drop internal docs (PDF, EPUB, Word, Markdown) into `.lean_ai/knowledge/` for context-aware plans.
+- **MediaWiki integration** — connect to an internal wiki so the agent can search and read company documentation while working on tasks. Supports authenticated and public wikis.
+- **Integrations** — two-way sync with Jira and ServiceNow for session summaries and task linking.
 - **Git-native** — every task runs on its own branch. Approve to merge, reject to discard.
 - **19 scaffold recipes** — bootstrap new projects with `/scaffold`.
 - **Notes & TODOs** — save notes from chat with `/note`, and the LLM can save notes and track project TODOs via built-in tools. Notes are auto-categorized by project with tags and searchable from the Notes panel.
@@ -145,6 +147,8 @@ Open the settings panel (gear icon in the chat header) to configure:
 - **Model selection** — primary, expert, and request models with independent sampling parameters (temperature, top-p, top-k, repeat penalty, context window, max tokens) and thinking mode per model
 - **Post-validation** — lint, test, and format commands
 - **Search provider** — DuckDuckGo, SearXNG, Google, or Bing
+- **MediaWiki** — connect to an internal wiki instance (URL, API path, optional authentication)
+- **Integrations** — Jira Cloud and ServiceNow for two-way task sync
 - **Vision model** — Ollama vision-language model for image understanding
 - **Voice** — STT, TTS, and wake word settings
 

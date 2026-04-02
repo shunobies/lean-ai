@@ -485,6 +485,24 @@ When all three ServiceNow credentials are configured and integrations are enable
 
 Features: list/search/get records, push session summaries as work notes, update record state, receive webhooks. Transparently handles both INC numbers and 32-character hex sys_ids.
 
+### MediaWiki
+
+Connect the agent to an internal MediaWiki instance for real-time search during task execution. Unlike the Jira/ServiceNow integrations above, MediaWiki integration does **not** require `LEAN_AI_ENABLE_INTEGRATIONS` — it is gated solely by `LEAN_AI_WIKI_URL` being non-empty.
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEAN_AI_WIKI_URL` | *(empty)* | MediaWiki instance URL (e.g. `https://wiki.company.com`). Empty = wiki tools disabled |
+| `LEAN_AI_WIKI_API_PATH` | `/w/api.php` | MediaWiki API endpoint path |
+| `LEAN_AI_WIKI_USERNAME` | *(empty)* | Username for authenticated wikis (bot account). Leave empty for public wikis |
+| `LEAN_AI_WIKI_PASSWORD` | *(empty)* | Bot password or user password (stored in OS keychain via extension) |
+
+When `LEAN_AI_WIKI_URL` is set, two tools become available to the agent in all workflow modes:
+
+- **`search_wiki`** — full-text search across wiki pages, returns titles, snippets, and URLs
+- **`fetch_wiki_page`** — fetches the full content of a wiki page by title, strips HTML to plain text
+
+Authentication is lazy — the agent logs in on the first wiki request using the MediaWiki Action API two-step login flow, then caches session cookies for the remainder of the session. No login is attempted when credentials are empty.
+
 ## Extension Settings
 
 The VSCode/VSCodium extension has its own settings, configured through the editor's settings UI. See [Extension Guide](extension.md#settings) for details.
