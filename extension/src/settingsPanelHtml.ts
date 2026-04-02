@@ -856,57 +856,6 @@ export function getSettingsPanelHtml(): string {
     </div>
 </div>
 
-<!-- ── Integrations ── -->
-<div class="section">
-    <h2>Integrations</h2>
-    <div class="field-check">
-        <input type="checkbox" id="enableIntegrations">
-        <div>
-            <label for="enableIntegrations">Enable Integrations</label>
-            <span class="hint">Enable external service integrations (Jira, ServiceNow, etc.) for two-way task sync</span>
-        </div>
-    </div>
-    <div class="field-check">
-        <input type="checkbox" id="integrationAutoPush">
-        <div>
-            <label for="integrationAutoPush">Auto-push session summaries</label>
-            <span class="hint">Automatically push session data to linked external tasks on completion</span>
-        </div>
-    </div>
-
-    <h3 style="margin-top:16px;margin-bottom:8px;opacity:0.9;">Jira Cloud</h3>
-    <div class="field">
-        <label>Jira URL <span class="hint">e.g. https://yourcompany.atlassian.net</span></label>
-        <input type="text" id="jiraUrl" placeholder="https://yourcompany.atlassian.net">
-    </div>
-    <div class="field">
-        <label>Jira Email <span class="hint">Account email for API authentication</span></label>
-        <input type="text" id="jiraEmail" placeholder="you@company.com">
-    </div>
-    <div class="field">
-        <label>Jira API Token</label>
-        <div id="jira-key-widget"></div>
-    </div>
-
-    <h3 style="margin-top:16px;margin-bottom:8px;opacity:0.9;">ServiceNow</h3>
-    <div class="field">
-        <label>ServiceNow URL <span class="hint">e.g. https://yourinstance.service-now.com</span></label>
-        <input type="text" id="servicenowUrl" placeholder="https://yourinstance.service-now.com">
-    </div>
-    <div class="field">
-        <label>ServiceNow Username</label>
-        <input type="text" id="servicenowUsername" placeholder="admin">
-    </div>
-    <div class="field">
-        <label>ServiceNow Password</label>
-        <div id="servicenow-key-widget"></div>
-    </div>
-    <div class="field">
-        <label>ServiceNow Table <span class="hint">Default: incident</span></label>
-        <input type="text" id="servicenowTable" placeholder="incident">
-    </div>
-</div>
-
 <!-- ── TDD Mode ── -->
 <div class="section">
     <h2>TDD Mode</h2>
@@ -1121,6 +1070,55 @@ export function getSettingsPanelHtml(): string {
             <label for="debugPlanning">Debug planning (save phase outputs to .lean_ai/plan_debug/)</label>
             <span class="hint">Enable to diagnose how the planner breaks down tasks.</span>
         </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--vscode-panel-border);margin:16px 0;">
+    <h3 style="margin-top:0;margin-bottom:8px;opacity:0.9;">Integrations</h3>
+    <div class="field-check">
+        <input type="checkbox" id="enableIntegrations">
+        <div>
+            <label for="enableIntegrations">Enable Integrations</label>
+            <span class="hint">Enable external service integrations (Jira, ServiceNow, etc.) for two-way task sync</span>
+        </div>
+    </div>
+    <div class="field-check">
+        <input type="checkbox" id="integrationAutoPush">
+        <div>
+            <label for="integrationAutoPush">Auto-push session summaries</label>
+            <span class="hint">Automatically push session data to linked external tasks on completion</span>
+        </div>
+    </div>
+
+    <h3 style="margin-top:16px;margin-bottom:8px;opacity:0.9;">Jira Cloud</h3>
+    <div class="field">
+        <label>Jira URL <span class="hint">e.g. https://yourcompany.atlassian.net</span></label>
+        <input type="text" id="jiraUrl" placeholder="https://yourcompany.atlassian.net">
+    </div>
+    <div class="field">
+        <label>Jira Email <span class="hint">Account email for API authentication</span></label>
+        <input type="text" id="jiraEmail" placeholder="you@company.com">
+    </div>
+    <div class="field">
+        <label>Jira API Token</label>
+        <div id="jira-key-widget"></div>
+    </div>
+
+    <h3 style="margin-top:16px;margin-bottom:8px;opacity:0.9;">ServiceNow</h3>
+    <div class="field">
+        <label>ServiceNow URL <span class="hint">e.g. https://yourinstance.service-now.com</span></label>
+        <input type="text" id="servicenowUrl" placeholder="https://yourinstance.service-now.com">
+    </div>
+    <div class="field">
+        <label>ServiceNow Username</label>
+        <input type="text" id="servicenowUsername" placeholder="admin">
+    </div>
+    <div class="field">
+        <label>ServiceNow Password</label>
+        <div id="servicenow-key-widget"></div>
+    </div>
+    <div class="field">
+        <label>ServiceNow Table <span class="hint">Default: incident</span></label>
+        <input type="text" id="servicenowTable" placeholder="incident">
     </div>
 </details>
 
