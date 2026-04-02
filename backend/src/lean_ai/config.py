@@ -78,6 +78,7 @@ class _DecryptingYamlSource(PydanticBaseSettingsSource):
     _SECRET_FIELDS = frozenset({
         "openai_api_key", "anthropic_api_key", "gemini_api_key",
         "serve_api_key", "search_api_key",
+        "jira_api_token", "servicenow_password",
     })
 
     def __init__(self, settings_cls: type[BaseSettings], yaml_file: str = "config.yaml") -> None:
@@ -307,6 +308,17 @@ class Settings(BaseSettings):
     # ── Integrations (Jira, ServiceNow, etc.) ──
     enable_integrations: bool = False  # Master switch for external integrations
     integration_auto_push: bool = True  # Auto-push session summaries on completion
+
+    # Jira Cloud
+    jira_url: str = ""          # e.g. "https://yourcompany.atlassian.net"
+    jira_email: str = ""        # Jira account email
+    jira_api_token: str = ""    # Jira API token (stored in OS keychain)
+
+    # ServiceNow
+    servicenow_url: str = ""         # e.g. "https://yourinstance.service-now.com"
+    servicenow_username: str = ""    # ServiceNow username
+    servicenow_password: str = ""    # ServiceNow password (stored in OS keychain)
+    servicenow_table: str = "incident"  # Default ServiceNow table
 
     # ── Debug / Testing ──
     debug_planning: bool = False  # Save all planning phase outputs to disk

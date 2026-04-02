@@ -242,6 +242,13 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_DEBUG_PLANNING` | `false` | Save all planning phase outputs to `.lean_ai/plan_debug/{session_id}/` |
 | `LEAN_AI_ENABLE_INTEGRATIONS` | `false` | Enable external service integrations (Jira, ServiceNow, etc.) |
 | `LEAN_AI_INTEGRATION_AUTO_PUSH` | `true` | Auto-push session summaries to linked tasks on completion |
+| `LEAN_AI_JIRA_URL` | *(empty)* | Jira Cloud instance URL (e.g. `https://yourcompany.atlassian.net`) |
+| `LEAN_AI_JIRA_EMAIL` | *(empty)* | Jira account email for API authentication |
+| `LEAN_AI_JIRA_API_TOKEN` | *(empty)* | Jira API token (stored in OS keychain via extension) |
+| `LEAN_AI_SERVICENOW_URL` | *(empty)* | ServiceNow instance URL (e.g. `https://yourinstance.service-now.com`) |
+| `LEAN_AI_SERVICENOW_USERNAME` | *(empty)* | ServiceNow username for API authentication |
+| `LEAN_AI_SERVICENOW_PASSWORD` | *(empty)* | ServiceNow password (stored in OS keychain via extension) |
+| `LEAN_AI_SERVICENOW_TABLE` | `incident` | ServiceNow table to query |
 | `LEAN_AI_PORT` | `8422` | Server port |
 
 **Post-validation auto-detection:** When `LEAN_AI_POST_*_COMMAND` variables are empty, the system falls back to commands auto-detected during `/init-workspace` (stored in `.lean_ai/commands.json`). Manual env vars always take priority. In fix mode, the LLM is instructed to write tests alongside code changes when a test command is available. In plan mode, test creation is handled by Phase 5 (verification step generation) which appends test file steps and a final `run_tests` step after all implementation steps. In TDD mode, Phase 5 produces test steps separately into `tdd_test_steps` (without `run_tests`) — these are executed first by the expert model, then the primary implements code with test files protected. **Validation fix loop:** when `_run_post_validation` detects failures, `_run_validation_fix_loop` retries up to `LEAN_AI_POST_VALIDATION_MAX_RETRIES` times. Each attempt uses a **hardcoded 30-turn budget** (independent of `LEAN_AI_IMPLEMENTATION_MAX_TURNS`), is **file-scoped** to the plan's `affected_files` list (the tool executor blocks edits to files outside the whitelist), and instructs the LLM to: (1) re-run the failing command to confirm the error, (2) read relevant files to find the root cause, (3) record diagnosis in scratchpad, (4) make the minimal fix, (5) re-run to verify. On the **final retry**, the expert model is used if configured. In TDD mode, the fix loop also enforces the test-file guard and provides the `request_test_change` dispute tool so the primary model can escalate flawed tests to the expert rather than editing them directly.

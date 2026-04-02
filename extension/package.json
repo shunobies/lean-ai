@@ -540,6 +540,31 @@
           "default": true,
           "markdownDescription": "**Integrations** — Automatically push session summaries (duration, files changed, commits) to linked external tasks when a session completes. Default: `true`"
         },
+        "lean-ai.jiraUrl": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Integrations / Jira** — Jira Cloud instance URL, e.g. `https://yourcompany.atlassian.net`"
+        },
+        "lean-ai.jiraEmail": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Integrations / Jira** — Jira account email address used for API authentication"
+        },
+        "lean-ai.servicenowUrl": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Integrations / ServiceNow** — ServiceNow instance URL, e.g. `https://yourinstance.service-now.com`"
+        },
+        "lean-ai.servicenowUsername": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Integrations / ServiceNow** — ServiceNow username for API authentication"
+        },
+        "lean-ai.servicenowTable": {
+          "type": "string",
+          "default": "incident",
+          "markdownDescription": "**Integrations / ServiceNow** — ServiceNow table to query. Default: `incident`"
+        },
         "lean-ai.enableTdd": {
           "type": "boolean",
           "default": false,

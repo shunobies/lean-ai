@@ -12,10 +12,12 @@ import * as path from "path";
 // ── Secret key identifiers (stored in OS keychain via context.secrets) ──────
 
 export const SECRET_KEYS = {
-    openaiApiKey:    "lean-ai.openaiApiKey",
-    anthropicApiKey: "lean-ai.anthropicApiKey",
-    geminiApiKey:    "lean-ai.geminiApiKey",
-    serveApiKey:     "lean-ai.serveApiKey",
+    openaiApiKey:       "lean-ai.openaiApiKey",
+    anthropicApiKey:    "lean-ai.anthropicApiKey",
+    geminiApiKey:       "lean-ai.geminiApiKey",
+    serveApiKey:        "lean-ai.serveApiKey",
+    jiraApiToken:       "lean-ai.jiraApiToken",
+    servicenowPassword: "lean-ai.servicenowPassword",
 } as const;
 
 // ── Non-secret setting → env var mapping ────────────────────────────────────
@@ -127,6 +129,11 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     // Integrations
     "lean-ai.enableIntegrations":       "LEAN_AI_ENABLE_INTEGRATIONS",
     "lean-ai.integrationAutoPush":      "LEAN_AI_INTEGRATION_AUTO_PUSH",
+    "lean-ai.jiraUrl":                  "LEAN_AI_JIRA_URL",
+    "lean-ai.jiraEmail":                "LEAN_AI_JIRA_EMAIL",
+    "lean-ai.servicenowUrl":            "LEAN_AI_SERVICENOW_URL",
+    "lean-ai.servicenowUsername":       "LEAN_AI_SERVICENOW_USERNAME",
+    "lean-ai.servicenowTable":          "LEAN_AI_SERVICENOW_TABLE",
 
     // Advanced / misc
     "lean-ai.enableFrameworkGuide":      "LEAN_AI_ENABLE_FRAMEWORK_GUIDE",
@@ -211,14 +218,18 @@ export async function buildFullBackendEnv(
     secrets: vscode.SecretStorage,
 ): Promise<Record<string, string>> {
     const env = buildBackendEnv();
-    const openaiKey    = await secrets.get(SECRET_KEYS.openaiApiKey);
-    const anthropicKey = await secrets.get(SECRET_KEYS.anthropicApiKey);
-    const geminiKey    = await secrets.get(SECRET_KEYS.geminiApiKey);
-    const serveKey     = await secrets.get(SECRET_KEYS.serveApiKey);
-    if (openaiKey)    { env["LEAN_AI_OPENAI_API_KEY"]    = openaiKey; }
-    if (anthropicKey) { env["LEAN_AI_ANTHROPIC_API_KEY"] = anthropicKey; }
-    if (geminiKey)    { env["LEAN_AI_GEMINI_API_KEY"]    = geminiKey; }
-    if (serveKey)     { env["LEAN_AI_SERVE_API_KEY"]     = serveKey; }
+    const openaiKey       = await secrets.get(SECRET_KEYS.openaiApiKey);
+    const anthropicKey    = await secrets.get(SECRET_KEYS.anthropicApiKey);
+    const geminiKey       = await secrets.get(SECRET_KEYS.geminiApiKey);
+    const serveKey        = await secrets.get(SECRET_KEYS.serveApiKey);
+    const jiraToken       = await secrets.get(SECRET_KEYS.jiraApiToken);
+    const servicenowPass  = await secrets.get(SECRET_KEYS.servicenowPassword);
+    if (openaiKey)       { env["LEAN_AI_OPENAI_API_KEY"]       = openaiKey; }
+    if (anthropicKey)    { env["LEAN_AI_ANTHROPIC_API_KEY"]    = anthropicKey; }
+    if (geminiKey)       { env["LEAN_AI_GEMINI_API_KEY"]       = geminiKey; }
+    if (serveKey)        { env["LEAN_AI_SERVE_API_KEY"]        = serveKey; }
+    if (jiraToken)       { env["LEAN_AI_JIRA_API_TOKEN"]       = jiraToken; }
+    if (servicenowPass)  { env["LEAN_AI_SERVICENOW_PASSWORD"]  = servicenowPass; }
     return env;
 }
 

@@ -147,6 +147,8 @@ export class SettingsPanel {
                     anthropic: SECRET_KEYS.anthropicApiKey,
                     gemini: SECRET_KEYS.geminiApiKey,
                     serve: SECRET_KEYS.serveApiKey,
+                    jira: SECRET_KEYS.jiraApiToken,
+                    servicenow: SECRET_KEYS.servicenowPassword,
                 };
                 const secretKey = secretKeyMap[provider];
                 if (!secretKey) { break; }
@@ -163,6 +165,8 @@ export class SettingsPanel {
                     anthropic: SECRET_KEYS.anthropicApiKey,
                     gemini: SECRET_KEYS.geminiApiKey,
                     serve: SECRET_KEYS.serveApiKey,
+                    jira: SECRET_KEYS.jiraApiToken,
+                    servicenow: SECRET_KEYS.servicenowPassword,
                 };
                 const secretKey = clearKeyMap[provider];
                 if (!secretKey) { break; }
@@ -264,6 +268,11 @@ export class SettingsPanel {
             searchDelay:              "lean-ai.searchDelay",
             enableIntegrations:       "lean-ai.enableIntegrations",
             integrationAutoPush:      "lean-ai.integrationAutoPush",
+            jiraUrl:                  "lean-ai.jiraUrl",
+            jiraEmail:                "lean-ai.jiraEmail",
+            servicenowUrl:            "lean-ai.servicenowUrl",
+            servicenowUsername:       "lean-ai.servicenowUsername",
+            servicenowTable:          "lean-ai.servicenowTable",
             enableTdd:                "lean-ai.enableTdd",
             enablePostValidation:     "lean-ai.enablePostValidation",
             postFormatCommand:        "lean-ai.postFormatCommand",
@@ -387,10 +396,12 @@ export class SettingsPanel {
     private async _sendCurrentSettings(): Promise<void> {
         const config = vscode.workspace.getConfiguration();
 
-        const openaiKeySet  = !!(await this._context.secrets.get(SECRET_KEYS.openaiApiKey));
-        const anthropicKeySet = !!(await this._context.secrets.get(SECRET_KEYS.anthropicApiKey));
-        const geminiKeySet = !!(await this._context.secrets.get(SECRET_KEYS.geminiApiKey));
-        const serveKeySet = !!(await this._context.secrets.get(SECRET_KEYS.serveApiKey));
+        const openaiKeySet      = !!(await this._context.secrets.get(SECRET_KEYS.openaiApiKey));
+        const anthropicKeySet   = !!(await this._context.secrets.get(SECRET_KEYS.anthropicApiKey));
+        const geminiKeySet      = !!(await this._context.secrets.get(SECRET_KEYS.geminiApiKey));
+        const serveKeySet       = !!(await this._context.secrets.get(SECRET_KEYS.serveApiKey));
+        const jiraKeySet        = !!(await this._context.secrets.get(SECRET_KEYS.jiraApiToken));
+        const servicenowKeySet  = !!(await this._context.secrets.get(SECRET_KEYS.servicenowPassword));
 
         const values = {
             // Provider
@@ -491,6 +502,13 @@ export class SettingsPanel {
             // Integrations
             enableIntegrations:        config.get("lean-ai.enableIntegrations", false),
             integrationAutoPush:       config.get("lean-ai.integrationAutoPush", true),
+            jiraKeySet,
+            jiraUrl:                   config.get("lean-ai.jiraUrl", ""),
+            jiraEmail:                 config.get("lean-ai.jiraEmail", ""),
+            servicenowKeySet,
+            servicenowUrl:             config.get("lean-ai.servicenowUrl", ""),
+            servicenowUsername:        config.get("lean-ai.servicenowUsername", ""),
+            servicenowTable:           config.get("lean-ai.servicenowTable", "incident"),
 
             // TDD mode
             enableTdd:                 config.get("lean-ai.enableTdd", false),

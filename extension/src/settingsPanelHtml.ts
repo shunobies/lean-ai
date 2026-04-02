@@ -873,6 +873,38 @@ export function getSettingsPanelHtml(): string {
             <span class="hint">Automatically push session data to linked external tasks on completion</span>
         </div>
     </div>
+
+    <h3 style="margin-top:16px;margin-bottom:8px;opacity:0.9;">Jira Cloud</h3>
+    <div class="field">
+        <label>Jira URL <span class="hint">e.g. https://yourcompany.atlassian.net</span></label>
+        <input type="text" id="jiraUrl" placeholder="https://yourcompany.atlassian.net">
+    </div>
+    <div class="field">
+        <label>Jira Email <span class="hint">Account email for API authentication</span></label>
+        <input type="text" id="jiraEmail" placeholder="you@company.com">
+    </div>
+    <div class="field">
+        <label>Jira API Token</label>
+        <div id="jira-key-widget"></div>
+    </div>
+
+    <h3 style="margin-top:16px;margin-bottom:8px;opacity:0.9;">ServiceNow</h3>
+    <div class="field">
+        <label>ServiceNow URL <span class="hint">e.g. https://yourinstance.service-now.com</span></label>
+        <input type="text" id="servicenowUrl" placeholder="https://yourinstance.service-now.com">
+    </div>
+    <div class="field">
+        <label>ServiceNow Username</label>
+        <input type="text" id="servicenowUsername" placeholder="admin">
+    </div>
+    <div class="field">
+        <label>ServiceNow Password</label>
+        <div id="servicenow-key-widget"></div>
+    </div>
+    <div class="field">
+        <label>ServiceNow Table <span class="hint">Default: incident</span></label>
+        <input type="text" id="servicenowTable" placeholder="incident">
+    </div>
 </div>
 
 <!-- ── TDD Mode ── -->
@@ -1177,6 +1209,8 @@ export function getSettingsPanelHtml(): string {
     renderKeyWidget('anthropic-key-widget', 'anthropic');
     renderKeyWidget('gemini-key-widget', 'gemini');
     renderKeyWidget('serve-key-widget', 'serve');
+    renderKeyWidget('jira-key-widget', 'jira');
+    renderKeyWidget('servicenow-key-widget', 'servicenow');
 
     // ── Provider radio group logic ─────────────────────────────────────────
 
@@ -1491,6 +1525,11 @@ export function getSettingsPanelHtml(): string {
             // Integrations
             enableIntegrations:    val('enableIntegrations'),
             integrationAutoPush:   val('integrationAutoPush'),
+            jiraUrl:               val('jiraUrl'),
+            jiraEmail:             val('jiraEmail'),
+            servicenowUrl:         val('servicenowUrl'),
+            servicenowUsername:    val('servicenowUsername'),
+            servicenowTable:       val('servicenowTable'),
 
             // TDD mode
             enableTdd:             val('enableTdd'),
@@ -1659,6 +1698,20 @@ export function getSettingsPanelHtml(): string {
         // Integrations
         setVal('enableIntegrations',       v.enableIntegrations);
         setVal('integrationAutoPush',      v.integrationAutoPush);
+        setVal('jiraUrl',                  v.jiraUrl);
+        setVal('jiraEmail',                v.jiraEmail);
+        setVal('servicenowUrl',            v.servicenowUrl);
+        setVal('servicenowUsername',        v.servicenowUsername);
+        setVal('servicenowTable',          v.servicenowTable);
+
+        // Jira key widget
+        if (v.jiraKeySet) {
+            document.getElementById('jira-key-widget')._renderSet();
+        }
+        // ServiceNow key widget
+        if (v.servicenowKeySet) {
+            document.getElementById('servicenow-key-widget')._renderSet();
+        }
 
         // TDD mode
         setVal('enableTdd',                v.enableTdd);

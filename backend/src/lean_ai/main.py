@@ -12,12 +12,55 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+async def _auto_init_integrations() -> None:
+    """Auto-initialize configured integration providers at startup."""
+    from lean_ai.config import settings
+    from lean_ai.integrations.registry import init_integration
+
+    if not settings.enable_integrations:
+        return
+
+    # Jira Cloud
+    if settings.jira_url and settings.jira_email and settings.jira_api_token:
+        provider = await init_integration(
+            "jira",
+            base_url=settings.jira_url,
+            email=settings.jira_email,
+            api_token=settings.jira_api_token,
+        )
+        if provider:
+            logger.info("Jira integration auto-initialized")
+        else:
+            logger.warning("Jira integration failed to initialize")
+
+    # ServiceNow
+    if settings.servicenow_url and settings.servicenow_username and settings.servicenow_password:
+        provider = await init_integration(
+            "servicenow",
+            instance_url=settings.servicenow_url,
+            username=settings.servicenow_username,
+            password=settings.servicenow_password,
+            table=settings.servicenow_table,
+        )
+        if provider:
+            logger.info("ServiceNow integration auto-initialized")
+        else:
+            logger.warning("ServiceNow integration failed to initialize")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: log readiness. Shutdown: cleanup."""
     logger.info("Starting Lean AI backend...")
+    await _auto_init_integrations()
     logger.info("Lean AI backend ready.")
     yield
+    # Shutdown integrations
+    try:
+        from lean_ai.integrations.registry import shutdown_integrations
+        await shutdown_integrations()
+    except ImportError:
+        pass
     # Cleanup headless Chrome if browser search provider was used
     try:
         from lean_ai.tools.browser_search import close_browser
