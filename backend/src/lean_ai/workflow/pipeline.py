@@ -21,7 +21,7 @@ from lean_ai.config import settings
 from lean_ai.llm.plan_schema import ExecutionPlan, plan_to_markdown
 from lean_ai.llm.planner import assess_clarity, create_plan
 from lean_ai.llm.tool_definitions import (
-    IMPLEMENTATION_TOOLS,
+    build_implementation_tools,
     build_tdd_implementation_tools,
 )
 from lean_ai.routers.context_helpers import load_condensed_context
@@ -551,7 +551,7 @@ async def _execute_plan(
 
         for step in plan.tdd_test_steps:
             await _run_step(
-                step, expert_llm_client, IMPLEMENTATION_TOOLS,
+                step, expert_llm_client, build_implementation_tools(),
                 test_tool_executor, test_system_prompt,
                 label_prefix="[TDD Test] ",
             )
@@ -673,7 +673,7 @@ async def _execute_plan(
             )
 
             await _run_step(
-                step, llm_client, IMPLEMENTATION_TOOLS,
+                step, llm_client, build_implementation_tools(),
                 impl_executor, tdd_impl_prompt,
                 label_prefix="[TDD Impl] ",
             )
@@ -688,7 +688,7 @@ async def _execute_plan(
         # ── Normal (non-TDD) execution ────────────────────────────
         for step in plan.steps:
             await _run_step(
-                step, llm_client, IMPLEMENTATION_TOOLS,
+                step, llm_client, build_implementation_tools(),
                 tool_executor, system_prompt,
             )
 

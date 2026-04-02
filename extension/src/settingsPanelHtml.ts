@@ -1120,6 +1120,24 @@ export function getSettingsPanelHtml(): string {
         <label>ServiceNow Table <span class="hint">Default: incident</span></label>
         <input type="text" id="servicenowTable" placeholder="incident">
     </div>
+
+    <h3 style="margin-top:16px;margin-bottom:8px;opacity:0.9;">MediaWiki</h3>
+    <div class="field">
+        <label>Wiki URL <span class="hint">e.g. https://wiki.company.com — leave empty to disable</span></label>
+        <input type="text" id="wikiUrl" placeholder="https://wiki.company.com">
+    </div>
+    <div class="field">
+        <label>Wiki API Path <span class="hint">Default: /w/api.php</span></label>
+        <input type="text" id="wikiApiPath" placeholder="/w/api.php">
+    </div>
+    <div class="field">
+        <label>Wiki Username <span class="hint">Optional — for authenticated wikis</span></label>
+        <input type="text" id="wikiUsername" placeholder="bot-account">
+    </div>
+    <div class="field">
+        <label>Wiki Password</label>
+        <div id="wiki-key-widget"></div>
+    </div>
 </details>
 
 <!-- ── Fixed Footer ── -->
@@ -1209,6 +1227,7 @@ export function getSettingsPanelHtml(): string {
     renderKeyWidget('serve-key-widget', 'serve');
     renderKeyWidget('jira-key-widget', 'jira');
     renderKeyWidget('servicenow-key-widget', 'servicenow');
+    renderKeyWidget('wiki-key-widget', 'wiki');
 
     // ── Provider radio group logic ─────────────────────────────────────────
 
@@ -1528,6 +1547,9 @@ export function getSettingsPanelHtml(): string {
             servicenowUrl:         val('servicenowUrl'),
             servicenowUsername:    val('servicenowUsername'),
             servicenowTable:       val('servicenowTable'),
+            wikiUrl:               val('wikiUrl'),
+            wikiApiPath:           val('wikiApiPath'),
+            wikiUsername:          val('wikiUsername'),
 
             // TDD mode
             enableTdd:             val('enableTdd'),
@@ -1709,6 +1731,15 @@ export function getSettingsPanelHtml(): string {
         // ServiceNow key widget
         if (v.servicenowKeySet) {
             document.getElementById('servicenow-key-widget')._renderSet();
+        }
+
+        // MediaWiki
+        setVal('wikiUrl',                  v.wikiUrl);
+        setVal('wikiApiPath',              v.wikiApiPath);
+        setVal('wikiUsername',             v.wikiUsername);
+        // Wiki key widget
+        if (v.wikiKeySet) {
+            document.getElementById('wiki-key-widget')._renderSet();
         }
 
         // TDD mode

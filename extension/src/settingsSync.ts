@@ -18,6 +18,7 @@ export const SECRET_KEYS = {
     serveApiKey:        "lean-ai.serveApiKey",
     jiraApiToken:       "lean-ai.jiraApiToken",
     servicenowPassword: "lean-ai.servicenowPassword",
+    wikiPassword:       "lean-ai.wikiPassword",
 } as const;
 
 // ── Non-secret setting → env var mapping ────────────────────────────────────
@@ -134,6 +135,9 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.servicenowUrl":            "LEAN_AI_SERVICENOW_URL",
     "lean-ai.servicenowUsername":       "LEAN_AI_SERVICENOW_USERNAME",
     "lean-ai.servicenowTable":          "LEAN_AI_SERVICENOW_TABLE",
+    "lean-ai.wikiUrl":                  "LEAN_AI_WIKI_URL",
+    "lean-ai.wikiApiPath":              "LEAN_AI_WIKI_API_PATH",
+    "lean-ai.wikiUsername":             "LEAN_AI_WIKI_USERNAME",
 
     // Advanced / misc
     "lean-ai.enableFrameworkGuide":      "LEAN_AI_ENABLE_FRAMEWORK_GUIDE",
@@ -224,12 +228,14 @@ export async function buildFullBackendEnv(
     const serveKey        = await secrets.get(SECRET_KEYS.serveApiKey);
     const jiraToken       = await secrets.get(SECRET_KEYS.jiraApiToken);
     const servicenowPass  = await secrets.get(SECRET_KEYS.servicenowPassword);
+    const wikiPass        = await secrets.get(SECRET_KEYS.wikiPassword);
     if (openaiKey)       { env["LEAN_AI_OPENAI_API_KEY"]       = openaiKey; }
     if (anthropicKey)    { env["LEAN_AI_ANTHROPIC_API_KEY"]    = anthropicKey; }
     if (geminiKey)       { env["LEAN_AI_GEMINI_API_KEY"]       = geminiKey; }
     if (serveKey)        { env["LEAN_AI_SERVE_API_KEY"]        = serveKey; }
     if (jiraToken)       { env["LEAN_AI_JIRA_API_TOKEN"]       = jiraToken; }
     if (servicenowPass)  { env["LEAN_AI_SERVICENOW_PASSWORD"]  = servicenowPass; }
+    if (wikiPass)        { env["LEAN_AI_WIKI_PASSWORD"]        = wikiPass; }
     return env;
 }
 

@@ -1,0 +1,268 @@
+"""MediaWiki search and page fetching via the Action API.
+
+Provides two tools:
+- search_wiki: full-text search across a MediaWiki instance
+- fetch_wiki_page: retrieve full page content by title
+
+Supports both authenticated (bot account / user login) and
+unauthenticated (public) wikis. Authentication is lazy — login
+happens on the first request when credentials are configured.
+
+Uses the same HTML stripping and pagination patterns as internet.py.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+from pathlib import Path
+
+import httpx
+from bs4 import BeautifulSoup
+
+from lean_ai.config import settings
+from lean_ai.tools.executor import ToolResult
+
+logger = logging.getLogger(__name__)
+
+# Module-level client — keeps session cookies for authenticated wikis.
+_client: httpx.AsyncClient | None = None
+_authenticated: bool = False
+
+
+def _api_url() -> str:
+    """Build the full MediaWiki API URL from config."""
+    base = settings.wiki_url.rstrip("/")
+    path = settings.wiki_api_path
+    return f"{base}{path}"
+
+
+async def _get_client() -> httpx.AsyncClient:
+    """Return (and lazily create) the shared HTTP client."""
+    global _client
+    if _client is None:
+        _client = httpx.AsyncClient(
+            timeout=30.0,
+            headers={"User-Agent": "LeanAI/1.0 (MediaWiki tool)"},
+        )
+    return _client
+
+
+async def _ensure_authenticated() -> None:
+    """Log in to the wiki if credentials are configured and we haven't yet.
+
+    Uses the MediaWiki ``action=login`` two-step flow:
+    1. Fetch a login token via ``action=query&meta=tokens&type=login``
+    2. POST ``action=login`` with username, password, and token.
+
+    Skips silently when no credentials are configured.
+    """
+    global _authenticated
+    if _authenticated:
+        return
+    if not settings.wiki_username or not settings.wiki_password:
+        _authenticated = True  # No credentials → nothing to do
+        return
+
+    client = await _get_client()
+    api = _api_url()
+
+    try:
+        # Step 1: get login token
+        token_resp = await client.get(api, params={
+            "action": "query",
+            "meta": "tokens",
+            "type": "login",
+            "format": "json",
+        })
+        token_resp.raise_for_status()
+        token_data = token_resp.json()
+        login_token = token_data["query"]["tokens"]["logintoken"]
+
+        # Step 2: login
+        login_resp = await client.post(api, data={
+            "action": "login",
+            "lgname": settings.wiki_username,
+            "lgpassword": settings.wiki_password,
+            "lgtoken": login_token,
+            "format": "json",
+        })
+        login_resp.raise_for_status()
+        login_result = login_resp.json().get("login", {})
+
+        if login_result.get("result") == "Success":
+            logger.info("MediaWiki login successful for user %s", settings.wiki_username)
+            _authenticated = True
+        else:
+            reason = login_result.get("reason", login_result.get("result", "Unknown"))
+            logger.warning("MediaWiki login failed: %s", reason)
+            # Mark as authenticated to avoid retrying every request
+            _authenticated = True
+    except Exception as e:
+        logger.warning("MediaWiki authentication error: %s", e)
+        _authenticated = True  # Don't retry on every request
+
+
+def _strip_html(raw: str) -> str:
+    """Remove HTML tags, extract text content."""
+    soup = BeautifulSoup(raw, "html.parser")
+    for tag in soup(["script", "style", "noscript"]):
+        tag.decompose()
+    return soup.get_text(separator="\n", strip=True)
+
+
+def _save_and_paginate(
+    text: str, identifier: str, repo_root: str, max_lines: int = 500,
+) -> str:
+    """Save long content to a file and return the first page.
+
+    Short content (<= max_lines) is returned as-is.  Long content is
+    written to ``.lean_ai/fetched/{hash}.txt`` and only the first
+    *max_lines* lines are returned with a continuation hint.
+    """
+    lines = text.splitlines()
+    total = len(lines)
+
+    if total <= max_lines:
+        return text
+
+    id_hash = hashlib.sha256(identifier.encode()).hexdigest()[:12]
+    fetched_dir = Path(repo_root) / ".lean_ai" / "fetched"
+    fetched_dir.mkdir(parents=True, exist_ok=True)
+    rel_path = f".lean_ai/fetched/{id_hash}.txt"
+    file_path = Path(repo_root) / rel_path
+    file_path.write_text(text, encoding="utf-8")
+
+    preview = "\n".join(lines[:max_lines])
+    next_start = max_lines + 1
+    next_end = min(max_lines + 500, total)
+    return (
+        f"{preview}\n\n"
+        f"[Content saved to {rel_path} — {total} lines total]\n"
+        f"To continue reading, call: read_file(path=\"{rel_path}\", "
+        f"start_line={next_start}, end_line={next_end})"
+    )
+
+
+async def search_wiki(query: str, limit: int = 5) -> ToolResult:
+    """Search MediaWiki for pages matching the query.
+
+    Uses ``action=query&list=search`` to perform a full-text search.
+    Returns formatted results with page titles, snippets, and URLs.
+    """
+    if not settings.wiki_url:
+        return ToolResult(
+            success=False,
+            error="MediaWiki not configured (LEAN_AI_WIKI_URL is empty)",
+        )
+
+    if not query.strip():
+        return ToolResult(success=False, error="Search query cannot be empty")
+
+    await _ensure_authenticated()
+    client = await _get_client()
+    api = _api_url()
+
+    try:
+        resp = await client.get(api, params={
+            "action": "query",
+            "list": "search",
+            "srsearch": query,
+            "srlimit": str(limit),
+            "srprop": "snippet|titlesnippet|size|wordcount",
+            "format": "json",
+        })
+        resp.raise_for_status()
+        data = resp.json()
+    except httpx.TimeoutException:
+        return ToolResult(success=False, error="MediaWiki search timed out")
+    except httpx.HTTPStatusError as e:
+        return ToolResult(success=False, error=f"MediaWiki HTTP error: {e.response.status_code}")
+    except Exception as e:
+        return ToolResult(success=False, error=f"MediaWiki search failed: {e}")
+
+    results = data.get("query", {}).get("search", [])
+    if not results:
+        return ToolResult(success=True, output=f"No wiki pages found for: {query}")
+
+    base_url = settings.wiki_url.rstrip("/")
+    lines: list[str] = []
+    for item in results:
+        title = item.get("title", "")
+        snippet = _strip_html(item.get("snippet", ""))
+        word_count = item.get("wordcount", 0)
+        page_url = f"{base_url}/wiki/{title.replace(' ', '_')}"
+        lines.append(
+            f"Title: {title}\n"
+            f"URL: {page_url}\n"
+            f"Words: {word_count}\n"
+            f"{snippet}\n"
+        )
+
+    return ToolResult(success=True, output="\n".join(lines))
+
+
+async def fetch_wiki_page(title: str, repo_root: str) -> ToolResult:
+    """Fetch the full content of a wiki page by title.
+
+    Uses ``action=parse`` to get the rendered HTML, then strips it
+    to plain text.  Long pages are saved to disk with pagination.
+    """
+    if not settings.wiki_url:
+        return ToolResult(
+            success=False,
+            error="MediaWiki not configured (LEAN_AI_WIKI_URL is empty)",
+        )
+
+    if not title.strip():
+        return ToolResult(success=False, error="Page title cannot be empty")
+
+    await _ensure_authenticated()
+    client = await _get_client()
+    api = _api_url()
+
+    try:
+        resp = await client.get(api, params={
+            "action": "parse",
+            "page": title,
+            "prop": "text",
+            "format": "json",
+        })
+        resp.raise_for_status()
+        data = resp.json()
+    except httpx.TimeoutException:
+        return ToolResult(success=False, error=f"Fetching wiki page '{title}' timed out")
+    except httpx.HTTPStatusError as e:
+        return ToolResult(success=False, error=f"MediaWiki HTTP error: {e.response.status_code}")
+    except Exception as e:
+        return ToolResult(success=False, error=f"Failed to fetch wiki page: {e}")
+
+    # Check for API-level error (e.g. page not found)
+    if "error" in data:
+        error_info = data["error"].get("info", "Unknown error")
+        return ToolResult(success=False, error=f"MediaWiki error: {error_info}")
+
+    html = data.get("parse", {}).get("text", {}).get("*", "")
+    if not html:
+        return ToolResult(success=False, error=f"Wiki page '{title}' has no content")
+
+    text = _strip_html(html)
+
+    # Add page header
+    base_url = settings.wiki_url.rstrip("/")
+    page_url = f"{base_url}/wiki/{title.replace(' ', '_')}"
+    header = f"# {title}\nSource: {page_url}\n\n"
+    full_text = header + text
+
+    # Paginate long pages
+    output = _save_and_paginate(full_text, f"wiki:{title}", repo_root)
+    return ToolResult(success=True, output=output)
+
+
+async def close_wiki_client() -> None:
+    """Close the shared HTTP client. Call on shutdown."""
+    global _client, _authenticated
+    if _client is not None:
+        await _client.aclose()
+        _client = None
+    _authenticated = False

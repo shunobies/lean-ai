@@ -37,7 +37,7 @@ from lean_ai.llm.prompts import (
     PLAN_SCOPE_SYSTEM_PROMPT,
     PLAN_VERIFICATION_SYSTEM_PROMPT,
 )
-from lean_ai.llm.tool_definitions import PLANNING_TOOLS
+from lean_ai.llm.tool_definitions import build_planning_tools
 
 if TYPE_CHECKING:
     from lean_ai.llm.client import LLMClient
@@ -381,7 +381,7 @@ async def create_plan(
 
     tool_calls, file_identification = await explorer.chat_with_tools(
         messages=phase2_messages,
-        tools=PLANNING_TOOLS,
+        tools=build_planning_tools(),
         tool_executor_fn=_read_only_executor,
         max_turns=settings.implementation_max_turns,
         max_tokens=phase_max_tokens,

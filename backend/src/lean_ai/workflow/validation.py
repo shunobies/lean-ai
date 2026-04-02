@@ -13,7 +13,7 @@ from fastapi import WebSocket
 
 from lean_ai.config import settings
 from lean_ai.llm.tool_definitions import (
-    IMPLEMENTATION_TOOLS,
+    build_implementation_tools,
     build_tdd_implementation_tools,
 )
 from lean_ai.routers.context_helpers import load_condensed_context
@@ -346,7 +346,7 @@ async def _run_validation_fix_loop(
         fix_tools = (
             build_tdd_implementation_tools()
             if tdd_fix_protect
-            else IMPLEMENTATION_TOOLS
+            else build_implementation_tools()
         )
         tool_executor = make_tool_executor(
             repo_root, ws, session_id, llm_client=active_client,

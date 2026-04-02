@@ -384,6 +384,65 @@ IMPLEMENTATION_TOOLS: list[dict] = [
 ]
 
 
+# ── MediaWiki tools ──────────────────────────────────────────────────────────
+
+WIKI_TOOLS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_wiki",
+            "description": (
+                "Search the internal wiki for information. Returns matching "
+                "page titles and snippets. Use this to find internal documentation, "
+                "architecture decisions, runbooks, API docs, or team knowledge "
+                "that may help with the current task."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_wiki_page",
+            "description": (
+                "Fetch the full content of an internal wiki page by title. "
+                "Use after search_wiki to read a specific page. Long pages "
+                "are saved to a file — use read_file to continue reading."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "The wiki page title",
+                    },
+                },
+                "required": ["title"],
+            },
+        },
+    },
+]
+
+
+def build_implementation_tools() -> list[dict]:
+    """IMPLEMENTATION_TOOLS + wiki tools when configured."""
+    from lean_ai.config import settings
+
+    tools = list(IMPLEMENTATION_TOOLS)
+    if settings.wiki_url:
+        tools.extend(WIKI_TOOLS)
+    return tools
+
+
 # ── TDD-specific tool ────────────────────────────────────────────────────────
 
 REQUEST_TEST_CHANGE_TOOL: dict = {
@@ -429,8 +488,15 @@ REQUEST_TEST_CHANGE_TOOL: dict = {
 
 
 def build_tdd_implementation_tools() -> list[dict]:
-    """IMPLEMENTATION_TOOLS + request_test_change for TDD mode."""
-    return IMPLEMENTATION_TOOLS + [REQUEST_TEST_CHANGE_TOOL]
+    """IMPLEMENTATION_TOOLS + request_test_change + wiki tools for TDD mode."""
+    return build_implementation_tools() + [REQUEST_TEST_CHANGE_TOOL]
+
+
+def _maybe_wiki_tools() -> list[dict]:
+    """Return wiki tools if MediaWiki is configured, else empty list."""
+    from lean_ai.config import settings
+
+    return list(WIKI_TOOLS) if settings.wiki_url else []
 
 
 # Read-only tools for planning phases
@@ -441,6 +507,12 @@ PLANNING_TOOLS: list[dict] = [
         "read_file", "list_directory", "directory_tree", "grep_files", "task_complete",
     )
 ]
+
+
+def build_planning_tools() -> list[dict]:
+    """PLANNING_TOOLS + wiki tools when configured."""
+    return PLANNING_TOOLS + _maybe_wiki_tools()
+
 
 # Read-only tools for chat exploration (no task_complete — text exit)
 CHAT_TOOLS: list[dict] = [
@@ -506,3 +578,8 @@ INVESTIGATION_TOOLS: list[dict] = [
         "update_scratchpad", "task_complete",
     )
 ]
+
+
+def build_investigation_tools() -> list[dict]:
+    """INVESTIGATION_TOOLS + wiki tools when configured."""
+    return INVESTIGATION_TOOLS + _maybe_wiki_tools()

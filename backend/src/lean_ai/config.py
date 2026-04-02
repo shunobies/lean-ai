@@ -79,6 +79,7 @@ class _DecryptingYamlSource(PydanticBaseSettingsSource):
         "openai_api_key", "anthropic_api_key", "gemini_api_key",
         "serve_api_key", "search_api_key",
         "jira_api_token", "servicenow_password",
+        "wiki_password",
     })
 
     def __init__(self, settings_cls: type[BaseSettings], yaml_file: str = "config.yaml") -> None:
@@ -259,6 +260,12 @@ class Settings(BaseSettings):
     search_api_key: str = ""
     search_delay: float = 2.0  # Min seconds between all searches (jitter adds 0–100%)
     internet_timeout_seconds: int = 30
+
+    # ── MediaWiki ──
+    wiki_url: str = ""              # e.g. "https://wiki.company.com" — empty = disabled
+    wiki_api_path: str = "/w/api.php"  # API endpoint path (MediaWiki default)
+    wiki_username: str = ""         # For authenticated wikis (bot account)
+    wiki_password: str = ""         # Bot password or user password (stored in keychain)
 
     # ── Project context ──
     enable_project_context: bool = True

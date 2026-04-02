@@ -565,6 +565,21 @@
           "default": "incident",
           "markdownDescription": "**Integrations / ServiceNow** — ServiceNow table to query. Default: `incident`"
         },
+        "lean-ai.wikiUrl": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Integrations / MediaWiki** — Wiki instance URL, e.g. `https://wiki.company.com`. Leave empty to disable wiki tools."
+        },
+        "lean-ai.wikiApiPath": {
+          "type": "string",
+          "default": "/w/api.php",
+          "markdownDescription": "**Integrations / MediaWiki** — API endpoint path. Default: `/w/api.php`"
+        },
+        "lean-ai.wikiUsername": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Integrations / MediaWiki** — Username for authenticated wikis (bot account). Leave empty for public wikis."
+        },
         "lean-ai.enableTdd": {
           "type": "boolean",
           "default": false,

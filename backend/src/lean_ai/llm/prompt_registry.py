@@ -254,6 +254,21 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
     ))
 
     reg.register(PromptEntry(
+        key="policy.wiki_search",
+        category="Core Policy",
+        name="Wiki Search Policy",
+        description=(
+            "When to search the internal wiki during"
+            " implementation. Only active when MediaWiki is configured."
+        ),
+        default_text=(
+            "If the task involves internal systems, APIs, or company-specific knowledge, "
+            "call search_wiki to find relevant internal documentation. "
+            "Use fetch_wiki_page to read the full content of matching pages."
+        ),
+    ))
+
+    reg.register(PromptEntry(
         key="policy.scratchpad",
         category="Core Policy",
         name="Scratchpad Policy",

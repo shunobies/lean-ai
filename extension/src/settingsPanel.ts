@@ -149,6 +149,7 @@ export class SettingsPanel {
                     serve: SECRET_KEYS.serveApiKey,
                     jira: SECRET_KEYS.jiraApiToken,
                     servicenow: SECRET_KEYS.servicenowPassword,
+                    wiki: SECRET_KEYS.wikiPassword,
                 };
                 const secretKey = secretKeyMap[provider];
                 if (!secretKey) { break; }
@@ -167,6 +168,7 @@ export class SettingsPanel {
                     serve: SECRET_KEYS.serveApiKey,
                     jira: SECRET_KEYS.jiraApiToken,
                     servicenow: SECRET_KEYS.servicenowPassword,
+                    wiki: SECRET_KEYS.wikiPassword,
                 };
                 const secretKey = clearKeyMap[provider];
                 if (!secretKey) { break; }
@@ -273,6 +275,9 @@ export class SettingsPanel {
             servicenowUrl:            "lean-ai.servicenowUrl",
             servicenowUsername:       "lean-ai.servicenowUsername",
             servicenowTable:          "lean-ai.servicenowTable",
+            wikiUrl:                  "lean-ai.wikiUrl",
+            wikiApiPath:              "lean-ai.wikiApiPath",
+            wikiUsername:             "lean-ai.wikiUsername",
             enableTdd:                "lean-ai.enableTdd",
             enablePostValidation:     "lean-ai.enablePostValidation",
             postFormatCommand:        "lean-ai.postFormatCommand",
@@ -402,6 +407,7 @@ export class SettingsPanel {
         const serveKeySet       = !!(await this._context.secrets.get(SECRET_KEYS.serveApiKey));
         const jiraKeySet        = !!(await this._context.secrets.get(SECRET_KEYS.jiraApiToken));
         const servicenowKeySet  = !!(await this._context.secrets.get(SECRET_KEYS.servicenowPassword));
+        const wikiKeySet        = !!(await this._context.secrets.get(SECRET_KEYS.wikiPassword));
 
         const values = {
             // Provider
@@ -509,6 +515,10 @@ export class SettingsPanel {
             servicenowUrl:             config.get("lean-ai.servicenowUrl", ""),
             servicenowUsername:        config.get("lean-ai.servicenowUsername", ""),
             servicenowTable:           config.get("lean-ai.servicenowTable", "incident"),
+            wikiKeySet,
+            wikiUrl:                   config.get("lean-ai.wikiUrl", ""),
+            wikiApiPath:               config.get("lean-ai.wikiApiPath", "/w/api.php"),
+            wikiUsername:              config.get("lean-ai.wikiUsername", ""),
 
             // TDD mode
             enableTdd:                 config.get("lean-ai.enableTdd", false),

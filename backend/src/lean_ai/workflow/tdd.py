@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from lean_ai.config import settings
 from lean_ai.llm.prompt_registry import registry
-from lean_ai.llm.tool_definitions import IMPLEMENTATION_TOOLS
+from lean_ai.llm.tool_definitions import build_implementation_tools
 from lean_ai.workflow.ws_handler import ws_send_nowait
 
 if TYPE_CHECKING:
@@ -107,7 +107,7 @@ async def evaluate_test_dispute(
 
     executed, explanation = await expert_client.chat_with_tools(
         messages=messages,
-        tools=IMPLEMENTATION_TOOLS,
+        tools=build_implementation_tools(),
         tool_executor_fn=tool_executor,
         max_turns=10,
         max_tokens=settings.implementation_max_tokens,

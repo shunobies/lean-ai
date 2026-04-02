@@ -44,12 +44,17 @@ _SIMPLE_KEYS: dict[str, str] = {
 
 def _compose(key: str) -> str:
     """Resolve a prompt that embeds policy block placeholders."""
+    from lean_ai.config import settings
+
     text = registry.get(key)
+    web_search = registry.get("policy.web_search")
+    if settings.wiki_url:
+        web_search += "\n" + registry.get("policy.wiki_search")
     subs = {
         "TOOL_POLICY": registry.get("policy.tool"),
         "COMPLETION_CONTRACT": registry.get("policy.completion"),
         "QUALITY_RULES": registry.get("policy.quality"),
-        "WEB_SEARCH_POLICY": registry.get("policy.web_search"),
+        "WEB_SEARCH_POLICY": web_search,
         "SCRATCHPAD_POLICY": registry.get("policy.scratchpad"),
     }
     try:

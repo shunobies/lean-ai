@@ -393,6 +393,19 @@ def make_tool_executor(
             )
             return result.output if result.success else f"ERROR: {result.error}"
 
+        elif name == "search_wiki":
+            from lean_ai.tools.wiki import search_wiki
+            result = await search_wiki(query=arguments.get("query", ""))
+            return result.output if result.success else f"ERROR: {result.error}"
+
+        elif name == "fetch_wiki_page":
+            from lean_ai.tools.wiki import fetch_wiki_page
+            result = await fetch_wiki_page(
+                title=arguments.get("title", ""),
+                repo_root=repo_root,
+            )
+            return result.output if result.success else f"ERROR: {result.error}"
+
         elif name == "task_complete":
             return "Task marked complete."
 
