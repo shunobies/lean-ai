@@ -2,25 +2,185 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
-## [0.3.34] - 2026-04-02
+## [0.7.0] - 2026-04-02
 
 ### Added
 - **MediaWiki integration** — new `search_wiki` and `fetch_wiki_page` tools let the agent search and read pages from an internal MediaWiki instance while working on tasks. Supports both authenticated (bot account login) and public wikis. Configure from the Advanced Settings tab: Wiki URL, API path, username, and password (stored in OS keychain). Tools are automatically available in all workflow modes (plan, fix, request) when a wiki URL is configured.
 
-## [0.3.33] - 2026-03-31
+### Fixed
+- **npm security vulnerabilities** — fixed lodash prototype pollution and brace-expansion ReDoS vulnerabilities
+
+## [0.6.10] - 2026-04-01
+
+### Added
+- **Jira/ServiceNow settings UI** — configuration fields for Jira and ServiceNow added to the Advanced Settings tab (URL, credentials, table name). Passwords and API tokens stored securely in the OS keychain.
+
+## [0.6.9] - 2026-04-01
+
+### Added
+- **Google Gemini provider** — use Gemini models (e.g., `gemini-2.5-flash`, `gemini-2.5-pro`) via the Google GenAI SDK. Supports primary, expert, and request model roles with context windows up to 1M+ tokens.
+
+## [0.6.8] - 2026-04-01
+
+### Added
+- **Two-way integration framework** — generic framework for external task tracking services with provider ABC, registry, SQLite persistence, and REST endpoints. Ships with **Jira Cloud** and **ServiceNow** providers for session summaries, task linking, and search. Gated by `LEAN_AI_ENABLE_INTEGRATIONS`.
+- **Lean AI Serve provider** — connect to a self-hosted lean-ai-serve (vLLM) server as an LLM provider. Fully OpenAI-compatible API with independent primary, expert, and request model configuration.
+
+## [0.6.7] - 2026-04-01
+
+### Added
+- **Notes sidebar icon** — quick-access button in the sidebar header to open the Notes & TODOs panel
+
+## [0.6.6] - 2026-03-31
+
+### Changed
+- **Chat code blocks** — the chat assistant now formats code in fenced code blocks for a more structured, developer-friendly experience while remaining TTS-friendly
+
+## [0.6.5] - 2026-03-31
 
 ### Added
 - **YAML configuration** — settings are now saved to `backend/config.yaml` instead of `backend/.env`. YAML format with field names (e.g. `ollama_url` instead of `LEAN_AI_OLLAMA_URL`). The `.env` file continues to work as a fallback.
 - **Encrypted API keys** — API keys in `config.yaml` can be Fernet-encrypted with an `enc:` prefix so leaked config files don't expose raw credentials. CLI tool: `python -m lean_ai encrypt-key <key>`. Extension users are unaffected — API keys remain in the OS keychain.
 - **CLI config tools** — `python -m lean_ai` commands for key encryption (`encrypt-key`), `.env` migration (`migrate-env`), and config template generation (`generate-config`).
 
-## [0.3.32] - 2026-03-31
+## [0.6.4] - 2026-03-31
 
 ### Added
 - **Notes & TODOs** — cross-project notes system with `/note` slash command. Notes are stored globally (`~/.lean_ai/notes/`), auto-categorized by project and tagged via background LLM analysis. The chat LLM has `save_note` and `list_project_todos` tools for in-conversation note-taking and TODO tracking. A dedicated Notes & TODOs webview panel provides full CRUD, search, and filtering.
 
 ### Changed
 - **Chat prompt** — the chat assistant now acts as a general-purpose coding assistant by default, only entering prompt-building mode when explicitly asked. Responses are conversational rather than always producing a Suggested Agent Prompt.
+
+## [0.6.3] - 2026-03-29
+
+### Added
+- **Customizable prompts** — override any built-in LLM prompt per project via `.lean_ai/prompts.yaml`. Edit from the UI with the "Edit Prompts" command. Useful when your model needs different instructions than the defaults.
+
+## [0.6.2] - 2026-03-29
+
+### Added
+- **Centralized prompt registry** — all LLM prompts are managed through a registry with an **Edit Prompts** UI in the extension for viewing and customizing prompts
+- **IaC framework guide** — `/init` now detects Infrastructure-as-Code frameworks (Terraform, Ansible, Pulumi, CloudFormation, etc.) and generates architecture guides for models without current IaC knowledge
+- **Language-agnostic planning** — planning prompts no longer assume web/application code; IaC and infrastructure projects generate read_file-only plans when appropriate
+
+## [0.6.1] - 2026-03-29
+
+### Added
+- **Chat file exploration** — the chat assistant now has read-only file tools (`read_file`, `list_directory`, `directory_tree`, `grep_files`) to explore your project and give better advice before producing a Suggested Agent Prompt
+
+## [0.6.0] - 2026-03-29
+
+### Changed
+- **Prompt hardening** — improved instruction-following reliability with assumption verification step in chat prompts
+
+## [0.5.10] - 2026-03-29
+
+### Fixed
+- **Pop-out window** — fixed a regression that broke the pop-out chat feature after planning prompt changes
+
+## [0.5.9] - 2026-03-28
+
+### Fixed
+- **False clarification with Qwen3.5** — short non-question responses (like `-` or brief acknowledgments) no longer trigger the clarification loop
+- **Phase-specific planning prompts** — fixed tool/capability mismatches where prompts referenced tools unavailable in that phase
+- **Request model routing** — planning phases 1-2 and task clarification now correctly route to the request model
+- **Planning context** — full context passed to expert phases; fixed step history truncation in later planning phases
+
+## [0.5.8] - 2026-03-27
+
+### Added
+- **Python scaffold improvements** — Python scaffolds now include venv creation and dependency installation steps
+- **Build tooling detection** — framework guide generation now detects Vite, Tailwind, and other build tools
+
+### Fixed
+- **/approve and /reject commands** — fixed session ID loss after workflow completion that prevented merge/discard
+- **Fix-mode tools** — `/fix` now correctly exposes available tools to the LLM
+- **Pop-out window** — fixed icon to merge chat back to sidebar
+
+## [0.5.7] - 2026-03-27
+
+### Added
+- **TTS queue controls** — stop button kills entire TTS queue, replay button to re-hear the last response, configurable audio threads
+
+### Fixed
+- **Framework guide** — switched from coding model to request model for better quality; fixed deep-mode file injection and budget separation
+
+## [0.5.6] - 2026-03-26
+
+### Changed
+- **TTS input cleaning** — strips URLs, emoji, arrows, HTML tags, and markdown formatting from TTS input for cleaner, more natural speech output
+
+## [0.5.5] - 2026-03-26
+
+### Changed
+- **Real-time TTS** — incremental sentence streaming with gapless playback via raw PCM pipeline, replacing the previous batch-and-wait approach
+
+## [0.5.4] - 2026-03-26
+
+### Changed
+- **Command safety gate** — `run_command` auto-executes safe commands (build, install, migrate) without user approval. Only destructive commands (rm, dd, chmod, git push, etc.) prompt for confirmation.
+
+## [0.5.3] - 2026-03-26
+
+### Fixed
+- **Vision model timeout** — increased from 60s to 120s for multi-image processing and cold starts
+- **Vision empty response** — gracefully handles cases where the vision model returns no description
+
+## [0.5.2] - 2026-03-26
+
+### Added
+- **`run_command` tool** — general-purpose shell command execution for builds, migrations, code generators, and package installs. Separate from `run_tests`/`run_lint`/`format_code`.
+
+### Changed
+- **Naming consistency** — softened prescriptive naming rules to a consistency nudge, letting models follow existing project conventions
+
+## [0.5.1] - 2026-03-26
+
+### Fixed
+- **Pop-out voice/stop** — voice controls and stop button now work in the detached chat window
+- **Vision descriptions** — image descriptions from the vision model are now visible in the chat UI
+- **TTS phoneme crash** — fixed crash when TTS encountered unsupported phoneme sequences
+
+## [0.5.0] - 2026-03-25
+
+### Changed
+- **Canonical policy blocks** — consolidated all LLM system prompts into shared, composable policy blocks (`TOOL_POLICY`, `COMPLETION_CONTRACT`, `QUALITY_RULES`, etc.) for better small-model optimization. Prevents instruction duplication across execution modes.
+
+### Fixed
+- **picomatch ReDoS** — fixed high-severity regular expression denial-of-service vulnerability (GHSA-c2c7-rcm5-vvqj)
+
+## [0.3.37] - 2026-03-25
+
+### Fixed
+- **Pop-out chat voice** — STT and TTS now work in the detached chat window (previously only worked in the sidebar)
+- **Planning docs** — corrected "6 phases" to "5 phases" across all documentation
+
+## [0.3.36] - 2026-03-25
+
+### Fixed
+- **New window chat** — fixed two regressions in the detached chat window feature
+
+## [0.3.35] - 2026-03-25
+
+### Fixed
+- **Greeting TTS** — startup greeting now speaks via TTS when enabled
+- **Greeting web search** — startup greeting no longer triggers an unnecessary web search
+- **Settings zero values** — expert/request model parameters (temperature, top_p, etc.) no longer persist `0` to the backend when left empty; `0` is treated as "inherit from primary"
+
+## [0.3.34] - 2026-03-25
+
+### Fixed
+- **Settings env vars** — fixed backend crash when zero-value settings were passed from the extension
+
+## [0.3.33] - 2026-03-25
+
+### Fixed
+- **Settings panel** — fixed a bug that prevented the settings panel from saving correctly
+
+## [0.3.32] - 2026-03-25
+
+### Changed
+- **Edge case hardening** — consolidated multi-monitor, copy/paste, send-to-terminal, and greeting warm-up improvements from recent releases
 
 ## [0.3.31] - 2026-03-25
 
@@ -54,6 +214,30 @@ All notable changes to the Lean AI extension will be documented in this file.
 - **Chat URL handling** — skips redundant web search when the user's message already contains explicit URLs; fixed stale `summarize_threshold` parameter in URL fetching.
 - **Inline predictions** — gracefully handles models that don't support FIM (Fill-in-the-Middle) instead of erroring.
 
+## [0.3.28] - 2026-03-24
+
+### Fixed
+- **TTS playback in VSCode** — fixed TTS not working due to cross-site scripting detection in VSCode. Switched from data URIs to blob URLs and then to Web Audio API to bypass autoplay restrictions.
+
+## [0.3.27] - 2026-03-24
+
+### Fixed
+- **TTS audio engine** — switched from URI-based to blob URL-based audio playback for better compatibility
+
+## [0.3.26] - 2026-03-24
+
+### Changed
+- **CPU-only voice** — TTS and STT are hardcoded to use CPU, reserving GPU for the LLM. ALSA error suppression on Linux.
+
+### Fixed
+- **Wake word detection** — attempted fix for wake word not triggering correctly alongside STT
+
+## [0.3.25] - 2026-03-24
+
+### Fixed
+- **Wake word detection** — fixed wake word not firing; improved STT auto-stop notification and silence threshold handling
+- **TTS/STT optimization** — fp16 model default, sentence-level streaming, greedy decoding for faster transcription
+
 ## [0.3.24] - 2026-03-24
 
 ### Added
@@ -78,10 +262,47 @@ All notable changes to the Lean AI extension will be documented in this file.
 - **TTS model auto-download with progress** — the ~310MB kokoro-onnx model files are downloaded automatically on first use with a visible progress notification. A confirmation message appears when download completes.
 - **Python 3.13 support for TTS** — switched from `kokoro` (PyTorch-based, Python <3.13) to `kokoro-onnx` (ONNX Runtime, Python 3.10–3.13).
 
+## [0.3.22] - 2026-03-24
+
+### Fixed
+- **Indexing** — fixed a bug where `/init --force` could not complete due to an undefined variable (`indexResult is not defined`)
+
+## [0.3.21] - 2026-03-23
+
+### Added
+- **Vision model support** (initial) — image description via Ollama vision-language models; later refined in 0.3.24
+- **Voice interaction** (initial) — STT, TTS, and wake word support; later refined in 0.3.23
+
+### Changed
+- **Thinking bubble UX** — expanded by default with improved text contrast
+- **Chat routing** — `/chat` now routes through the request model when configured
+
 ## [0.3.20] - 2026-03-22
 
 ### Added
 - **Planning phase indicator** — the status badge now shows "planning phase 1" through "planning phase 6" as each planning phase starts, instead of a static "planning" label. Also reflected in the thinking indicator and Chat Participant progress.
+
+## [0.3.19] - 2026-03-21
+
+### Fixed
+- **Planning hallucinations** — fixed context not passing properly between planning phases, causing the expert model to hallucinate naming conventions, file listings, and codebase exploration results. Project context is now loaded from disk for expert phases.
+
+## [0.3.18] - 2026-03-21
+
+### Fixed
+- **Settings save** — fixed extension settings not saving correctly; added error handling and wired missing `postValidationFixTurns` field
+- **Backend restart on save** — the extension now offers to restart the backend server after settings are saved
+
+## [0.3.15] - 2026-03-21
+
+### Added
+- **TDD mode** — when `LEAN_AI_ENABLE_TDD` is enabled, plan execution runs in three phases: (A) expert model writes all tests first, (B) primary model reviews and can dispute tests, (C) primary model implements code with test files protected. The dispute mechanism runs a tight expert session to evaluate whether a test is genuinely flawed.
+
+## [0.3.14] - 2026-03-21
+
+### Changed
+- **Plan-to-execution consistency** — added name registry, cross-step context, and enriched instructions to reduce drift between planned and implemented code
+- **Smart auto-scroll** — chat panel pauses auto-scroll when the user scrolls up, and resumes when scrolled back to bottom
 
 ## [0.3.13] - 2026-03-21
 
