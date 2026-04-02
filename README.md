@@ -179,6 +179,7 @@ See the [full configuration reference](docs/configuration.md) for all options.
 | [Prompt Customization](docs/prompt-customization.md) | Customizing LLM prompts per project |
 | [Modelfile Guide](docs/modelfile.md) | Customizing Ollama models with persistent rules |
 | [llama-server Guide](docs/llama-server.md) | Using llama.cpp as an alternative to Ollama |
+| [Regulated Environments](docs/regulated-environments.md) | Self-hosted deployment for HIPAA, SOX, GDPR, ITAR, and air-gapped networks |
 
 ## Requirements
 
