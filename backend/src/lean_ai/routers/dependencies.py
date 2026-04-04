@@ -39,6 +39,7 @@ def _create_provider() -> LLMProvider:
             context_window=settings.openai_context_window,
             temperature=settings.openai_temperature,
             base_url=settings.openai_base_url or None,
+            enable_thinking=settings.enable_thinking,
         )
 
     if provider == "anthropic":
@@ -53,6 +54,7 @@ def _create_provider() -> LLMProvider:
             max_tokens=settings.anthropic_max_tokens,
             context_window=settings.anthropic_context_window,
             temperature=settings.anthropic_temperature,
+            enable_thinking=settings.enable_thinking,
         )
 
     if provider == "serve":
@@ -72,6 +74,7 @@ def _create_provider() -> LLMProvider:
             context_window=settings.serve_context_window,
             temperature=settings.serve_temperature,
             base_url=f"{settings.serve_url.rstrip('/')}/v1",
+            enable_thinking=settings.enable_thinking,
         )
 
     if provider == "gemini":
@@ -86,6 +89,7 @@ def _create_provider() -> LLMProvider:
             max_tokens=settings.gemini_max_tokens,
             context_window=settings.gemini_context_window,
             temperature=settings.gemini_temperature,
+            enable_thinking=settings.enable_thinking,
         )
 
     raise ValueError(
@@ -169,6 +173,7 @@ if _expert_p == "openai":
                 temperature=settings.openai_temperature,
                 context_window=settings.openai_context_window,
                 max_tokens=settings.openai_max_tokens,
+                enable_thinking=settings.enable_thinking_expert,
             )
             expert_llm_client = LLMClient(provider=_expert_provider)
             logger.info("Expert model enabled (OpenAI): %s", _expert_model)
@@ -192,6 +197,7 @@ elif _expert_p == "anthropic":
                 temperature=settings.anthropic_temperature,
                 context_window=settings.anthropic_context_window,
                 max_tokens=settings.anthropic_max_tokens,
+                enable_thinking=settings.enable_thinking_expert,
             )
             expert_llm_client = LLMClient(provider=_expert_provider)
             logger.info("Expert model enabled (Anthropic): %s", _expert_model)
@@ -216,6 +222,7 @@ elif _expert_p == "serve":
                 temperature=settings.serve_temperature,
                 context_window=settings.serve_context_window,
                 max_tokens=settings.serve_max_tokens,
+                enable_thinking=settings.enable_thinking_expert,
             )
             expert_llm_client = LLMClient(provider=_expert_provider)
             logger.info("Expert model enabled (Serve): %s", _expert_model)
@@ -239,6 +246,7 @@ elif _expert_p == "gemini":
                 temperature=settings.gemini_temperature,
                 context_window=settings.gemini_context_window,
                 max_tokens=settings.gemini_max_tokens,
+                enable_thinking=settings.enable_thinking_expert,
             )
             expert_llm_client = LLMClient(provider=_expert_provider)
             logger.info("Expert model enabled (Gemini): %s", _expert_model)
@@ -296,6 +304,7 @@ if _request_p == "openai":
                 temperature=settings.openai_temperature,
                 context_window=settings.openai_context_window,
                 max_tokens=settings.openai_max_tokens,
+                enable_thinking=settings.enable_thinking_request,
             )
             request_llm_client = LLMClient(
                 provider=_request_provider,
@@ -322,6 +331,7 @@ elif _request_p == "anthropic":
                 temperature=settings.anthropic_temperature,
                 context_window=settings.anthropic_context_window,
                 max_tokens=settings.anthropic_max_tokens,
+                enable_thinking=settings.enable_thinking_request,
             )
             request_llm_client = LLMClient(
                 provider=_request_provider,
@@ -349,6 +359,7 @@ elif _request_p == "serve":
                 temperature=settings.serve_temperature,
                 context_window=settings.serve_context_window,
                 max_tokens=settings.serve_max_tokens,
+                enable_thinking=settings.enable_thinking_request,
             )
             request_llm_client = LLMClient(
                 provider=_request_provider,
@@ -375,6 +386,7 @@ elif _request_p == "gemini":
                 temperature=settings.gemini_temperature,
                 context_window=settings.gemini_context_window,
                 max_tokens=settings.gemini_max_tokens,
+                enable_thinking=settings.enable_thinking_request,
             )
             request_llm_client = LLMClient(
                 provider=_request_provider,

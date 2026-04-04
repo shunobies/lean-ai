@@ -82,6 +82,7 @@ def _make_provider(types_mod=None, **overrides):
         provider._temperature = overrides.get("temperature", 0.7)
         provider._retry_max = overrides.get("retry_max", 0)
         provider._retry_base_delay = overrides.get("retry_base_delay", 0.01)
+        provider._enable_thinking = overrides.get("enable_thinking", False)
 
     return provider
 

@@ -50,6 +50,9 @@ def _convert_tools(tools: list[dict]) -> list[dict]:
 class AnthropicProvider(LLMProvider):
     """LLM provider backed by Anthropic's Claude API."""
 
+    # Fraction of max_tokens allocated to thinking budget
+    _THINKING_BUDGET_PERCENT = 0.8
+
     def __init__(
         self,
         api_key: str,
@@ -59,6 +62,7 @@ class AnthropicProvider(LLMProvider):
         temperature: float = 0.7,
         retry_max: int | None = None,
         retry_base_delay: float | None = None,
+        enable_thinking: bool = False,
     ):
         import anthropic as anthropic_lib
         self._anthropic = anthropic_lib
@@ -68,6 +72,7 @@ class AnthropicProvider(LLMProvider):
         self._max_tokens_val = max_tokens
         self._context_window_val = context_window
         self._temperature = temperature
+        self._enable_thinking = enable_thinking
         self._retry_max = retry_max if retry_max is not None else settings.llm_retry_max
         self._retry_base_delay = (
             retry_base_delay if retry_base_delay is not None else settings.llm_retry_base_delay
@@ -125,6 +130,29 @@ class AnthropicProvider(LLMProvider):
             )
         return LLMMetrics(stop_reason=stop_reason)
 
+    def _apply_thinking_kwargs(self, kwargs: dict, tokens: int) -> None:
+        """Add extended thinking parameters to API kwargs when enabled.
+
+        Anthropic extended thinking requires temperature=1.0 and adds a
+        ``thinking`` parameter with a budget.
+        """
+        if not self._enable_thinking:
+            return
+        budget = max(1024, int(tokens * self._THINKING_BUDGET_PERCENT))
+        kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+        kwargs["temperature"] = 1.0
+
+    @staticmethod
+    def _extract_thinking_from_message(message) -> str | None:
+        """Extract thinking text from content blocks of a final message."""
+        parts: list[str] = []
+        for block in getattr(message, "content", []):
+            if getattr(block, "type", None) == "thinking":
+                text = getattr(block, "thinking", "")
+                if text:
+                    parts.append(text)
+        return "\n\n".join(parts) if parts else None
+
     async def chat_raw(
         self,
         messages: list[dict],
@@ -139,9 +167,10 @@ class AnthropicProvider(LLMProvider):
         system_prompt, filtered_messages = _split_system(messages)
 
         logger.info(
-            "Anthropic chat_raw: model=%s messages=%d temp=%.1f max_tokens=%d streaming=%s",
+            "Anthropic chat_raw: model=%s messages=%d temp=%.1f max_tokens=%d "
+            "streaming=%s thinking=%s",
             self._model, len(filtered_messages), temp, tokens,
-            bool(stream_callback),
+            bool(stream_callback or thinking_callback), self._enable_thinking,
         )
 
         kwargs: dict = {
@@ -153,6 +182,13 @@ class AnthropicProvider(LLMProvider):
         if system_prompt:
             kwargs["system"] = system_prompt
 
+        if self._enable_thinking and (stream_callback or thinking_callback):
+            self._apply_thinking_kwargs(kwargs, tokens)
+            return await self._chat_raw_streaming(
+                kwargs, stream_callback, thinking_callback,
+            )
+
+        # Non-thinking streaming path (content only)
         async def _chat():
             chunks: list[str] = []
             async with self._client.messages.stream(**kwargs) as stream:
@@ -172,6 +208,90 @@ class AnthropicProvider(LLMProvider):
         logger.info("Anthropic chat_raw response (%d chars): %s", len(text), text[:200])
         return text, metrics
 
+    async def _chat_raw_streaming(
+        self,
+        kwargs: dict,
+        stream_callback,
+        thinking_callback,
+    ) -> tuple[str, LLMMetrics]:
+        """Stream chat_raw with thinking support via full event iteration."""
+        content_parts: list[str] = []
+        thinking_parts: list[str] = []
+
+        async def _chat():
+            async with self._client.messages.stream(**kwargs) as stream:
+                async for event in stream:
+                    etype = getattr(event, "type", "")
+                    if etype == "content_block_delta":
+                        delta = getattr(event, "delta", None)
+                        if delta is None:
+                            continue
+                        dtype = getattr(delta, "type", "")
+                        if dtype == "thinking_delta":
+                            text = getattr(delta, "thinking", "")
+                            if text:
+                                thinking_parts.append(text)
+                                if thinking_callback:
+                                    await thinking_callback(text)
+                        elif dtype == "text_delta":
+                            text = getattr(delta, "text", "")
+                            if text:
+                                content_parts.append(text)
+                                if stream_callback:
+                                    await stream_callback(text)
+                return await stream.get_final_message()
+
+        try:
+            final_message = await self._retry_with_backoff(
+                _chat, label="chat_raw(thinking)",
+            )
+        except self._anthropic.BadRequestError as exc:
+            logger.warning(
+                "Extended thinking not supported for %s, falling back: %s",
+                self._model, exc,
+            )
+            # Remove thinking params and retry without
+            kwargs.pop("thinking", None)
+            kwargs["temperature"] = self._temperature
+
+            async def _fallback():
+                chunks: list[str] = []
+                async with self._client.messages.stream(**kwargs) as stream:
+                    async for chunk in stream.text_stream:
+                        if chunk:
+                            chunks.append(chunk)
+                            if stream_callback:
+                                await stream_callback(chunk)
+                    final_msg = await stream.get_final_message()
+                return "".join(chunks), final_msg
+
+            text, final_message = await self._retry_with_backoff(
+                _fallback, label="chat_raw(fallback)",
+            )
+            metrics = self._extract_metrics(
+                final_message,
+                stop_reason=getattr(final_message, "stop_reason", None),
+            )
+            logger.info(
+                "Anthropic chat_raw response (%d chars, fallback): %s",
+                len(text), text[:200],
+            )
+            return text, metrics
+
+        text = "".join(content_parts)
+        thinking = "\n".join(thinking_parts) or None
+        metrics = self._extract_metrics(
+            final_message,
+            stop_reason=getattr(final_message, "stop_reason", None),
+        )
+        metrics.thinking = thinking
+
+        logger.info(
+            "Anthropic chat_raw response (%d chars, thinking=%d chars): %s",
+            len(text), len(thinking or ""), text[:200],
+        )
+        return text, metrics
+
     async def chat_structured(
         self,
         messages: list[dict],
@@ -186,7 +306,8 @@ class AnthropicProvider(LLMProvider):
         system_prompt, filtered_messages = _split_system(messages)
 
         logger.info(
-            "Anthropic chat_structured: schema=%s model=%s", schema.__name__, self._model,
+            "Anthropic chat_structured: schema=%s model=%s thinking=%s",
+            schema.__name__, self._model, self._enable_thinking,
         )
 
         # Inject JSON schema instruction into system prompt
@@ -206,19 +327,16 @@ class AnthropicProvider(LLMProvider):
             "system": structured_instruction,
         }
 
-        async def _chat():
-            chunks: list[str] = []
-            async with self._client.messages.stream(**kwargs) as stream:
-                async for chunk in stream.text_stream:
-                    if chunk:
-                        chunks.append(chunk)
-                final_message = await stream.get_final_message()
-            return "".join(chunks), final_message
+        if self._enable_thinking and thinking_callback:
+            self._apply_thinking_kwargs(kwargs, tokens)
+            chat_fn = self._make_structured_thinking_chat(kwargs, thinking_callback)
+        else:
+            chat_fn = self._make_structured_chat(kwargs)
 
         last_error = None
         for attempt in range(2):
             raw, final_message = await self._retry_with_backoff(
-                _chat, label=f"structured({schema.__name__})",
+                chat_fn, label=f"structured({schema.__name__})",
             )
             metrics = self._extract_metrics(
                 final_message,
@@ -252,6 +370,61 @@ class AnthropicProvider(LLMProvider):
                 )
                 raise
         raise last_error  # type: ignore[misc]
+
+    def _make_structured_chat(self, kwargs: dict):
+        """Create a non-thinking structured chat coroutine factory."""
+        async def _chat():
+            chunks: list[str] = []
+            async with self._client.messages.stream(**kwargs) as stream:
+                async for chunk in stream.text_stream:
+                    if chunk:
+                        chunks.append(chunk)
+                final_message = await stream.get_final_message()
+            return "".join(chunks), final_message
+        return _chat
+
+    def _make_structured_thinking_chat(self, kwargs: dict, thinking_callback):
+        """Create a thinking-enabled structured chat coroutine factory."""
+        anthropic_lib = self._anthropic
+
+        async def _chat():
+            content_parts: list[str] = []
+            try:
+                async with self._client.messages.stream(**kwargs) as stream:
+                    async for event in stream:
+                        etype = getattr(event, "type", "")
+                        if etype == "content_block_delta":
+                            delta = getattr(event, "delta", None)
+                            if delta is None:
+                                continue
+                            dtype = getattr(delta, "type", "")
+                            if dtype == "thinking_delta":
+                                text = getattr(delta, "thinking", "")
+                                if text:
+                                    await thinking_callback(text)
+                            elif dtype == "text_delta":
+                                text = getattr(delta, "text", "")
+                                if text:
+                                    content_parts.append(text)
+                    final_message = await stream.get_final_message()
+                return "".join(content_parts), final_message
+            except anthropic_lib.BadRequestError:
+                logger.warning(
+                    "Extended thinking not supported for %s in structured mode, "
+                    "falling back",
+                    self._model,
+                )
+                kwargs.pop("thinking", None)
+                kwargs["temperature"] = self._temperature
+                chunks: list[str] = []
+                async with self._client.messages.stream(**kwargs) as stream:
+                    async for chunk in stream.text_stream:
+                        if chunk:
+                            chunks.append(chunk)
+                    final_msg = await stream.get_final_message()
+                return "".join(chunks), final_msg
+
+        return _chat
 
     async def chat_with_tools_single(
         self,

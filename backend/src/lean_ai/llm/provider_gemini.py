@@ -49,6 +49,8 @@ def _convert_tools(tools: list[dict], types_mod) -> list:
 class GeminiProvider(LLMProvider):
     """LLM provider backed by Google's Gemini API via the google-genai SDK."""
 
+    _THINKING_BUDGET_PERCENT = 0.8
+
     def __init__(
         self,
         api_key: str,
@@ -58,6 +60,7 @@ class GeminiProvider(LLMProvider):
         temperature: float = 0.7,
         retry_max: int | None = None,
         retry_base_delay: float | None = None,
+        enable_thinking: bool = False,
     ):
         from google import genai
         from google.genai import types
@@ -69,6 +72,7 @@ class GeminiProvider(LLMProvider):
         self._max_tokens_val = max_tokens
         self._context_window_val = context_window
         self._temperature = temperature
+        self._enable_thinking = enable_thinking
         self._retry_max = retry_max if retry_max is not None else settings.llm_retry_max
         self._retry_base_delay = (
             retry_base_delay if retry_base_delay is not None else settings.llm_retry_base_delay
@@ -190,6 +194,35 @@ class GeminiProvider(LLMProvider):
                 return str(reason)
         return None
 
+    def _apply_thinking_config(self, config, tokens: int) -> None:
+        """Add thinking config when enabled."""
+        if not self._enable_thinking:
+            return
+        try:
+            budget = max(1024, int(tokens * self._THINKING_BUDGET_PERCENT))
+            config.thinking_config = self._types.ThinkingConfig(
+                thinking_budget=budget,
+            )
+        except Exception:
+            logger.warning(
+                "ThinkingConfig not supported for %s, skipping", self._model,
+            )
+
+    @staticmethod
+    def _iter_chunk_parts(chunk):
+        """Yield (thought, text) tuples from a streaming chunk's parts."""
+        candidates = getattr(chunk, "candidates", None)
+        if not candidates:
+            return
+        content = getattr(candidates[0], "content", None)
+        if not content:
+            return
+        for part in getattr(content, "parts", []) or []:
+            is_thought = getattr(part, "thought", False)
+            text = getattr(part, "text", None) or ""
+            if text:
+                yield is_thought, text
+
     async def chat_raw(
         self,
         messages: list[dict],
@@ -205,9 +238,10 @@ class GeminiProvider(LLMProvider):
         contents = self._build_contents(filtered_messages)
 
         logger.info(
-            "Gemini chat_raw: model=%s messages=%d temp=%.1f max_tokens=%d streaming=%s",
+            "Gemini chat_raw: model=%s messages=%d temp=%.1f max_tokens=%d "
+            "streaming=%s thinking=%s",
             self._model, len(filtered_messages), temp, tokens,
-            bool(stream_callback),
+            bool(stream_callback or thinking_callback), self._enable_thinking,
         )
 
         types = self._types
@@ -218,8 +252,14 @@ class GeminiProvider(LLMProvider):
         if system_prompt:
             config.system_instruction = system_prompt
 
+        if self._enable_thinking and (stream_callback or thinking_callback):
+            self._apply_thinking_config(config, tokens)
+            return await self._chat_raw_streaming(
+                contents, config, stream_callback, thinking_callback,
+            )
+
         if stream_callback:
-            # Streaming path
+            # Streaming path (content only)
             async def _chat():
                 chunks: list[str] = []
                 final_response = None
@@ -254,6 +294,53 @@ class GeminiProvider(LLMProvider):
         logger.info("Gemini chat_raw response (%d chars): %s", len(text), text[:200])
         return text, metrics
 
+    async def _chat_raw_streaming(
+        self,
+        contents,
+        config,
+        stream_callback,
+        thinking_callback,
+    ) -> tuple[str, LLMMetrics]:
+        """Stream chat_raw with thinking support via part inspection."""
+        content_parts: list[str] = []
+        thinking_parts: list[str] = []
+
+        async def _chat():
+            final_response = None
+            async for chunk in self._client.aio.models.generate_content_stream(
+                model=self._model,
+                contents=contents,
+                config=config,
+            ):
+                final_response = chunk
+                for is_thought, text in self._iter_chunk_parts(chunk):
+                    if is_thought:
+                        thinking_parts.append(text)
+                        if thinking_callback:
+                            await thinking_callback(text)
+                    else:
+                        content_parts.append(text)
+                        if stream_callback:
+                            await stream_callback(text)
+            return final_response
+
+        final_response = await self._retry_with_backoff(
+            _chat, label="chat_raw(thinking)",
+        )
+
+        text = "".join(content_parts)
+        thinking = "\n".join(thinking_parts) or None
+        metrics = self._extract_metrics(
+            final_response, stop_reason=self._get_finish_reason(final_response),
+        )
+        metrics.thinking = thinking
+
+        logger.info(
+            "Gemini chat_raw response (%d chars, thinking=%d chars): %s",
+            len(text), len(thinking or ""), text[:200],
+        )
+        return text, metrics
+
     async def chat_structured(
         self,
         messages: list[dict],
@@ -269,7 +356,8 @@ class GeminiProvider(LLMProvider):
         contents = self._build_contents(filtered_messages)
 
         logger.info(
-            "Gemini chat_structured: schema=%s model=%s", schema.__name__, self._model,
+            "Gemini chat_structured: schema=%s model=%s thinking=%s",
+            schema.__name__, self._model, self._enable_thinking,
         )
 
         types = self._types
@@ -282,23 +370,34 @@ class GeminiProvider(LLMProvider):
         if system_prompt:
             config.system_instruction = system_prompt
 
+        use_thinking = self._enable_thinking and thinking_callback
+        if use_thinking:
+            self._apply_thinking_config(config, tokens)
+
         last_error = None
         for attempt in range(2):
-            async def _chat():
-                return await self._client.aio.models.generate_content(
-                    model=self._model,
-                    contents=contents,
-                    config=config,
+            if use_thinking:
+                raw, response = await self._chat_structured_streaming(
+                    contents, config, thinking_callback,
+                    label=f"structured({schema.__name__})",
                 )
+            else:
+                async def _chat():
+                    return await self._client.aio.models.generate_content(
+                        model=self._model,
+                        contents=contents,
+                        config=config,
+                    )
 
-            response = await self._retry_with_backoff(
-                _chat, label=f"structured({schema.__name__})",
-            )
+                response = await self._retry_with_backoff(
+                    _chat, label=f"structured({schema.__name__})",
+                )
+                raw = getattr(response, "text", None) or ""
+
             metrics = self._extract_metrics(
                 response, stop_reason=self._get_finish_reason(response),
             )
 
-            raw = getattr(response, "text", None) or ""
             # Strip markdown code fences if present
             cleaned = raw.strip()
             if cleaned.startswith("```"):
@@ -325,6 +424,34 @@ class GeminiProvider(LLMProvider):
                 )
                 raise
         raise last_error  # type: ignore[misc]
+
+    async def _chat_structured_streaming(
+        self,
+        contents,
+        config,
+        thinking_callback,
+        label: str = "structured(stream)",
+    ) -> tuple[str, object]:
+        """Stream structured output, forwarding thinking tokens via callback."""
+        content_parts: list[str] = []
+
+        async def _chat():
+            final_response = None
+            async for chunk in self._client.aio.models.generate_content_stream(
+                model=self._model,
+                contents=contents,
+                config=config,
+            ):
+                final_response = chunk
+                for is_thought, text in self._iter_chunk_parts(chunk):
+                    if is_thought:
+                        await thinking_callback(text)
+                    else:
+                        content_parts.append(text)
+            return final_response
+
+        response = await self._retry_with_backoff(_chat, label=label)
+        return "".join(content_parts), response
 
     async def chat_with_tools_single(
         self,

@@ -20,6 +20,9 @@ class OpenAIProvider(LLMProvider):
     (Together, Groq, vLLM, etc.) via ``base_url``.
     """
 
+    # Model prefixes known to expose reasoning_content in streaming
+    _REASONING_PREFIXES = ("o1", "o3", "o4")
+
     def __init__(
         self,
         api_key: str,
@@ -30,6 +33,7 @@ class OpenAIProvider(LLMProvider):
         base_url: str | None = None,
         retry_max: int | None = None,
         retry_base_delay: float | None = None,
+        enable_thinking: bool = False,
     ):
         import openai as openai_lib
         self._openai = openai_lib
@@ -42,10 +46,16 @@ class OpenAIProvider(LLMProvider):
         self._max_tokens_val = max_tokens
         self._context_window_val = context_window
         self._temperature = temperature
+        self._enable_thinking = enable_thinking
         self._retry_max = retry_max if retry_max is not None else settings.llm_retry_max
         self._retry_base_delay = (
             retry_base_delay if retry_base_delay is not None else settings.llm_retry_base_delay
         )
+
+    @property
+    def _is_reasoning_model(self) -> bool:
+        """Check if current model is a reasoning model that exposes reasoning_content."""
+        return any(self._model.startswith(p) for p in self._REASONING_PREFIXES)
 
     @property
     def model_name(self) -> str:
@@ -112,13 +122,15 @@ class OpenAIProvider(LLMProvider):
         tokens = max_tokens if max_tokens is not None else self._max_tokens_val
 
         logger.info(
-            "OpenAI chat_raw: model=%s messages=%d temp=%.1f max_tokens=%d streaming=%s",
-            self._model, len(messages), temp, tokens, bool(stream_callback),
+            "OpenAI chat_raw: model=%s messages=%d temp=%.1f max_tokens=%d "
+            "streaming=%s thinking=%s",
+            self._model, len(messages), temp, tokens,
+            bool(stream_callback or thinking_callback), self._enable_thinking,
         )
 
-        if stream_callback:
+        if stream_callback or thinking_callback:
             return await self._chat_raw_streaming(
-                messages, temp, tokens, stream_callback,
+                messages, temp, tokens, stream_callback, thinking_callback,
             )
 
         async def _chat():
@@ -145,45 +157,70 @@ class OpenAIProvider(LLMProvider):
         temp: float,
         tokens: int,
         stream_callback,
+        thinking_callback,
     ) -> tuple[str, LLMMetrics]:
-        """Stream chat_raw response, forwarding content tokens via callback."""
+        """Stream chat_raw response, forwarding content and reasoning tokens."""
+        use_reasoning = (
+            self._enable_thinking
+            and self._is_reasoning_model
+            and thinking_callback
+        )
+
+        create_kwargs: dict = {
+            "model": self._model,
+            "messages": messages,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if use_reasoning:
+            # Reasoning models reject temperature and use max_completion_tokens
+            create_kwargs["max_completion_tokens"] = tokens
+        else:
+            create_kwargs["temperature"] = temp
+            create_kwargs["max_tokens"] = tokens
+
         async def _start_stream():
-            return await self._client.chat.completions.create(
-                model=self._model,
-                messages=messages,
-                temperature=temp,
-                max_tokens=tokens,
-                stream=True,
-                stream_options={"include_usage": True},
-            )
+            return await self._client.chat.completions.create(**create_kwargs)
 
         stream = await self._retry_with_backoff(
             _start_stream, label="chat_raw(stream)",
         )
 
         content_parts: list[str] = []
+        thinking_parts: list[str] = []
         stop_reason: str | None = None
         usage = None
 
         async for chunk in stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                token = chunk.choices[0].delta.content
-                content_parts.append(token)
-                await stream_callback(token)
-            if chunk.choices and chunk.choices[0].finish_reason:
-                stop_reason = chunk.choices[0].finish_reason
+            if chunk.choices:
+                delta = chunk.choices[0].delta
+                # Content tokens
+                if delta.content:
+                    content_parts.append(delta.content)
+                    if stream_callback:
+                        await stream_callback(delta.content)
+                # Reasoning tokens (o1/o3/o4 models)
+                reasoning = getattr(delta, "reasoning_content", None)
+                if reasoning and thinking_callback:
+                    thinking_parts.append(reasoning)
+                    await thinking_callback(reasoning)
+                if chunk.choices[0].finish_reason:
+                    stop_reason = chunk.choices[0].finish_reason
             if hasattr(chunk, "usage") and chunk.usage:
                 usage = chunk.usage
 
         text = "".join(content_parts)
+        thinking = "".join(thinking_parts) or None
         metrics = LLMMetrics(
             prompt_tokens=usage.prompt_tokens if usage else 0,
             completion_tokens=usage.completion_tokens if usage else 0,
             stop_reason=stop_reason,
         )
+        metrics.thinking = thinking
 
         logger.info(
-            "OpenAI chat_raw response (%d chars, streamed): %s", len(text), text[:200],
+            "OpenAI chat_raw response (%d chars, thinking=%d chars): %s",
+            len(text), len(thinking or ""), text[:200],
         )
         return text, metrics
 
@@ -199,40 +236,55 @@ class OpenAIProvider(LLMProvider):
         temp = temperature if temperature is not None else self._temperature
         tokens = max_tokens if max_tokens is not None else self._max_tokens_val
 
+        use_reasoning = (
+            self._enable_thinking
+            and self._is_reasoning_model
+            and thinking_callback
+        )
+
         logger.info(
-            "OpenAI chat_structured: schema=%s model=%s", schema.__name__, self._model,
+            "OpenAI chat_structured: schema=%s model=%s thinking=%s",
+            schema.__name__, self._model, use_reasoning,
         )
 
         json_schema = schema.model_json_schema()
         # Remove unsupported keys that Pydantic adds
         json_schema.pop("title", None)
 
-        async def _chat():
-            return await self._client.chat.completions.create(
-                model=self._model,
-                messages=messages,
-                temperature=temp,
-                max_tokens=tokens,
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": schema.__name__,
-                        "schema": json_schema,
-                        "strict": True,
-                    },
-                },
-            )
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": schema.__name__,
+                "schema": json_schema,
+                "strict": True,
+            },
+        }
 
         last_error = None
         for attempt in range(2):
-            response = await self._retry_with_backoff(
-                _chat, label=f"structured({schema.__name__})",
-            )
-            choice = response.choices[0]
-            raw = choice.message.content or ""
-            metrics = self._extract_metrics(
-                response, stop_reason=choice.finish_reason,
-            )
+            if use_reasoning:
+                raw, metrics = await self._chat_structured_streaming(
+                    messages, tokens, response_format, thinking_callback,
+                    label=f"structured({schema.__name__})",
+                )
+            else:
+                async def _chat():
+                    return await self._client.chat.completions.create(
+                        model=self._model,
+                        messages=messages,
+                        temperature=temp,
+                        max_tokens=tokens,
+                        response_format=response_format,
+                    )
+
+                response = await self._retry_with_backoff(
+                    _chat, label=f"structured({schema.__name__})",
+                )
+                choice = response.choices[0]
+                raw = choice.message.content or ""
+                metrics = self._extract_metrics(
+                    response, stop_reason=choice.finish_reason,
+                )
             try:
                 return schema.model_validate_json(raw), metrics
             except ValidationError as exc:
@@ -249,6 +301,52 @@ class OpenAIProvider(LLMProvider):
                 )
                 raise
         raise last_error  # type: ignore[misc]
+
+    async def _chat_structured_streaming(
+        self,
+        messages: list[dict],
+        tokens: int,
+        response_format: dict,
+        thinking_callback,
+        label: str = "structured(stream)",
+    ) -> tuple[str, LLMMetrics]:
+        """Stream structured output for reasoning models, forwarding reasoning tokens."""
+        async def _start_stream():
+            return await self._client.chat.completions.create(
+                model=self._model,
+                messages=messages,
+                max_completion_tokens=tokens,
+                response_format=response_format,
+                stream=True,
+                stream_options={"include_usage": True},
+            )
+
+        stream = await self._retry_with_backoff(_start_stream, label=label)
+
+        content_parts: list[str] = []
+        stop_reason: str | None = None
+        usage = None
+
+        async for chunk in stream:
+            if chunk.choices:
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    content_parts.append(delta.content)
+                reasoning = getattr(delta, "reasoning_content", None)
+                if reasoning:
+                    await thinking_callback(reasoning)
+                if chunk.choices[0].finish_reason:
+                    stop_reason = chunk.choices[0].finish_reason
+            if hasattr(chunk, "usage") and chunk.usage:
+                usage = chunk.usage
+
+        raw = "".join(content_parts)
+        metrics = LLMMetrics(
+            prompt_tokens=usage.prompt_tokens if usage else 0,
+            completion_tokens=usage.completion_tokens if usage else 0,
+            stop_reason=stop_reason,
+        )
+        return raw, metrics
 
     async def chat_with_tools_single(
         self,
