@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import re
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
@@ -12,7 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from lean_ai.config import settings
 from lean_ai.llm.refiner import RefinerResult
-from lean_ai.llm.tool_definitions import CHAT_TOOLS
+from lean_ai.llm.tool_definitions import build_chat_tools
 from lean_ai.routers.context_helpers import (
     build_chat_system_prompt,
     extract_urls,
@@ -31,51 +30,6 @@ chat_router = APIRouter()
 
 # Max tool-calling turns for chat exploration
 _CHAT_MAX_TURNS = 20
-
-# Words that carry no search value — conversational filler + English stop words
-_STOP_WORDS = frozenset(
-    "a about all also am an and any are as at be been being but by can could "
-    "did do does don doing doesn each for from get going got had has have he "
-    "her here him his how i if in into is it its just know let like make me "
-    "mine my no nor not of on or our out really set she should so some stuff "
-    "than that the their them then there these they thing things this those "
-    "to too up us use using very want was we well were what when where which "
-    "who will with would yeah yes you your".split()
-)
-
-# Short conversational replies that never need a web search
-_SKIP_PREFIXES = (
-    "that sounds good", "sounds good", "looks good", "that works",
-    "yes", "no", "ok", "okay", "sure", "thanks", "thank you",
-    "perfect", "great", "go ahead", "proceed", "let's do",
-    "i don't have", "i don't know", "i'm not sure", "whatever",
-)
-
-
-def _extract_search_query(message: str | None) -> str | None:
-    """Extract a search query from a chat message.
-
-    Returns a cleaned keyword string suitable for web search, or ``None``
-    if the message is a conversational follow-up / too short to search.
-    """
-    if not message or len(message) < 15:
-        return None
-
-    lower = message.lower().strip()
-
-    # Skip pure conversational follow-ups
-    if any(lower.startswith(p) for p in _SKIP_PREFIXES):
-        return None
-
-    # Tokenize — keep alphanumeric words 2+ chars, preserving hyphens
-    # inside words (e.g. "vue-router" stays as one token)
-    tokens = re.findall(r"\b[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\b", message)
-    keywords = [t for t in tokens if t.lower() not in _STOP_WORDS and len(t) > 1]
-
-    if len(keywords) < 2:
-        return None
-
-    return " ".join(keywords[:8])
 
 
 def _get_chat_client():
@@ -98,10 +52,21 @@ def _get_chat_max_tokens() -> int:
 # ── Read-only tool executor for chat ────────────────────────────────
 
 
-def _make_chat_tool_executor(repo_root: str):
-    """Create a read-only tool executor for chat exploration."""
+def _make_chat_tool_executor(repo_root: str | None = None):
+    """Create a tool executor for chat exploration.
+
+    Workspace tools (read_file, grep_files, etc.) require *repo_root*.
+    Search tools (search_internet, fetch_url) work without a workspace.
+    """
 
     async def _executor(name: str, arguments: dict) -> str:
+        # ── Workspace tools (need repo_root) ──
+        if name in (
+            "read_file", "grep_files", "list_directory", "directory_tree",
+            "save_note", "list_project_todos",
+        ) and not repo_root:
+            return f"ERROR: {name} requires an open workspace."
+
         from lean_ai.tools.file_ops import grep_files, read_file
 
         if name == "read_file":
@@ -185,6 +150,26 @@ def _make_chat_tool_executor(repo_root: str):
                 return "\n".join(lines)
             finally:
                 await db.close()
+
+        # ── Search tools (no workspace needed) ──
+        elif name == "search_internet":
+            from lean_ai.tools.internet import search_internet
+
+            result = await search_internet(
+                query=arguments.get("query", ""),
+                llm_client=llm_client,
+            )
+            return result.output if result.success else f"ERROR: {result.error}"
+        elif name == "fetch_url":
+            from lean_ai.tools.internet import fetch_url
+
+            result = await fetch_url(
+                url=arguments.get("url", ""),
+                repo_root=repo_root or "",
+                llm_client=llm_client,
+            )
+            return result.output if result.success else f"ERROR: {result.error}"
+
         return f"Unknown tool: {name}"
 
     return _executor
@@ -209,7 +194,6 @@ async def _build_chat_messages(
     active_file_content: str | None = None
     search_results: list[dict] = []
     project_context: str | None = None
-    web_search_text: str | None = None
     fetched_pages: list[dict] = []
     refiner_result: RefinerResult | None = None
 
@@ -248,25 +232,6 @@ async def _build_chat_messages(
                 )
         except Exception as e:
             logger.warning("Chat workspace context failed (non-fatal): %s", e)
-
-    async def _do_web_search():
-        nonlocal web_search_text
-        if request.skip_web_search:
-            return
-        # Skip web search when the user provided explicit URLs to fetch
-        if extract_urls(request.message):
-            return
-        query = _extract_search_query(request.message)
-        if not query:
-            return
-        try:
-            result = await internet.search_internet(
-                query, llm_client=llm_client,
-            )
-            if result.success and result.output:
-                web_search_text = result.output
-        except Exception as e:
-            logger.debug("Chat web search failed (non-fatal): %s", e)
 
     async def _fetch_urls():
         nonlocal fetched_pages
@@ -316,7 +281,6 @@ async def _build_chat_messages(
 
     await asyncio.gather(
         _gather_workspace_context(),
-        _do_web_search(),
         _fetch_urls(),
         _refine_message(),
         _describe_attachments(),
@@ -337,7 +301,6 @@ async def _build_chat_messages(
         search_results=search_results,
         project_context=project_context,
         fetched_pages=fetched_pages or None,
-        web_search_results=web_search_text,
         knowledge_context=knowledge_ctx,
         user_name=request.user_name,
     )
@@ -352,9 +315,9 @@ async def _build_chat_messages(
     messages.append({"role": "user", "content": user_message})
 
     logger.info(
-        "Chat: history=%d, files=%d, search=%d, project_ctx=%s, web=%s, refined=%s, images=%d",
+        "Chat: history=%d, files=%d, search=%d, project_ctx=%s, refined=%s, images=%d",
         len(request.history), len(file_tree), len(search_results),
-        bool(project_context), bool(web_search_text),
+        bool(project_context),
         bool(refiner_result and refiner_result.was_refined),
         len(request.attachments),
     )
@@ -383,21 +346,22 @@ async def chat(request: ChatRequest):
             else None
         )
 
-        if repo_root:
-            executor = _make_chat_tool_executor(repo_root)
-            _, reply = await _chat_client.chat_with_tools(
-                messages=messages,
-                tools=CHAT_TOOLS,
-                tool_executor_fn=executor,
-                max_turns=_CHAT_MAX_TURNS,
-                max_tokens=_get_chat_max_tokens(),
-                text_only_exit_count=1,
-            )
-        else:
-            reply = await _chat_client.chat_raw(
-                messages,
-                max_tokens=_get_chat_max_tokens(),
-            )
+        executor = _make_chat_tool_executor(repo_root)
+        tools = build_chat_tools()
+        if not repo_root:
+            # Without a workspace, only expose search tools
+            tools = [
+                t for t in tools
+                if t["function"]["name"] in ("search_internet", "fetch_url")
+            ]
+        _, reply = await _chat_client.chat_with_tools(
+            messages=messages,
+            tools=tools,
+            tool_executor_fn=executor,
+            max_turns=_CHAT_MAX_TURNS,
+            max_tokens=_get_chat_max_tokens(),
+            text_only_exit_count=1,
+        )
 
         metrics = _chat_client.last_chat_metrics or {}
         return ChatResponse(
@@ -419,38 +383,11 @@ async def chat(request: ChatRequest):
 # ── Streaming helpers ───────────────────────────────────────────────
 
 
-async def _stream_chat_simple(messages: list[dict]) -> AsyncGenerator[str, None]:
-    """Stream LLM response without tools (no workspace available)."""
-    thinking_queue: asyncio.Queue[str | None] = asyncio.Queue()
-
-    async def _on_thinking(token: str) -> None:
-        await thinking_queue.put(token)
-
-    async def _drain_thinking():
-        while not thinking_queue.empty():
-            t = thinking_queue.get_nowait()
-            if t is not None:
-                yield f"data: {json.dumps({'type': 'thinking', 'content': t})}\n\n"
-
-    async for token in _get_chat_client().chat_stream(
-        messages, max_tokens=_get_chat_max_tokens(),
-        thinking_callback=_on_thinking,
-    ):
-        async for sse in _drain_thinking():
-            yield sse
-        yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
-
-    async for sse in _drain_thinking():
-        yield sse
-
-    yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
-
 async def _stream_chat_with_tools(
     messages: list[dict],
-    repo_root: str,
+    repo_root: str | None = None,
 ) -> AsyncGenerator[str, None]:
-    """Stream LLM response with read-only tool exploration.
+    """Stream LLM response with tool exploration.
 
     Runs ``chat_with_tools`` in a background task. Content and thinking
     tokens are streamed via callbacks that push to an asyncio queue.
@@ -474,6 +411,10 @@ async def _stream_chat_with_tools(
             desc = f"Listing {args.get('path', '') or '.'}"
         elif name == "directory_tree":
             desc = f"Tree of {args.get('path', '') or '.'}"
+        elif name == "search_internet":
+            desc = f"Searching: {args.get('query', '...')}"
+        elif name == "fetch_url":
+            desc = f"Fetching {args.get('url', '...')}"
         await queue.put({"type": "tool_call", "name": name, "description": desc})
 
     async def _on_tool_result(name: str, result: str) -> None:
@@ -481,12 +422,18 @@ async def _stream_chat_with_tools(
         await queue.put({"type": "tool_result", "name": name, "success": success})
 
     executor = _make_chat_tool_executor(repo_root)
+    tools = build_chat_tools()
+    if not repo_root:
+        tools = [
+            t for t in tools
+            if t["function"]["name"] in ("search_internet", "fetch_url")
+        ]
 
     async def _run():
         try:
             await _get_chat_client().chat_with_tools(
                 messages=messages,
-                tools=CHAT_TOOLS,
+                tools=tools,
                 tool_executor_fn=executor,
                 max_turns=_CHAT_MAX_TURNS,
                 max_tokens=_get_chat_max_tokens(),
@@ -560,12 +507,8 @@ async def chat_stream_endpoint(request: ChatRequest):
                 else None
             )
 
-            if repo_root:
-                async for sse_event in _stream_chat_with_tools(messages, repo_root):
-                    yield sse_event
-            else:
-                async for sse_event in _stream_chat_simple(messages):
-                    yield sse_event
+            async for sse_event in _stream_chat_with_tools(messages, repo_root):
+                yield sse_event
 
         except Exception as e:
             logger.exception("Chat stream failed")

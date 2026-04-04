@@ -520,6 +520,7 @@ CHAT_TOOLS: list[dict] = [
     for tool in IMPLEMENTATION_TOOLS
     if tool["function"]["name"] in (
         "read_file", "list_directory", "directory_tree", "grep_files",
+        "search_internet", "fetch_url",
     )
 ] + [
     {
@@ -566,6 +567,11 @@ CHAT_TOOLS: list[dict] = [
         },
     },
 ]
+
+def build_chat_tools() -> list[dict]:
+    """CHAT_TOOLS + wiki tools when configured."""
+    return CHAT_TOOLS + _maybe_wiki_tools()
+
 
 # Read-only + diagnostic tools for fix-mode investigation phase
 INVESTIGATION_TOOLS: list[dict] = [

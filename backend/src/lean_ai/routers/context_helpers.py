@@ -248,8 +248,8 @@ def build_chat_system_prompt(
         "directory_tree) to explore further when you need more detail.",
         "- You DO have access to their code. DO NOT say 'I cannot access "
         "your files'.",
-        "- The system AUTOMATICALLY searches the web and fetches URLs on "
-        "your behalf.",
+        "- You have search_internet and fetch_url tools to look up documentation, "
+        "error messages, or any external information when needed.",
         "- When answering, reference the actual code provided below.",
     ])
 
