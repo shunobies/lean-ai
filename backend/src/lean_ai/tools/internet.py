@@ -13,32 +13,21 @@ for long content. No regex injection detection — trust the prompt setup.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import random
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
-from bs4 import BeautifulSoup
 
 from lean_ai.config import settings
 from lean_ai.tools.executor import ToolResult
+from lean_ai.tools.html_utils import save_and_paginate, strip_html
 
 if TYPE_CHECKING:
     from lean_ai.llm.client import LLMClient
 
 logger = logging.getLogger(__name__)
-
-
-def _strip_html(raw: str) -> str:
-    """Remove HTML tags, extract text content."""
-    soup = BeautifulSoup(raw, "html.parser")
-    # Remove script and style elements
-    for tag in soup(["script", "style", "noscript"]):
-        tag.decompose()
-    return soup.get_text(separator="\n", strip=True)
 
 
 async def _summarize_if_long(
@@ -67,41 +56,6 @@ async def _summarize_if_long(
     except Exception as e:
         logger.warning("LLM summarization failed, returning truncated: %s", e)
         return text[:threshold] + "\n\n[Content truncated]"
-
-
-def _save_and_paginate(
-    text: str, url: str, repo_root: str, max_lines: int = 500,
-) -> str:
-    """Save long content to a file and return the first page with a continuation hint.
-
-    Short content (<= max_lines) is returned as-is.  Long content is
-    written to ``.lean_ai/fetched/{hash}.txt`` and only the first
-    *max_lines* lines are returned, with an instruction telling the
-    LLM how to read the rest via ``read_file``.
-    """
-    lines = text.splitlines()
-    total = len(lines)
-
-    if total <= max_lines:
-        return text
-
-    url_hash = hashlib.sha256(url.encode()).hexdigest()[:12]
-    fetched_dir = Path(repo_root) / ".lean_ai" / "fetched"
-    fetched_dir.mkdir(parents=True, exist_ok=True)
-    rel_path = f".lean_ai/fetched/{url_hash}.txt"
-    file_path = Path(repo_root) / rel_path
-    file_path.write_text(text, encoding="utf-8")
-
-    preview = "\n".join(lines[:max_lines])
-    next_start = max_lines + 1
-    next_end = min(max_lines + 500, total)
-    return (
-        f"{preview}\n\n"
-        f"[Showing lines 1-{max_lines} of {total}. "
-        f"Remaining content saved to {rel_path}.\n"
-        f"To continue reading, call: "
-        f'read_file path="{rel_path}" start_line={next_start} end_line={next_end}]'
-    )
 
 
 # ── Search providers ──
@@ -254,7 +208,7 @@ async def search_internet(
     # delay is measured from end-to-start, not start-to-start.
     _last_search_time = time.monotonic()
 
-    sanitized = _strip_html(raw_content)
+    sanitized = strip_html(raw_content)
 
     if llm_client is not None:
         sanitized = await _summarize_if_long(sanitized, llm_client)
@@ -304,11 +258,11 @@ async def fetch_url(
         logger.warning("Fetch URL: failed: %s — %s", url, e)
         return ToolResult(success=False, error=f"Failed to fetch: {e}")
 
-    sanitized = _strip_html(raw_content)
+    sanitized = strip_html(raw_content)
 
     # Save long content to file for paginated reading via read_file
     if repo_root:
-        sanitized = _save_and_paginate(sanitized, url, repo_root)
+        sanitized = save_and_paginate(sanitized, url, repo_root)
 
     logger.info("Fetch URL: %s -> %d chars", url, len(sanitized))
     return ToolResult(success=True, output=sanitized)

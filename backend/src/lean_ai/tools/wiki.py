@@ -13,15 +13,13 @@ Uses the same HTML stripping and pagination patterns as internet.py.
 
 from __future__ import annotations
 
-import hashlib
 import logging
-from pathlib import Path
 
 import httpx
-from bs4 import BeautifulSoup
 
 from lean_ai.config import settings
 from lean_ai.tools.executor import ToolResult
+from lean_ai.tools.html_utils import save_and_paginate, strip_html
 
 logger = logging.getLogger(__name__)
 
@@ -103,47 +101,6 @@ async def _ensure_authenticated() -> None:
         _authenticated = True  # Don't retry on every request
 
 
-def _strip_html(raw: str) -> str:
-    """Remove HTML tags, extract text content."""
-    soup = BeautifulSoup(raw, "html.parser")
-    for tag in soup(["script", "style", "noscript"]):
-        tag.decompose()
-    return soup.get_text(separator="\n", strip=True)
-
-
-def _save_and_paginate(
-    text: str, identifier: str, repo_root: str, max_lines: int = 500,
-) -> str:
-    """Save long content to a file and return the first page.
-
-    Short content (<= max_lines) is returned as-is.  Long content is
-    written to ``.lean_ai/fetched/{hash}.txt`` and only the first
-    *max_lines* lines are returned with a continuation hint.
-    """
-    lines = text.splitlines()
-    total = len(lines)
-
-    if total <= max_lines:
-        return text
-
-    id_hash = hashlib.sha256(identifier.encode()).hexdigest()[:12]
-    fetched_dir = Path(repo_root) / ".lean_ai" / "fetched"
-    fetched_dir.mkdir(parents=True, exist_ok=True)
-    rel_path = f".lean_ai/fetched/{id_hash}.txt"
-    file_path = Path(repo_root) / rel_path
-    file_path.write_text(text, encoding="utf-8")
-
-    preview = "\n".join(lines[:max_lines])
-    next_start = max_lines + 1
-    next_end = min(max_lines + 500, total)
-    return (
-        f"{preview}\n\n"
-        f"[Content saved to {rel_path} — {total} lines total]\n"
-        f"To continue reading, call: read_file(path=\"{rel_path}\", "
-        f"start_line={next_start}, end_line={next_end})"
-    )
-
-
 async def search_wiki(query: str, limit: int = 5) -> ToolResult:
     """Search MediaWiki for pages matching the query.
 
@@ -189,7 +146,7 @@ async def search_wiki(query: str, limit: int = 5) -> ToolResult:
     lines: list[str] = []
     for item in results:
         title = item.get("title", "")
-        snippet = _strip_html(item.get("snippet", ""))
+        snippet = strip_html(item.get("snippet", ""))
         word_count = item.get("wordcount", 0)
         page_url = f"{base_url}/wiki/{title.replace(' ', '_')}"
         lines.append(
@@ -246,7 +203,7 @@ async def fetch_wiki_page(title: str, repo_root: str) -> ToolResult:
     if not html:
         return ToolResult(success=False, error=f"Wiki page '{title}' has no content")
 
-    text = _strip_html(html)
+    text = strip_html(html)
 
     # Add page header
     base_url = settings.wiki_url.rstrip("/")
@@ -255,7 +212,7 @@ async def fetch_wiki_page(title: str, repo_root: str) -> ToolResult:
     full_text = header + text
 
     # Paginate long pages
-    output = _save_and_paginate(full_text, f"wiki:{title}", repo_root)
+    output = save_and_paginate(full_text, f"wiki:{title}", repo_root)
     return ToolResult(success=True, output=output)
 
 

@@ -413,19 +413,42 @@ class Settings(BaseSettings):
             self.implementation_max_tokens = ctx // 4
         return self
 
+    # ── Internal helpers for DRY config resolution ──
+
+    def _ollama_param_with_fallback(self, role: str, param: str):
+        """Return ``ollama_{role}_{param}`` if set, else ``ollama_{param}``."""
+        val = getattr(self, f"ollama_{role}_{param}", None)
+        return val if val is not None else getattr(self, f"ollama_{param}")
+
+    def _provider_context_window(self, provider: str) -> int:
+        """Return context window for the named provider."""
+        mapping = {
+            "openai": self.openai_context_window,
+            "anthropic": self.anthropic_context_window,
+            "gemini": self.gemini_context_window,
+            "serve": self.serve_context_window,
+        }
+        return mapping.get(provider, self.ollama_context_window)
+
+    def _provider_max_tokens(self, provider: str, ollama_fallback: int | None = None) -> int:
+        """Return max tokens for the named provider (derived from context window if unset)."""
+        mapping = {
+            "openai": self.openai_max_tokens or (self.openai_context_window // 4),
+            "anthropic": self.anthropic_max_tokens or (self.anthropic_context_window // 4),
+            "gemini": self.gemini_max_tokens or (self.gemini_context_window // 4),
+            "serve": self.serve_max_tokens or (self.serve_context_window // 4),
+        }
+        return mapping.get(
+            provider,
+            (ollama_fallback or 0) or (self.ollama_context_window // 4),
+        )
+
+    # ── Public computed properties ──
+
     @property
     def _active_context_window(self) -> int:
         """Context window of the currently selected provider."""
-        provider = self.llm_provider.lower()
-        if provider == "openai":
-            return self.openai_context_window
-        if provider == "anthropic":
-            return self.anthropic_context_window
-        if provider == "gemini":
-            return self.gemini_context_window
-        if provider == "serve":
-            return self.serve_context_window
-        return self.ollama_context_window
+        return self._provider_context_window(self.llm_provider.lower())
 
     @property
     def effective_inline_url(self) -> str:
@@ -441,88 +464,59 @@ class Settings(BaseSettings):
 
     @property
     def effective_expert_temperature(self) -> float:
-        val = self.ollama_expert_temperature
-        return val if val is not None else self.ollama_temperature
+        return self._ollama_param_with_fallback("expert", "temperature")
 
     @property
     def effective_expert_top_p(self) -> float:
-        val = self.ollama_expert_top_p
-        return val if val is not None else self.ollama_top_p
+        return self._ollama_param_with_fallback("expert", "top_p")
 
     @property
     def effective_expert_top_k(self) -> int:
-        val = self.ollama_expert_top_k
-        return val if val is not None else self.ollama_top_k
+        return self._ollama_param_with_fallback("expert", "top_k")
 
     @property
     def effective_expert_repeat_penalty(self) -> float:
-        val = self.ollama_expert_repeat_penalty
-        return val if val is not None else self.ollama_repeat_penalty
+        return self._ollama_param_with_fallback("expert", "repeat_penalty")
 
     @property
     def effective_expert_context_window(self) -> int:
         """Context window for the expert model provider."""
         ep = (self.expert_llm_provider or "").lower()
-        if ep == "openai":
-            return self.openai_context_window
-        elif ep == "anthropic":
-            return self.anthropic_context_window
-        elif ep == "gemini":
-            return self.gemini_context_window
-        elif ep == "serve":
-            return self.serve_context_window
-        else:  # ollama (default / backwards-compat)
+        if not ep or ep == "ollama":
             return self.ollama_expert_context_window or self.ollama_context_window
+        return self._provider_context_window(ep)
 
     @property
     def effective_expert_max_tokens(self) -> int:
         """Max tokens for expert model — derived from the expert provider's settings."""
         ep = (self.expert_llm_provider or "").lower()
-        if ep == "openai":
-            return self.openai_max_tokens or (self.openai_context_window // 4)
-        elif ep == "anthropic":
-            return self.anthropic_max_tokens or (self.anthropic_context_window // 4)
-        elif ep == "gemini":
-            return self.gemini_max_tokens or (self.gemini_context_window // 4)
-        elif ep == "serve":
-            return self.serve_max_tokens or (self.serve_context_window // 4)
-        else:  # ollama (default / backwards-compat)
+        if not ep or ep == "ollama":
             return self.ollama_expert_max_tokens or (self.ollama_context_window // 4)
+        return self._provider_max_tokens(ep)
 
     @property
     def effective_request_temperature(self) -> float:
-        val = self.ollama_request_temperature
-        return val if val is not None else self.ollama_temperature
+        return self._ollama_param_with_fallback("request", "temperature")
 
     @property
     def effective_request_top_p(self) -> float:
-        val = self.ollama_request_top_p
-        return val if val is not None else self.ollama_top_p
+        return self._ollama_param_with_fallback("request", "top_p")
 
     @property
     def effective_request_top_k(self) -> int:
-        val = self.ollama_request_top_k
-        return val if val is not None else self.ollama_top_k
+        return self._ollama_param_with_fallback("request", "top_k")
 
     @property
     def effective_request_repeat_penalty(self) -> float:
-        val = self.ollama_request_repeat_penalty
-        return val if val is not None else self.ollama_repeat_penalty
+        return self._ollama_param_with_fallback("request", "repeat_penalty")
 
     @property
     def effective_request_max_tokens(self) -> int:
         """Max tokens for request model — derived from the request provider's settings."""
         rp = (self.request_llm_provider or "").lower()
-        if rp == "openai":
-            return self.openai_max_tokens or (self.openai_context_window // 4)
-        elif rp == "anthropic":
-            return self.anthropic_max_tokens or (self.anthropic_context_window // 4)
-        elif rp == "gemini":
-            return self.gemini_max_tokens or (self.gemini_context_window // 4)
-        elif rp == "serve":
-            return self.serve_max_tokens or (self.serve_context_window // 4)
-        else:  # ollama
+        if not rp or rp == "ollama":
             return self.ollama_request_max_tokens or (self.ollama_context_window // 4)
+        return self._provider_max_tokens(rp)
 
     @property
     def effective_refiner_url(self) -> str:

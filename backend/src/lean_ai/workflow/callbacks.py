@@ -1,0 +1,136 @@
+"""Shared workflow callback factories.
+
+All workflow modules (pipeline, fix_mode, validation, tdd) need the same
+set of progress-reporting callbacks for ``chat_with_tools``.  This module
+provides a single factory so the logic lives in one place.
+"""
+
+import asyncio
+import json
+import logging
+from collections.abc import Callable
+from typing import NamedTuple
+
+from fastapi import WebSocket
+
+from lean_ai.workflow.ws_handler import ws_send_nowait
+
+logger = logging.getLogger(__name__)
+
+
+def log_task_exception(task: asyncio.Task) -> None:
+    """Callback for fire-and-forget tasks — log unhandled exceptions."""
+    if not task.cancelled() and task.exception():
+        logger.warning("Background task failed: %s", task.exception())
+
+
+class WorkflowCallbacks(NamedTuple):
+    """Callback set returned by :func:`build_workflow_callbacks`."""
+
+    on_tool_call: Callable
+    on_tool_result: Callable
+    on_content: Callable
+    on_thinking: Callable | None
+    on_metrics: Callable | None
+
+
+def build_workflow_callbacks(
+    ws: WebSocket,
+    *,
+    conversation_logger: Callable | None = None,
+    include_thinking: bool = True,
+    include_metrics: bool = True,
+    description_prefix: str = "",
+    content_prefix: str = "",
+    streaming: bool = False,
+) -> WorkflowCallbacks:
+    """Build the standard set of WebSocket progress callbacks.
+
+    Parameters
+    ----------
+    ws:
+        WebSocket for sending progress messages.
+    conversation_logger:
+        Optional async callable for persisting conversation events.
+    include_thinking:
+        When *False*, ``on_thinking`` is returned as *None*.
+    include_metrics:
+        When *False*, ``on_metrics`` is returned as *None*.
+    description_prefix:
+        Prefix prepended to tool call descriptions (e.g. ``"[TDD dispute] "``).
+    content_prefix:
+        Prefix prepended to assistant content (e.g. ``"[TDD dispute] "``).
+    streaming:
+        When *True*, assistant/thinking content payloads include
+        ``"streaming": True`` (used for planning-phase token streaming).
+    """
+
+    async def on_tool_call(name: str, args: dict) -> None:
+        desc = f"{name} {args.get('path', args.get('command', ''))}"
+        ws_send_nowait(ws, "tool_progress", {
+            "tool": name,
+            "status": "running",
+            "description": f"{description_prefix}{desc}",
+        })
+        if conversation_logger:
+            t = asyncio.create_task(conversation_logger(
+                "tool_call", desc,
+                tool_name=name, tool_args=json.dumps(args),
+            ))
+            t.add_done_callback(log_task_exception)
+
+    async def on_tool_result(name: str, result: str) -> None:
+        is_error = result.startswith("ERROR:")
+        ws_send_nowait(ws, "tool_progress", {
+            "tool": name,
+            "status": "error" if is_error else "complete",
+            "output": result[:500],
+        })
+        if conversation_logger:
+            t = asyncio.create_task(conversation_logger(
+                "tool_result", result[:2000],
+                tool_name=name,
+            ))
+            t.add_done_callback(log_task_exception)
+
+    async def on_content(text: str) -> None:
+        payload: dict = {"content": f"{content_prefix}{text}"}
+        if streaming:
+            payload["streaming"] = True
+        ws_send_nowait(ws, "assistant_content", payload)
+        if conversation_logger:
+            t = asyncio.create_task(conversation_logger("assistant", text))
+            t.add_done_callback(log_task_exception)
+
+    on_thinking: Callable | None = None
+    if include_thinking:
+        async def _on_thinking(text: str) -> None:
+            payload: dict = {"content": text}
+            if streaming:
+                payload["streaming"] = True
+            ws_send_nowait(ws, "thinking_content", payload)
+
+        on_thinking = _on_thinking
+
+    on_metrics: Callable | None = None
+    if include_metrics:
+        async def _on_metrics(prompt_tokens: int, context_window: int) -> None:
+            context_pct = (
+                round((prompt_tokens / context_window) * 100)
+                if context_window else 0
+            )
+            ws_send_nowait(ws, "metrics_update", {
+                "context_percent": context_pct,
+                "prompt_tokens": prompt_tokens,
+                "context_window": context_window,
+            })
+
+        on_metrics = _on_metrics
+
+    return WorkflowCallbacks(
+        on_tool_call=on_tool_call,
+        on_tool_result=on_tool_result,
+        on_content=on_content,
+        on_thinking=on_thinking,
+        on_metrics=on_metrics,
+    )

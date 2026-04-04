@@ -1,37 +1,16 @@
 """Git operations via async subprocess."""
 
-import asyncio
 import logging
 
-from lean_ai.config import settings
 from lean_ai.tools.executor import ToolResult
+from lean_ai.tools.subprocess_utils import run_subprocess
 
 logger = logging.getLogger(__name__)
 
 
 async def _run_git(args: list[str], cwd: str) -> ToolResult:
     """Run a git command and capture output."""
-    cmd = ["git"] + args
-    try:
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(), timeout=settings.tool_timeout_seconds,
-        )
-        return ToolResult(
-            success=process.returncode == 0,
-            output=stdout.decode("utf-8", errors="replace"),
-            error=stderr.decode("utf-8", errors="replace") if process.returncode != 0 else None,
-            exit_code=process.returncode,
-        )
-    except asyncio.TimeoutError:
-        return ToolResult(success=False, error="Git command timed out", exit_code=-1)
-    except Exception as e:
-        return ToolResult(success=False, error=str(e))
+    return await run_subprocess(["git"] + args, cwd, merge_stderr=False)
 
 
 async def git_commit(

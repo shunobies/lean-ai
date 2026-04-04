@@ -5,11 +5,15 @@ Each provider implements core chat methods. Provider-specific differences
 are encapsulated inside each implementation.
 """
 
+import asyncio
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 # Type alias for streaming callbacks used by chat_raw / chat_structured.
 StreamCallback = Callable[[str], Awaitable[None]]
@@ -46,6 +50,69 @@ class LLMMetrics:
     tokens_per_second: float | None = None
     stop_reason: str | None = None
     thinking: str | None = None
+
+    @classmethod
+    def from_usage(
+        cls,
+        prompt: int = 0,
+        completion: int = 0,
+        *,
+        stop_reason: str | None = None,
+        tps: float | None = None,
+    ) -> "LLMMetrics":
+        """Construct from provider-extracted token counts."""
+        return cls(
+            prompt_tokens=prompt or 0,
+            completion_tokens=completion or 0,
+            tokens_per_second=tps,
+            stop_reason=stop_reason,
+        )
+
+
+async def retry_with_backoff(
+    coro_factory: Callable,
+    *,
+    retryable_exceptions: tuple[type[Exception], ...] = (),
+    is_retryable: Callable[[Exception], bool] | None = None,
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+    label: str = "LLM call",
+):
+    """Retry an async callable with exponential backoff.
+
+    Parameters
+    ----------
+    coro_factory:
+        Zero-arg async callable to retry.
+    retryable_exceptions:
+        Exception types that should trigger a retry.
+    is_retryable:
+        Optional predicate for exceptions not covered by
+        *retryable_exceptions* (e.g. checking status codes or
+        exception name substrings).
+    max_retries:
+        Maximum number of retry attempts (0 = no retries).
+    base_delay:
+        Base delay in seconds (doubled each attempt).
+    label:
+        Human-readable label for log messages.
+    """
+    for attempt in range(max_retries + 1):
+        try:
+            return await coro_factory()
+        except Exception as exc:
+            should_retry = (
+                isinstance(exc, retryable_exceptions)
+                or (is_retryable is not None and is_retryable(exc))
+            )
+            if not should_retry or attempt >= max_retries:
+                raise
+            delay = base_delay * (2 ** attempt)
+            logger.warning(
+                "%s failed (attempt %d/%d), retrying in %.1fs: %s",
+                label, attempt + 1, max_retries + 1, delay, exc,
+            )
+            await asyncio.sleep(delay)
 
 
 class LLMProvider(ABC):

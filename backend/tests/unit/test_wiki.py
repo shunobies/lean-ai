@@ -310,47 +310,47 @@ class TestAuthentication:
 
 class TestHtmlStripping:
     def test_strips_html_tags(self):
-        from lean_ai.tools.wiki import _strip_html
+        from lean_ai.tools.html_utils import strip_html
 
-        result = _strip_html("<p>Hello <b>world</b></p>")
+        result = strip_html("<p>Hello <b>world</b></p>")
         assert "Hello" in result
         assert "world" in result
         assert "<p>" not in result
         assert "<b>" not in result
 
     def test_removes_scripts(self):
-        from lean_ai.tools.wiki import _strip_html
+        from lean_ai.tools.html_utils import strip_html
 
-        result = _strip_html("<p>text</p><script>evil()</script>")
+        result = strip_html("<p>text</p><script>evil()</script>")
         assert "text" in result
         assert "evil" not in result
 
     def test_removes_style_tags(self):
-        from lean_ai.tools.wiki import _strip_html
+        from lean_ai.tools.html_utils import strip_html
 
-        result = _strip_html("<style>.x{color:red}</style><p>content</p>")
+        result = strip_html("<style>.x{color:red}</style><p>content</p>")
         assert "content" in result
         assert "color" not in result
 
 
 class TestPagination:
     def test_short_content_returned_as_is(self, tmp_path):
-        from lean_ai.tools.wiki import _save_and_paginate
+        from lean_ai.tools.html_utils import save_and_paginate
 
         text = "Short content\nOnly two lines"
-        result = _save_and_paginate(text, "wiki:Test", str(tmp_path))
+        result = save_and_paginate(text, "wiki:Test", str(tmp_path))
         assert result == text
 
     def test_long_content_paginated(self, tmp_path):
-        from lean_ai.tools.wiki import _save_and_paginate
+        from lean_ai.tools.html_utils import save_and_paginate
 
         lines = [f"Line {i}" for i in range(600)]
         text = "\n".join(lines)
-        result = _save_and_paginate(text, "wiki:LongPage", str(tmp_path), max_lines=100)
+        result = save_and_paginate(text, "wiki:LongPage", str(tmp_path), max_lines=100)
 
         assert "Line 0" in result
         assert "Line 99" in result
-        assert "Content saved to" in result
+        assert "content saved to" in result
         assert "read_file" in result
 
         # Verify file was written

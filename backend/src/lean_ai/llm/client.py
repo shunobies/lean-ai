@@ -8,7 +8,7 @@ import ollama as ollama_lib
 from pydantic import BaseModel, ValidationError
 
 from lean_ai.config import settings
-from lean_ai.llm.base import LLMMetrics, LLMProvider, ToolCallInfo
+from lean_ai.llm.base import LLMMetrics, LLMProvider, ToolCallInfo, retry_with_backoff
 
 logger = logging.getLogger(__name__)
 
@@ -159,48 +159,37 @@ class OllamaProvider(LLMProvider):
         try:
             eval_count = response.get("eval_count", 0) or 0
             eval_duration = response.get("eval_duration", 0) or 0
-            prompt_tokens = response.get("prompt_eval_count", 0) or 0
             tps = (
                 round(eval_count / (eval_duration / 1_000_000_000), 1)
                 if eval_count and eval_duration and eval_duration > 0
                 else None
             )
-            return LLMMetrics(
-                prompt_tokens=prompt_tokens,
-                completion_tokens=eval_count,
-                tokens_per_second=tps,
+            return LLMMetrics.from_usage(
+                response.get("prompt_eval_count", 0),
+                eval_count,
                 stop_reason=response.get("done_reason"),
+                tps=tps,
             )
         except Exception:
             return LLMMetrics()
 
     async def _retry_with_backoff(self, coro_factory, label: str = "LLM call"):
         """Retry an async callable with exponential backoff for transient errors."""
-        max_retries = settings.llm_retry_max
-        base_delay = settings.llm_retry_base_delay
+        def _is_retryable(exc: Exception) -> bool:
+            return (
+                isinstance(exc, ollama_lib.ResponseError)
+                and exc.status_code is not None
+                and exc.status_code >= 500
+            )
 
-        for attempt in range(max_retries + 1):
-            try:
-                return await coro_factory()
-            except _TRANSIENT_ERRORS as exc:
-                if attempt >= max_retries:
-                    raise
-                delay = base_delay * (2**attempt)
-                logger.warning(
-                    "%s failed (attempt %d/%d), retrying in %.1fs: %s",
-                    label, attempt + 1, max_retries + 1, delay, exc,
-                )
-                await asyncio.sleep(delay)
-            except ollama_lib.ResponseError as exc:
-                if exc.status_code and exc.status_code >= 500 and attempt < max_retries:
-                    delay = base_delay * (2**attempt)
-                    logger.warning(
-                        "%s server error %d (attempt %d/%d), retrying in %.1fs: %s",
-                        label, exc.status_code, attempt + 1, max_retries + 1, delay, exc,
-                    )
-                    await asyncio.sleep(delay)
-                else:
-                    raise
+        return await retry_with_backoff(
+            coro_factory,
+            retryable_exceptions=_TRANSIENT_ERRORS,
+            is_retryable=_is_retryable,
+            max_retries=settings.llm_retry_max,
+            base_delay=settings.llm_retry_base_delay,
+            label=label,
+        )
 
     async def chat_raw(
         self,

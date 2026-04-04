@@ -1,13 +1,12 @@
 """Google Gemini LLM provider — wraps the google-genai SDK."""
 
-import asyncio
 import logging
 from collections.abc import AsyncIterator
 
 from pydantic import BaseModel, ValidationError
 
 from lean_ai.config import settings
-from lean_ai.llm.base import LLMMetrics, LLMProvider, ToolCallInfo
+from lean_ai.llm.base import LLMMetrics, LLMProvider, ToolCallInfo, retry_with_backoff
 
 logger = logging.getLogger(__name__)
 
@@ -92,23 +91,21 @@ class GeminiProvider(LLMProvider):
 
     async def _retry_with_backoff(self, coro_factory, label: str = "Gemini call"):
         """Retry with exponential backoff for transient errors."""
-        for attempt in range(self._retry_max + 1):
-            try:
-                return await coro_factory()
-            except Exception as exc:
-                exc_name = type(exc).__name__
-                is_retryable = any(
-                    kw in exc_name.lower()
-                    for kw in ("unavailable", "resourceexhausted", "deadline", "internal")
-                ) or isinstance(exc, (ConnectionError, TimeoutError, OSError))
-                if not is_retryable or attempt >= self._retry_max:
-                    raise
-                delay = self._retry_base_delay * (2 ** attempt)
-                logger.warning(
-                    "%s failed (attempt %d/%d), retrying in %.1fs: %s",
-                    label, attempt + 1, self._retry_max + 1, delay, exc,
-                )
-                await asyncio.sleep(delay)
+        def _is_retryable(exc: Exception) -> bool:
+            exc_name = type(exc).__name__
+            return any(
+                kw in exc_name.lower()
+                for kw in ("unavailable", "resourceexhausted", "deadline", "internal")
+            )
+
+        return await retry_with_backoff(
+            coro_factory,
+            retryable_exceptions=(ConnectionError, TimeoutError, OSError),
+            is_retryable=_is_retryable,
+            max_retries=self._retry_max,
+            base_delay=self._retry_base_delay,
+            label=label,
+        )
 
     def _build_contents(self, messages: list[dict]) -> list:
         """Convert standard message dicts to Gemini Content format.
@@ -178,9 +175,9 @@ class GeminiProvider(LLMProvider):
         """Extract metrics from a Gemini response."""
         usage = getattr(response, "usage_metadata", None)
         if usage:
-            return LLMMetrics(
-                prompt_tokens=getattr(usage, "prompt_token_count", 0) or 0,
-                completion_tokens=getattr(usage, "candidates_token_count", 0) or 0,
+            return LLMMetrics.from_usage(
+                getattr(usage, "prompt_token_count", 0),
+                getattr(usage, "candidates_token_count", 0),
                 stop_reason=stop_reason,
             )
         return LLMMetrics(stop_reason=stop_reason)

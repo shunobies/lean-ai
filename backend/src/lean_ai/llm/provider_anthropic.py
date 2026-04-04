@@ -1,6 +1,5 @@
 """Anthropic LLM provider — wraps the Anthropic Python SDK."""
 
-import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -8,7 +7,7 @@ from collections.abc import AsyncIterator
 from pydantic import BaseModel, ValidationError
 
 from lean_ai.config import settings
-from lean_ai.llm.base import LLMMetrics, LLMProvider, ToolCallInfo
+from lean_ai.llm.base import LLMMetrics, LLMProvider, ToolCallInfo, retry_with_backoff
 
 logger = logging.getLogger(__name__)
 
@@ -92,30 +91,17 @@ class AnthropicProvider(LLMProvider):
 
     async def _retry_with_backoff(self, coro_factory, label: str = "Anthropic call"):
         """Retry with exponential backoff for transient/rate-limit errors."""
-        for attempt in range(self._retry_max + 1):
-            try:
-                return await coro_factory()
-            except (
+        return await retry_with_backoff(
+            coro_factory,
+            retryable_exceptions=(
                 self._anthropic.APIConnectionError,
                 self._anthropic.InternalServerError,
-            ) as exc:
-                if attempt >= self._retry_max:
-                    raise
-                delay = self._retry_base_delay * (2**attempt)
-                logger.warning(
-                    "%s failed (attempt %d/%d), retrying in %.1fs: %s",
-                    label, attempt + 1, self._retry_max + 1, delay, exc,
-                )
-                await asyncio.sleep(delay)
-            except self._anthropic.RateLimitError as exc:
-                if attempt >= self._retry_max:
-                    raise
-                delay = self._retry_base_delay * (2**attempt)
-                logger.warning(
-                    "%s rate limited (attempt %d/%d), retrying in %.1fs: %s",
-                    label, attempt + 1, self._retry_max + 1, delay, exc,
-                )
-                await asyncio.sleep(delay)
+                self._anthropic.RateLimitError,
+            ),
+            max_retries=self._retry_max,
+            base_delay=self._retry_base_delay,
+            label=label,
+        )
 
     def _extract_metrics(
         self, response, *, stop_reason: str | None = None,
@@ -123,9 +109,9 @@ class AnthropicProvider(LLMProvider):
         """Extract metrics from an Anthropic response."""
         usage = getattr(response, "usage", None)
         if usage:
-            return LLMMetrics(
-                prompt_tokens=getattr(usage, "input_tokens", 0) or 0,
-                completion_tokens=getattr(usage, "output_tokens", 0) or 0,
+            return LLMMetrics.from_usage(
+                getattr(usage, "input_tokens", 0),
+                getattr(usage, "output_tokens", 0),
                 stop_reason=stop_reason,
             )
         return LLMMetrics(stop_reason=stop_reason)

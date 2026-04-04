@@ -3,8 +3,6 @@
 Extracted from pipeline.py for separation of concerns.
 """
 
-import asyncio
-import json
 import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -15,6 +13,7 @@ from lean_ai.config import settings
 from lean_ai.llm.tool_definitions import build_implementation_tools, build_investigation_tools
 from lean_ai.routers.context_helpers import load_condensed_context
 from lean_ai.tools import scratchpad
+from lean_ai.workflow.callbacks import build_workflow_callbacks
 from lean_ai.workflow.prompts import (
     build_fix_investigation_prompt,
     build_fix_system_prompt,
@@ -33,12 +32,6 @@ if TYPE_CHECKING:
     from lean_ai.llm.facade import LLMClient
 
 logger = logging.getLogger(__name__)
-
-
-def _log_task_exception(task: asyncio.Task) -> None:
-    """Callback for fire-and-forget tasks — log unhandled exceptions."""
-    if not task.cancelled() and task.exception():
-        logger.warning("Background task failed: %s", task.exception())
 
 
 async def _run_fix(
@@ -86,50 +79,9 @@ async def _run_fix(
         )
 
     # Callbacks — fire-and-forget (same rationale as plan mode callbacks)
-    async def on_tool_call(name: str, args: dict) -> None:
-        ws_send_nowait(ws, "tool_progress", {
-            "tool": name,
-            "status": "running",
-            "description": f"{name} {args.get('path', args.get('command', ''))}",
-        })
-        if conversation_logger:
-            t = asyncio.create_task(conversation_logger(
-                "tool_call",
-                f"{name} {args.get('path', args.get('command', ''))}",
-                tool_name=name, tool_args=json.dumps(args),
-            ))
-            t.add_done_callback(_log_task_exception)
-
-    async def on_tool_result(name: str, result: str) -> None:
-        is_error = result.startswith("ERROR:")
-        ws_send_nowait(ws, "tool_progress", {
-            "tool": name,
-            "status": "error" if is_error else "complete",
-            "output": result[:500],
-        })
-        if conversation_logger:
-            t = asyncio.create_task(conversation_logger(
-                "tool_result", result[:2000],
-                tool_name=name,
-            ))
-            t.add_done_callback(_log_task_exception)
-
-    async def on_content(text: str) -> None:
-        ws_send_nowait(ws, "assistant_content", {"content": text})
-        if conversation_logger:
-            t = asyncio.create_task(conversation_logger("assistant", text))
-            t.add_done_callback(_log_task_exception)
-
-    async def on_thinking(text: str) -> None:
-        ws_send_nowait(ws, "thinking_content", {"content": text})
-
-    async def on_metrics(prompt_tokens: int, context_window: int) -> None:
-        context_pct = round((prompt_tokens / context_window) * 100) if context_window else 0
-        ws_send_nowait(ws, "metrics_update", {
-            "context_percent": context_pct,
-            "prompt_tokens": prompt_tokens,
-            "context_window": context_window,
-        })
+    cb = build_workflow_callbacks(
+        ws, conversation_logger=conversation_logger,
+    )
 
     # ── Investigation phase (fix mode only) ───────────────────────
     # Run read-only tools first so the LLM gathers context before editing.
@@ -164,11 +116,11 @@ async def _run_fix(
             tool_executor_fn=tool_executor,
             max_turns=20,
             max_tokens=settings.implementation_max_tokens,
-            on_tool_call=on_tool_call,
-            on_tool_result=on_tool_result,
-            on_content=on_content,
-            on_thinking=on_thinking,
-            on_metrics=on_metrics,
+            on_tool_call=cb.on_tool_call,
+            on_tool_result=cb.on_tool_result,
+            on_content=cb.on_content,
+            on_thinking=cb.on_thinking,
+            on_metrics=cb.on_metrics,
             dispatcher=dispatcher,
         )
 
@@ -262,11 +214,11 @@ async def _run_fix(
         task_reminder=_build_fix_reminder,
         reminder_interval=settings.reminder_interval,
         text_only_nudge=request_nudge,
-        on_tool_call=on_tool_call,
-        on_tool_result=on_tool_result,
-        on_content=on_content,
-        on_thinking=on_thinking,
-        on_metrics=on_metrics,
+        on_tool_call=cb.on_tool_call,
+        on_tool_result=cb.on_tool_result,
+        on_content=cb.on_content,
+        on_thinking=cb.on_thinking,
+        on_metrics=cb.on_metrics,
         on_context_refresh=_build_context_refresh,
         dispatcher=dispatcher,
     )

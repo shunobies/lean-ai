@@ -1,42 +1,17 @@
 """Shell command runners: tests, lint, format, general-purpose."""
 
-import asyncio
 import logging
 from pathlib import Path
 
-from lean_ai.config import settings
 from lean_ai.tools.executor import ToolResult
+from lean_ai.tools.subprocess_utils import run_subprocess
 
 logger = logging.getLogger(__name__)
 
 
 async def _run_command(cmd: str, cwd: str) -> ToolResult:
     """Run a shell command and capture output."""
-    try:
-        process = await asyncio.create_subprocess_shell(
-            cmd,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(), timeout=settings.tool_timeout_seconds,
-        )
-        return ToolResult(
-            success=process.returncode == 0,
-            output=stdout.decode("utf-8", errors="replace")
-            + stderr.decode("utf-8", errors="replace"),
-            exit_code=process.returncode,
-        )
-    except asyncio.TimeoutError:
-        try:
-            process.kill()
-            await process.wait()
-        except ProcessLookupError:
-            pass
-        return ToolResult(success=False, error="Command timed out", exit_code=-1)
-    except Exception as e:
-        return ToolResult(success=False, error=str(e))
+    return await run_subprocess(cmd, cwd)
 
 
 async def run_tests(command: str, repo_root: str) -> ToolResult:

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from lean_ai.config import settings
 from lean_ai.llm.prompt_registry import registry
 from lean_ai.llm.tool_definitions import build_implementation_tools
-from lean_ai.workflow.ws_handler import ws_send_nowait
+from lean_ai.workflow.callbacks import build_workflow_callbacks
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
@@ -85,25 +85,13 @@ async def evaluate_test_dispute(
         },
     ]
 
-    async def on_tool_call(name: str, args: dict) -> None:
-        ws_send_nowait(ws, "tool_progress", {
-            "tool": name,
-            "status": "running",
-            "description": f"[TDD dispute] {name} {args.get('path', '')}",
-        })
-
-    async def on_tool_result(name: str, result: str) -> None:
-        is_error = result.startswith("ERROR:")
-        ws_send_nowait(ws, "tool_progress", {
-            "tool": name,
-            "status": "error" if is_error else "complete",
-            "output": result[:500],
-        })
-
-    async def on_content(text: str) -> None:
-        ws_send_nowait(ws, "assistant_content", {
-            "content": f"[TDD dispute] {text}",
-        })
+    cb = build_workflow_callbacks(
+        ws,
+        include_thinking=False,
+        include_metrics=False,
+        description_prefix="[TDD dispute] ",
+        content_prefix="[TDD dispute] ",
+    )
 
     executed, explanation = await expert_client.chat_with_tools(
         messages=messages,
@@ -111,9 +99,9 @@ async def evaluate_test_dispute(
         tool_executor_fn=tool_executor,
         max_turns=10,
         max_tokens=settings.implementation_max_tokens,
-        on_tool_call=on_tool_call,
-        on_tool_result=on_tool_result,
-        on_content=on_content,
+        on_tool_call=cb.on_tool_call,
+        on_tool_result=cb.on_tool_result,
+        on_content=cb.on_content,
         dispatcher=dispatcher,
     )
 

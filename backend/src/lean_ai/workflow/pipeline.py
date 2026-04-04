@@ -8,7 +8,6 @@ instruction into a single tool invocation.
 """
 
 import asyncio
-import json
 import logging
 import os
 from collections.abc import Callable
@@ -25,6 +24,7 @@ from lean_ai.llm.tool_definitions import (
     build_tdd_implementation_tools,
 )
 from lean_ai.routers.context_helpers import load_condensed_context
+from lean_ai.workflow.callbacks import build_workflow_callbacks
 from lean_ai.workflow.fix_mode import _run_fix  # noqa: F401 — used by run_workflow
 from lean_ai.workflow.prompts import (
     build_step_system_prompt,
@@ -39,7 +39,7 @@ from lean_ai.workflow.validation import (
     _run_validation_fix_loop,
 )
 from lean_ai.workflow.ws_dispatcher import WSMessageDispatcher
-from lean_ai.workflow.ws_handler import ws_send, ws_send_nowait
+from lean_ai.workflow.ws_handler import ws_send
 
 if TYPE_CHECKING:
     from lean_ai.llm.client import LLMClient
@@ -49,12 +49,6 @@ logger = logging.getLogger(__name__)
 
 # Max plan revision rounds before giving up
 _MAX_REVISIONS = 5
-
-
-def _log_task_exception(task: asyncio.Task) -> None:
-    """Callback for fire-and-forget tasks — log unhandled exceptions."""
-    if not task.cancelled() and task.exception():
-        logger.warning("Background task failed: %s", task.exception())
 
 
 # ── Public API ──────────────────────────────────────────────────────
@@ -135,40 +129,7 @@ async def run_workflow(
     # Planning-specific streaming callbacks — include streaming flag
     # so the extension can distinguish token-level updates from
     # per-turn bulk content used during execution.
-    async def on_planning_content(text: str) -> None:
-        ws_send_nowait(ws, "assistant_content", {
-            "content": text, "streaming": True,
-        })
-
-    async def on_planning_thinking(text: str) -> None:
-        ws_send_nowait(ws, "thinking_content", {
-            "content": text, "streaming": True,
-        })
-
-    async def on_planning_tool_call(name: str, args: dict) -> None:
-        ws_send_nowait(ws, "tool_progress", {
-            "tool": name,
-            "status": "running",
-            "description": f"{name} {args.get('path', args.get('command', ''))}",
-        })
-
-    async def on_planning_tool_result(name: str, result: str) -> None:
-        is_error = result.startswith("ERROR:")
-        ws_send_nowait(ws, "tool_progress", {
-            "tool": name,
-            "status": "error" if is_error else "complete",
-            "output": result[:500],
-        })
-
-    async def on_planning_metrics(prompt_tokens: int, context_window: int) -> None:
-        context_pct = (
-            round((prompt_tokens / context_window) * 100) if context_window else 0
-        )
-        ws_send_nowait(ws, "metrics_update", {
-            "context_percent": context_pct,
-            "prompt_tokens": prompt_tokens,
-            "context_window": context_window,
-        })
+    planning_cb = build_workflow_callbacks(ws, streaming=True)
 
     plan = await create_plan(
         task=task_with_answers,
@@ -181,11 +142,11 @@ async def run_workflow(
         session_id=session_id,
         expert_llm_client=expert_llm_client,
         request_llm_client=request_llm_client,
-        on_content=on_planning_content,
-        on_thinking=on_planning_thinking,
-        on_tool_call=on_planning_tool_call,
-        on_tool_result=on_planning_tool_result,
-        on_metrics=on_planning_metrics,
+        on_content=planning_cb.on_content,
+        on_thinking=planning_cb.on_thinking,
+        on_tool_call=planning_cb.on_tool_call,
+        on_tool_result=planning_cb.on_tool_result,
+        on_metrics=planning_cb.on_metrics,
     )
 
     # ── Phase 3: Approve ─────────────────────────────────────────
@@ -383,52 +344,9 @@ async def _execute_plan(
     )
 
     # Callbacks for WebSocket progress + conversation logging.
-    # Progress messages are fire-and-forget (non-blocking) since they are
-    # informational.  Conversation logging is also fire-and-forget — the
-    # data is for post-hoc review and does not need to block tool execution.
-    async def on_tool_call(name: str, args: dict) -> None:
-        ws_send_nowait(ws, "tool_progress", {
-            "tool": name,
-            "status": "running",
-            "description": f"{name} {args.get('path', args.get('command', ''))}",
-        })
-        if conversation_logger:
-            t = asyncio.create_task(conversation_logger(
-                "tool_call", f"{name} {args.get('path', args.get('command', ''))}",
-                tool_name=name, tool_args=json.dumps(args),
-            ))
-            t.add_done_callback(_log_task_exception)
-
-    async def on_tool_result(name: str, result: str) -> None:
-        is_error = result.startswith("ERROR:")
-        ws_send_nowait(ws, "tool_progress", {
-            "tool": name,
-            "status": "error" if is_error else "complete",
-            "output": result[:500],
-        })
-        if conversation_logger:
-            t = asyncio.create_task(conversation_logger(
-                "tool_result", result[:2000],
-                tool_name=name,
-            ))
-            t.add_done_callback(_log_task_exception)
-
-    async def on_content(text: str) -> None:
-        ws_send_nowait(ws, "assistant_content", {"content": text})
-        if conversation_logger:
-            t = asyncio.create_task(conversation_logger("assistant", text))
-            t.add_done_callback(_log_task_exception)
-
-    async def on_thinking(text: str) -> None:
-        ws_send_nowait(ws, "thinking_content", {"content": text})
-
-    async def on_metrics(prompt_tokens: int, context_window: int) -> None:
-        context_pct = round((prompt_tokens / context_window) * 100) if context_window else 0
-        ws_send_nowait(ws, "metrics_update", {
-            "context_percent": context_pct,
-            "prompt_tokens": prompt_tokens,
-            "context_window": context_window,
-        })
+    cb = build_workflow_callbacks(
+        ws, conversation_logger=conversation_logger,
+    )
 
     # ── Helper: execute a single step with a given client/tools ─────
     async def _run_step(
@@ -465,11 +383,11 @@ async def _execute_plan(
             tool_executor_fn=executor,
             max_turns=settings.implementation_max_turns,
             max_tokens=settings.implementation_max_tokens,
-            on_tool_call=on_tool_call,
-            on_tool_result=on_tool_result,
-            on_content=on_content,
-            on_thinking=on_thinking,
-            on_metrics=on_metrics,
+            on_tool_call=cb.on_tool_call,
+            on_tool_result=cb.on_tool_result,
+            on_content=cb.on_content,
+            on_thinking=cb.on_thinking,
+            on_metrics=cb.on_metrics,
             dispatcher=dispatcher,
         )
 
@@ -635,11 +553,11 @@ async def _execute_plan(
                 tool_executor_fn=review_executor,
                 max_turns=settings.implementation_max_turns,
                 max_tokens=settings.implementation_max_tokens,
-                on_tool_call=on_tool_call,
-                on_tool_result=on_tool_result,
-                on_content=on_content,
-                on_thinking=on_thinking,
-                on_metrics=on_metrics,
+                on_tool_call=cb.on_tool_call,
+                on_tool_result=cb.on_tool_result,
+                on_content=cb.on_content,
+                on_thinking=cb.on_thinking,
+                on_metrics=cb.on_metrics,
                 dispatcher=dispatcher,
             )
 
