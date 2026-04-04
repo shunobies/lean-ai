@@ -6,6 +6,7 @@ loaded alongside other custom steering documents during workflows and chat.
 
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from lean_ai.context.content import _read_file_safe
@@ -336,6 +337,7 @@ async def generate_style_guide(
     repo_root: str,
     llm_client,
     max_tokens: int = 4096,
+    thinking_callback: Callable[[str], Awaitable[None]] | None = None,
 ) -> str:
     """Discover style files, collect contents, and generate a style guide.
 
@@ -378,6 +380,7 @@ async def generate_style_guide(
                 {"role": "user", "content": user_content},
             ],
             max_tokens=max_tokens,
+            thinking_callback=thinking_callback,
         )
     except Exception as exc:
         logger.warning("Style guide: LLM generation failed: %s", exc)

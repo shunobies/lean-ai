@@ -9,6 +9,7 @@ No regex — all text processing uses simple string operations.
 import asyncio
 import logging
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -227,6 +228,7 @@ async def _generate_project_context_single_pass(
     llm_client: "LLMClient",
     caps: dict[str, int],
     max_out: int,
+    thinking_callback: Callable[[str], Awaitable[None]] | None = None,
 ) -> str:
     """Single-pass project context generation.
 
@@ -243,6 +245,7 @@ async def _generate_project_context_single_pass(
     content = await llm_client.chat_raw(
         messages=messages,
         max_tokens=max_out,
+        thinking_callback=thinking_callback,
     )
 
     if _appears_truncated(content):
@@ -262,6 +265,7 @@ async def _generate_project_context_multi_round(
     caps: dict[str, int],
     max_out: int,
     context_window: int,
+    thinking_callback: Callable[[str], Awaitable[None]] | None = None,
 ) -> str:
     """Multi-round project context generation for small context windows.
 
@@ -293,6 +297,7 @@ async def _generate_project_context_multi_round(
     current_doc = await llm_client.chat_raw(
         messages=round1_messages,
         max_tokens=max_out,
+        thinking_callback=thinking_callback,
     )
     current_doc = _truncate_repetition(current_doc)
     logger.info("multi-round context: round 1 complete (%d chars)", len(current_doc))
@@ -352,6 +357,7 @@ async def _generate_project_context_multi_round(
         updated_doc = await llm_client.chat_raw(
             messages=expansion_messages,
                 max_tokens=max_out,
+            thinking_callback=thinking_callback,
         )
         updated_doc = _truncate_repetition(updated_doc)
 
@@ -465,6 +471,7 @@ async def _expand_project_context(
     caps: dict[str, int],
     max_out: int,
     context_window: int,
+    thinking_callback: Callable[[str], Awaitable[None]] | None = None,
 ) -> str:
     """Additive expansion: process remaining source files and merge findings.
 
@@ -541,6 +548,7 @@ async def _expand_project_context(
             additions = await llm_client.chat_raw(
                 messages=messages,
                 max_tokens=max_out,
+                thinking_callback=thinking_callback,
             )
             additions = _truncate_repetition(additions)
             logger.info(
@@ -580,6 +588,7 @@ async def _expand_project_context(
 async def generate_project_context(
     repo_root: str,
     llm_client: "LLMClient",
+    thinking_callback: Callable[[str], Awaitable[None]] | None = None,
 ) -> str:
     """Generate a project context document using the LLM.
 
@@ -606,6 +615,7 @@ async def generate_project_context(
         content = await _generate_project_context_multi_round(
             repo_root, llm_client, caps, max_out,
             context_window=settings.ollama_context_window,
+            thinking_callback=thinking_callback,
         )
     else:
         logger.info(
@@ -614,6 +624,7 @@ async def generate_project_context(
         )
         content = await _generate_project_context_single_pass(
             repo_root, llm_client, caps, max_out,
+            thinking_callback=thinking_callback,
         )
 
     content = _deduplicate_sections(content)
@@ -625,6 +636,7 @@ async def generate_project_context(
             content = await _expand_project_context(
                 content, repo_root, llm_client, caps, max_out,
                 context_window=settings.ollama_context_window,
+                thinking_callback=thinking_callback,
             )
         except Exception as exc:
             logger.warning("Additive expansion failed (non-fatal): %s", exc)
@@ -655,6 +667,7 @@ async def update_project_context(
     repo_root: str,
     modified_paths: list[str],
     llm_client: "LLMClient",
+    thinking_callback: Callable[[str], Awaitable[None]] | None = None,
 ) -> str | None:
     """Incrementally update project_context.md with changes from modified files.
 
@@ -711,6 +724,7 @@ async def update_project_context(
     additions = await llm_client.chat_raw(
         messages=messages,
         max_tokens=max_out,
+        thinking_callback=thinking_callback,
     )
     additions = _truncate_repetition(additions)
 

@@ -164,13 +164,17 @@ export async function handleInitCommand(
     let ctxSettled: PromiseSettledResult<{ path: string; chars: number; skipped?: boolean }>;
     let guideSettled: PromiseSettledResult<{ path: string; chars: number; skipped?: boolean }>;
 
+    const thinkingCb = (token: string) => {
+        ctx.postMessage({ type: "llmThinking", text: token, streaming: true });
+    };
+
     if (runParallel) {
         // Parallel: each generation gets its own LLM slot
-        const ctxPromise = ctx.client.generateProjectContext(repoRoot, force)
+        const ctxPromise = ctx.client.generateProjectContext(repoRoot, force, thinkingCb)
             .then((result) => { ctxDone = true; return result; })
             .catch((err: unknown) => { ctxDone = true; throw err; });
 
-        const guidePromise = ctx.client.generateFrameworkGuide(repoRoot, force)
+        const guidePromise = ctx.client.generateFrameworkGuide(repoRoot, force, thinkingCb)
             .then((result) => { guideDone = true; return result; })
             .catch((err: unknown) => { guideDone = true; throw err; });
 
@@ -180,7 +184,7 @@ export async function handleInitCommand(
         ]);
     } else {
         // Sequential: project context first, then framework guide
-        ctxSettled = await ctx.client.generateProjectContext(repoRoot, force)
+        ctxSettled = await ctx.client.generateProjectContext(repoRoot, force, thinkingCb)
             .then((result): PromiseFulfilledResult<typeof result> => {
                 ctxDone = true;
                 return { status: "fulfilled", value: result };
@@ -190,7 +194,7 @@ export async function handleInitCommand(
                 return { status: "rejected", reason: err };
             });
 
-        guideSettled = await ctx.client.generateFrameworkGuide(repoRoot, force)
+        guideSettled = await ctx.client.generateFrameworkGuide(repoRoot, force, thinkingCb)
             .then((result): PromiseFulfilledResult<typeof result> => {
                 guideDone = true;
                 return { status: "fulfilled", value: result };
@@ -322,7 +326,9 @@ export async function handleGuideCommand(
 
     try {
         // Always force-regenerate — the whole point of /guide
-        const guideResult = await ctx.client.generateFrameworkGuide(repoRoot, true);
+        const guideResult = await ctx.client.generateFrameworkGuide(repoRoot, true, (token) => {
+            ctx.postMessage({ type: "llmThinking", text: token, streaming: true });
+        });
         clearInterval(guideTicker);
         ctx.postMessage({
             type: "reply",
@@ -394,7 +400,9 @@ export async function handleStyleCommand(
 
     try {
         // Always force-regenerate — the whole point of /style
-        const styleResult = await ctx.client.generateStyleGuide(repoRoot, true);
+        const styleResult = await ctx.client.generateStyleGuide(repoRoot, true, (token) => {
+            ctx.postMessage({ type: "llmThinking", text: token, streaming: true });
+        });
         clearInterval(styleTicker);
         ctx.postMessage({
             type: "reply",

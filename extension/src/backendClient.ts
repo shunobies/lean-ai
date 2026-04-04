@@ -134,6 +134,94 @@ export class BackendClient {
         });
     }
 
+    /**
+     * POST JSON to the backend and consume an SSE (text/event-stream) response.
+     *
+     * Thinking tokens are forwarded to *onThinking* as they arrive.
+     * Resolves with the payload of the ``result`` SSE event.
+     * Rejects on ``error`` events or HTTP-level failures.
+     */
+    private _postSseNoTimeout(
+        path: string,
+        body: unknown,
+        onThinking?: (token: string) => void,
+    ): Promise<unknown> {
+        return new Promise((resolve, reject) => {
+            const fullUrl = new URL(`${this.baseUrl}${path}`);
+            const isHttps = fullUrl.protocol === "https:";
+            const transport = isHttps ? https : http;
+
+            const postData = JSON.stringify(body);
+
+            const options: http.RequestOptions = {
+                hostname: fullUrl.hostname,
+                port: fullUrl.port || (isHttps ? "443" : "80"),
+                path: fullUrl.pathname,
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Content-Length": Buffer.byteLength(postData),
+                },
+                timeout: 0,
+            };
+
+            let buffer = "";
+            let resolved = false;
+
+            const req = transport.request(options, (res) => {
+                if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
+                    reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+                    return;
+                }
+
+                res.on("data", (chunk: Buffer | string) => {
+                    buffer += chunk.toString();
+                    const lines = buffer.split("\n");
+                    buffer = lines.pop()!; // keep incomplete last line
+
+                    for (const line of lines) {
+                        if (!line.startsWith("data: ")) { continue; }
+                        try {
+                            const data = JSON.parse(line.slice(6)) as Record<string, unknown>;
+                            if (data["type"] === "thinking" && data["content"] && onThinking) {
+                                onThinking(data["content"] as string);
+                            } else if (data["type"] === "result") {
+                                resolved = true;
+                                resolve(data);
+                            } else if (data["type"] === "error") {
+                                resolved = true;
+                                const status = data["status"] as number | undefined;
+                                reject(new Error(
+                                    status
+                                        ? `HTTP ${status}: ${data["message"] as string}`
+                                        : (data["message"] as string) || "Stream error",
+                                ));
+                            }
+                            // "done" is ignored — we resolve/reject on result/error
+                        } catch {
+                            // skip malformed SSE lines
+                        }
+                    }
+                });
+
+                res.on("end", () => {
+                    if (!resolved) {
+                        reject(new Error("SSE stream ended without result event"));
+                    }
+                });
+
+                res.on("error", (err: Error) => {
+                    reject(new Error(`Response stream error: ${err.message}`));
+                });
+            });
+
+            req.on("socket", (socket) => { socket.setTimeout(0); });
+            req.on("error", (err) => { reject(err); });
+            req.write(postData);
+            req.end();
+        });
+    }
+
     // --- REST Methods ---
 
     async createSession(repoRoot: string): Promise<CreateSessionResponse> {
@@ -594,39 +682,48 @@ export class BackendClient {
     async generateProjectContext(
         repoRoot: string,
         force: boolean = false,
+        onThinking?: (token: string) => void,
     ): Promise<{ path: string; chars: number; skipped?: boolean }> {
-        // Uses http module — fetch (undici) has a hardcoded 5-min timeout
-        // that kills long-running LLM calls with large local models.
-        // The caller shows a "working..." indicator while waiting.
-        // skip_if_exists=true by default; pass force=true on /init --force
-        // to always regenerate even when the file already exists.
+        const body = { repo_root: repoRoot, skip_if_exists: !force, stream: !!onThinking };
+        if (onThinking) {
+            return (await this._postSseNoTimeout(
+                "/api/generate-project-context", body, onThinking,
+            )) as { path: string; chars: number; skipped?: boolean };
+        }
         return (await this._postJsonNoTimeout(
-            "/api/generate-project-context",
-            { repo_root: repoRoot, skip_if_exists: !force },
+            "/api/generate-project-context", body,
         )) as { path: string; chars: number; skipped?: boolean };
     }
 
     async generateFrameworkGuide(
         repoRoot: string,
         force: boolean = false,
+        onThinking?: (token: string) => void,
     ): Promise<{ path: string; chars: number; skipped?: boolean }> {
-        // Generates .lean_ai/framework_guide.md for detected frameworks.
-        // Returns 404 if no frameworks detected — caller should treat as non-fatal.
+        const body = { repo_root: repoRoot, skip_if_exists: !force, stream: !!onThinking };
+        if (onThinking) {
+            return (await this._postSseNoTimeout(
+                "/api/generate-framework-guide", body, onThinking,
+            )) as { path: string; chars: number; skipped?: boolean };
+        }
         return (await this._postJsonNoTimeout(
-            "/api/generate-framework-guide",
-            { repo_root: repoRoot, skip_if_exists: !force },
+            "/api/generate-framework-guide", body,
         )) as { path: string; chars: number; skipped?: boolean };
     }
 
     async generateStyleGuide(
         repoRoot: string,
         force: boolean = false,
+        onThinking?: (token: string) => void,
     ): Promise<{ path: string; chars: number; skipped?: boolean }> {
-        // Generates .lean_ai/context/style_guide.md from CSS and template files.
-        // Returns 404 if no style files detected — caller should treat as non-fatal.
+        const body = { repo_root: repoRoot, skip_if_exists: !force, stream: !!onThinking };
+        if (onThinking) {
+            return (await this._postSseNoTimeout(
+                "/api/generate-style-guide", body, onThinking,
+            )) as { path: string; chars: number; skipped?: boolean };
+        }
         return (await this._postJsonNoTimeout(
-            "/api/generate-style-guide",
-            { repo_root: repoRoot, skip_if_exists: !force },
+            "/api/generate-style-guide", body,
         )) as { path: string; chars: number; skipped?: boolean };
     }
 

@@ -229,7 +229,7 @@ class TestExpandParallel:
 
         call_count = 0
 
-        async def mock_chat_raw(messages, max_tokens=None):
+        async def mock_chat_raw(messages, max_tokens=None, **kwargs):
             nonlocal call_count
             call_count += 1
             # Expansion batches return additions-only.

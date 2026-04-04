@@ -29,6 +29,7 @@ class InitWorkspaceResponse(BaseModel):
 class GenerateProjectContextRequest(BaseModel):
     repo_root: str
     skip_if_exists: bool = True
+    stream: bool = False
 
 
 class GenerateProjectContextResponse(BaseModel):
@@ -126,6 +127,7 @@ class ResumeSessionRequest(BaseModel):
 class GenerateFrameworkGuideRequest(BaseModel):
     repo_root: str
     skip_if_exists: bool = False
+    stream: bool = False
 
 
 class GenerateFrameworkGuideResponse(BaseModel):
@@ -137,6 +139,7 @@ class GenerateFrameworkGuideResponse(BaseModel):
 class GenerateStyleGuideRequest(BaseModel):
     repo_root: str
     skip_if_exists: bool = False
+    stream: bool = False
 
 
 class GenerateStyleGuideResponse(BaseModel):

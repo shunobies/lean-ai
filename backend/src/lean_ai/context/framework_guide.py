@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -918,6 +919,7 @@ async def _fill_guide_gaps(
     runtimes: list[tuple[str, str]],
     cutoff: str | None,
     max_tokens: int,
+    thinking_callback: Callable[[str], Awaitable[None]] | None = None,
 ) -> str:
     """Fill empty subsections using new search results.
 
@@ -968,6 +970,7 @@ async def _fill_guide_gaps(
                 {"role": "user", "content": user_msg[:40000]},
             ],
             max_tokens=max_tokens,
+            thinking_callback=thinking_callback,
         )
     except Exception as exc:
         logger.warning("Framework guide: gap-fill LLM call failed: %s", exc)
@@ -1374,6 +1377,7 @@ async def _generate_section(
     search_timeout: int,
     max_tokens: int,
     tooling: list[tuple[str, str]] | None = None,
+    thinking_callback: Callable[[str], Awaitable[None]] | None = None,
 ) -> str:
     """Generate content for one framework guide section.
 
@@ -1469,6 +1473,7 @@ async def _generate_section(
                 {"role": "user", "content": user_content},
             ],
             max_tokens=max_tokens,
+            thinking_callback=thinking_callback,
         )
     except Exception as exc:
         logger.warning(
@@ -1674,6 +1679,7 @@ async def _generate_guide_basic(
     runtimes: list[tuple[str, str]],
     max_tokens: int,
     tooling: list[tuple[str, str]] | None = None,
+    thinking_callback: Callable[[str], Awaitable[None]] | None = None,
 ) -> str:
     """Single-pass guide generation (basic mode).
 
@@ -1779,6 +1785,7 @@ async def _generate_guide_basic(
                 {"role": "user", "content": user_content[:40000]},
             ],
             max_tokens=max_tokens,
+            thinking_callback=thinking_callback,
         )
     except Exception as exc:
         logger.warning("Framework guide [basic]: LLM generation failed: %s", exc)
@@ -1790,6 +1797,7 @@ async def _generate_guide_basic(
     return await _postprocess_guide(
         guide, repo_root, llm_client, frameworks, runtimes,
         None, search_timeout, max_tokens,
+        thinking_callback=thinking_callback,
     )
 
 
@@ -1800,6 +1808,7 @@ async def _generate_guide_deep(
     runtimes: list[tuple[str, str]],
     max_tokens: int,
     tooling: list[tuple[str, str]] | None = None,
+    thinking_callback: Callable[[str], Awaitable[None]] | None = None,
 ) -> str:
     """Multi-pass guide generation (deep mode).
 
@@ -1856,6 +1865,7 @@ async def _generate_guide_deep(
             search_timeout=search_timeout,
             max_tokens=section_budgets[i],
             tooling=tooling,
+            thinking_callback=thinking_callback,
         )
         if section_content.strip():
             generated_sections.append(section_content)
@@ -1869,6 +1879,7 @@ async def _generate_guide_deep(
     return await _postprocess_guide(
         guide, repo_root, llm_client, frameworks, runtimes,
         None, search_timeout, max_tokens,
+        thinking_callback=thinking_callback,
     )
 
 
@@ -1881,6 +1892,7 @@ async def _postprocess_guide(
     cutoff: str | None,
     search_timeout: int,
     max_tokens: int,
+    thinking_callback: Callable[[str], Awaitable[None]] | None = None,
 ) -> str:
     """Shared post-processing: repair, dedup, validate, gap-fill."""
     from lean_ai.tools.internet import search_internet
@@ -1937,6 +1949,7 @@ async def _postprocess_guide(
                     guide = await _fill_guide_gaps(
                         guide, gaps, gap_content, llm_client,
                         frameworks, runtimes, cutoff, max_tokens,
+                        thinking_callback=thinking_callback,
                     )
                     guide = _repair_code_blocks(guide)
                     guide = _renumber_steps(guide)
@@ -1952,6 +1965,7 @@ async def generate_framework_guide(
     repo_root: str,
     llm_client: LLMClient,
     max_tokens: int | None = None,
+    thinking_callback: Callable[[str], Awaitable[None]] | None = None,
 ) -> str:
     """Detect frameworks, search for best practices, and generate a guide.
 
@@ -2002,12 +2016,14 @@ async def generate_framework_guide(
         guide = await _generate_guide_basic(
             repo_root, llm_client, frameworks, runtimes, max_tokens,
             tooling=tooling,
+            thinking_callback=thinking_callback,
         )
     else:
         logger.info("Framework guide: using deep (multi-pass) mode")
         guide = await _generate_guide_deep(
             repo_root, llm_client, frameworks, runtimes, max_tokens,
             tooling=tooling,
+            thinking_callback=thinking_callback,
         )
 
     if not guide:

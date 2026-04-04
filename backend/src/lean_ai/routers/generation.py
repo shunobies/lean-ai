@@ -1,10 +1,12 @@
 """Workspace init, project context, and framework guide generation endpoints."""
 
 import asyncio
+import json
 import logging
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
 from lean_ai.config import settings
 from lean_ai.indexer.indexer import (
@@ -134,8 +136,15 @@ async def generate_project_context_endpoint(request: GenerateProjectContextReque
     """Generate .lean_ai/project_context.md for the workspace."""
     ctx_path = Path(request.repo_root) / ".lean_ai" / "project_context.md"
     if request.skip_if_exists and ctx_path.is_file():
+        if request.stream:
+            return _sse_skipped(str(ctx_path), ctx_path.stat().st_size)
         return GenerateProjectContextResponse(
             path=str(ctx_path), chars=ctx_path.stat().st_size, skipped=True,
+        )
+
+    if request.stream:
+        return _sse_generation_response(
+            request.repo_root, "project_context",
         )
 
     try:
@@ -160,8 +169,15 @@ async def generate_framework_guide_endpoint(request: GenerateFrameworkGuideReque
     """Generate .lean_ai/framework_guide.md for the workspace."""
     guide_path = Path(request.repo_root) / ".lean_ai" / "framework_guide.md"
     if request.skip_if_exists and guide_path.is_file():
+        if request.stream:
+            return _sse_skipped(str(guide_path), guide_path.stat().st_size)
         return GenerateFrameworkGuideResponse(
             path=str(guide_path), chars=guide_path.stat().st_size, skipped=True,
+        )
+
+    if request.stream:
+        return _sse_generation_response(
+            request.repo_root, "framework_guide",
         )
 
     try:
@@ -190,8 +206,15 @@ async def generate_style_guide_endpoint(request: GenerateStyleGuideRequest):
     """Generate .lean_ai/context/style_guide.md for the workspace."""
     guide_path = Path(request.repo_root) / ".lean_ai" / "context" / "style_guide.md"
     if request.skip_if_exists and guide_path.is_file():
+        if request.stream:
+            return _sse_skipped(str(guide_path), guide_path.stat().st_size)
         return GenerateStyleGuideResponse(
             path=str(guide_path), chars=guide_path.stat().st_size, skipped=True,
+        )
+
+    if request.stream:
+        return _sse_generation_response(
+            request.repo_root, "style_guide",
         )
 
     try:
@@ -213,3 +236,121 @@ async def generate_style_guide_endpoint(request: GenerateStyleGuideRequest):
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# SSE streaming helpers
+# ---------------------------------------------------------------------------
+
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "X-Accel-Buffering": "no",
+}
+
+
+def _sse_event(data: dict) -> str:
+    return f"data: {json.dumps(data)}\n\n"
+
+
+def _sse_skipped(path: str, size: int) -> StreamingResponse:
+    """Return a minimal SSE stream for a skipped (already-exists) result."""
+    async def _gen():
+        yield _sse_event({"type": "result", "path": path, "chars": size, "skipped": True})
+        yield _sse_event({"type": "done"})
+
+    return StreamingResponse(_gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
+
+
+def _sse_generation_response(
+    repo_root: str,
+    kind: str,
+) -> StreamingResponse:
+    """Return an SSE StreamingResponse that runs generation with thinking tokens.
+
+    *kind* is one of ``"project_context"``, ``"framework_guide"``,
+    or ``"style_guide"``.
+    """
+    async def _generate():
+        queue: asyncio.Queue[dict | None] = asyncio.Queue()
+
+        async def thinking_cb(token: str) -> None:
+            await queue.put({"type": "thinking", "content": token})
+
+        async def _run() -> None:
+            try:
+                _client = request_llm_client or llm_client
+
+                if kind == "project_context":
+                    from lean_ai.context.generation import (
+                        generate_project_context,
+                        write_project_context,
+                    )
+                    content = await generate_project_context(
+                        repo_root, _client, thinking_callback=thinking_cb,
+                    )
+                    path = write_project_context(repo_root, content)
+                    await queue.put({
+                        "type": "result", "path": path, "chars": len(content),
+                    })
+
+                elif kind == "framework_guide":
+                    from lean_ai.context.framework_guide import (
+                        generate_framework_guide,
+                        write_framework_guide,
+                    )
+                    content = await generate_framework_guide(
+                        repo_root, _client, thinking_callback=thinking_cb,
+                    )
+                    if not content:
+                        await queue.put({
+                            "type": "error",
+                            "message": "No frameworks detected in the project",
+                            "status": 404,
+                        })
+                        return
+                    path = write_framework_guide(repo_root, content)
+                    await queue.put({
+                        "type": "result", "path": path, "chars": len(content),
+                    })
+
+                elif kind == "style_guide":
+                    from lean_ai.context.style_guide import (
+                        generate_style_guide,
+                        write_style_guide,
+                    )
+                    content = await generate_style_guide(
+                        repo_root, _client, thinking_callback=thinking_cb,
+                    )
+                    if not content:
+                        await queue.put({
+                            "type": "error",
+                            "message": "No style files detected in the project",
+                            "status": 404,
+                        })
+                        return
+                    path = write_style_guide(repo_root, content)
+                    await queue.put({
+                        "type": "result", "path": path, "chars": len(content),
+                    })
+
+            except Exception as exc:
+                logger.warning("SSE generation (%s) failed: %s", kind, exc)
+                await queue.put({"type": "error", "message": str(exc)})
+            finally:
+                await queue.put(None)  # sentinel
+
+        task = asyncio.create_task(_run())
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                yield _sse_event(event)
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+        yield _sse_event({"type": "done"})
+
+    return StreamingResponse(
+        _generate(), media_type="text/event-stream", headers=_SSE_HEADERS,
+    )
