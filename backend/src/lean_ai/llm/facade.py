@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -49,6 +50,59 @@ class _TurnState:
     max_text_only: int = 3
     max_truncated: int = 5
     loop_detection_threshold: int = 3
+
+
+# ── Claim verification ────────────────────────────────────────────
+
+# Patterns indicating the LLM is making an unverified external claim.
+_CLAIM_PATTERNS = re.compile(
+    r"(?:"
+    # Existence / non-existence claims
+    r"(?:does(?:n't| not)|doesn't) (?:exist|have|support|provide|include|offer|expose)"
+    r"|(?:is(?:n't| not)|isn't) (?:available|supported|implemented|released|possible)"
+    r"|(?:not yet (?:available|supported|released|implemented))"
+    r"|(?:no longer (?:available|supported|maintained))"
+    r"|(?:not (?:a )?(?:valid|real|actual|existing) "
+    r"(?:function|method|class|module|package|library|API|endpoint|feature))"
+    # Future / deprecation claims
+    r"|(?:(?:will be|has been|was) (?:deprecated|removed|discontinued))"
+    r"|(?:only (?:available|supported) in .{0,30}"
+    r"(?:future|upcoming|next|later|beta|preview|unreleased))"
+    r"|(?:(?:future|upcoming|planned|proposed) (?:version|release|feature|API))"
+    # Training data caveat
+    r"|(?:as of my (?:knowledge|training|last update|cutoff))"
+    r"|(?:my (?:training|knowledge) (?:data |cutoff |)"
+    r"(?:only (?:goes|extends)|doesn't (?:cover|include)))"
+    r"|(?:I (?:don't|do not) have (?:information|data|knowledge) "
+    r"(?:about|on|regarding))"
+    # Assumption markers about external things
+    r"|(?:I (?:assume|believe|think) (?:this|that|the) "
+    r"(?:library|package|API|module|function|feature|version))"
+    r")",
+    re.IGNORECASE,
+)
+
+# If these appear near a match, the claim is about project files, not external.
+_PROJECT_CONTEXT_PATTERNS = re.compile(
+    r"(?:this (?:file|test|module|class|function)|"
+    r"(?:creat|writ|add|implement)(?:e|ing) (?:this|the|a new) (?:file|test)|"
+    r"we (?:need to|will|should|can) (?:create|add|implement|write))",
+    re.IGNORECASE,
+)
+
+
+def _detect_unverified_claims(content: str) -> bool:
+    """Return True if *content* contains unverified claims about external things."""
+    if not content or len(content) < 20:
+        return False
+    for match in _CLAIM_PATTERNS.finditer(content):
+        start = max(0, match.start() - 80)
+        end = min(len(content), match.end() + 80)
+        window = content[start:end]
+        if _PROJECT_CONTEXT_PATTERNS.search(window):
+            continue
+        return True
+    return False
 
 
 class LLMClient:
@@ -425,6 +479,25 @@ class LLMClient:
                 messages.append({"role": "user", "content": action.message})
                 if not tool_calls:
                     continue  # Skip to next turn for text-only nudges
+
+            # ── Claim verification nudge (independent of turn verdict) ──
+            if (
+                settings.enable_claim_verification
+                and content.strip()
+                and _detect_unverified_claims(content)
+                and not any(
+                    tc.name == "search_internet" for tc in (tool_calls or [])
+                )
+            ):
+                logger.info(
+                    "chat_with_tools: unverified claim detected, "
+                    "nudging verification"
+                )
+                from lean_ai.llm.prompt_registry import registry
+                messages.append({
+                    "role": "user",
+                    "content": registry.get("nudge.claim_verification"),
+                })
         else:
             logger.warning(
                 "chat_with_tools: reached max_turns=%s without completion",

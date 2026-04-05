@@ -299,6 +299,9 @@ class Settings(BaseSettings):
     # ── Fix-mode investigation phase ──
     enable_fix_investigation: bool = True  # Read-only investigation before editing
 
+    # ── Claim verification ──
+    enable_claim_verification: bool = True  # Nudge LLM to verify external claims via web search
+
     # ── TDD mode ──
     enable_tdd: bool = False  # Expert writes tests first, primary implements
     tdd_max_disputes_per_step: int = 3  # Max test disputes per implementation step

@@ -103,6 +103,7 @@ Lightweight control mechanisms in the `chat_with_tools` orchestration loop. Afte
 | Context refresh | Token usage crosses 70% of context window | Drop old messages, re-read from disk |
 | Task reminder | Every N turns (default 10) | Re-inject task description |
 | Cancel/interrupt | User sends cancel or new message | Raise error or inject interrupt |
+| Claim verification | LLM claims something doesn't exist / is future / is deprecated | Inject "verify via search_internet" nudge |
 
 Post-execution controls:
 
@@ -227,6 +228,7 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_IMPLEMENTATION_MAX_TOKENS` | *(derived: 25% of context window)* | Max tokens per LLM turn |
 | `LEAN_AI_REFRESH_THRESHOLD` | `0.7` | Refresh context at this % of context window |
 | `LEAN_AI_ENABLE_FIX_INVESTIGATION` | `true` | Enforce read-only investigation phase in /fix mode before editing |
+| `LEAN_AI_ENABLE_CLAIM_VERIFICATION` | `true` | Nudge LLM to verify external claims (doesn't exist, deprecated, future) via web search |
 | `LEAN_AI_ENABLE_TDD` | `false` | TDD mode: expert writes tests first, primary implements. Requires expert model |
 | `LEAN_AI_TDD_MAX_DISPUTES_PER_STEP` | `3` | Max test disputes per implementation step in TDD mode |
 | `LEAN_AI_ENABLE_POST_VALIDATION` | `true` | Run deterministic lint/test after execution |

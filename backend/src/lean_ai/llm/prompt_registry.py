@@ -269,6 +269,22 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
     ))
 
     reg.register(PromptEntry(
+        key="policy.claim_verification",
+        category="Core Policy",
+        name="Claim Verification Policy",
+        description=(
+            "Instructs the LLM to verify claims about"
+            " external libraries, APIs, and features via web search."
+        ),
+        default_text=(
+            "Before stating that a library, API, feature, or function does not exist, "
+            "is deprecated, or is only available in a future version, call search_internet "
+            "to verify. Your training data may be outdated. This applies to external "
+            "dependencies and third-party tools — not to files within this project."
+        ),
+    ))
+
+    reg.register(PromptEntry(
         key="policy.scratchpad",
         category="Core Policy",
         name="Scratchpad Policy",
@@ -876,6 +892,7 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
             "stale or incomplete, call read_file on the target file first, then make the edit.\n"
             "{TOOL_POLICY}\n"
             "{QUALITY_RULES}\n"
+            "{WEB_SEARCH_POLICY}\n"
             "- Do NOT make changes to any file other than the one specified in this step.\n"
             "- Focus on this step. If the step context seems stale or incomplete, use "
             "read_file or grep_files to verify before editing.\n"
@@ -886,7 +903,7 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
             "names, and inconsistent references are the hardest bugs to find.\n\n"
             "{COMPLETION_CONTRACT}"
         ),
-        template_vars=["TOOL_POLICY", "QUALITY_RULES", "COMPLETION_CONTRACT"],
+        template_vars=["TOOL_POLICY", "QUALITY_RULES", "WEB_SEARCH_POLICY", "COMPLETION_CONTRACT"],
     ))
 
     reg.register(PromptEntry(
@@ -1639,6 +1656,20 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
         default_text=(
             "Loop detected: {tool_name} called {count} times with same args. "
             "Use a different approach."
+        ),
+    ))
+
+    reg.register(PromptEntry(
+        key="nudge.claim_verification",
+        category="Advanced",
+        name="Claim Verification Nudge",
+        description=(
+            "Injected when the model makes unverified claims"
+            " about external libraries/APIs/features."
+        ),
+        default_text=(
+            "Your response contains a claim about an external library, API, or feature "
+            "that may be outdated. Call search_internet to verify before proceeding."
         ),
     ))
 
