@@ -63,6 +63,8 @@ async def get_integrations_db() -> aiosqlite.Connection:
     """Open (or create) the global integrations database."""
     db = await aiosqlite.connect(str(_db_path()))
     db.row_factory = aiosqlite.Row
+    await db.execute("PRAGMA journal_mode = WAL")
+    await db.execute("PRAGMA busy_timeout = 5000")
     await db.execute("PRAGMA foreign_keys = ON")
     await db.executescript(_SCHEMA)
     return db

@@ -69,6 +69,8 @@ async def get_db(repo_root: str) -> aiosqlite.Connection:
     """Open (or create) the database and ensure schema exists."""
     db = await aiosqlite.connect(str(_db_path(repo_root)))
     db.row_factory = aiosqlite.Row
+    await db.execute("PRAGMA journal_mode = WAL")
+    await db.execute("PRAGMA busy_timeout = 5000")
     await db.executescript(_SCHEMA)
     await _ensure_columns(db)
     return db
