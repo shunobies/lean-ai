@@ -52,12 +52,8 @@ intellijPlatform {
         }
     }
 
-    signing {
-        // Configure for marketplace publishing
-    }
-
     publishing {
-        // Configure marketplace token
+        token = providers.environmentVariable("PUBLISH_TOKEN")
     }
 }
 
