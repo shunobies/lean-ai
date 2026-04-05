@@ -183,7 +183,7 @@ async def _confidence_audit(
     Returns a VERIFIED REFERENCES section to append to the design output,
     or empty string if all decisions are high-confidence or audit fails.
     """
-    threshold = settings.confidence_threshold
+    threshold = settings.effective_confidence_threshold_expert
 
     # Step 1: Get structured confidence ratings
     try:

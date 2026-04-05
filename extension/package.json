@@ -667,6 +667,19 @@
           "default": true,
           "markdownDescription": "**Ollama Request Model** — Enable thinking/reasoning mode for the request model. Default: `true`"
         },
+        "lean-ai.confidenceThreshold": {
+          "type": "number",
+          "default": 0.7,
+          "markdownDescription": "**Confidence Threshold** — Minimum confidence level (0.0–1.0) for the structured confidence audit. Design decisions below this threshold trigger automatic internet verification during planning. Default: `0.7`"
+        },
+        "lean-ai.confidenceThresholdExpert": {
+          "type": "number",
+          "markdownDescription": "**Expert Model** — Confidence threshold for the expert model's design decisions. Leave empty to inherit from the primary threshold."
+        },
+        "lean-ai.confidenceThresholdRequest": {
+          "type": "number",
+          "markdownDescription": "**Request Model** — Confidence threshold for the request model during codebase exploration. Leave empty to inherit from the primary threshold."
+        },
         "lean-ai.ollamaExpertTemperature": {
           "type": "number",
           "markdownDescription": "**Ollama Expert Model** — Sampling temperature. Leave empty to inherit from the primary model."

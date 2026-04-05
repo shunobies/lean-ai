@@ -148,6 +148,9 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.enableThinking":            "LEAN_AI_ENABLE_THINKING",
     "lean-ai.enableThinkingExpert":      "LEAN_AI_ENABLE_THINKING_EXPERT",
     "lean-ai.enableThinkingRequest":     "LEAN_AI_ENABLE_THINKING_REQUEST",
+    "lean-ai.confidenceThreshold":       "LEAN_AI_CONFIDENCE_THRESHOLD",
+    "lean-ai.confidenceThresholdExpert": "LEAN_AI_CONFIDENCE_THRESHOLD_EXPERT",
+    "lean-ai.confidenceThresholdRequest":"LEAN_AI_CONFIDENCE_THRESHOLD_REQUEST",
 };
 
 // ── Zero-value filtering ─────────────────────────────────────────────────────
@@ -191,6 +194,9 @@ const ZERO_MEANS_UNSET: ReadonlySet<string> = new Set([
     "lean-ai.serveContextWindow",
     "lean-ai.serveTemperature",
     "lean-ai.serveMaxTokens",
+    // Confidence thresholds (0 = inherit from primary)
+    "lean-ai.confidenceThresholdExpert",
+    "lean-ai.confidenceThresholdRequest",
 ]);
 
 // ── Env building helpers ─────────────────────────────────────────────────────

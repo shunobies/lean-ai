@@ -303,7 +303,9 @@ class Settings(BaseSettings):
     enable_claim_verification: bool = True  # Nudge LLM to verify external claims via web search
 
     # ── Confidence verification ──
-    confidence_threshold: float = 0.7  # 0.0-1.0, below triggers search nudge in confidence audit
+    confidence_threshold: float = 0.7  # Primary model, 0.0-1.0
+    confidence_threshold_expert: float | None = None  # Falls back to primary
+    confidence_threshold_request: float | None = None  # Falls back to primary
 
     # ── TDD mode ──
     enable_tdd: bool = False  # Expert writes tests first, primary implements
@@ -523,6 +525,20 @@ class Settings(BaseSettings):
         if not rp or rp == "ollama":
             return self.ollama_request_max_tokens or (self.ollama_context_window // 4)
         return self._provider_max_tokens(rp)
+
+    @property
+    def effective_confidence_threshold_expert(self) -> float:
+        """Confidence threshold for the expert model (falls back to primary)."""
+        if self.confidence_threshold_expert is not None:
+            return self.confidence_threshold_expert
+        return self.confidence_threshold
+
+    @property
+    def effective_confidence_threshold_request(self) -> float:
+        """Confidence threshold for the request model (falls back to primary)."""
+        if self.confidence_threshold_request is not None:
+            return self.confidence_threshold_request
+        return self.confidence_threshold
 
     @property
     def effective_refiner_url(self) -> str:
