@@ -79,6 +79,41 @@ def cleanup_all_tool_output(repo_root: str) -> int:
     return deleted
 
 
+def _is_external_path(path: str, repo_root: str) -> bool:
+    """Return True if *path* resolves outside the repository root."""
+    resolved = (Path(repo_root) / path).resolve()
+    return not resolved.is_relative_to(Path(repo_root).resolve())
+
+
+async def _request_tool_approval(
+    ws: WebSocket,
+    dispatcher: "WSMessageDispatcher | None",
+    tool: str,
+    command: str,
+    reason: str,
+) -> bool:
+    """Send ``tool_approval_required`` and wait for user response.
+
+    Returns ``True`` if the user approves, ``False`` otherwise (denied,
+    disconnected, or cancelled).
+    """
+    await ws_send(ws, "tool_approval_required", {
+        "tool": tool, "command": command, "reason": reason,
+    })
+    if dispatcher:
+        from lean_ai.workflow.ws_dispatcher import WorkflowCancelledError
+        try:
+            approval_msg = await dispatcher.wait_for_approval()
+        except WorkflowCancelledError:
+            return False
+    else:
+        from lean_ai.workflow.ws_handler import safe_receive
+        approval_msg = await safe_receive(ws)
+    if approval_msg is None:
+        return False
+    return approval_msg.get("type") == "approve_tool"
+
+
 def make_tool_executor(
     repo_root: str,
     ws: WebSocket,
@@ -140,34 +175,64 @@ def make_tool_executor(
             )
 
         if name == "create_file":
+            target_path = arguments["path"]
+            external = _is_external_path(target_path, repo_root)
+            if external:
+                approved = await _request_tool_approval(
+                    ws, dispatcher, "create_file", target_path,
+                    "File is outside the project directory",
+                )
+                if not approved:
+                    return "ERROR: Access to external file not approved by user"
             result = await file_ops.create_file(
-                path=arguments["path"],
+                path=target_path,
                 content=arguments["content"],
                 repo_root=repo_root,
+                allow_external=external,
             )
             diff = result.metadata.get("diff", "")
             if diff:
-                await ws_send(ws, "diff", {"file": arguments["path"], "diff": diff})
+                await ws_send(ws, "diff", {"file": target_path, "diff": diff})
             return result.output if result.success else f"ERROR: {result.error}"
 
         elif name == "edit_file":
+            target_path = arguments["path"]
+            external = _is_external_path(target_path, repo_root)
+            if external:
+                approved = await _request_tool_approval(
+                    ws, dispatcher, "edit_file", target_path,
+                    "File is outside the project directory",
+                )
+                if not approved:
+                    return "ERROR: Access to external file not approved by user"
             result = await file_ops.edit_file(
-                path=arguments["path"],
+                path=target_path,
                 search=arguments["search"],
                 replace=arguments["replace"],
                 repo_root=repo_root,
+                allow_external=external,
             )
             diff = result.metadata.get("diff", "")
             if diff:
-                await ws_send(ws, "diff", {"file": arguments["path"], "diff": diff})
+                await ws_send(ws, "diff", {"file": target_path, "diff": diff})
             return result.output if result.success else f"ERROR: {result.error}"
 
         elif name == "read_file":
+            target_path = arguments["path"]
+            external = _is_external_path(target_path, repo_root)
+            if external:
+                approved = await _request_tool_approval(
+                    ws, dispatcher, "read_file", target_path,
+                    "File is outside the project directory",
+                )
+                if not approved:
+                    return "ERROR: Access to external file not approved by user"
             result = await file_ops.read_file(
-                path=arguments["path"],
+                path=target_path,
                 repo_root=repo_root,
                 start_line=arguments.get("start_line"),
                 end_line=arguments.get("end_line"),
+                allow_external=external,
             )
             return result.output if result.success else f"ERROR: {result.error}"
 
@@ -177,21 +242,9 @@ def make_tool_executor(
             if risk == CommandRisk.ALWAYS_BLOCK:
                 return f"ERROR: Command blocked: {reason}"
             if risk == CommandRisk.REQUIRES_APPROVAL:
-                await ws_send(ws, "tool_approval_required", {
-                    "tool": name, "command": command, "reason": reason,
-                })
-                if dispatcher:
-                    from lean_ai.workflow.ws_dispatcher import WorkflowCancelledError
-                    try:
-                        approval_msg = await dispatcher.wait_for_approval()
-                    except WorkflowCancelledError:
-                        return "ERROR: Workflow cancelled by user"
-                else:
-                    from lean_ai.workflow.ws_handler import safe_receive
-                    approval_msg = await safe_receive(ws)
-                if approval_msg is None:
-                    return "ERROR: WebSocket disconnected — command skipped (requires approval)"
-                if approval_msg.get("type") != "approve_tool":
+                if not await _request_tool_approval(
+                    ws, dispatcher, name, command, reason,
+                ):
                     return "ERROR: Command not approved by user"
 
             handler = {
@@ -257,21 +310,9 @@ def make_tool_executor(
             if risk == CommandRisk.ALWAYS_BLOCK:
                 return f"ERROR: Command blocked: {reason}"
             if risk == CommandRisk.REQUIRES_APPROVAL:
-                await ws_send(ws, "tool_approval_required", {
-                    "tool": name, "command": command, "reason": reason,
-                })
-                if dispatcher:
-                    from lean_ai.workflow.ws_dispatcher import WorkflowCancelledError
-                    try:
-                        approval_msg = await dispatcher.wait_for_approval()
-                    except WorkflowCancelledError:
-                        return "ERROR: Workflow cancelled by user"
-                else:
-                    from lean_ai.workflow.ws_handler import safe_receive
-                    approval_msg = await safe_receive(ws)
-                if approval_msg is None:
-                    return "ERROR: WebSocket disconnected — command skipped (requires approval)"
-                if approval_msg.get("type") != "approve_tool":
+                if not await _request_tool_approval(
+                    ws, dispatcher, name, command, reason,
+                ):
                     return "ERROR: Command not approved by user"
 
             result = await shell.run_command(

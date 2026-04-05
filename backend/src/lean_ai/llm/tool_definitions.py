@@ -19,7 +19,11 @@ IMPLEMENTATION_TOOLS: list[dict] = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "File path relative to the repository root",
+                        "description": (
+                            "File path relative to the repository root, or an "
+                            "absolute path for files outside the project "
+                            "(requires user approval)"
+                        ),
                     },
                     "content": {
                         "type": "string",
@@ -49,7 +53,11 @@ IMPLEMENTATION_TOOLS: list[dict] = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "File path relative to the repository root",
+                        "description": (
+                            "File path relative to the repository root, or an "
+                            "absolute path for files outside the project "
+                            "(requires user approval)"
+                        ),
                     },
                     "search": {
                         "type": "string",
@@ -74,14 +82,20 @@ IMPLEMENTATION_TOOLS: list[dict] = [
             "description": (
                 "Read the contents of a file with line numbers. "
                 "Returns up to 500 lines by default. For large files, "
-                "use start_line and end_line to read specific sections."
+                "use start_line and end_line to read specific sections. "
+                "Can read files outside the project (e.g. log files) "
+                "using absolute paths — requires user approval."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "File path relative to the repository root",
+                        "description": (
+                            "File path relative to the repository root, or an "
+                            "absolute path for files outside the project "
+                            "(requires user approval)"
+                        ),
                     },
                     "start_line": {
                         "type": "integer",

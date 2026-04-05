@@ -14,21 +14,30 @@ logger = logging.getLogger(__name__)
 _MAX_READ_BYTES = 2 * 1024 * 1024
 
 
-def _safe_resolve(path: str, repo_root: str) -> Path | None:
+def _safe_resolve(
+    path: str, repo_root: str, allow_external: bool = False,
+) -> Path | None:
     """Resolve *path* under *repo_root* and verify it doesn't escape.
 
     Returns the resolved ``Path`` or ``None`` if the path escapes the
     repository root (e.g. via ``../`` traversal or symlinks).
+
+    When *allow_external* is ``True``, paths outside the repo root are
+    permitted (caller is responsible for gating this behind user approval).
     """
     resolved = (Path(repo_root) / path).resolve()
     if not resolved.is_relative_to(Path(repo_root).resolve()):
+        if allow_external:
+            return resolved
         return None
     return resolved
 
 
-async def create_file(path: str, content: str, repo_root: str) -> ToolResult:
+async def create_file(
+    path: str, content: str, repo_root: str, allow_external: bool = False,
+) -> ToolResult:
     """Create a new file with the given content."""
-    file_path = _safe_resolve(path, repo_root)
+    file_path = _safe_resolve(path, repo_root, allow_external=allow_external)
     if file_path is None:
         return ToolResult(
             success=False,
@@ -52,12 +61,13 @@ async def create_file(path: str, content: str, repo_root: str) -> ToolResult:
 
 async def edit_file(
     path: str, search: str, replace: str, repo_root: str,
+    allow_external: bool = False,
 ) -> ToolResult:
     """Apply a targeted SEARCH/REPLACE edit to an existing file.
 
     Falls back to whitespace-tolerant matching if exact match fails.
     """
-    file_path = _safe_resolve(path, repo_root)
+    file_path = _safe_resolve(path, repo_root, allow_external=allow_external)
     if file_path is None:
         return ToolResult(
             success=False,
@@ -104,9 +114,10 @@ async def read_file(
     repo_root: str,
     start_line: int | None = None,
     end_line: int | None = None,
+    allow_external: bool = False,
 ) -> ToolResult:
     """Read a file with line numbers. Auto-truncates at 500 lines."""
-    file_path = _safe_resolve(path, repo_root)
+    file_path = _safe_resolve(path, repo_root, allow_external=allow_external)
     if file_path is None:
         return ToolResult(
             success=False,

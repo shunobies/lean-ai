@@ -169,9 +169,8 @@ class TestABC:
     def test_webhook_default(self):
         """Default handle_webhook returns not_implemented."""
         provider = FakeIntegration()
-        # Override to call parent default
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             IntegrationProvider.handle_webhook(provider, WebhookEvent("test", "1", "src"))
         )
         assert result == {"status": "not_implemented"}
@@ -179,7 +178,7 @@ class TestABC:
     def test_search_default(self):
         """Default search_tasks returns empty list."""
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             IntegrationProvider.search_tasks(MagicMock(), "query")
         )
         assert result == []
