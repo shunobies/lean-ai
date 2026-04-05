@@ -524,8 +524,26 @@ PLANNING_TOOLS: list[dict] = [
 
 
 def build_planning_tools() -> list[dict]:
-    """PLANNING_TOOLS + wiki tools when configured."""
-    return PLANNING_TOOLS + _maybe_wiki_tools()
+    """PLANNING_TOOLS + search tools + wiki tools when configured."""
+    search_tools = [
+        tool
+        for tool in IMPLEMENTATION_TOOLS
+        if tool["function"]["name"] in ("search_internet", "fetch_url")
+    ]
+    return PLANNING_TOOLS + search_tools + _maybe_wiki_tools()
+
+
+# Search + task_complete tools for Phase 3 design synthesis
+DESIGN_TOOLS: list[dict] = [
+    tool
+    for tool in IMPLEMENTATION_TOOLS
+    if tool["function"]["name"] in ("search_internet", "fetch_url", "task_complete")
+]
+
+
+def build_design_tools() -> list[dict]:
+    """Search + task_complete + wiki tools for Phase 3 design synthesis."""
+    return DESIGN_TOOLS + _maybe_wiki_tools()
 
 
 # Read-only tools for chat exploration (no task_complete — text exit)

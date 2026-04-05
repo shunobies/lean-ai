@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import WebSocket
+from pydantic import BaseModel
 
 from lean_ai.config import settings
 from lean_ai.llm.plan_schema import (
@@ -37,7 +38,7 @@ from lean_ai.llm.prompts import (
     PLAN_SCOPE_SYSTEM_PROMPT,
     PLAN_VERIFICATION_SYSTEM_PROMPT,
 )
-from lean_ai.llm.tool_definitions import build_planning_tools
+from lean_ai.llm.tool_definitions import build_design_tools, build_planning_tools
 
 if TYPE_CHECKING:
     from lean_ai.llm.client import LLMClient
@@ -50,6 +51,23 @@ logger = logging.getLogger(__name__)
 # and context fields — give them 40% of the expert context window so
 # detailed plans are not truncated (vs. the default 25% for general output).
 PLAN_OUTPUT_PERCENT = 0.40
+
+
+# ── Confidence audit models ──────────────────────────────────────────
+
+
+class ConfidenceItem(BaseModel):
+    """A single design decision with a confidence rating."""
+
+    topic: str
+    confidence: float  # 0.0-1.0
+    reasoning: str
+
+
+class ConfidenceAudit(BaseModel):
+    """Structured confidence ratings for design decisions."""
+
+    items: list[ConfidenceItem]
 
 
 def _save_debug_phase(
@@ -148,6 +166,122 @@ async def _extract_missing_files(
     if stripped.upper() == "NONE" or len(stripped) < 10:
         return ""
     return stripped
+
+
+async def _confidence_audit(
+    design_output: str,
+    llm_client: "LLMClient",
+    repo_root: str,
+    ws: WebSocket | None = None,
+) -> str:
+    """Run a structured confidence audit on design decisions.
+
+    Asks the expert model to rate confidence in each design decision
+    involving external frameworks, libraries, APIs, or patterns.
+    Items below the confidence threshold are verified via internet search.
+
+    Returns a VERIFIED REFERENCES section to append to the design output,
+    or empty string if all decisions are high-confidence or audit fails.
+    """
+    threshold = settings.confidence_threshold
+
+    # Step 1: Get structured confidence ratings
+    try:
+        audit = await llm_client.chat_structured(
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "Review the design decisions below and rate your "
+                        "confidence (0.0-1.0) in each decision that involves "
+                        "external frameworks, libraries, APIs, conventions, "
+                        "or version-specific behavior. Focus on items where "
+                        "your training data might be stale — framework APIs, "
+                        "library versions, deprecated patterns, new conventions.\n\n"
+                        "For each item, provide:\n"
+                        "- topic: what the decision is about\n"
+                        "- confidence: 0.0 (no confidence) to 1.0 (certain)\n"
+                        "- reasoning: why your confidence is at this level\n\n"
+                        "If the design only involves project-internal changes "
+                        "with no external dependencies, return an empty items list.\n\n"
+                        f"DESIGN OUTPUT:\n{design_output}"
+                    ),
+                },
+            ],
+            schema=ConfidenceAudit,
+            max_tokens=2048,
+        )
+    except Exception:
+        logger.warning("Confidence audit: structured call failed, skipping")
+        return ""
+
+    if not audit.items:
+        logger.info("Confidence audit: no external-dependency decisions found")
+        return ""
+
+    low_confidence = [
+        item for item in audit.items if item.confidence < threshold
+    ]
+    if not low_confidence:
+        logger.info(
+            "Confidence audit: all %d items above threshold (%.1f)",
+            len(audit.items), threshold,
+        )
+        return ""
+
+    logger.info(
+        "Confidence audit: %d/%d items below threshold (%.1f), verifying",
+        len(low_confidence), len(audit.items), threshold,
+    )
+
+    if ws:
+        await _send_stage(
+            ws,
+            f"Verifying {len(low_confidence)} low-confidence design "
+            f"decision(s) via internet search...",
+        )
+
+    # Step 2: Search and verify low-confidence items
+    from lean_ai.tools.internet import search_internet
+
+    verified_lines: list[str] = []
+    for item in low_confidence:
+        query = f"{item.topic} latest documentation API"
+        try:
+            result = await search_internet(
+                query=query, llm_client=llm_client,
+            )
+            if result.success and result.output:
+                verified_lines.append(
+                    f"- **{item.topic}** (confidence: {item.confidence:.1f}): "
+                    f"{result.output[:500]}"
+                )
+            else:
+                verified_lines.append(
+                    f"- **{item.topic}** (confidence: {item.confidence:.1f}): "
+                    f"[UNVERIFIED — search returned no results]"
+                )
+        except Exception:
+            logger.warning(
+                "Confidence audit: search failed for %r", item.topic,
+            )
+            verified_lines.append(
+                f"- **{item.topic}** (confidence: {item.confidence:.1f}): "
+                f"[UNVERIFIED — search failed]"
+            )
+
+    if not verified_lines:
+        return ""
+
+    section = (
+        "\n\n─── VERIFIED REFERENCES (from confidence audit) ───\n"
+        + "\n".join(verified_lines)
+    )
+    logger.info(
+        "Confidence audit: appended %d verified references (%d chars)",
+        len(verified_lines), len(section),
+    )
+    return section
 
 
 async def assess_clarity(
@@ -396,6 +530,21 @@ async def create_plan(
                     indent = "  " * depth
                     lines.append(f"{indent}{e.path.split('/')[-1]}")
             return "\n".join(lines) or "(empty)"
+        elif name == "search_internet":
+            from lean_ai.tools.internet import search_internet
+            result = await search_internet(
+                query=arguments.get("query", ""),
+                llm_client=explorer,
+            )
+            return result.output if result.success else result.error or "Error"
+        elif name == "fetch_url":
+            from lean_ai.tools.internet import fetch_url
+            result = await fetch_url(
+                url=arguments.get("url", ""),
+                repo_root=repo_root,
+                llm_client=explorer,
+            )
+            return result.output if result.success else result.error or "Error"
         elif name == "task_complete":
             return "Exploration marked complete."
         return f"Unknown tool: {name}"
@@ -454,26 +603,62 @@ async def create_plan(
     )
     logger.info("Planning Phase 3: Design + risk synthesis")
     t0 = time.monotonic()
-    design_and_risks = await expert.chat_raw(
-        messages=[
-            {"role": "system", "content": PLAN_DESIGN_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": registry.format(
-                    "planning.design_user",
-                    task=task,
-                    scope=scope,
-                    project_context=(
-                        f"PROJECT CONTEXT:\n{project_context}\n\n"
-                        if project_context else ""
-                    ),
-                    file_summary=file_summary,
+
+    phase3_messages = [
+        {"role": "system", "content": PLAN_DESIGN_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": registry.format(
+                "planning.design_user",
+                task=task,
+                scope=scope,
+                project_context=(
+                    f"PROJECT CONTEXT:\n{project_context}\n\n"
+                    if project_context else ""
                 ),
-            },
-        ],
+                file_summary=file_summary,
+            ),
+        },
+    ]
+
+    # Search-only tool executor for Phase 3 design synthesis
+    async def _search_only_executor(name: str, arguments: dict) -> str:
+        """Execute search tools for Phase 3 design verification."""
+        if name == "search_internet":
+            from lean_ai.tools.internet import search_internet
+            result = await search_internet(
+                query=arguments.get("query", ""),
+                llm_client=expert,
+            )
+            return result.output if result.success else result.error or "Error"
+        elif name == "fetch_url":
+            from lean_ai.tools.internet import fetch_url
+            result = await fetch_url(
+                url=arguments.get("url", ""),
+                repo_root=repo_root,
+                llm_client=expert,
+            )
+            return result.output if result.success else result.error or "Error"
+        elif name == "task_complete":
+            return "Design synthesis marked complete."
+        return f"Unknown tool: {name}"
+
+    # Use chat_with_tools so the expert can search the internet to verify
+    # external frameworks, APIs, and patterns during design.
+    # text_only_exit_count=1 preserves single-shot behavior when no search
+    # is needed — the model exits immediately on the first text response.
+    _phase3_tool_calls, design_and_risks = await expert.chat_with_tools(
+        messages=phase3_messages,
+        tools=build_design_tools(),
+        tool_executor_fn=_search_only_executor,
+        max_turns=15,
         max_tokens=expert_max_tokens,
-        stream_callback=on_content,
-        thinking_callback=on_thinking,
+        text_only_exit_count=1,
+        on_tool_call=on_tool_call,
+        on_tool_result=on_tool_result,
+        on_content=on_content,
+        on_thinking=on_thinking,
+        on_metrics=on_metrics,
     )
     if on_content:
         await _send_content_done(ws, design_and_risks)
@@ -486,6 +671,17 @@ async def create_plan(
     await _send_stage_done(
         ws, "Design and risk synthesis complete", model=expert.model_name, phase=3,
     )
+
+    # Confidence audit: verify low-confidence design decisions via search
+    confidence_refs = await _confidence_audit(
+        design_and_risks, expert, repo_root, ws=ws,
+    )
+    if confidence_refs:
+        design_and_risks += confidence_refs
+        _save_debug_phase(
+            repo_root, session_id, "phase_3_confidence_audit",
+            confidence_refs, 0.0,
+        )
 
     # Extract missing files from gap analysis for explicit injection into Phase 4
     missing_files = await _extract_missing_files(design_and_risks, expert)

@@ -285,6 +285,24 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
     ))
 
     reg.register(PromptEntry(
+        key="policy.confidence",
+        category="Core Policy",
+        name="Confidence Self-Assessment",
+        description=(
+            "Instructs the LLM to tag uncertain claims"
+            " and search when unsure about external knowledge."
+        ),
+        default_text=(
+            "When making claims about external frameworks, libraries, APIs, conventions, "
+            "or version-specific behavior, assess your confidence. If you are not confident "
+            "that the information is current, tag the claim with [UNVERIFIED] and call "
+            "search_internet to verify before proceeding. After verifying, cite the "
+            "documentation URL and key details so your verified knowledge can be trusted "
+            "by downstream steps."
+        ),
+    ))
+
+    reg.register(PromptEntry(
         key="policy.scratchpad",
         category="Core Policy",
         name="Scratchpad Policy",
@@ -334,11 +352,21 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
             "Use your knowledge of programming and software architecture to explore the "
             "codebase and identify every file that needs to change.\n\n"
             "You have read-only tools: read_file, list_directory, directory_tree, "
-            "grep_files, and task_complete.\n\n"
+            "grep_files, and task_complete. You also have search_internet and fetch_url "
+            "to verify external APIs and documentation.\n\n"
             "CRITICAL: Your text output is the ONLY information that reaches downstream "
             "phases. Tool call results are NOT passed forward. You MUST include relevant "
             "file content (key sections, imports, signatures) IN YOUR TEXT RESPONSES for "
-            "every file to be modified — not just in tool calls."
+            "every file to be modified — not just in tool calls.\n\n"
+            "STALE KNOWLEDGE CHECK: When you encounter external dependencies, frameworks, "
+            "or third-party APIs central to the planned changes, call search_internet to "
+            "verify that the patterns, conventions, and versions you plan to use are current. "
+            "Your training data may be outdated — libraries release breaking changes, "
+            "deprecate functions, and introduce new recommended patterns. Focus on "
+            "dependencies central to the task — not every import.\n\n"
+            "After searching, include a VERIFIED REFERENCES section in your output listing "
+            "each verified dependency with: the documentation URL, confirmed API signatures "
+            "or patterns, and the version checked."
         ),
     ))
 
@@ -353,11 +381,16 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
         default_text=(
             "Use your knowledge of programming and software architecture to synthesize "
             "design decisions from the scope analysis and file exploration results provided.\n\n"
-            "You do NOT have tools — work entirely from the information given. The scope "
+            "You have search_internet, fetch_url, and task_complete tools. The scope "
             "analysis and file summary below were produced by a different model that "
             "explored the codebase with read-only tools.\n\n"
+            "When making design decisions involving external frameworks, libraries, APIs, "
+            "or version-specific behavior, verify current patterns via search_internet if "
+            "the file summary's VERIFIED REFERENCES section does not already cover what "
+            "you need. Cite documentation URLs for any external patterns you reference.\n\n"
             "Do NOT simulate running commands, invent file listings, or fabricate file "
-            "contents. Base your analysis ONLY on the codebase information provided."
+            "contents. Base your analysis ONLY on the codebase information provided and "
+            "verified search results."
         ),
     ))
 
@@ -406,7 +439,12 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
             "for every edit\n"
             "- When a step depends on output from a previous step, include the expected "
             "names/paths/signatures in the context field\n"
-            "- Never assume the executor will infer relationships between steps"
+            "- Never assume the executor will infer relationships between steps\n\n"
+            "VERIFIED REFERENCES:\n"
+            "When plan steps reference external framework patterns, APIs, or conventions, "
+            "use ONLY the verified references from the file summary and design synthesis. "
+            "If a step requires an external pattern that was NOT verified in earlier phases, "
+            "mark it as [UNVERIFIED] in the step description."
         ),
     ))
 
@@ -571,7 +609,10 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
             "FILES READ FOR CONTEXT (not modified, but content informs changes):\n"
             "1. path/to/source — what it contains\n\n"
             "MISSING INFRASTRUCTURE (assumed by the task but not found):\n"
-            "1. what is missing — why it is needed"
+            "1. what is missing — why it is needed\n\n"
+            "VERIFIED REFERENCES (from internet search — include for each verified item):\n"
+            "1. dependency/framework — docs URL — version checked — "
+            "confirmed patterns or API details"
         ),
     ))
 
@@ -1670,6 +1711,21 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
         default_text=(
             "Your response contains a claim about an external library, API, or feature "
             "that may be outdated. Call search_internet to verify before proceeding."
+        ),
+    ))
+
+    reg.register(PromptEntry(
+        key="nudge.confidence_verification",
+        category="Advanced",
+        name="Confidence Verification Nudge",
+        description=(
+            "Injected when the model tags claims as"
+            " [UNVERIFIED] but does not search to verify."
+        ),
+        default_text=(
+            "You tagged claims as [UNVERIFIED]. Call search_internet to verify "
+            "these claims before proceeding. Cite the documentation URL and "
+            "confirmed details in your response."
         ),
     ))
 

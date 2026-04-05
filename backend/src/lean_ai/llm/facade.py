@@ -498,6 +498,31 @@ class LLMClient:
                     "role": "user",
                     "content": registry.get("nudge.claim_verification"),
                 })
+
+            # ── Confidence verification nudge ──
+            # Detect [UNVERIFIED] markers in model output. Only nudge if
+            # search_internet is available in the tool list and wasn't
+            # already called this turn.
+            _has_search = any(
+                t["function"]["name"] == "search_internet" for t in tools
+            )
+            if (
+                content.strip()
+                and "[UNVERIFIED]" in content.upper()
+                and _has_search
+                and not any(
+                    tc.name == "search_internet" for tc in (tool_calls or [])
+                )
+            ):
+                logger.info(
+                    "chat_with_tools: [UNVERIFIED] marker detected, "
+                    "nudging confidence verification"
+                )
+                from lean_ai.llm.prompt_registry import registry
+                messages.append({
+                    "role": "user",
+                    "content": registry.get("nudge.confidence_verification"),
+                })
         else:
             logger.warning(
                 "chat_with_tools: reached max_turns=%s without completion",

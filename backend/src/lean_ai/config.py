@@ -302,6 +302,9 @@ class Settings(BaseSettings):
     # ── Claim verification ──
     enable_claim_verification: bool = True  # Nudge LLM to verify external claims via web search
 
+    # ── Confidence verification ──
+    confidence_threshold: float = 0.7  # 0.0-1.0, below triggers search nudge in confidence audit
+
     # ── TDD mode ──
     enable_tdd: bool = False  # Expert writes tests first, primary implements
     tdd_max_disputes_per_step: int = 3  # Max test disputes per implementation step
