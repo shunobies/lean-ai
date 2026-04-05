@@ -1,0 +1,94 @@
+<idea-plugin>
+    <id>com.leanai.plugin</id>
+    <name>Lean AI</name>
+    <version>0.1.0</version>
+    <vendor email="support@lean-ai.dev" url="https://github.com/shunobies/lean-ai">lean-ai</vendor>
+
+    <description><![CDATA[
+    <p>Single-Model Deterministic Agentic Architecture — Chat Agent &amp; Inline Predictions.</p>
+    <p>Lean AI is an agentic coding assistant that uses a local LLM (via Ollama) or cloud providers
+    (OpenAI, Anthropic, Gemini) with a simple philosophy: plan well, give the LLM tools, let it work.</p>
+    <ul>
+        <li>Full agent workflow: plan → approve → execute</li>
+        <li>Bug-fix mode with investigation phase</li>
+        <li>Open-ended request mode</li>
+        <li>Inline code completions (FIM)</li>
+        <li>Internet search tools for documentation lookup</li>
+        <li>Post-execution validation (lint, test, format)</li>
+        <li>TDD mode with expert/primary model pipeline</li>
+        <li>Voice interaction (STT, TTS, wake word)</li>
+    </ul>
+    ]]></description>
+
+    <change-notes><![CDATA[
+    <p>Initial JetBrains plugin release.</p>
+    ]]></change-notes>
+
+    <!-- Minimal dependency = works in ALL JetBrains IDEs -->
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Startup activity: initialize backend on IDE open -->
+        <postStartupActivity
+            implementation="com.leanai.plugin.LeanAiPlugin"/>
+
+        <!-- Chat tool window (JCEF-based) -->
+        <toolWindow
+            id="Lean AI"
+            anchor="right"
+            factoryClass="com.leanai.plugin.ui.ChatToolWindowFactory"
+            icon="/icons/leanai-13.svg"/>
+
+        <!-- Sessions tool window -->
+        <toolWindow
+            id="Lean AI Sessions"
+            anchor="right"
+            secondary="true"
+            factoryClass="com.leanai.plugin.ui.SessionsToolWindowFactory"
+            icon="/icons/leanai-13.svg"/>
+
+        <!-- Inline completion provider (requires 2024.1+) -->
+        <inline.completion.provider
+            implementation="com.leanai.plugin.completion.LeanAiInlineCompletionProvider"/>
+
+        <!-- Application-level settings service -->
+        <applicationService
+            serviceImplementation="com.leanai.plugin.settings.LeanAiSettings"/>
+
+        <!-- Settings UI in Preferences > Tools > Lean AI -->
+        <applicationConfigurable
+            instance="com.leanai.plugin.settings.LeanAiConfigurable"
+            id="com.leanai.plugin.settings"
+            displayName="Lean AI"
+            groupId="tools"/>
+
+        <!-- Notification group -->
+        <notificationGroup
+            id="Lean AI"
+            displayType="BALLOON"/>
+    </extensions>
+
+    <actions>
+        <!-- Tool window title bar actions -->
+        <group id="LeanAi.ToolWindowActions" text="Lean AI Actions">
+            <action
+                id="LeanAi.Approve"
+                class="com.leanai.plugin.actions.ApproveAction"
+                text="Approve Plan"
+                description="Approve the current plan"
+                icon="AllIcons.Actions.Checked"/>
+            <action
+                id="LeanAi.Reject"
+                class="com.leanai.plugin.actions.RejectAction"
+                text="Reject Plan"
+                description="Reject the current plan with feedback"
+                icon="AllIcons.Actions.Cancel"/>
+            <action
+                id="LeanAi.RestartBackend"
+                class="com.leanai.plugin.actions.RestartBackendAction"
+                text="Restart Backend"
+                description="Restart the Lean AI backend server"
+                icon="AllIcons.Actions.Restart"/>
+        </group>
+    </actions>
+</idea-plugin>

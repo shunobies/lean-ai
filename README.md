@@ -24,7 +24,11 @@ Run it fully local with [Ollama](https://ollama.com), or connect to OpenAI and A
 
 ### 1. Install the extension
 
-Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=lean-ai.lean-ai) or [OpenVSX](https://open-vsx.org/extension/lean-ai/lean-ai). On first activation, the extension automatically creates a Python virtual environment and installs the backend server — no manual setup required.
+**VS Code / VSCodium:** Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=lean-ai.lean-ai) or [OpenVSX](https://open-vsx.org/extension/lean-ai/lean-ai).
+
+**JetBrains IDEs** (IntelliJ, PyCharm, WebStorm, CLion, etc.): See the [JetBrains Plugin guide](jetbrains-plugin/README.md) for build and install instructions.
+
+On first activation, the extension automatically creates a Python virtual environment and installs the backend server — no manual setup required.
 
 ### 2. Install Ollama and pull a model
 
@@ -176,6 +180,7 @@ See the [full configuration reference](docs/configuration.md) for all options.
 | [Knowledge Base & Refiner](docs/knowledge-base.md) | Private docs, RAG enrichment, and cloud privacy |
 | [API Reference](docs/api-reference.md) | REST endpoints and WebSocket protocol |
 | [Extension Guide](docs/extension.md) | VSCode/VSCodium setup, commands, and settings |
+| [JetBrains Plugin](jetbrains-plugin/README.md) | IntelliJ, PyCharm, WebStorm, CLion, and all JetBrains IDEs |
 | [Prompt Customization](docs/prompt-customization.md) | Customizing LLM prompts per project |
 | [Modelfile Guide](docs/modelfile.md) | Customizing Ollama models with persistent rules |
 | [llama-server Guide](docs/llama-server.md) | Using llama.cpp as an alternative to Ollama |
@@ -200,7 +205,8 @@ Ollama is always required for inline predictions and embeddings, even when using
 | LLM providers | Ollama, OpenAI, Anthropic |
 | Code analysis | tree-sitter (13 languages) |
 | Search | Whoosh BM25F + embedding RRF |
-| Extension | TypeScript, VSCode API |
+| VS Code Extension | TypeScript, VSCode API |
+| JetBrains Plugin | Kotlin, IntelliJ Platform SDK, JCEF |
 
 ## License
 

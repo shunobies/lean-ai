@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lean AI Chat</title>
+    <link rel="stylesheet" href="chat.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Status bar -->
+        <div id="status-bar" class="status-bar">
+            <span id="status-text" class="status-text">Ready</span>
+            <span id="metrics-badge" class="metrics-badge" style="display:none;"></span>
+        </div>
+
+        <!-- Messages container -->
+        <div id="messages" class="messages"></div>
+
+        <!-- Input area -->
+        <div id="input-area" class="input-area">
+            <div class="input-row">
+                <textarea
+                    id="message-input"
+                    class="message-input"
+                    placeholder="Type a message or /command..."
+                    rows="1"
+                ></textarea>
+                <button id="send-btn" class="send-btn" title="Send">&#x27A4;</button>
+                <button id="cancel-btn" class="cancel-btn" title="Cancel" style="display:none;">&#x2715;</button>
+            </div>
+            <div id="command-hint" class="command-hint" style="display:none;"></div>
+        </div>
+    </div>
+
+    <script src="chat.js"></script>
+</body>
+</html>
