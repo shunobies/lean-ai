@@ -68,13 +68,17 @@ def _make_chat_tool_executor(repo_root: str | None = None):
             return f"ERROR: {name} requires an open workspace."
 
         from lean_ai.tools.file_ops import grep_files, read_file
+        from lean_ai.workflow.tool_executor import _is_external_path
 
         if name == "read_file":
+            target_path = arguments.get("path", "")
+            external = _is_external_path(target_path, repo_root)
             result = await read_file(
-                path=arguments.get("path", ""),
+                path=target_path,
                 repo_root=repo_root,
                 start_line=arguments.get("start_line"),
                 end_line=arguments.get("end_line"),
+                allow_external=external,
             )
             return result.output if result.success else result.error or "Error"
         elif name == "grep_files":

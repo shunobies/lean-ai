@@ -42,6 +42,7 @@ from lean_ai.llm.tool_definitions import build_planning_tools
 if TYPE_CHECKING:
     from lean_ai.llm.client import LLMClient
     from lean_ai.llm.refiner import PromptRefiner
+    from lean_ai.workflow.ws_dispatcher import WSMessageDispatcher
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +212,7 @@ async def create_plan(
     context: str = "",
     revision_context: str | None = None,
     ws: WebSocket | None = None,
+    dispatcher: "WSMessageDispatcher | None" = None,
     refiner: "PromptRefiner | None" = None,
     test_command: str = "",
     session_id: str = "",
@@ -334,13 +336,32 @@ async def create_plan(
     async def _read_only_executor(name: str, arguments: dict) -> str:
         """Execute read-only tools for planning phase."""
         from lean_ai.tools.file_ops import grep_files, read_file
+        from lean_ai.workflow.tool_executor import (
+            _is_external_path,
+            _request_tool_approval,
+        )
 
         if name == "read_file":
+            target_path = arguments.get("path", "")
+            external = _is_external_path(target_path, repo_root)
+            if external:
+                if ws is None:
+                    return (
+                        "ERROR: Cannot read files outside the "
+                        "project without an active connection"
+                    )
+                approved = await _request_tool_approval(
+                    ws, dispatcher, "read_file", target_path,
+                    "File is outside the project directory",
+                )
+                if not approved:
+                    return "ERROR: Access to external file not approved by user"
             result = await read_file(
-                path=arguments.get("path", ""),
+                path=target_path,
                 repo_root=repo_root,
                 start_line=arguments.get("start_line"),
                 end_line=arguments.get("end_line"),
+                allow_external=external,
             )
             return result.output if result.success else result.error or "Error"
         elif name == "grep_files":
