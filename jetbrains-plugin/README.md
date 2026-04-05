@@ -26,7 +26,30 @@ git clone https://github.com/shunobies/lean-ai.git
 cd lean-ai/jetbrains-plugin
 ```
 
-#### 2. Install the Gradle wrapper
+#### 2. Install JDK 17+
+
+The build requires JDK 17 or newer. Check if you already have it:
+
+```bash
+java -version
+```
+
+If not installed:
+
+```bash
+# Debian / Ubuntu
+sudo apt install openjdk-17-jdk
+
+# macOS (Homebrew)
+brew install openjdk@17
+
+# Windows (winget)
+winget install Microsoft.OpenJDK.17
+```
+
+> **Note:** The JDK is only needed for building. The IDE ships its own JRE for running the plugin.
+
+#### 3. Install the Gradle wrapper
 
 The project uses the Gradle wrapper, which downloads the correct Gradle version automatically. If you don't have `gradlew` yet:
 
@@ -36,7 +59,7 @@ gradle wrapper --gradle-version 8.10
 
 Or download it manually from [gradle.org](https://gradle.org/install/).
 
-#### 3. Build the plugin
+#### 4. Build the plugin
 
 ```bash
 ./gradlew buildPlugin
@@ -47,7 +70,7 @@ This does three things:
 2. Compiles the Kotlin source against the IntelliJ Platform SDK
 3. Produces a distributable `.zip` at `build/distributions/lean-ai-plugin-<version>.zip`
 
-#### 4. Install the plugin
+#### 5. Install the plugin
 
 In your JetBrains IDE:
 1. Go to **Settings > Plugins > ⚙️ (gear icon) > Install Plugin from Disk...**

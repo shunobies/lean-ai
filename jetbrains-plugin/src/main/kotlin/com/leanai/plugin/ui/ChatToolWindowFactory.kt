@@ -6,7 +6,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.content.ContentFactory
-import com.intellij.ui.jcef.JBCefBrowser
+import com.intellij.ui.jcef.JBCefApp
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.SwingConstants
@@ -29,7 +29,7 @@ class ChatToolWindowFactory : ToolWindowFactory, DumbAware {
 
     private fun createChatPanel(project: Project): JComponent {
         // Check if JCEF is available
-        return if (JBCefBrowser.isCefBrowserCreationAllowed()) {
+        return if (JBCefApp.isSupported()) {
             createJcefPanel(project)
         } else {
             // Fallback: simple label directing user to enable JCEF

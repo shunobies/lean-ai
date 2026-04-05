@@ -206,13 +206,13 @@ object SettingsSync {
     }
 
     /** Store a secret in PasswordSafe. */
-    fun storeSecret(key: SecretKey, value: String) {
+    private fun storeSecret(key: SecretKey, value: String) {
         val attrs = CredentialAttributes(generateServiceName(key.service, key.account))
         PasswordSafe.instance.setPassword(attrs, value)
     }
 
     /** Retrieve a secret from PasswordSafe. */
-    fun getSecret(key: SecretKey): String? {
+    private fun getSecret(key: SecretKey): String? {
         val attrs = CredentialAttributes(generateServiceName(key.service, key.account))
         return PasswordSafe.instance.getPassword(attrs)
     }
