@@ -38,6 +38,8 @@ Download [Ollama](https://ollama.com) and pull a model:
 ollama pull qwen3-coder:30b
 ```
 
+> **Cloud models:** Ollama also supports cloud-hosted models. Pull one with `ollama pull model-name:cloud`, then run `ollama run model-name:cloud` and follow the link to connect your Ollama Cloud account. Once linked, select the cloud model from the Lean AI dropdown — it works the same as a local model.
+
 ### 3. Open a project and run `/init`
 
 Type `/init` in the chat panel to index your workspace and generate project context. Then describe what you want built.
