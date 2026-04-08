@@ -17,13 +17,14 @@ from typing import TYPE_CHECKING
 from fastapi import WebSocket, WebSocketDisconnect
 
 from lean_ai.config import settings
-from lean_ai.llm.plan_schema import ExecutionPlan, plan_to_markdown
+from lean_ai.llm.plan_schema import ExecutionPlan, PlanStep, plan_to_markdown
 from lean_ai.llm.planner import assess_clarity, create_plan
 from lean_ai.llm.tool_definitions import (
     build_implementation_tools,
     build_tdd_implementation_tools,
 )
-from lean_ai.routers.context_helpers import load_condensed_context
+from lean_ai.routers.context_helpers import load_execution_context
+from lean_ai.tools import scratchpad
 from lean_ai.workflow.callbacks import build_workflow_callbacks
 from lean_ai.workflow.fix_mode import _run_fix  # noqa: F401 — used by run_workflow
 from lean_ai.workflow.prompts import (
@@ -39,7 +40,7 @@ from lean_ai.workflow.validation import (
     _run_validation_fix_loop,
 )
 from lean_ai.workflow.ws_dispatcher import WSMessageDispatcher
-from lean_ai.workflow.ws_handler import ws_send
+from lean_ai.workflow.ws_handler import ws_send, ws_send_nowait
 
 if TYPE_CHECKING:
     from lean_ai.llm.client import LLMClient
@@ -80,7 +81,7 @@ async def run_workflow(
     """
     logger.info("Workflow (%s): starting task: %s", mode, task[:100])
 
-    # Validate TDD requires expert model
+    # Validate TDD requirements: expert model + sufficient context window
     if settings.enable_tdd and expert_llm_client is None:
         logger.warning(
             "TDD mode enabled but no expert model configured — "
@@ -92,6 +93,22 @@ async def run_workflow(
             "summary": (
                 "TDD mode requires an expert model. "
                 "Falling back to normal mode."
+            ),
+        })
+
+    if settings.enable_tdd and settings._active_context_window <= 32768:
+        logger.warning(
+            "TDD mode disabled — context window too small (%d). "
+            "TDD requires cross-phase context that exceeds 32k budget.",
+            settings._active_context_window,
+        )
+        await ws_send(ws, "stage_status", {
+            "stage": "tdd",
+            "status": "done",
+            "summary": (
+                "TDD mode auto-disabled: context window too small "
+                f"({settings._active_context_window}). "
+                "Increase to 64k+ to enable TDD."
             ),
         })
 
@@ -308,6 +325,75 @@ async def _wait_for_approval(
             continue
 
 
+# ── Step dependency analysis ──────────────────────────────────────
+
+# Tools that act as barriers — they depend on ALL prior steps completing.
+_BARRIER_TOOLS = frozenset({"run_tests", "run_lint", "format_code", "run_command"})
+
+
+def _build_step_groups(
+    steps: list[PlanStep],
+) -> list[list[PlanStep]]:
+    """Group plan steps by dependency for parallel execution.
+
+    Rules:
+    - Same ``file_path`` → sequential (same group boundary).
+    - Step B's instruction/context mentions step A's ``file_path``
+      → cross-file dependency.
+    - Barrier tools (run_tests, run_lint, etc.) depend on ALL prior steps.
+    - Steps with no dependency on each other land in the same parallel group.
+
+    Returns a list of groups.  Steps within a group are independent
+    and can run concurrently.
+    """
+    if not steps:
+        return []
+
+    # Track which group each step belongs to
+    group_idx: list[int] = []  # group index for each step
+
+    # Map file_path → latest step index that touches it
+    file_owners: dict[str, int] = {}
+
+    for i, step in enumerate(steps):
+        max_dep_group = -1
+
+        # Barrier tool: depends on everything before it
+        if step.tool in _BARRIER_TOOLS:
+            if group_idx:
+                max_dep_group = max(group_idx)
+            group_idx.append(max_dep_group + 1)
+            # After a barrier, subsequent steps start fresh
+            file_owners.clear()
+            continue
+
+        # Same file_path → sequential dependency
+        if step.file_path and step.file_path in file_owners:
+            dep_step = file_owners[step.file_path]
+            max_dep_group = max(max_dep_group, group_idx[dep_step])
+
+        # Cross-file reference: check if instruction/context mentions
+        # any previously-touched file
+        searchable = (step.instruction or "") + " " + (step.file_path or "")
+        for fpath, dep_step in file_owners.items():
+            if fpath and fpath in searchable:
+                max_dep_group = max(max_dep_group, group_idx[dep_step])
+
+        group_idx.append(max_dep_group + 1)
+
+        # Register this step's file
+        if step.file_path:
+            file_owners[step.file_path] = i
+
+    # Collect groups
+    num_groups = max(group_idx) + 1 if group_idx else 0
+    groups: list[list[PlanStep]] = [[] for _ in range(num_groups)]
+    for i, step in enumerate(steps):
+        groups[group_idx[i]].append(step)
+
+    return groups
+
+
 # ── Phase 4: Per-Step Execution ────────────────────────────────────
 
 
@@ -337,10 +423,13 @@ async def _execute_plan(
     step_explanations: list[str] = []
     completed_descriptions: list[str] = []
     step_artifacts: dict[str, str] = {}  # {relative_path: file_content}
+    _artifacts_lock = asyncio.Lock()  # guards shared state in parallel groups
 
     # Build the system prompt once (shared across all steps)
+    # Use execution context (framework guide + custom docs) — step instructions
+    # are specific enough that project_context.md is not needed here.
     system_prompt = build_step_system_prompt(
-        load_condensed_context(repo_root),
+        load_execution_context(repo_root),
         naming_conventions=getattr(plan, "naming_conventions", ""),
         name_registry=getattr(plan, "name_registry", ""),
     )
@@ -379,6 +468,41 @@ async def _execute_plan(
             {"role": "user", "content": user_msg},
         ]
 
+        def _build_step_refresh(current_messages: list[dict]) -> list[dict]:
+            """Rebuild message list from fresh disk state for context refresh."""
+            fresh_ctx = load_execution_context(repo_root)
+            fresh_sys = build_step_system_prompt(
+                fresh_ctx,
+                naming_conventions=getattr(plan, "naming_conventions", ""),
+                name_registry=getattr(plan, "name_registry", ""),
+            )
+            fresh_user = build_step_user_message(
+                step, completed_descriptions, total_steps,
+                step_artifacts=step_artifacts,
+            )
+            pad = scratchpad.read_scratchpad(repo_root, session_id)
+            new_messages: list[dict] = [
+                {"role": "system", "content": fresh_sys},
+                {"role": "user", "content": fresh_user},
+            ]
+            if pad:
+                new_messages.append({
+                    "role": "user",
+                    "content": f"[CONTEXT REFRESHED]\n\n{pad}",
+                })
+            else:
+                new_messages.append({
+                    "role": "user",
+                    "content": (
+                        "[CONTEXT REFRESHED]\n\n"
+                        "Continue working on the current step."
+                    ),
+                })
+            ws_send_nowait(ws, "context_refreshed", {
+                "message": "Step context refreshed.",
+            })
+            return new_messages
+
         executed, explanation = await client.chat_with_tools(
             messages=messages,
             tools=tools,
@@ -390,44 +514,47 @@ async def _execute_plan(
             on_content=cb.on_content,
             on_thinking=cb.on_thinking,
             on_metrics=cb.on_metrics,
+            on_context_refresh=_build_step_refresh,
             dispatcher=dispatcher,
         )
 
-        all_executed.extend(executed)
-        if explanation.strip():
-            step_explanations.append(
-                f"{step_label}: {explanation.strip()}"
+        # Update shared state under lock for parallel safety
+        async with _artifacts_lock:
+            all_executed.extend(executed)
+            if explanation.strip():
+                step_explanations.append(
+                    f"{step_label}: {explanation.strip()}"
+                )
+            completed_descriptions.append(
+                f"{step_label}: {step.instruction}"
             )
-        completed_descriptions.append(
-            f"{step_label}: {step.instruction}"
-        )
 
-        # Collect files created/modified for cross-step context
-        artifact_budget = int(
-            settings._active_context_window * 0.10 * 3.5
-        )
-        for tc in executed:
-            if tc.tool_name in ("create_file", "edit_file"):
-                fpath = tc.parameters.get("path", "")
-                if fpath:
-                    full = os.path.join(repo_root, fpath)
-                    try:
-                        if os.path.isfile(full):
-                            content = await asyncio.to_thread(
-                                Path(full).read_text,
-                                encoding="utf-8",
-                                errors="replace",
-                            )
-                            step_artifacts[fpath] = content
-                    except Exception:
-                        pass
+            # Collect files created/modified for cross-step context
+            artifact_budget = int(
+                settings._active_context_window * 0.10 * 3.5
+            )
+            for tc in executed:
+                if tc.tool_name in ("create_file", "edit_file"):
+                    fpath = tc.parameters.get("path", "")
+                    if fpath:
+                        full = os.path.join(repo_root, fpath)
+                        try:
+                            if os.path.isfile(full):
+                                content = await asyncio.to_thread(
+                                    Path(full).read_text,
+                                    encoding="utf-8",
+                                    errors="replace",
+                                )
+                                step_artifacts[fpath] = content
+                        except Exception:
+                            pass
 
-        while (
-            sum(len(c) for c in step_artifacts.values()) > artifact_budget
-            and step_artifacts
-        ):
-            oldest_key = next(iter(step_artifacts))
-            del step_artifacts[oldest_key]
+            while (
+                sum(len(c) for c in step_artifacts.values()) > artifact_budget
+                and step_artifacts
+            ):
+                oldest_key = next(iter(step_artifacts))
+                del step_artifacts[oldest_key]
 
         await ws_send(ws, "checkpoint", {
             "step_index": step.step_number - 1,
@@ -441,6 +568,7 @@ async def _execute_plan(
         settings.enable_tdd
         and plan.tdd_test_steps
         and expert_llm_client is not None
+        and settings._active_context_window > 32768
     )
 
     if tdd_active:
@@ -464,7 +592,7 @@ async def _execute_plan(
             dispatcher=dispatcher,
         )
         test_system_prompt = build_step_system_prompt(
-            load_condensed_context(repo_root),
+            load_execution_context(repo_root),
             naming_conventions=getattr(plan, "naming_conventions", ""),
             name_registry=getattr(plan, "name_registry", ""),
         )
@@ -500,7 +628,7 @@ async def _execute_plan(
             })
 
             review_prompt = build_tdd_review_prompt(
-                load_condensed_context(repo_root),
+                load_execution_context(repo_root),
                 tdd_test_files,
             )
 
@@ -580,7 +708,7 @@ async def _execute_plan(
         })
 
         tdd_impl_prompt = build_tdd_step_system_prompt(
-            load_condensed_context(repo_root),
+            load_execution_context(repo_root),
             naming_conventions=getattr(plan, "naming_conventions", ""),
             name_registry=getattr(plan, "name_registry", ""),
         )
@@ -606,11 +734,32 @@ async def _execute_plan(
 
     else:
         # ── Normal (non-TDD) execution ────────────────────────────
-        for step in plan.steps:
-            await _run_step(
-                step, llm_client, build_implementation_tools(),
-                tool_executor, system_prompt,
-            )
+        # Group independent steps for parallel execution when
+        # num_parallel > 1.  Barrier tools (run_tests, etc.) force
+        # sequential boundaries.
+        step_groups = _build_step_groups(plan.steps)
+
+        for group in step_groups:
+            if len(group) == 1 or settings.num_parallel <= 1:
+                for step in group:
+                    await _run_step(
+                        step, llm_client, build_implementation_tools(),
+                        tool_executor, system_prompt,
+                    )
+            else:
+                # Run independent steps concurrently
+                logger.info(
+                    "Parallel group: %d steps (%s)",
+                    len(group),
+                    ", ".join(s.file_path or s.tool for s in group),
+                )
+                await asyncio.gather(*[
+                    _run_step(
+                        step, llm_client, build_implementation_tools(),
+                        tool_executor, system_prompt,
+                    )
+                    for step in group
+                ])
 
     # ── All steps done ───────────────────────────────────────────
     files_modified = list({

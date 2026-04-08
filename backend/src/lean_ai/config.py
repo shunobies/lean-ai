@@ -38,6 +38,7 @@ _CONTEXT_WINDOW_FIELDS = frozenset({
     "ollama_context_window",
     "ollama_expert_context_window",
     "ollama_request_context_window",
+    "ollama_worker_context_window",
     "openai_context_window",
     "anthropic_context_window",
     "gemini_context_window",
@@ -209,10 +210,25 @@ class Settings(BaseSettings):
     openai_request_model: str = ""
     anthropic_request_model: str = ""
 
+    # ── Worker model — lightweight auxiliary tasks (summarization, compression) ──
+    worker_llm_provider: str = ""  # ollama/openai/anthropic/gemini/serve/""
+    ollama_model_worker: str = ""  # e.g. "qwen3.5:2b-q8_0". Empty = falls back to primary
+    ollama_worker_temperature: float | None = None  # Falls back to ollama_temperature
+    ollama_worker_top_p: float | None = None  # Falls back to ollama_top_p
+    ollama_worker_top_k: int | None = None  # Falls back to ollama_top_k
+    ollama_worker_repeat_penalty: float | None = None  # Falls back to ollama_repeat_penalty
+    ollama_worker_context_window: int | None = None  # Accepts shorthand; falls back
+    ollama_worker_max_tokens: int | None = None  # Derived: 25% of worker context window
+    openai_worker_model: str = ""  # Falls back to openai_model when empty
+    anthropic_worker_model: str = ""  # Falls back to anthropic_model when empty
+    gemini_worker_model: str = ""  # Falls back to gemini_model when empty
+    serve_worker_model: str = ""  # Falls back to serve_model when empty
+
     # ── Thinking mode ──
     enable_thinking: bool = True  # Pass think=True to Ollama for reasoning models (Qwen3, Qwen3.5)
     enable_thinking_expert: bool = True  # Independent per-model thinking toggle
     enable_thinking_request: bool = True  # Independent per-model thinking toggle
+    enable_thinking_worker: bool = False  # Disabled by default — worker model prioritizes speed
 
     # ── Ollama — inline prediction model (always Ollama) ──
     inline_model: str = ""
@@ -413,6 +429,11 @@ class Settings(BaseSettings):
                 self.ollama_request_context_window = self.ollama_context_window
             if self.ollama_request_max_tokens is None:
                 self.ollama_request_max_tokens = self.ollama_request_context_window // 4
+        if self.ollama_model_worker:
+            if self.ollama_worker_context_window is None:
+                self.ollama_worker_context_window = self.ollama_context_window
+            if self.ollama_worker_max_tokens is None:
+                self.ollama_worker_max_tokens = self.ollama_worker_context_window // 4
         if self.inline_context_window is None:
             self.inline_context_window = self.ollama_context_window // 8
         if self.implementation_max_tokens is None:
@@ -525,6 +546,38 @@ class Settings(BaseSettings):
         if not rp or rp == "ollama":
             return self.ollama_request_max_tokens or (self.ollama_context_window // 4)
         return self._provider_max_tokens(rp)
+
+    @property
+    def effective_worker_temperature(self) -> float:
+        return self._ollama_param_with_fallback("worker", "temperature")
+
+    @property
+    def effective_worker_top_p(self) -> float:
+        return self._ollama_param_with_fallback("worker", "top_p")
+
+    @property
+    def effective_worker_top_k(self) -> int:
+        return self._ollama_param_with_fallback("worker", "top_k")
+
+    @property
+    def effective_worker_repeat_penalty(self) -> float:
+        return self._ollama_param_with_fallback("worker", "repeat_penalty")
+
+    @property
+    def effective_worker_context_window(self) -> int:
+        """Context window for the worker model provider."""
+        wp = (self.worker_llm_provider or "").lower()
+        if not wp or wp == "ollama":
+            return self.ollama_worker_context_window or self.ollama_context_window
+        return self._provider_context_window(wp)
+
+    @property
+    def effective_worker_max_tokens(self) -> int:
+        """Max tokens for worker model — derived from the worker provider's settings."""
+        wp = (self.worker_llm_provider or "").lower()
+        if not wp or wp == "ollama":
+            return self.ollama_worker_max_tokens or (self.ollama_context_window // 4)
+        return self._provider_max_tokens(wp)
 
     @property
     def effective_confidence_threshold_expert(self) -> float:

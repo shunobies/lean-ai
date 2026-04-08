@@ -5,6 +5,7 @@ import fnmatch
 import logging
 from pathlib import Path
 
+from lean_ai.config import settings
 from lean_ai.indexer.tree import list_repo_tree
 from lean_ai.tools.executor import ToolResult
 
@@ -154,7 +155,8 @@ async def read_file(
     end = end_line if end_line and end_line <= total else total
 
     selected = lines[start:end]
-    max_display = 500
+    # Scale display limit with context window: 500 at 128k, ~123 at 32k
+    max_display = max(100, min(500, settings._active_context_window // 260))
     truncated = len(selected) > max_display
 
     if truncated:
@@ -319,7 +321,7 @@ async def grep_files(
     pattern: str,
     repo_root: str,
     file_glob: str | None = None,
-    max_results: int = 100,
+    max_results: int | None = None,
     context_lines: int = 1,
 ) -> ToolResult:
     """Search for a text pattern across all repository files.
@@ -329,6 +331,10 @@ async def grep_files(
     """
     if not pattern:
         return ToolResult(success=False, error="Search pattern cannot be empty.")
+
+    # Scale max_results with context window: 100 at 128k, ~24 at 32k
+    if max_results is None:
+        max_results = max(20, min(100, settings._active_context_window // 1300))
 
     pattern_lower = pattern.lower()
     entries = list_repo_tree(repo_root)

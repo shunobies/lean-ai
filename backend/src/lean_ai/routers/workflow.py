@@ -12,7 +12,7 @@ from lean_ai.db import (
     log_conversation_entry,
     update_session,
 )
-from lean_ai.routers.context_helpers import load_full_context
+from lean_ai.routers.context_helpers import load_planning_context
 from lean_ai.routers.dependencies import (
     expert_llm_client,
     llm_client,
@@ -128,7 +128,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                     branch_name = ""
 
                             # --- Load context and run workflow ---
-                            context = load_full_context(repo_root)
+                            context = load_planning_context(repo_root)
 
                             # --- Describe attached images via vision model ---
                             if attachments:
@@ -365,7 +365,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
                         branch_name = session.get("branch_name", "")
 
                         # Load project context
-                        context = load_full_context(repo_root)
+                        context = load_planning_context(repo_root)
 
                         # Conversation logger
                         async def _log_conversation_resume(

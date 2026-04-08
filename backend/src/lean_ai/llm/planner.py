@@ -12,6 +12,7 @@ to explore the codebase and read every file it plans to modify.
 Phase 5 only runs when a test command is available.
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -86,6 +87,46 @@ def _save_debug_phase(
     logger.info(
         "Debug: saved %s (%d chars, %.1fs)", phase_name, len(content), elapsed,
     )
+
+
+def _extract_file_paths(scan_output: str, repo_root: str) -> list[str]:
+    """Extract file paths from Phase 2a scan output.
+
+    Looks for lines containing path-like strings (with / separators
+    and common extensions).  Validates that each path exists on disk.
+    """
+    import re
+    path_pattern = re.compile(
+        r'(?:^|[\s`"\'\-•])([a-zA-Z0-9_.][a-zA-Z0-9_./\-]*'
+        r'\.[a-zA-Z]{1,10})(?:[\s`"\'\-:,]|$)',
+    )
+    seen: set[str] = set()
+    paths: list[str] = []
+    for line in scan_output.splitlines():
+        for match in path_pattern.finditer(line):
+            candidate = match.group(1).strip()
+            if candidate in seen or "/" not in candidate:
+                continue
+            full = Path(repo_root) / candidate
+            if full.is_file():
+                seen.add(candidate)
+                paths.append(candidate)
+    return paths
+
+
+def _split_list(items: list, n: int) -> list[list]:
+    """Split *items* into *n* roughly equal chunks."""
+    if n <= 1:
+        return [items]
+    chunk_size = max(1, len(items) // n)
+    chunks: list[list] = []
+    for i in range(0, len(items), chunk_size):
+        chunks.append(items[i:i + chunk_size])
+    # Merge trailing runt into last real chunk
+    while len(chunks) > n:
+        chunks[-2].extend(chunks[-1])
+        chunks.pop()
+    return chunks
 
 
 async def _send_stage(
@@ -168,6 +209,67 @@ async def _extract_missing_files(
     return stripped
 
 
+async def _compact_file_summary(
+    file_summary: str,
+    llm_client: "LLMClient",
+    ctx_window: int,
+) -> str:
+    """Compact file_summary to fit within a token budget at small context windows.
+
+    Uses the explorer (request) model — code understanding is needed here.
+    Target budget: 20% of the context window in characters (~= tokens * 3.5).
+    Returns the original if it already fits.
+    """
+    budget = int(ctx_window * 0.20 * 3.5)
+    if len(file_summary) <= budget:
+        return file_summary
+
+    logger.info(
+        "Compacting file_summary: %d chars -> target %d chars",
+        len(file_summary), budget,
+    )
+
+    try:
+        compacted = await llm_client.chat_raw(
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Compress the codebase exploration output below. "
+                        "Preserve ALL of the following:\n"
+                        "- File paths and whether they are create/edit/reference\n"
+                        "- Function/class signatures with parameters\n"
+                        "- Import statements\n"
+                        "- VERIFIED REFERENCES and MISSING INFRASTRUCTURE sections\n"
+                        "- Key constants and configuration values\n\n"
+                        "Remove:\n"
+                        "- Inline code blocks longer than 5 lines\n"
+                        "- Verbose explanations of file purposes\n"
+                        "- Redundant observations\n\n"
+                        "Output the compressed version directly."
+                    ),
+                },
+                {"role": "user", "content": file_summary[:budget * 3]},
+            ],
+            max_tokens=2048,
+        )
+        if compacted and len(compacted.strip()) > 200:
+            logger.info(
+                "File summary compacted: %d -> %d chars (%.0f%%)",
+                len(file_summary), len(compacted),
+                len(compacted) / len(file_summary) * 100,
+            )
+            return compacted.strip()
+    except Exception:
+        logger.warning(
+            "File summary compaction failed, using truncation fallback",
+            exc_info=True,
+        )
+
+    # Fallback: hard truncate
+    return file_summary[:budget] + "\n... (truncated to fit context budget)"
+
+
 async def _confidence_audit(
     design_output: str,
     llm_client: "LLMClient",
@@ -242,33 +344,39 @@ async def _confidence_audit(
         )
 
     # Step 2: Search and verify low-confidence items
+    # Run searches in parallel when num_parallel >= 2
     from lean_ai.tools.internet import search_internet
 
-    verified_lines: list[str] = []
-    for item in low_confidence:
+    async def _verify_item(item: ConfidenceItem) -> str:
         query = f"{item.topic} latest documentation API"
         try:
             result = await search_internet(
                 query=query, llm_client=llm_client,
             )
             if result.success and result.output:
-                verified_lines.append(
+                return (
                     f"- **{item.topic}** (confidence: {item.confidence:.1f}): "
                     f"{result.output[:500]}"
                 )
-            else:
-                verified_lines.append(
-                    f"- **{item.topic}** (confidence: {item.confidence:.1f}): "
-                    f"[UNVERIFIED — search returned no results]"
-                )
+            return (
+                f"- **{item.topic}** (confidence: {item.confidence:.1f}): "
+                f"[UNVERIFIED — search returned no results]"
+            )
         except Exception:
             logger.warning(
                 "Confidence audit: search failed for %r", item.topic,
             )
-            verified_lines.append(
+            return (
                 f"- **{item.topic}** (confidence: {item.confidence:.1f}): "
                 f"[UNVERIFIED — search failed]"
             )
+
+    if settings.num_parallel >= 2:
+        verified_lines = list(await asyncio.gather(
+            *[_verify_item(item) for item in low_confidence]
+        ))
+    else:
+        verified_lines = [await _verify_item(item) for item in low_confidence]
 
     if not verified_lines:
         return ""
@@ -467,6 +575,10 @@ async def create_plan(
     ]
 
     # Let the LLM explore with read-only tools — generous budget
+    # Tighter tool limits at small context windows to prevent Phase 2
+    # from filling the conversation before exploration is complete.
+    _small_ctx = settings._active_context_window <= 32768
+
     async def _read_only_executor(name: str, arguments: dict) -> str:
         """Execute read-only tools for planning phase."""
         from lean_ai.tools.file_ops import grep_files, read_file
@@ -490,11 +602,16 @@ async def create_plan(
                 )
                 if not approved:
                     return "ERROR: Access to external file not approved by user"
+            # At small windows, cap visible range to 200 lines
+            end_line = arguments.get("end_line")
+            if _small_ctx and end_line is None:
+                start = arguments.get("start_line") or 1
+                end_line = start + 199
             result = await read_file(
                 path=target_path,
                 repo_root=repo_root,
                 start_line=arguments.get("start_line"),
-                end_line=arguments.get("end_line"),
+                end_line=end_line,
                 allow_external=external,
             )
             return result.output if result.success else result.error or "Error"
@@ -503,6 +620,7 @@ async def create_plan(
                 pattern=arguments.get("pattern", ""),
                 repo_root=repo_root,
                 file_glob=arguments.get("file_glob"),
+                max_results=30 if _small_ctx else None,
             )
             return result.output if result.success else result.error or "Error"
         elif name == "list_directory":
@@ -510,7 +628,8 @@ async def create_plan(
             target = Path(repo_root) / arguments.get("path", "")
             if not target.is_dir():
                 return f"Not a directory: {arguments.get('path', '')}"
-            max_entries = arguments.get("max_entries", 100)
+            default_max = 50 if _small_ctx else 100
+            max_entries = arguments.get("max_entries", default_max)
             entries = sorted(target.iterdir())[:max_entries]
             lines = []
             for e in entries:
@@ -523,8 +642,9 @@ async def create_plan(
             tree_root = f"{repo_root}/{sub_path}" if sub_path else repo_root
             entries = list_repo_tree(tree_root)
             max_depth = arguments.get("max_depth", 3)
+            max_tree_entries = 100 if _small_ctx else 200
             lines = []
-            for e in entries[:200]:
+            for e in entries[:max_tree_entries]:
                 depth = e.path.count("/")
                 if depth <= max_depth:
                     indent = "  " * depth
@@ -549,20 +669,129 @@ async def create_plan(
             return "Exploration marked complete."
         return f"Unknown tool: {name}"
 
-    tool_calls, file_identification = await explorer.chat_with_tools(
-        messages=phase2_messages,
-        tools=build_planning_tools(),
-        tool_executor_fn=_read_only_executor,
-        max_turns=settings.implementation_max_turns,
-        max_tokens=phase_max_tokens,
-        task_reminder=registry.format("planning.task_reminder", task=task),
-        reminder_interval=15,
-        on_tool_call=on_tool_call,
-        on_tool_result=on_tool_result,
-        on_content=on_content,
-        on_thinking=on_thinking,
-        on_metrics=on_metrics,
-    )
+    if settings.num_parallel >= 2:
+        # ── Parallel Phase 2: fan-out then merge ──────────────────
+        # Phase 2a: broad scan — identify files without reading contents
+        scan_tools = [
+            t for t in build_planning_tools()
+            if t["function"]["name"] in (
+                "list_directory", "directory_tree", "grep_files", "task_complete",
+            )
+        ]
+        scan_messages = [
+            {"role": "system", "content": PLAN_EXPLORATION_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    "PHASE 2a — BROAD SCAN ONLY.\n"
+                    "Survey the codebase for the given task. "
+                    "Use directory_tree, grep_files, list_directory to identify "
+                    "ALL relevant files. Output a structured file list with "
+                    "each file's role (create/edit/reference). "
+                    "Do NOT read file contents.\n\n"
+                    + registry.format(
+                        "planning.exploration_user",
+                        task=task, scope=scope, context=context,
+                    )
+                ),
+            },
+        ]
+
+        _, scan_output = await explorer.chat_with_tools(
+            messages=scan_messages,
+            tools=scan_tools,
+            tool_executor_fn=_read_only_executor,
+            max_turns=15,
+            max_tokens=phase_max_tokens,
+            on_tool_call=on_tool_call,
+            on_tool_result=on_tool_result,
+            on_content=on_content,
+            on_thinking=on_thinking,
+            on_metrics=on_metrics,
+        )
+
+        _save_debug_phase(
+            repo_root, session_id, "phase_2a_scan",
+            scan_output, time.monotonic() - t0,
+        )
+
+        # Parse file paths from scan output
+        file_paths = _extract_file_paths(scan_output, repo_root)
+        logger.info(
+            "Phase 2a scan identified %d file paths", len(file_paths),
+        )
+
+        if file_paths:
+            # Phase 2b: parallel deep-dive — read identified files
+            n_workers = min(len(file_paths), settings.num_parallel)
+            chunks = _split_list(file_paths, n_workers)
+
+            async def _deep_dive(file_subset: list[str]) -> str:
+                """Read a subset of files and produce a summary."""
+                file_list = "\n".join(f"- {f}" for f in file_subset)
+                dive_messages = [
+                    {"role": "system", "content": PLAN_EXPLORATION_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"PHASE 2b — READ THESE FILES.\n"
+                            f"Read each file and note: purpose, exports, imports, "
+                            f"classes/functions with signatures, and what needs to "
+                            f"change for the task.\n\nTask: {task}\n\n"
+                            f"Files to read:\n{file_list}\n\n"
+                            f"Call task_complete when done."
+                        ),
+                    },
+                ]
+                read_tools = [
+                    t for t in build_planning_tools()
+                    if t["function"]["name"] in (
+                        "read_file", "grep_files", "task_complete",
+                    )
+                ]
+                max_turns = max(10, 30 // n_workers)
+                _, dive_output = await explorer.chat_with_tools(
+                    messages=dive_messages,
+                    tools=read_tools,
+                    tool_executor_fn=_read_only_executor,
+                    max_turns=max_turns,
+                    max_tokens=phase_max_tokens,
+                )
+                return dive_output
+
+            await _send_stage(
+                ws,
+                f"Phase 2b: {n_workers} parallel workers reading "
+                f"{len(file_paths)} files...",
+                model=explorer.model_name, phase=2,
+            )
+
+            dive_results = await asyncio.gather(
+                *[_deep_dive(chunk) for chunk in chunks]
+            )
+            file_identification = (
+                scan_output + "\n\n"
+                + "\n\n".join(dive_results)
+            )
+        else:
+            file_identification = scan_output
+
+    else:
+        # ── Serial Phase 2 (num_parallel=1) ───────────────────────
+        tool_calls, file_identification = await explorer.chat_with_tools(
+            messages=phase2_messages,
+            tools=build_planning_tools(),
+            tool_executor_fn=_read_only_executor,
+            max_turns=settings.implementation_max_turns,
+            max_tokens=phase_max_tokens,
+            task_reminder=registry.format("planning.task_reminder", task=task),
+            reminder_interval=15,
+            on_tool_call=on_tool_call,
+            on_tool_result=on_tool_result,
+            on_content=on_content,
+            on_thinking=on_thinking,
+            on_metrics=on_metrics,
+        )
 
     phase_timings["phase_2_file_identification"] = time.monotonic() - t0
     _save_debug_phase(
@@ -584,6 +813,12 @@ async def create_plan(
             logger.info(
                 "Privacy: stripped %d items from file summary", len(redactions),
             )
+
+    # Compact file_summary at small context windows to prevent Phase 3/4 overflow
+    if settings._active_context_window <= 32768:
+        file_summary = await _compact_file_summary(
+            file_summary, explorer, settings._active_context_window,
+        )
 
     # Phase 3: Design + Risk Synthesis
     if expert_llm_client:
@@ -673,9 +908,17 @@ async def create_plan(
     )
 
     # Confidence audit: verify low-confidence design decisions via search
-    confidence_refs = await _confidence_audit(
-        design_and_risks, expert, repo_root, ws=ws,
-    )
+    # Skip at small context windows — the overhead is not worth the budget cost.
+    if expert_ctx <= 32768:
+        logger.info(
+            "Skipping confidence audit — context window too small (%d)",
+            expert_ctx,
+        )
+        confidence_refs = ""
+    else:
+        confidence_refs = await _confidence_audit(
+            design_and_risks, expert, repo_root, ws=ws,
+        )
     if confidence_refs:
         design_and_risks += confidence_refs
         _save_debug_phase(
@@ -694,6 +937,20 @@ async def create_plan(
     )
     logger.info("Planning Phase 4: Structured plan assembly")
     t0 = time.monotonic()
+
+    # At small context windows, design_and_risks already synthesized scope
+    # and project_context — drop redundant re-injection to save tokens.
+    phase4_scope = scope
+    phase4_project_context = project_context
+    if expert_ctx <= 32768:
+        phase4_scope = ""
+        phase4_project_context = ""
+        logger.info(
+            "Phase 4: small context window (%d) — dropping scope and "
+            "project_context re-injection (already in design_and_risks)",
+            expert_ctx,
+        )
+
     plan = await expert.chat_structured(
         messages=[
             {"role": "system", "content": PLAN_ASSEMBLY_SYSTEM_PROMPT},
@@ -705,10 +962,10 @@ async def create_plan(
                     design_and_risks=design_and_risks,
                     file_summary=file_summary,
                     project_context=(
-                        f"PROJECT CONTEXT:\n{project_context}\n\n"
-                        if project_context else ""
+                        f"PROJECT CONTEXT:\n{phase4_project_context}\n\n"
+                        if phase4_project_context else ""
                     ),
-                    scope=scope,
+                    scope=phase4_scope,
                     missing_files=(
                         "REQUIRED MISSING FILES — these were identified "
                         "during risk assessment as files that MUST exist "

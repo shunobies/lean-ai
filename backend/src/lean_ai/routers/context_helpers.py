@@ -13,6 +13,7 @@ from lean_ai.routers.models import WorkspaceContext
 logger = logging.getLogger(__name__)
 
 EXECUTION_CONTEXT_PERCENT = 0.05  # 5% of context window for execution prompts
+PLANNING_CONTEXT_PERCENT = 0.15  # 15% of context window for planning prompts
 CUSTOM_DOCS_SHARE = 0.4  # 40% of budget reserved for custom steering docs
 
 
@@ -107,11 +108,17 @@ def load_custom_steering_docs(repo_root: str) -> str:
     return "\n\n".join(parts)
 
 
-def load_full_context(repo_root: str) -> str:
-    """Load project_context.md + framework_guide.md, then all .md from .lean_ai/context/."""
+def load_full_context(repo_root: str, *, max_chars: int | None = None) -> str:
+    """Load project_context.md + framework_guide.md, then all .md from .lean_ai/context/.
+
+    When *max_chars* is set, the combined output is truncated to fit the
+    budget with priority ordering preserved.  When ``None`` (default),
+    all content is returned unbounded for backward compatibility.
+    """
     parts: list[str] = []
     lean_dir = Path(repo_root) / ".lean_ai"
     loaded: set[Path] = set()
+    used = 0
 
     # Priority files first
     for filename in ("project_context.md", "framework_guide.md"):
@@ -119,7 +126,14 @@ def load_full_context(repo_root: str) -> str:
         if path.is_file():
             chunk = path.read_text(encoding="utf-8", errors="replace")
             if chunk.strip():
+                if max_chars is not None:
+                    remaining = max_chars - used
+                    if remaining <= 200:
+                        break
+                    if len(chunk) > remaining:
+                        chunk = chunk[:remaining] + "\n... (truncated)"
                 parts.append(chunk)
+                used += len(chunk)
                 loaded.add(path.resolve())
 
     # Then all .md files in context/ subfolder, alphabetically
@@ -129,7 +143,99 @@ def load_full_context(repo_root: str) -> str:
             if path.is_file() and path.resolve() not in loaded:
                 chunk = path.read_text(encoding="utf-8", errors="replace")
                 if chunk.strip():
+                    if max_chars is not None:
+                        remaining = max_chars - used
+                        if remaining <= 200:
+                            break
+                        if len(chunk) > remaining:
+                            chunk = chunk[:remaining] + "\n... (truncated)"
                     parts.append(chunk)
+                    used += len(chunk)
+
+    return "\n\n".join(parts)
+
+
+def load_planning_context(repo_root: str) -> str:
+    """Load project_context.md + custom steering docs for planning phases.
+
+    Skips framework_guide.md entirely — planning phases need architecture
+    context and naming conventions, not framework implementation patterns.
+    Budget-gated at PLANNING_CONTEXT_PERCENT of the active context window.
+    """
+    budget = int(
+        settings._active_context_window * PLANNING_CONTEXT_PERCENT * 3.5
+    )
+    parts: list[str] = []
+    lean_dir = Path(repo_root) / ".lean_ai"
+    used = 0
+
+    # Priority: project_context.md (architecture overview)
+    pc_path = lean_dir / "project_context.md"
+    if pc_path.is_file():
+        chunk = pc_path.read_text(encoding="utf-8", errors="replace")
+        if chunk.strip():
+            if len(chunk) > budget:
+                chunk = chunk[:budget] + "\n... (truncated)"
+            parts.append(chunk)
+            used += len(chunk)
+
+    # Then custom steering docs (naming conventions, project-specific rules)
+    custom_text = load_custom_steering_docs(repo_root)
+    if custom_text:
+        remaining = budget - used
+        if remaining > 200:
+            if len(custom_text) > remaining:
+                custom_text = custom_text[:remaining] + "\n... (truncated)"
+            parts.append(custom_text)
+
+    return "\n\n".join(parts)
+
+
+def load_execution_context(repo_root: str) -> str:
+    """Load framework_guide.md + custom steering docs for step execution.
+
+    Skips project_context.md — step instructions are specific enough.
+    Execution needs framework patterns and custom conventions.
+    Budget-gated at EXECUTION_CONTEXT_PERCENT of the active context window.
+    """
+    total_budget = int(
+        settings._active_context_window * EXECUTION_CONTEXT_PERCENT * 3.5
+    )
+    lean_dir = Path(repo_root) / ".lean_ai"
+
+    # Load framework guide
+    guide_text = ""
+    guide_path = lean_dir / "framework_guide.md"
+    if guide_path.is_file():
+        guide_text = guide_path.read_text(encoding="utf-8", errors="replace").strip()
+
+    custom_text = load_custom_steering_docs(repo_root)
+
+    # Budget allocation with rollover (same pattern as load_condensed_context)
+    custom_budget = int(total_budget * CUSTOM_DOCS_SHARE)
+    guide_budget = total_budget - custom_budget
+
+    if not custom_text:
+        guide_budget = total_budget
+        custom_budget = 0
+    if not guide_text:
+        custom_budget = total_budget
+        guide_budget = 0
+
+    parts: list[str] = []
+
+    if guide_text:
+        if len(guide_text) <= guide_budget:
+            parts.append(guide_text)
+            custom_budget += guide_budget - len(guide_text)
+        else:
+            parts.append(guide_text[:guide_budget] + "\n... (condensed)")
+
+    if custom_text:
+        if len(custom_text) <= custom_budget:
+            parts.append(custom_text)
+        else:
+            parts.append(custom_text[:custom_budget] + "\n... (condensed)")
 
     return "\n\n".join(parts)
 

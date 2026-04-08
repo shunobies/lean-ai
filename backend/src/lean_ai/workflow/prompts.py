@@ -1,5 +1,6 @@
 """Prompt builders for workflow execution, fix mode, and request mode."""
 
+from lean_ai.config import settings
 from lean_ai.llm.plan_schema import PlanStep
 from lean_ai.llm.prompts import (
     FIX_INVESTIGATION_PROMPT,
@@ -146,7 +147,9 @@ def build_tdd_review_prompt(
     return prompt
 
 
-_ARTIFACT_PER_FILE_LIMIT = 8000
+def _artifact_per_file_limit() -> int:
+    """Scale per-file artifact limit with context window: 8000 at 128k, ~2800 at 32k."""
+    return max(2000, min(8000, int(settings._active_context_window * 0.025 * 3.5)))
 
 
 def build_step_user_message(
@@ -176,9 +179,13 @@ def build_step_user_message(
     parts.append(f"Instruction: {step.instruction}")
 
     if step.context:
+        ctx_text = step.context
+        # At small context windows, truncate and instruct to read_file instead
+        if settings._active_context_window <= 32768 and len(ctx_text) > 1000:
+            ctx_text = ctx_text[:1000] + "\n... (truncated — call read_file before editing)"
         parts.append(
             "\nContext (file content from planner investigation):"
-            f"\n```\n{step.context}\n```"
+            f"\n```\n{ctx_text}\n```"
         )
 
     # Include relevant artifacts from previous steps
@@ -206,8 +213,8 @@ def build_step_user_message(
                 "names/structure for consistency):"
             )
             for path, content in relevant.items():
-                truncated = content[:_ARTIFACT_PER_FILE_LIMIT]
-                if len(content) > _ARTIFACT_PER_FILE_LIMIT:
+                truncated = content[:_artifact_per_file_limit()]
+                if len(content) > _artifact_per_file_limit():
                     truncated += "\n... (truncated)"
                 parts.append(f"\n--- {path} ---\n```\n{truncated}\n```")
 

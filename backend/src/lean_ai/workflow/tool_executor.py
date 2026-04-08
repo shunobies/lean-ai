@@ -1,5 +1,6 @@
 """Tool executor factory for workflow execution."""
 
+import logging
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -7,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import WebSocket
 
+from lean_ai.config import settings
 from lean_ai.tools import file_ops, scratchpad, shell
 from lean_ai.tools.command_safety import CommandRisk, check_command
 from lean_ai.workflow.ws_handler import ws_send
@@ -14,6 +16,8 @@ from lean_ai.workflow.ws_handler import ws_send
 if TYPE_CHECKING:
     from lean_ai.llm.facade import LLMClient
     from lean_ai.workflow.ws_dispatcher import WSMessageDispatcher
+
+logger = logging.getLogger(__name__)
 
 # Short output is returned inline; longer output is saved to a file
 # so the LLM can page through it with read_file.
@@ -114,11 +118,83 @@ async def _request_tool_approval(
     return approval_msg.get("type") == "approve_tool"
 
 
+# Tools eligible for worker-model compression
+_COMPRESSIBLE_TOOLS = frozenset({
+    "read_file", "grep_files", "run_tests", "run_lint",
+    "run_command", "search_internet", "fetch_url",
+})
+
+_COMPRESS_PROMPTS: dict[str, str] = {
+    "read_file": (
+        "Summarize this source file preserving: all function/class "
+        "signatures with parameters, imports, key constants, docstrings. "
+        "Omit function bodies."
+    ),
+    "grep_files": (
+        "Condense these search results: keep file paths and matched line "
+        "content. Remove duplicate patterns. Group by file."
+    ),
+    "run_command": (
+        "Extract: exit code, error messages, failing test names, key "
+        "output lines. Remove verbose stack traces and passing test details."
+    ),
+    "run_tests": (
+        "Extract: exit code, error messages, failing test names, key "
+        "output lines. Remove verbose stack traces and passing test details."
+    ),
+}
+
+
+async def _compress_tool_output(
+    output: str,
+    tool_name: str,
+    worker_client: "LLMClient",
+) -> str:
+    """Compress large tool output using the worker model.
+
+    Trigger threshold: 5% of context window in chars.  When the output
+    exceeds this, the worker model produces a concise summary.
+    """
+    threshold = int(settings._active_context_window * 0.05 * 3.5)
+    if len(output) <= threshold:
+        return output
+
+    prompt = _COMPRESS_PROMPTS.get(tool_name, (
+        "Summarize this tool output concisely. Preserve key facts, "
+        "file paths, error messages, and actionable details."
+    ))
+
+    try:
+        compressed = await worker_client.chat_raw(
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": output[:threshold * 3]},
+            ],
+            max_tokens=1024,
+        )
+        if compressed and len(compressed.strip()) > 50:
+            logger.info(
+                "Compressed %s output: %d -> %d chars (%.0f%%)",
+                tool_name, len(output), len(compressed),
+                len(compressed) / len(output) * 100,
+            )
+            return compressed.strip()
+    except Exception:
+        logger.warning(
+            "Worker model compression failed for %s, using truncation",
+            tool_name, exc_info=True,
+        )
+
+    # Fallback: truncate
+    return output[:threshold] + "\n... (truncated)"
+
+
 def make_tool_executor(
     repo_root: str,
     ws: WebSocket,
     session_id: str = "",
     llm_client: "LLMClient | None" = None,
+    worker_client: "LLMClient | None" = None,
     dispatcher: "WSMessageDispatcher | None" = None,
     tdd_protect_tests: bool = False,
     on_test_dispute: "Callable | None" = None,
@@ -127,6 +203,9 @@ def make_tool_executor(
     """Create a tool executor closure for the workflow.
 
     Args:
+        worker_client: Optional small model for compressing large tool outputs.
+            When provided and output exceeds 5% of the context window, the
+            worker model summarizes it before returning to the primary model.
         tdd_protect_tests: When True, block ``create_file``/``edit_file``
             calls targeting test files.  The LLM should use
             ``request_test_change`` instead.
@@ -452,4 +531,17 @@ def make_tool_executor(
 
         return f"ERROR: Unknown tool: {name}"
 
+    async def execute_with_compression(name: str, arguments: dict) -> str:
+        """Execute a tool and optionally compress large output via worker model."""
+        result = await execute(name, arguments)
+        if (
+            worker_client is not None
+            and name in _COMPRESSIBLE_TOOLS
+            and not result.startswith("ERROR:")
+        ):
+            result = await _compress_tool_output(result, name, worker_client)
+        return result
+
+    if worker_client is not None:
+        return execute_with_compression
     return execute

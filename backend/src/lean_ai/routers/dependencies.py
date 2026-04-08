@@ -428,3 +428,125 @@ elif _request_p == "ollama" and settings.ollama_model_request:
     except Exception as e:
         logger.warning("Could not create request LLM client (Ollama): %s", e)
         request_llm_client = None
+
+# Worker model client — lightweight auxiliary tasks (summarization, compression)
+worker_llm_client: LLMClient | None = None
+_worker_p = (settings.worker_llm_provider or "").lower()
+
+# Empty = auto-detect: Ollama worker only when primary provider is also Ollama
+if not _worker_p:
+    if settings.llm_provider.lower() == "ollama" and settings.ollama_model_worker:
+        _worker_p = "ollama"
+
+if _worker_p == "openai":
+    _worker_model = settings.openai_worker_model or settings.openai_model
+    if _worker_model and settings.openai_api_key:
+        try:
+            from lean_ai.llm.provider_openai import OpenAIProvider as _WrkOpenAI
+            _worker_provider = _WrkOpenAI(
+                api_key=settings.openai_api_key,
+                model=_worker_model,
+                base_url=settings.openai_base_url or None,
+                temperature=settings.openai_temperature,
+                context_window=settings.openai_context_window,
+                max_tokens=settings.openai_max_tokens,
+                enable_thinking=settings.enable_thinking_worker,
+            )
+            worker_llm_client = LLMClient(
+                provider=_worker_provider,
+                concurrency_semaphore=_llm_semaphore,
+            )
+            logger.info("Worker model enabled (OpenAI): %s", _worker_model)
+        except Exception as e:
+            logger.warning("Could not create worker LLM client (OpenAI): %s", e)
+
+elif _worker_p == "anthropic":
+    _worker_model = settings.anthropic_worker_model or settings.anthropic_model
+    if _worker_model and settings.anthropic_api_key:
+        try:
+            from lean_ai.llm.provider_anthropic import AnthropicProvider as _WrkAnthropic
+            _worker_provider = _WrkAnthropic(
+                api_key=settings.anthropic_api_key,
+                model=_worker_model,
+                temperature=settings.anthropic_temperature,
+                context_window=settings.anthropic_context_window,
+                max_tokens=settings.anthropic_max_tokens,
+                enable_thinking=settings.enable_thinking_worker,
+            )
+            worker_llm_client = LLMClient(
+                provider=_worker_provider,
+                concurrency_semaphore=_llm_semaphore,
+            )
+            logger.info("Worker model enabled (Anthropic): %s", _worker_model)
+        except Exception as e:
+            logger.warning("Could not create worker LLM client (Anthropic): %s", e)
+
+elif _worker_p == "serve":
+    _worker_model = settings.serve_worker_model or settings.serve_model
+    if _worker_model and settings.serve_api_key:
+        try:
+            from lean_ai.llm.provider_openai import OpenAIProvider as _WrkServe
+            _worker_provider = _WrkServe(
+                api_key=settings.serve_api_key,
+                model=_worker_model,
+                base_url=f"{settings.serve_url.rstrip('/')}/v1",
+                temperature=settings.serve_temperature,
+                context_window=settings.serve_context_window,
+                max_tokens=settings.serve_max_tokens,
+                enable_thinking=settings.enable_thinking_worker,
+            )
+            worker_llm_client = LLMClient(
+                provider=_worker_provider,
+                concurrency_semaphore=_llm_semaphore,
+            )
+            logger.info("Worker model enabled (Serve): %s", _worker_model)
+        except Exception as e:
+            logger.warning("Could not create worker LLM client (Serve): %s", e)
+
+elif _worker_p == "gemini":
+    _worker_model = settings.gemini_worker_model or settings.gemini_model
+    if _worker_model and settings.gemini_api_key:
+        try:
+            from lean_ai.llm.provider_gemini import GeminiProvider as _WrkGemini
+            _worker_provider = _WrkGemini(
+                api_key=settings.gemini_api_key,
+                model=_worker_model,
+                temperature=settings.gemini_temperature,
+                context_window=settings.gemini_context_window,
+                max_tokens=settings.gemini_max_tokens,
+                enable_thinking=settings.enable_thinking_worker,
+            )
+            worker_llm_client = LLMClient(
+                provider=_worker_provider,
+                concurrency_semaphore=_llm_semaphore,
+            )
+            logger.info("Worker model enabled (Gemini): %s", _worker_model)
+        except Exception as e:
+            logger.warning("Could not create worker LLM client (Gemini): %s", e)
+
+elif _worker_p == "ollama" and settings.ollama_model_worker:
+    try:
+        _worker_provider = OllamaProvider(
+            ollama_url=settings.ollama_url,
+            model=settings.ollama_model_worker,
+            max_tokens=settings.ollama_worker_max_tokens,
+            context_window=settings.ollama_worker_context_window or settings.ollama_context_window,
+            temperature=settings.effective_worker_temperature,
+            top_p=settings.effective_worker_top_p,
+            top_k=settings.effective_worker_top_k,
+            repeat_penalty=settings.effective_worker_repeat_penalty,
+            enable_thinking=settings.enable_thinking_worker,
+        )
+        worker_llm_client = LLMClient(
+            provider=_worker_provider,
+            concurrency_semaphore=_llm_semaphore,
+        )
+        logger.info(
+            "Worker model enabled (Ollama): %s (ctx=%s, max_tokens=%s)",
+            settings.ollama_model_worker,
+            settings.ollama_worker_context_window or settings.ollama_context_window,
+            settings.ollama_worker_max_tokens,
+        )
+    except Exception as e:
+        logger.warning("Could not create worker LLM client (Ollama): %s", e)
+        worker_llm_client = None
