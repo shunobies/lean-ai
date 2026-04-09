@@ -2,7 +2,7 @@
   "name": "lean-ai",
   "displayName": "Lean AI",
   "description": "Single-Model Deterministic Agentic Architecture - Chat Agent & Inline Predictions",
-  "version": "0.7.7",
+  "version": "0.7.8",
   "publisher": "lean-ai",
   "icon": "icon.png",
   "repository": {
@@ -416,7 +416,14 @@
         "lean-ai.workerLlmProvider": {
           "type": "string",
           "default": "",
-          "enum": ["", "ollama", "openai", "anthropic", "gemini", "serve"],
+          "enum": [
+            "",
+            "ollama",
+            "openai",
+            "anthropic",
+            "gemini",
+            "serve"
+          ],
           "enumDescriptions": [
             "Auto-detect from ollamaModelWorker (empty = use primary provider)",
             "Use Ollama for worker tasks",
