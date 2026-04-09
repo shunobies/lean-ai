@@ -39,7 +39,6 @@ export function createSlashCommands(
     map.set("/agent",    (args) => handleAgentCommand(ctx, args));
     map.set("/fix",      (args) => handleFixCommand(ctx, args));
     map.set("/request",  (args) => handleRequestCommand(ctx, args));
-    map.set("/guide",    (args) => handleGuideCommand(ctx, args));
     map.set("/style",    (args) => handleStyleCommand(ctx, args));
     map.set("/reboot",   (args) => handleRebootCommand(ctx, args));
     map.set("/approve",  (args) => handleApproveCommand(ctx, args));
@@ -113,15 +112,8 @@ export async function handleInitCommand(
         });
     }
 
-    // ── Steps 2 + 3: Generate project context and framework guide ──
-    // Only run in parallel when NUM_PARALLEL >= 2, giving each process its
-    // own LLM slot. With NUM_PARALLEL=1, run sequentially so the LLM can
-    // focus on one document at a time without interleaving.
-    const runParallel = (indexResult.num_parallel ?? 1) >= 2;
-
+    // ── Step 2: Generate project context ──
     const startTime = Date.now();
-    let ctxDone = false;
-    let guideDone = false;
 
     const formatElapsed = (): string => {
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
@@ -132,84 +124,26 @@ export async function handleInitCommand(
             : `${secs}s`;
     };
 
-    const tickerStatus = (): string => {
-        if (ctxDone && !guideDone) {
-            return "Project context ✓ — generating framework guide";
-        }
-        if (!ctxDone && guideDone) {
-            return "Framework guide ✓ — generating project context";
-        }
-        if (runParallel) {
-            return "Generating project context + framework guide";
-        }
-        return ctxDone ? "Generating framework guide" : "Generating project context";
-    };
-
     const ticker = setInterval(() => {
         ctx.postMessage({
             type: "thinking",
             show: true,
-            text: `${tickerStatus()}... (${formatElapsed()})`,
+            text: `Generating project context... (${formatElapsed()})`,
         });
     }, 5_000);
 
     ctx.postMessage({
         type: "thinking",
         show: true,
-        text: runParallel
-            ? "Generating project context + framework guide..."
-            : "Generating project context...",
+        text: "Generating project context...",
     });
-
-    let ctxSettled: PromiseSettledResult<{ path: string; chars: number; skipped?: boolean }>;
-    let guideSettled: PromiseSettledResult<{ path: string; chars: number; skipped?: boolean }>;
 
     const thinkingCb = (token: string) => {
         ctx.postMessage({ type: "llmThinking", text: token, streaming: true });
     };
 
-    if (runParallel) {
-        // Parallel: each generation gets its own LLM slot
-        const ctxPromise = ctx.client.generateProjectContext(repoRoot, force, thinkingCb)
-            .then((result) => { ctxDone = true; return result; })
-            .catch((err: unknown) => { ctxDone = true; throw err; });
-
-        const guidePromise = ctx.client.generateFrameworkGuide(repoRoot, force, thinkingCb)
-            .then((result) => { guideDone = true; return result; })
-            .catch((err: unknown) => { guideDone = true; throw err; });
-
-        [ctxSettled, guideSettled] = await Promise.allSettled([
-            ctxPromise,
-            guidePromise,
-        ]);
-    } else {
-        // Sequential: project context first, then framework guide
-        ctxSettled = await ctx.client.generateProjectContext(repoRoot, force, thinkingCb)
-            .then((result): PromiseFulfilledResult<typeof result> => {
-                ctxDone = true;
-                return { status: "fulfilled", value: result };
-            })
-            .catch((err: unknown): PromiseRejectedResult => {
-                ctxDone = true;
-                return { status: "rejected", reason: err };
-            });
-
-        guideSettled = await ctx.client.generateFrameworkGuide(repoRoot, force, thinkingCb)
-            .then((result): PromiseFulfilledResult<typeof result> => {
-                guideDone = true;
-                return { status: "fulfilled", value: result };
-            })
-            .catch((err: unknown): PromiseRejectedResult => {
-                guideDone = true;
-                return { status: "rejected", reason: err };
-            });
-    }
-
-    clearInterval(ticker);
-
-    // Handle project context result
-    if (ctxSettled.status === "fulfilled") {
-        const ctxResult = ctxSettled.value;
+    try {
+        const ctxResult = await ctx.client.generateProjectContext(repoRoot, force, thinkingCb);
         if (ctxResult.skipped) {
             ctx.postMessage({
                 type: "reply",
@@ -223,11 +157,9 @@ export async function handleInitCommand(
                 cls: "msg-system",
             });
         }
-    } else {
+    } catch (e) {
         anyFailure = true;
-        const error = ctxSettled.reason instanceof Error
-            ? ctxSettled.reason.message
-            : String(ctxSettled.reason);
+        const error = e instanceof Error ? e.message : String(e);
         ctx.postMessage({
             type: "reply",
             text: `Project context generation failed: ${error}`,
@@ -235,41 +167,7 @@ export async function handleInitCommand(
         });
     }
 
-    // Handle framework guide result
-    if (guideSettled.status === "fulfilled") {
-        const guideResult = guideSettled.value;
-        if (guideResult.skipped) {
-            ctx.postMessage({
-                type: "reply",
-                text: `Framework guide already exists (${guideResult.chars.toLocaleString()} bytes). Use \`/init --force\` to regenerate.`,
-                cls: "msg-system",
-            });
-        } else {
-            ctx.postMessage({
-                type: "reply",
-                text: `Framework guide generated (${guideResult.chars.toLocaleString()} chars).`,
-                cls: "msg-system",
-            });
-        }
-    } else {
-        // Non-fatal — 404 means no frameworks detected, anything else is an error
-        const error = guideSettled.reason instanceof Error
-            ? guideSettled.reason.message
-            : String(guideSettled.reason);
-        if (error.includes("404")) {
-            ctx.postMessage({
-                type: "reply",
-                text: "No frameworks detected — framework guide skipped.",
-                cls: "msg-system",
-            });
-        } else {
-            ctx.postMessage({
-                type: "reply",
-                text: `Framework guide generation failed: ${error}`,
-                cls: "msg-system",
-            });
-        }
-    }
+    clearInterval(ticker);
 
     // ── Done ──
     ctx.postMessage({ type: "thinking", show: false });
@@ -280,80 +178,6 @@ export async function handleInitCommand(
             : "Workspace initialized successfully! Chat and agent modes now have full context.",
         cls: "msg-system",
     });
-}
-
-// ── /guide — regenerate framework guide only ─────────────────────────
-
-export async function handleGuideCommand(
-    ctx: SlashCommandContext,
-    _args: string,
-): Promise<void> {
-    // Health check
-    ctx.postMessage({ type: "thinking", show: true, text: "Checking backend..." });
-    const healthy = await ctx.client.healthCheck();
-    if (!healthy) {
-        ctx.postMessage({ type: "thinking", show: false });
-        ctx.postMessage({
-            type: "error",
-            text: "Backend not available. Start the server:\ncd backend && uvicorn lean_ai.main:app --reload --port 8422",
-        });
-        return;
-    }
-
-    const repoRoot = ctx.getRepoRoot();
-
-    // Elapsed-time ticker
-    const guideStart = Date.now();
-    const guideTicker = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - guideStart) / 1000);
-        const mins = Math.floor(elapsed / 60);
-        const secs = elapsed % 60;
-        const timeStr = mins > 0
-            ? `${mins}m ${secs.toString().padStart(2, "0")}s`
-            : `${secs}s`;
-        ctx.postMessage({
-            type: "thinking",
-            show: true,
-            text: `Generating framework guide... (${timeStr})`,
-        });
-    }, 5_000);
-
-    ctx.postMessage({
-        type: "thinking",
-        show: true,
-        text: "Generating framework guide...",
-    });
-
-    try {
-        // Always force-regenerate — the whole point of /guide
-        const guideResult = await ctx.client.generateFrameworkGuide(repoRoot, true, (token) => {
-            ctx.postMessage({ type: "llmThinking", text: token, streaming: true });
-        });
-        clearInterval(guideTicker);
-        ctx.postMessage({
-            type: "reply",
-            text: `Framework guide generated (${guideResult.chars.toLocaleString()} chars).`,
-            cls: "msg-system",
-        });
-    } catch (e) {
-        clearInterval(guideTicker);
-        const error = e instanceof Error ? e.message : String(e);
-        if (error.includes("404")) {
-            ctx.postMessage({
-                type: "reply",
-                text: "No frameworks detected — framework guide skipped.",
-                cls: "msg-system",
-            });
-        } else {
-            ctx.postMessage({
-                type: "reply",
-                text: `Framework guide generation failed: ${error}`,
-                cls: "msg-system",
-            });
-        }
-    }
-
-    ctx.postMessage({ type: "thinking", show: false });
 }
 
 // ── /style — generate style guide from CSS and template files ────────

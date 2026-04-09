@@ -278,29 +278,3 @@ class TestParseBingResults:
         assert _parse_bing_results("") == []
         assert _parse_bing_results("<html></html>") == []
 
-
-# ---------------------------------------------------------------------------
-# Output format compatibility
-# ---------------------------------------------------------------------------
-
-
-class TestOutputFormat:
-    def test_output_matches_extract_format(self):
-        """Formatted output must be parseable by _extract_search_results."""
-        from lean_ai.context.framework_search import (
-            extract_search_results as _extract_search_results,
-        )
-
-        formatted = (
-            "Title: Laravel Docs\n"
-            "URL: https://laravel.com/docs\n"
-            "Laravel is a PHP framework\n\n"
-            "---\n\n"
-            "Title: Django Docs\n"
-            "URL: https://docs.djangoproject.com\n"
-            "Django is a Python framework"
-        )
-        results = _extract_search_results(formatted)
-        assert len(results) == 2
-        assert results[0][1] == "https://laravel.com/docs"
-        assert results[1][1] == "https://docs.djangoproject.com"

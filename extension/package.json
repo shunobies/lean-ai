@@ -408,6 +408,74 @@
           "default": "",
           "markdownDescription": "**Lean AI Serve Request** — Override model for `/request` mode. Falls back to `lean-ai.serveModel` if empty."
         },
+        "lean-ai.ollamaModelWorker": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Ollama Worker Model** — A small, fast model for auxiliary tasks (summarization, compression). Leave empty to disable. Example: `qwen3.5:2b-q8_0`"
+        },
+        "lean-ai.workerLlmProvider": {
+          "type": "string",
+          "default": "",
+          "enum": ["", "ollama", "openai", "anthropic", "gemini", "serve"],
+          "enumDescriptions": [
+            "Auto-detect from ollamaModelWorker (empty = use primary provider)",
+            "Use Ollama for worker tasks",
+            "Use OpenAI for worker tasks",
+            "Use Anthropic for worker tasks",
+            "Use Gemini for worker tasks",
+            "Use Lean AI Serve for worker tasks"
+          ],
+          "markdownDescription": "**Worker Model** — Provider for auxiliary tasks (summarization, compression). Leave empty to auto-detect."
+        },
+        "lean-ai.ollamaWorkerContextWindow": {
+          "type": "number",
+          "markdownDescription": "**Ollama Worker Model** — Context window. Defaults to the primary model's context window."
+        },
+        "lean-ai.ollamaWorkerTemperature": {
+          "type": "number",
+          "markdownDescription": "**Ollama Worker Model** — Temperature. Defaults to primary."
+        },
+        "lean-ai.ollamaWorkerTopP": {
+          "type": "number",
+          "markdownDescription": "**Ollama Worker Model** — Top-p. Defaults to primary."
+        },
+        "lean-ai.ollamaWorkerTopK": {
+          "type": "number",
+          "markdownDescription": "**Ollama Worker Model** — Top-k. Defaults to primary."
+        },
+        "lean-ai.ollamaWorkerRepeatPenalty": {
+          "type": "number",
+          "markdownDescription": "**Ollama Worker Model** — Repeat penalty. Defaults to primary."
+        },
+        "lean-ai.ollamaWorkerMaxTokens": {
+          "type": "number",
+          "markdownDescription": "**Ollama Worker Model** — Max tokens. Defaults to 25% of worker context window."
+        },
+        "lean-ai.enableThinkingWorker": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Worker Model** — Enable thinking mode. Disabled by default since worker model prioritizes speed."
+        },
+        "lean-ai.openaiWorkerModel": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**OpenAI Worker** — Model for worker tasks when using OpenAI provider."
+        },
+        "lean-ai.anthropicWorkerModel": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Anthropic Worker** — Model for worker tasks when using Anthropic provider."
+        },
+        "lean-ai.geminiWorkerModel": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Gemini Worker** — Model for worker tasks when using Gemini provider."
+        },
+        "lean-ai.serveWorkerModel": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Lean AI Serve Worker** — Model for worker tasks when using Serve provider."
+        },
         "lean-ai.inlineModel": {
           "type": "string",
           "default": "",
@@ -622,10 +690,10 @@
           "minimum": 5,
           "markdownDescription": "**Post-Validation** — Tool-calling turns allowed per fix attempt. Increase for complex failures or fast cloud models; decrease for slow local models. Default: `30`"
         },
-        "lean-ai.enableFrameworkGuide": {
+        "lean-ai.enableRequiredCitations": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "**Advanced** — Generate a `.lean_ai/framework_guide.md` when running `/init`. Detects frameworks from dependency files and creates architecture/conventions guidance. Default: `true`"
+          "markdownDescription": "**Advanced** — Mandate documentation verification and citation for external framework/library/API usage during planning and execution. Default: `true`"
         },
         "lean-ai.implementationMaxTurns": {
           "type": "number",
@@ -666,19 +734,6 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "**Ollama Request Model** — Enable thinking/reasoning mode for the request model. Default: `true`"
-        },
-        "lean-ai.confidenceThreshold": {
-          "type": "number",
-          "default": 0.7,
-          "markdownDescription": "**Confidence Threshold** — Minimum confidence level (0.0–1.0) for the structured confidence audit. Design decisions below this threshold trigger automatic internet verification during planning. Default: `0.7`"
-        },
-        "lean-ai.confidenceThresholdExpert": {
-          "type": "number",
-          "markdownDescription": "**Expert Model** — Confidence threshold for the expert model's design decisions. Leave empty to inherit from the primary threshold."
-        },
-        "lean-ai.confidenceThresholdRequest": {
-          "type": "number",
-          "markdownDescription": "**Request Model** — Confidence threshold for the request model during codebase exploration. Leave empty to inherit from the primary threshold."
         },
         "lean-ai.ollamaExpertTemperature": {
           "type": "number",

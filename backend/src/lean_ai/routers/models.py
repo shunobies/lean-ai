@@ -124,18 +124,6 @@ class ResumeSessionRequest(BaseModel):
     repo_root: str
 
 
-class GenerateFrameworkGuideRequest(BaseModel):
-    repo_root: str
-    skip_if_exists: bool = False
-    stream: bool = False
-
-
-class GenerateFrameworkGuideResponse(BaseModel):
-    path: str
-    chars: int
-    skipped: bool = False
-
-
 class GenerateStyleGuideRequest(BaseModel):
     repo_root: str
     skip_if_exists: bool = False

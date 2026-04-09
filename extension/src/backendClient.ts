@@ -695,22 +695,6 @@ export class BackendClient {
         )) as { path: string; chars: number; skipped?: boolean };
     }
 
-    async generateFrameworkGuide(
-        repoRoot: string,
-        force: boolean = false,
-        onThinking?: (token: string) => void,
-    ): Promise<{ path: string; chars: number; skipped?: boolean }> {
-        const body = { repo_root: repoRoot, skip_if_exists: !force, stream: !!onThinking };
-        if (onThinking) {
-            return (await this._postSseNoTimeout(
-                "/api/generate-framework-guide", body, onThinking,
-            )) as { path: string; chars: number; skipped?: boolean };
-        }
-        return (await this._postJsonNoTimeout(
-            "/api/generate-framework-guide", body,
-        )) as { path: string; chars: number; skipped?: boolean };
-    }
-
     async generateStyleGuide(
         repoRoot: string,
         force: boolean = false,

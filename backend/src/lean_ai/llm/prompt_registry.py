@@ -285,20 +285,20 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
     ))
 
     reg.register(PromptEntry(
-        key="policy.confidence",
+        key="policy.required_citations",
         category="Core Policy",
-        name="Confidence Self-Assessment",
+        name="Required Citations Policy",
         description=(
-            "Instructs the LLM to tag uncertain claims"
-            " and search when unsure about external knowledge."
+            "Mandates documentation verification and citation"
+            " for external framework/library/API usage."
         ),
         default_text=(
-            "When making claims about external frameworks, libraries, APIs, conventions, "
-            "or version-specific behavior, assess your confidence. If you are not confident "
-            "that the information is current, tag the claim with [UNVERIFIED] and call "
-            "search_internet to verify before proceeding. After verifying, cite the "
-            "documentation URL and key details so your verified knowledge can be trusted "
-            "by downstream steps."
+            "REQUIRED CITATIONS: Before writing code that uses external frameworks, "
+            "libraries, or APIs, call search_internet to verify current patterns and "
+            "API signatures. Your training data may be stale. After verifying, include "
+            "the documentation URL and confirmed details in your output so downstream "
+            "steps can trust the information. This is mandatory for external dependencies "
+            "— not for project-internal code."
         ),
     ))
 
@@ -384,10 +384,14 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
             "You have search_internet, fetch_url, and task_complete tools. The scope "
             "analysis and file summary below were produced by a different model that "
             "explored the codebase with read-only tools.\n\n"
-            "When making design decisions involving external frameworks, libraries, APIs, "
-            "or version-specific behavior, verify current patterns via search_internet if "
-            "the file summary's VERIFIED REFERENCES section does not already cover what "
-            "you need. Cite documentation URLs for any external patterns you reference.\n\n"
+            "REQUIRED CITATIONS: ALL design decisions involving external frameworks, libraries, "
+            "APIs, or version-specific behavior MUST be verified against current documentation. "
+            "Call search_internet and fetch_url to verify patterns and API signatures before "
+            "finalizing design. For each external dependency referenced, include a citation with: "
+            "the documentation URL, confirmed API signatures or patterns, "
+            "and the version verified. "
+            "If the file summary's VERIFIED REFERENCES already covers an item, reference those "
+            "citations. Decisions without citations for external dependencies are unacceptable.\n\n"
             "Do NOT simulate running commands, invent file listings, or fabricate file "
             "contents. Base your analysis ONLY on the codebase information provided and "
             "verified search results."
@@ -1577,37 +1581,6 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
             "- If using component classes, show the actual class naming convention"
         ),
     ))
-
-    # ── Framework Guide ───────────────────────────────────────────────
-
-    _fw_sections = [
-        ("framework.section.architecture", "Framework Architecture",
-         "Architecture pattern and request lifecycle for the detected framework."),
-        ("framework.section.relationships", "Component Relationships",
-         "How major framework components connect (route→handler, model→migration, DI, etc.)."),
-        ("framework.section.cli_commands", "Common CLI Commands",
-         "Essential CLI commands grouped by purpose (setup, DB, dev server, testing)."),
-        ("framework.section.file_organization", "File Organization Conventions",
-         "Standard directory structure and where each component type lives."),
-        ("framework.section.new_feature", "Adding a New Feature",
-         "Step-by-step workflow for adding a typical new CRUD feature."),
-        ("framework.section.pitfalls", "Common Patterns and Pitfalls",
-         "Version-specific gotchas, deprecated features, and breaking changes."),
-        ("framework.section.build_tooling", "Build Tooling & Frontend Stack",
-         "Build tools, CSS frameworks, and frontend integration configuration."),
-    ]
-
-    # We register framework section prompts from the _SECTION_SPECS data.
-    # The actual section_prompt texts are defined inline in framework_guide.py
-    # and imported at refactor time. For now, register with descriptions only.
-    for key, name, desc in _fw_sections:
-        reg.register(PromptEntry(
-            key=key,
-            category="Framework Guide",
-            name=name,
-            description=desc,
-            default_text="",  # populated by _sync_framework_defaults()
-        ))
 
     # ── TDD & Vision ──────────────────────────────────────────────────
 

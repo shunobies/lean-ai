@@ -61,6 +61,21 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.openaiRequestModel":        "LEAN_AI_OPENAI_REQUEST_MODEL",
     "lean-ai.anthropicRequestModel":     "LEAN_AI_ANTHROPIC_REQUEST_MODEL",
 
+    // Worker model
+    "lean-ai.ollamaModelWorker":         "LEAN_AI_OLLAMA_MODEL_WORKER",
+    "lean-ai.workerLlmProvider":         "LEAN_AI_WORKER_LLM_PROVIDER",
+    "lean-ai.ollamaWorkerContextWindow": "LEAN_AI_OLLAMA_WORKER_CONTEXT_WINDOW",
+    "lean-ai.ollamaWorkerTemperature":   "LEAN_AI_OLLAMA_WORKER_TEMPERATURE",
+    "lean-ai.ollamaWorkerTopP":          "LEAN_AI_OLLAMA_WORKER_TOP_P",
+    "lean-ai.ollamaWorkerTopK":          "LEAN_AI_OLLAMA_WORKER_TOP_K",
+    "lean-ai.ollamaWorkerRepeatPenalty": "LEAN_AI_OLLAMA_WORKER_REPEAT_PENALTY",
+    "lean-ai.ollamaWorkerMaxTokens":     "LEAN_AI_OLLAMA_WORKER_MAX_TOKENS",
+    "lean-ai.enableThinkingWorker":      "LEAN_AI_ENABLE_THINKING_WORKER",
+    "lean-ai.openaiWorkerModel":         "LEAN_AI_OPENAI_WORKER_MODEL",
+    "lean-ai.anthropicWorkerModel":      "LEAN_AI_ANTHROPIC_WORKER_MODEL",
+    "lean-ai.geminiWorkerModel":         "LEAN_AI_GEMINI_WORKER_MODEL",
+    "lean-ai.serveWorkerModel":          "LEAN_AI_SERVE_WORKER_MODEL",
+
     // OpenAI (no API key — stored in SecretStorage)
     "lean-ai.openaiModel":               "LEAN_AI_OPENAI_MODEL",
     "lean-ai.openaiBaseUrl":             "LEAN_AI_OPENAI_BASE_URL",
@@ -140,7 +155,7 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.wikiUsername":             "LEAN_AI_WIKI_USERNAME",
 
     // Advanced / misc
-    "lean-ai.enableFrameworkGuide":      "LEAN_AI_ENABLE_FRAMEWORK_GUIDE",
+    "lean-ai.enableRequiredCitations":   "LEAN_AI_ENABLE_REQUIRED_CITATIONS",
     "lean-ai.numParallel":               "LEAN_AI_NUM_PARALLEL",
     "lean-ai.implementationMaxTurns":    "LEAN_AI_IMPLEMENTATION_MAX_TURNS",
     "lean-ai.refreshThreshold":          "LEAN_AI_REFRESH_THRESHOLD",
@@ -148,9 +163,6 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.enableThinking":            "LEAN_AI_ENABLE_THINKING",
     "lean-ai.enableThinkingExpert":      "LEAN_AI_ENABLE_THINKING_EXPERT",
     "lean-ai.enableThinkingRequest":     "LEAN_AI_ENABLE_THINKING_REQUEST",
-    "lean-ai.confidenceThreshold":       "LEAN_AI_CONFIDENCE_THRESHOLD",
-    "lean-ai.confidenceThresholdExpert": "LEAN_AI_CONFIDENCE_THRESHOLD_EXPERT",
-    "lean-ai.confidenceThresholdRequest":"LEAN_AI_CONFIDENCE_THRESHOLD_REQUEST",
 };
 
 // ── Zero-value filtering ─────────────────────────────────────────────────────
@@ -181,6 +193,13 @@ const ZERO_MEANS_UNSET: ReadonlySet<string> = new Set([
     "lean-ai.ollamaRequestTopP",
     "lean-ai.ollamaRequestTopK",
     "lean-ai.ollamaRequestRepeatPenalty",
+    // Worker Ollama model (0 = inherit from primary)
+    "lean-ai.ollamaWorkerContextWindow",
+    "lean-ai.ollamaWorkerMaxTokens",
+    "lean-ai.ollamaWorkerTemperature",
+    "lean-ai.ollamaWorkerTopP",
+    "lean-ai.ollamaWorkerTopK",
+    "lean-ai.ollamaWorkerRepeatPenalty",
     // OpenAI
     "lean-ai.openaiContextWindow",
     "lean-ai.openaiTemperature",
@@ -194,9 +213,6 @@ const ZERO_MEANS_UNSET: ReadonlySet<string> = new Set([
     "lean-ai.serveContextWindow",
     "lean-ai.serveTemperature",
     "lean-ai.serveMaxTokens",
-    // Confidence thresholds (0 = inherit from primary)
-    "lean-ai.confidenceThresholdExpert",
-    "lean-ai.confidenceThresholdRequest",
 ]);
 
 // ── Env building helpers ─────────────────────────────────────────────────────

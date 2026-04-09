@@ -286,8 +286,7 @@ class Settings(BaseSettings):
     # ── Project context ──
     enable_project_context: bool = True
     enable_multi_round_context: bool = True
-    enable_framework_guide: bool = True  # Generate .lean_ai/framework_guide.md
-    framework_guide_depth: str = "deep"  # "basic" (single-pass) or "deep" (multi-pass)
+    enable_required_citations: bool = True  # Mandate documentation citations for external APIs
 
     # ── Knowledge base ──
     knowledge_dir: str = ".lean_ai/knowledge"
@@ -317,11 +316,6 @@ class Settings(BaseSettings):
 
     # ── Claim verification ──
     enable_claim_verification: bool = True  # Nudge LLM to verify external claims via web search
-
-    # ── Confidence verification ──
-    confidence_threshold: float = 0.7  # Primary model, 0.0-1.0
-    confidence_threshold_expert: float | None = None  # Falls back to primary
-    confidence_threshold_request: float | None = None  # Falls back to primary
 
     # ── TDD mode ──
     enable_tdd: bool = False  # Expert writes tests first, primary implements
@@ -578,20 +572,6 @@ class Settings(BaseSettings):
         if not wp or wp == "ollama":
             return self.ollama_worker_max_tokens or (self.ollama_context_window // 4)
         return self._provider_max_tokens(wp)
-
-    @property
-    def effective_confidence_threshold_expert(self) -> float:
-        """Confidence threshold for the expert model (falls back to primary)."""
-        if self.confidence_threshold_expert is not None:
-            return self.confidence_threshold_expert
-        return self.confidence_threshold
-
-    @property
-    def effective_confidence_threshold_request(self) -> float:
-        """Confidence threshold for the request model (falls back to primary)."""
-        if self.confidence_threshold_request is not None:
-            return self.confidence_threshold_request
-        return self.confidence_threshold
 
     @property
     def effective_refiner_url(self) -> str:

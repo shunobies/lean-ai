@@ -91,6 +91,8 @@ export function getSettingsPanelHtml(): string {
     .expert-section.active { display: block; }
     .request-section { display: none; margin-top: var(--gap); }
     .request-section.active { display: block; }
+    .worker-section { display: none; margin-top: var(--gap); }
+    .worker-section.active { display: block; }
 
     /* Form fields */
     .field {
@@ -856,6 +858,124 @@ export function getSettingsPanelHtml(): string {
     </div>
 </div>
 
+<!-- ── Worker Model ── -->
+<div class="section">
+    <h2>Worker Model <span style="font-weight:normal;font-size:0.85em;color:var(--vscode-descriptionForeground)">— optional, small fast model for auxiliary tasks</span></h2>
+    <div class="field-check">
+        <input type="checkbox" id="useWorkerModel">
+        <div>
+            <label for="useWorkerModel">Use a separate model for summarization and compression</label>
+            <span class="hint">If disabled, the primary model handles auxiliary tasks. A small, fast model (e.g. qwen3.5:2b-q8_0) is ideal.</span>
+        </div>
+    </div>
+    <div class="worker-section indent" id="worker-section">
+        <div class="radio-group" id="workerProviderGroup">
+            <label class="radio-option" id="wopt-ollama">
+                <input type="radio" name="workerProvider" value="ollama">
+                <span><span class="radio-label">Ollama</span></span>
+            </label>
+            <label class="radio-option" id="wopt-openai">
+                <input type="radio" name="workerProvider" value="openai">
+                <span><span class="radio-label">OpenAI</span></span>
+            </label>
+            <label class="radio-option" id="wopt-anthropic">
+                <input type="radio" name="workerProvider" value="anthropic">
+                <span><span class="radio-label">Anthropic</span></span>
+            </label>
+            <label class="radio-option" id="wopt-gemini">
+                <input type="radio" name="workerProvider" value="gemini">
+                <span><span class="radio-label">Gemini</span></span>
+            </label>
+            <label class="radio-option" id="wopt-serve">
+                <input type="radio" name="workerProvider" value="serve">
+                <span><span class="radio-label">Lean AI Serve</span></span>
+            </label>
+        </div>
+        <div class="indent">
+            <!-- Worker Ollama fields -->
+            <div class="provider-section" id="worker-ollama-fields">
+                <div class="field-row">
+                    <div class="field">
+                        <label>Worker Ollama Model <span class="hint">e.g. qwen3.5:2b-q8_0</span></label>
+                        <div class="model-combobox" id="ollamaModelWorkerCombobox">
+                            <input type="text" id="ollamaModelWorker" placeholder="qwen3.5:2b-q8_0">
+                            <button type="button" class="model-combobox-btn" tabindex="-1">&#9660;</button>
+                            <div class="model-combobox-options"></div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label>Context Window <span class="hint">leave empty to inherit</span></label>
+                        <input type="text" id="ollamaWorkerContextWindow" placeholder="">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Temperature <span class="hint">leave empty to inherit</span></label>
+                        <input type="number" id="ollamaWorkerTemperature" min="0" max="2" step="0.05" placeholder="">
+                    </div>
+                    <div class="field">
+                        <label>Top P <span class="hint">leave empty to inherit</span></label>
+                        <input type="number" id="ollamaWorkerTopP" min="0" max="1" step="0.05" placeholder="">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Top K <span class="hint">leave empty to inherit</span></label>
+                        <input type="number" id="ollamaWorkerTopK" min="0" step="1" placeholder="">
+                    </div>
+                    <div class="field">
+                        <label>Repeat Penalty <span class="hint">leave empty to inherit</span></label>
+                        <input type="number" id="ollamaWorkerRepeatPenalty" min="0" step="0.01" placeholder="">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Max Tokens <span class="hint">0 = auto (25% of context window)</span></label>
+                        <input type="number" id="ollamaWorkerMaxTokens" min="0" step="256" placeholder="">
+                    </div>
+                    <div class="field">
+                    </div>
+                </div>
+                <div class="field-check">
+                    <input type="checkbox" id="enableThinkingWorker">
+                    <div>
+                        <label for="enableThinkingWorker">Enable thinking mode</label>
+                        <span class="hint">Disabled by default — worker model prioritizes speed over deep reasoning.</span>
+                    </div>
+                </div>
+            </div>
+            <!-- Worker OpenAI fields -->
+            <div class="provider-section" id="worker-openai-fields">
+                <div class="field">
+                    <label>Worker OpenAI Model <span class="hint">e.g. gpt-4o-mini</span></label>
+                    <input type="text" id="openaiWorkerModel" placeholder="gpt-4o-mini">
+                </div>
+            </div>
+            <!-- Worker Anthropic fields -->
+            <div class="provider-section" id="worker-anthropic-fields">
+                <div class="field">
+                    <label>Worker Anthropic Model <span class="hint">e.g. claude-haiku-4-5-20251001</span></label>
+                    <input type="text" id="anthropicWorkerModel" placeholder="claude-haiku-4-5-20251001">
+                </div>
+            </div>
+            <!-- Worker Gemini fields -->
+            <div class="provider-section" id="worker-gemini-fields">
+                <div class="field">
+                    <label>Worker Gemini Model <span class="hint">e.g. gemini-2.5-flash</span></label>
+                    <input type="text" id="geminiWorkerModel" placeholder="gemini-2.5-flash">
+                </div>
+            </div>
+            <!-- Worker Lean AI Serve fields -->
+            <div class="provider-section" id="worker-serve-fields">
+                <div class="field">
+                    <label>Worker Serve Model <span class="hint">falls back to primary Serve model</span></label>
+                    <input type="text" id="serveWorkerModel" placeholder="">
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- ── TDD Mode ── -->
 <div class="section">
     <h2>TDD Mode</h2>
@@ -1051,10 +1171,10 @@ export function getSettingsPanelHtml(): string {
         </div>
     </div>
     <div class="field-check">
-        <input type="checkbox" id="enableFrameworkGuide">
+        <input type="checkbox" id="enableRequiredCitations">
         <div>
-            <label for="enableFrameworkGuide">Generate framework guide during /init</label>
-            <span class="hint">Detects frameworks and creates a conventions guide. Requires web search.</span>
+            <label for="enableRequiredCitations">Require documentation citations</label>
+            <span class="hint">Mandate online documentation verification before using external frameworks/libraries/APIs during planning and execution.</span>
         </div>
     </div>
     <div class="field-check">
@@ -1274,7 +1394,7 @@ export function getSettingsPanelHtml(): string {
         document.querySelectorAll('#providerGroup .radio-option').forEach(o => o.classList.remove('selected'));
         document.querySelectorAll('.provider-section').forEach(s => {
             // only top-level provider sections, not expert sub-sections
-            if (!s.closest('.expert-section') && !s.closest('.request-section')) s.classList.remove('active');
+            if (!s.closest('.expert-section') && !s.closest('.request-section') && !s.closest('.worker-section')) s.classList.remove('active');
         });
         if (val) {
             const opt = document.getElementById('opt-' + val);
@@ -1337,6 +1457,33 @@ export function getSettingsPanelHtml(): string {
     // Request model checkbox
     document.getElementById('useRequestModel').addEventListener('change', function() {
         document.getElementById('request-section').classList.toggle('active', this.checked);
+    });
+
+    // Worker model provider radio buttons
+    document.querySelectorAll('#workerProviderGroup .radio-option').forEach(opt => {
+        opt.addEventListener('click', () => {
+            const radio = opt.querySelector('input[type="radio"]');
+            if (radio) { radio.checked = true; updateWorkerProvider(); }
+        });
+    });
+
+    function updateWorkerProvider() {
+        const selected = document.querySelector('input[name="workerProvider"]:checked');
+        const val = selected ? selected.value : null;
+        document.querySelectorAll('#workerProviderGroup .radio-option').forEach(o => o.classList.remove('selected'));
+        document.querySelectorAll('#worker-section .provider-section').forEach(s => s.classList.remove('active'));
+        if (val) {
+            const opt = document.getElementById('wopt-' + val);
+            if (opt) opt.classList.add('selected');
+            const sec = document.getElementById('worker-' + val + '-fields');
+            if (sec) sec.classList.add('active');
+        }
+    }
+    document.querySelectorAll('input[name="workerProvider"]').forEach(r => r.addEventListener('change', updateWorkerProvider));
+
+    // Worker model checkbox
+    document.getElementById('useWorkerModel').addEventListener('change', function() {
+        document.getElementById('worker-section').classList.toggle('active', this.checked);
     });
 
     // ── GitHub link — route through extension to open external browser ─────
@@ -1471,6 +1618,8 @@ export function getSettingsPanelHtml(): string {
         const expertProvider = document.querySelector('input[name="expertProvider"]:checked')?.value || '';
         const requestChecked = document.getElementById('useRequestModel').checked;
         const requestProvider = (document.querySelector('input[name="requestProvider"]:checked') || {}).value || '';
+        const workerChecked = document.getElementById('useWorkerModel').checked;
+        const workerProvider = (document.querySelector('input[name="workerProvider"]:checked') || {}).value || '';
 
         const values = {
             // Provider
@@ -1539,6 +1688,21 @@ export function getSettingsPanelHtml(): string {
             geminiRequestModel:       requestChecked && requestProvider === 'gemini' ? val('geminiRequestModel') : '',
             serveRequestModel:        requestChecked && requestProvider === 'serve' ? val('serveRequestModel') : '',
 
+            // Worker model
+            workerLlmProvider:        workerChecked ? workerProvider : '',
+            ollamaModelWorker:        workerChecked && workerProvider === 'ollama' ? val('ollamaModelWorker') : '',
+            ollamaWorkerContextWindow:workerChecked && workerProvider === 'ollama' ? val('ollamaWorkerContextWindow') : '',
+            ollamaWorkerTemperature:  workerChecked && workerProvider === 'ollama' ? val('ollamaWorkerTemperature') : '',
+            ollamaWorkerTopP:         workerChecked && workerProvider === 'ollama' ? val('ollamaWorkerTopP') : '',
+            ollamaWorkerTopK:         workerChecked && workerProvider === 'ollama' ? val('ollamaWorkerTopK') : '',
+            ollamaWorkerRepeatPenalty:workerChecked && workerProvider === 'ollama' ? val('ollamaWorkerRepeatPenalty') : '',
+            ollamaWorkerMaxTokens:    workerChecked && workerProvider === 'ollama' ? val('ollamaWorkerMaxTokens') : '',
+            enableThinkingWorker:     workerChecked && workerProvider === 'ollama' ? val('enableThinkingWorker') : '',
+            openaiWorkerModel:        workerChecked && workerProvider === 'openai' ? val('openaiWorkerModel') : '',
+            anthropicWorkerModel:     workerChecked && workerProvider === 'anthropic' ? val('anthropicWorkerModel') : '',
+            geminiWorkerModel:        workerChecked && workerProvider === 'gemini' ? val('geminiWorkerModel') : '',
+            serveWorkerModel:         workerChecked && workerProvider === 'serve' ? val('serveWorkerModel') : '',
+
             // Integrations
             enableIntegrations:    val('enableIntegrations'),
             integrationAutoPush:   val('integrationAutoPush'),
@@ -1586,7 +1750,7 @@ export function getSettingsPanelHtml(): string {
             implementationMaxTurns:val('implementationMaxTurns'),
             refreshThreshold:      val('refreshThreshold'),
             numParallel:           val('numParallel'),
-            enableFrameworkGuide:  val('enableFrameworkGuide'),
+            enableRequiredCitations: val('enableRequiredCitations'),
             debugPlanning:         val('debugPlanning'),
             enableThinking:        val('enableThinking'),
         };
@@ -1715,6 +1879,30 @@ export function getSettingsPanelHtml(): string {
         setVal('geminiRequestModel',      v.geminiRequestModel);
         setVal('serveRequestModel',       v.serveRequestModel);
 
+        // Worker model
+        const hasWorker = !!(v.workerLlmProvider || v.ollamaModelWorker);
+        document.getElementById('useWorkerModel').checked = hasWorker;
+        document.getElementById('worker-section').classList.toggle('active', hasWorker);
+
+        const workerProv = v.workerLlmProvider || (v.ollamaModelWorker ? 'ollama' : '');
+        if (workerProv) {
+            const wr = document.querySelector('input[name="workerProvider"][value="' + workerProv + '"]');
+            if (wr) { wr.checked = true; }
+            updateWorkerProvider();
+        }
+        setVal('ollamaModelWorker',        v.ollamaModelWorker);
+        setVal('ollamaWorkerContextWindow',v.ollamaWorkerContextWindow);
+        setVal('ollamaWorkerTemperature',  v.ollamaWorkerTemperature);
+        setVal('ollamaWorkerTopP',         v.ollamaWorkerTopP);
+        setVal('ollamaWorkerTopK',         v.ollamaWorkerTopK);
+        setVal('ollamaWorkerRepeatPenalty',v.ollamaWorkerRepeatPenalty);
+        setVal('ollamaWorkerMaxTokens',    v.ollamaWorkerMaxTokens);
+        setVal('enableThinkingWorker',     v.enableThinkingWorker);
+        setVal('openaiWorkerModel',        v.openaiWorkerModel);
+        setVal('anthropicWorkerModel',     v.anthropicWorkerModel);
+        setVal('geminiWorkerModel',        v.geminiWorkerModel);
+        setVal('serveWorkerModel',         v.serveWorkerModel);
+
         // Integrations
         setVal('enableIntegrations',       v.enableIntegrations);
         setVal('integrationAutoPush',      v.integrationAutoPush);
@@ -1777,7 +1965,7 @@ export function getSettingsPanelHtml(): string {
         setVal('implementationMaxTurns',v.implementationMaxTurns);
         setVal('refreshThreshold',      v.refreshThreshold);
         setVal('numParallel',           v.numParallel);
-        setVal('enableFrameworkGuide',  v.enableFrameworkGuide);
+        setVal('enableRequiredCitations', v.enableRequiredCitations);
         setVal('debugPlanning',         v.debugPlanning);
         setVal('enableThinking',        v.enableThinking);
 

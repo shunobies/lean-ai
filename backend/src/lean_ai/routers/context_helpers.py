@@ -69,9 +69,9 @@ def read_active_file(workspace_root: str, relative_path: str, max_chars: int = 3
 
 
 def read_project_context(workspace_root: str, max_chars: int = 20_000) -> str | None:
-    """Read .lean_ai/project_context.md and framework_guide.md if they exist."""
+    """Read .lean_ai/project_context.md if it exists."""
     parts: list[str] = []
-    for filename in ("project_context.md", "framework_guide.md"):
+    for filename in ("project_context.md",):
         filepath = os.path.join(workspace_root, ".lean_ai", filename)
         if not os.path.isfile(filepath):
             continue
@@ -93,9 +93,8 @@ def read_project_context(workspace_root: str, max_chars: int = 20_000) -> str | 
 def load_custom_steering_docs(repo_root: str) -> str:
     """Load all .md files from .lean_ai/context/ (custom steering documents only).
 
-    Unlike ``load_full_context`` this deliberately skips project_context.md and
-    framework_guide.md so it can be used *during* their generation without
-    circular dependency.
+    Unlike ``load_full_context`` this deliberately skips project_context.md so
+    it can be used *during* its generation without circular dependency.
     """
     parts: list[str] = []
     context_dir = Path(repo_root) / ".lean_ai" / "context"
@@ -109,7 +108,7 @@ def load_custom_steering_docs(repo_root: str) -> str:
 
 
 def load_full_context(repo_root: str, *, max_chars: int | None = None) -> str:
-    """Load project_context.md + framework_guide.md, then all .md from .lean_ai/context/.
+    """Load project_context.md, then all .md from .lean_ai/context/.
 
     When *max_chars* is set, the combined output is truncated to fit the
     budget with priority ordering preserved.  When ``None`` (default),
@@ -121,7 +120,7 @@ def load_full_context(repo_root: str, *, max_chars: int | None = None) -> str:
     used = 0
 
     # Priority files first
-    for filename in ("project_context.md", "framework_guide.md"):
+    for filename in ("project_context.md",):
         path = lean_dir / filename
         if path.is_file():
             chunk = path.read_text(encoding="utf-8", errors="replace")
@@ -158,8 +157,6 @@ def load_full_context(repo_root: str, *, max_chars: int | None = None) -> str:
 def load_planning_context(repo_root: str) -> str:
     """Load project_context.md + custom steering docs for planning phases.
 
-    Skips framework_guide.md entirely — planning phases need architecture
-    context and naming conventions, not framework implementation patterns.
     Budget-gated at PLANNING_CONTEXT_PERCENT of the active context window.
     """
     budget = int(
@@ -192,52 +189,21 @@ def load_planning_context(repo_root: str) -> str:
 
 
 def load_execution_context(repo_root: str) -> str:
-    """Load framework_guide.md + custom steering docs for step execution.
+    """Load custom steering docs for step execution.
 
-    Skips project_context.md — step instructions are specific enough.
-    Execution needs framework patterns and custom conventions.
+    Framework guide has been replaced by the required citations system
+    (search-on-demand during execution).
     Budget-gated at EXECUTION_CONTEXT_PERCENT of the active context window.
     """
     total_budget = int(
         settings._active_context_window * EXECUTION_CONTEXT_PERCENT * 3.5
     )
-    lean_dir = Path(repo_root) / ".lean_ai"
-
-    # Load framework guide
-    guide_text = ""
-    guide_path = lean_dir / "framework_guide.md"
-    if guide_path.is_file():
-        guide_text = guide_path.read_text(encoding="utf-8", errors="replace").strip()
-
     custom_text = load_custom_steering_docs(repo_root)
-
-    # Budget allocation with rollover (same pattern as load_condensed_context)
-    custom_budget = int(total_budget * CUSTOM_DOCS_SHARE)
-    guide_budget = total_budget - custom_budget
-
     if not custom_text:
-        guide_budget = total_budget
-        custom_budget = 0
-    if not guide_text:
-        custom_budget = total_budget
-        guide_budget = 0
-
-    parts: list[str] = []
-
-    if guide_text:
-        if len(guide_text) <= guide_budget:
-            parts.append(guide_text)
-            custom_budget += guide_budget - len(guide_text)
-        else:
-            parts.append(guide_text[:guide_budget] + "\n... (condensed)")
-
-    if custom_text:
-        if len(custom_text) <= custom_budget:
-            parts.append(custom_text)
-        else:
-            parts.append(custom_text[:custom_budget] + "\n... (condensed)")
-
-    return "\n\n".join(parts)
+        return ""
+    if len(custom_text) <= total_budget:
+        return custom_text
+    return custom_text[:total_budget] + "\n... (condensed)"
 
 
 def load_condensed_context(repo_root: str) -> str:
@@ -256,7 +222,7 @@ def load_condensed_context(repo_root: str) -> str:
     lean_dir = Path(repo_root) / ".lean_ai"
 
     generated_parts: list[str] = []
-    for filename in ("project_context.md", "framework_guide.md"):
+    for filename in ("project_context.md",):
         path = lean_dir / filename
         if path.is_file():
             chunk = path.read_text(encoding="utf-8", errors="replace")

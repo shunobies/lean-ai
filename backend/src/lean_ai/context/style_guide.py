@@ -10,10 +10,20 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from lean_ai.context.content import _read_file_safe
-from lean_ai.context.framework_detection import get_compact_tree
 from lean_ai.indexer.tree import list_repo_tree
 
 logger = logging.getLogger(__name__)
+
+
+def get_compact_tree(repo_root: str, max_entries: int = 100) -> str:
+    """Return a compact file tree of the project for inclusion in the prompt."""
+    try:
+        entries = list_repo_tree(repo_root)
+        lines = [e.path for e in entries[:max_entries]]
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
 
 # Directories containing compiled/bundled output — skip these.
 _SKIP_DIRS = ("public/", "dist/", "build/", ".output/", ".next/", "vendor/", "node_modules/")

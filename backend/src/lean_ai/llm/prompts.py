@@ -52,7 +52,8 @@ def _compose(key: str) -> str:
         web_search += "\n" + registry.get("policy.wiki_search")
     if settings.enable_claim_verification:
         web_search += "\n" + registry.get("policy.claim_verification")
-    web_search += "\n" + registry.get("policy.confidence")
+    if settings.enable_required_citations:
+        web_search += "\n" + registry.get("policy.required_citations")
     subs = {
         "TOOL_POLICY": registry.get("policy.tool"),
         "COMPLETION_CONTRACT": registry.get("policy.completion"),
