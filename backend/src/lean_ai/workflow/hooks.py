@@ -84,7 +84,7 @@ async def auto_extract_session_memories(
         # Use worker model if available, fall back to primary
         extractor_llm = worker_llm_client or llm_client
 
-        # Gather tool call stats from DB
+        # Gather tool call stats and search findings from DB
         db = await get_db(repo_root)
         try:
             cursor = await db.execute(
@@ -96,6 +96,19 @@ async def auto_extract_session_memories(
             rows = await cursor.fetchall()
             tool_stats = {row[0]: row[1] for row in rows}
             failed_tools = [row[0] for row in rows if row[2] > 0]
+
+            # Gather search/fetch results for extraction enrichment
+            search_cursor = await db.execute(
+                "SELECT tool_name, content FROM conversation_logs "
+                "WHERE session_id = ? AND role = 'tool_result' "
+                "AND tool_name IN ('search_internet', 'fetch_url') "
+                "ORDER BY id ASC",
+                (session_id,),
+            )
+            search_rows = await search_cursor.fetchall()
+            search_findings: list[tuple[str, str]] = [
+                (row[0], row[1]) for row in search_rows
+            ]
         finally:
             await db.close()
 
@@ -112,6 +125,7 @@ async def auto_extract_session_memories(
             failed_tools=failed_tools,
             validation_passed=validation_passed,
             files_modified=files_modified,
+            search_findings=search_findings,
         )
 
         schedule_extraction(

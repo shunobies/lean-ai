@@ -506,9 +506,43 @@ def make_tool_executor(
             return result.output if result.success else f"ERROR: {result.error}"
 
         elif name == "search_internet":
+            query = arguments.get("query", "")
+
+            # Pre-search memory check: return cached findings if available
+            if settings.enable_session_memory and repo_root and query:
+                try:
+                    from lean_ai.memory.index import (
+                        search_memories_with_threshold,
+                    )
+
+                    cached = search_memories_with_threshold(
+                        repo_root, query,
+                    )
+                    if cached:
+                        lines = [
+                            "FROM WORKSPACE MEMORY "
+                            "(previous session findings):\n",
+                        ]
+                        for r in cached:
+                            cat = r.get("category") or "general"
+                            lines.append(f"[{cat}] {r['content']}")
+                            if r.get("source_task"):
+                                task_snip = r["source_task"][:60]
+                                lines.append(f"  (from task: {task_snip})")
+                        lines.append(
+                            "\nThese are cached findings from a "
+                            "previous session. Call search_internet "
+                            "again if you need the latest information."
+                        )
+                        return "\n".join(lines)
+                except Exception:
+                    logger.debug(
+                        "Pre-search memory check failed", exc_info=True,
+                    )
+
             from lean_ai.tools.internet import search_internet
             result = await search_internet(
-                query=arguments.get("query", ""),
+                query=query,
                 llm_client=llm_client,
             )
             return result.output if result.success else f"ERROR: {result.error}"

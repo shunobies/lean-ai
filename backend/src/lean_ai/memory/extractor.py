@@ -28,7 +28,7 @@ class MemoryItem(BaseModel):
     category: str = Field(
         description=(
             "Memory category: architecture, build, testing, "
-            "pattern, gotcha, or convention"
+            "pattern, gotcha, convention, or discovery"
         ),
     )
     content: str = Field(
@@ -161,6 +161,9 @@ async def _extract_and_store(
     return stored
 
 
+_SEARCH_FINDINGS_BUDGET = 3000  # chars for the SEARCH & LOOKUPS section
+
+
 def build_session_summary_for_extraction(
     task: str,
     plan_text: str | None,
@@ -168,11 +171,16 @@ def build_session_summary_for_extraction(
     failed_tools: list[str],
     validation_passed: bool,
     files_modified: list[str],
+    search_findings: list[tuple[str, str]] | None = None,
 ) -> str:
     """Build a compact session summary for the extraction prompt.
 
     Assembles key session data into a text block that the LLM can
     analyze to extract reusable memories.
+
+    *search_findings* is a list of ``(tool_name, result_text)`` tuples
+    from ``search_internet`` / ``fetch_url`` calls logged during the
+    session.  They are budget-gated to avoid overwhelming the prompt.
     """
     parts = [f"TASK: {task}"]
 
@@ -196,6 +204,24 @@ def build_session_summary_for_extraction(
 
     if files_modified:
         parts.append("\nFILES MODIFIED:\n  " + "\n  ".join(files_modified))
+
+    if search_findings:
+        findings_parts = ["\nSEARCH & LOOKUPS:"]
+        budget_used = len(findings_parts[0])
+        for tool_name, content in search_findings:
+            label = "search" if tool_name == "search_internet" else "fetch"
+            snippet = content[:400]
+            if len(content) > 400:
+                snippet += "..."
+            entry = f"\n  [{label}] {snippet}"
+            if budget_used + len(entry) > _SEARCH_FINDINGS_BUDGET:
+                findings_parts.append(
+                    "\n  ... (additional findings truncated)"
+                )
+                break
+            findings_parts.append(entry)
+            budget_used += len(entry)
+        parts.append("".join(findings_parts))
 
     return "\n".join(parts)
 

@@ -126,3 +126,31 @@ def search_memories(
             })
 
     return results
+
+
+def search_memories_with_threshold(
+    repo_root: str,
+    query: str,
+    min_score: float = 1.0,
+    relative_cutoff: float = 0.7,
+    limit: int = 3,
+) -> list[dict]:
+    """Search memories filtered by relevance threshold.
+
+    Returns only results with score >= *min_score*.  When multiple
+    qualify, includes results within *relative_cutoff* of the top score.
+
+    BM25F scores aren't normalised — they vary by index size and field
+    lengths.  The floor + relative approach avoids fragile absolute
+    thresholds while still filtering noise.
+    """
+    results = search_memories(repo_root, query, limit=limit)
+    if not results:
+        return []
+
+    top_score = results[0]["score"]
+    if top_score < min_score:
+        return []
+
+    threshold = top_score * relative_cutoff
+    return [r for r in results if r["score"] >= max(min_score, threshold)]
