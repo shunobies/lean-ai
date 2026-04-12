@@ -16,6 +16,8 @@ from lean_ai.llm.tool_definitions import (
     build_tdd_implementation_tools,
 )
 from lean_ai.routers.context_helpers import load_condensed_context
+from lean_ai.tools import scratchpad
+from lean_ai.tools.journal import read_journal
 from lean_ai.workflow.callbacks import build_workflow_callbacks
 from lean_ai.workflow.prompts import build_fix_system_prompt
 from lean_ai.workflow.tool_executor import make_tool_executor
@@ -280,6 +282,21 @@ async def _run_validation_fix_loop(
             },
         ]
 
+        # Inject execution-phase state so the fix LLM has context
+        if session_id:
+            jrnl = read_journal(repo_root, session_id)
+            if jrnl:
+                messages.append({
+                    "role": "user",
+                    "content": f"[SESSION JOURNAL]\n{jrnl}",
+                })
+            pad = scratchpad.read_scratchpad(repo_root, session_id)
+            if pad:
+                messages.append({
+                    "role": "user",
+                    "content": f"[SCRATCHPAD]\n{pad}",
+                })
+
         # Run LLM with a tight turn budget
         # In TDD mode, protect test files and allow disputes
         tdd_fix_protect = settings.enable_tdd and expert_llm_client is not None
@@ -298,6 +315,34 @@ async def _run_validation_fix_loop(
                     session_id=session_id,
                     dispatcher=dispatcher,
                 )
+
+        # Context refresh: rebuild messages from fresh disk state
+        def _build_fix_refresh(current_messages: list[dict]) -> list[dict]:
+            fresh_sys = build_fix_system_prompt(
+                load_condensed_context(repo_root),
+            )
+            pad = scratchpad.read_scratchpad(repo_root, session_id)
+            jrnl = read_journal(repo_root, session_id)
+            refreshed: list[dict] = [
+                {"role": "system", "content": fresh_sys},
+                # Preserve the failure text (second message)
+                {"role": "user", "content": current_messages[1]["content"]},
+            ]
+            if jrnl:
+                refreshed.append({
+                    "role": "user",
+                    "content": f"[SESSION JOURNAL]\n{jrnl}",
+                })
+            if pad:
+                refreshed.append({
+                    "role": "user",
+                    "content": f"[SCRATCHPAD]\n{pad}",
+                })
+            refreshed.append({
+                "role": "user",
+                "content": "[CONTEXT REFRESHED] Continue fixing.",
+            })
+            return refreshed
 
         fix_tools = (
             build_tdd_implementation_tools()
@@ -321,6 +366,7 @@ async def _run_validation_fix_loop(
             on_tool_result=cb.on_tool_result,
             on_content=cb.on_content,
             on_metrics=cb.on_metrics,
+            on_context_refresh=_build_fix_refresh,
             dispatcher=dispatcher,
         )
 

@@ -51,6 +51,8 @@ from lean_ai.llm.prompts import (
     PLAN_VERIFICATION_SYSTEM_PROMPT,
 )
 from lean_ai.llm.tool_definitions import build_design_tools
+from lean_ai.tools import scratchpad
+from lean_ai.tools.journal import read_journal
 
 if TYPE_CHECKING:
     from lean_ai.llm.facade import LLMClient
@@ -273,6 +275,27 @@ async def create_plan(
             ),
         },
     ]
+
+    # Inject Phase 2 exploration notes (scratchpad/journal) into expert context
+    if session_id:
+        exploration_journal = read_journal(repo_root, session_id)
+        if exploration_journal:
+            phase3_messages.append({
+                "role": "user",
+                "content": (
+                    "EXPLORATION NOTES (from codebase analysis):\n"
+                    + exploration_journal
+                ),
+            })
+        exploration_pad = scratchpad.read_scratchpad(repo_root, session_id)
+        if exploration_pad:
+            phase3_messages.append({
+                "role": "user",
+                "content": (
+                    "EXPLORATION SCRATCHPAD (current state):\n"
+                    + exploration_pad
+                ),
+            })
 
     # Search-only tool executor for Phase 3 design synthesis
     async def _search_only_executor(name: str, arguments: dict) -> str:

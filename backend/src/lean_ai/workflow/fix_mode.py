@@ -120,6 +120,38 @@ async def _run_fix(
                     ),
                 })
 
+        def _build_investigation_refresh(
+            current_messages: list[dict],
+        ) -> list[dict]:
+            """Rebuild investigation messages from fresh disk state."""
+            fresh_context = load_condensed_context(repo_root)
+            fresh_prompt = build_fix_investigation_prompt(
+                fresh_context, test_command=commands.get("test", ""),
+            )
+            pad = scratchpad.read_scratchpad(repo_root, session_id)
+            jrnl = read_journal(repo_root, session_id)
+            refreshed: list[dict] = [
+                {"role": "system", "content": fresh_prompt},
+                {"role": "user", "content": task},
+            ]
+            if jrnl:
+                refreshed.append({
+                    "role": "user",
+                    "content": f"[SESSION JOURNAL]\n{jrnl}",
+                })
+            if pad:
+                refreshed.append({
+                    "role": "user",
+                    "content": f"[SCRATCHPAD]\n{pad}",
+                })
+            refreshed.append({
+                "role": "user",
+                "content": (
+                    "[CONTEXT REFRESHED] Continue investigating."
+                ),
+            })
+            return refreshed
+
         executed_investigation, _ = await active_client.chat_with_tools(
             messages=messages,
             tools=build_investigation_tools(),
@@ -131,6 +163,7 @@ async def _run_fix(
             on_content=cb.on_content,
             on_thinking=cb.on_thinking,
             on_metrics=cb.on_metrics,
+            on_context_refresh=_build_investigation_refresh,
             dispatcher=dispatcher,
         )
 
