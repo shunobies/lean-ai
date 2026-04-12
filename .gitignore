@@ -36,6 +36,14 @@ extension/*.vsix
 package-lock.json
 !extension/package-lock.json
 
+# JetBrains plugin
+jetbrains-plugin/.gradle/
+jetbrains-plugin/.intellijPlatform/
+jetbrains-plugin/src/main/resources/backend/
+
+# Ollama modelfiles
+*.model
+
 # OS
 .DS_Store
 Thumbs.db
