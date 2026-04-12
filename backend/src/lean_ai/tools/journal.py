@@ -51,10 +51,10 @@ async def add_journal_entry(
 
     if len(existing) >= max_chars:
         return ToolResult(
-            success=True,
-            output=(
+            success=False,
+            error=(
                 f"Journal full ({len(existing)} chars, limit {max_chars}). "
-                "Entry NOT added. Keep using scratchpad for volatile state."
+                "Entry NOT added. Use update_scratchpad for volatile working state instead."
             ),
         )
 
@@ -64,7 +64,21 @@ async def add_journal_entry(
     new_content = existing + entry
     if len(new_content) > max_chars:
         available = max_chars - len(existing)
-        entry = entry[:available]
+        if available < 20:
+            return ToolResult(
+                success=False,
+                error=(
+                    f"Journal full ({len(existing)} chars, limit {max_chars}). "
+                    "Entry NOT added. Use update_scratchpad for volatile working state instead."
+                ),
+            )
+        # Truncate at last newline to avoid cutting mid-character
+        truncated = entry[:available]
+        last_nl = truncated.rfind("\n")
+        if last_nl > 0:
+            entry = truncated[:last_nl]
+        else:
+            entry = truncated
         new_content = existing + entry
         new_content += "\n[JOURNAL FULL — no more entries accepted]"
 

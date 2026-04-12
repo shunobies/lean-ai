@@ -189,6 +189,54 @@ async def _compress_tool_output(
     return output[:threshold] + "\n... (truncated)"
 
 
+# Required parameters per tool — used for early validation
+_REQUIRED_PARAMS: dict[str, list[str]] = {
+    "create_file": ["path", "content"],
+    "edit_file": ["path", "search", "replace"],
+    "read_file": ["path"],
+    "run_tests": ["command"],
+    "run_lint": ["command"],
+    "format_code": ["command"],
+    "run_command": ["command"],
+    "update_scratchpad": ["content"],
+    "add_journal_entry": ["content"],
+    "grep_files": ["pattern"],
+    "search_internet": ["query"],
+    "fetch_url": ["url"],
+    "search_wiki": ["query"],
+    "fetch_wiki_page": ["title"],
+}
+
+# Parameters where empty string is valid
+_ALLOW_EMPTY: frozenset[tuple[str, str]] = frozenset({
+    ("create_file", "content"),   # empty file creation is valid
+    ("edit_file", "replace"),     # replacing with empty = deletion
+})
+
+
+def _validate_required_params(name: str, arguments: dict) -> str | None:
+    """Return an error message if required parameters are missing or empty."""
+    required = _REQUIRED_PARAMS.get(name)
+    if not required:
+        return None
+    problems: list[str] = []
+    for p in required:
+        if p not in arguments:
+            problems.append(p)
+        elif (
+            isinstance(arguments[p], str)
+            and not arguments[p].strip()
+            and (name, p) not in _ALLOW_EMPTY
+        ):
+            problems.append(f"{p} (was empty)")
+    if problems:
+        return (
+            f"ERROR: {name} requires parameter(s): {', '.join(problems)}. "
+            f"Provide all required parameters and retry."
+        )
+    return None
+
+
 def make_tool_executor(
     repo_root: str,
     ws: WebSocket,
@@ -219,6 +267,22 @@ def make_tool_executor(
 
     async def execute(name: str, arguments: dict) -> str:
         """Execute a tool and return the result as a string."""
+        try:
+            return await _execute_inner(name, arguments)
+        except Exception as exc:
+            logger.exception("Unhandled exception in tool %s", name)
+            return (
+                f"ERROR: {name} failed: {exc}. "
+                f"You may retry or try a different approach."
+            )
+
+    async def _execute_inner(name: str, arguments: dict) -> str:
+        """Inner dispatch — all tool logic lives here."""
+
+        # Validate required parameters upfront
+        param_error = _validate_required_params(name, arguments)
+        if param_error:
+            return param_error
 
         # File whitelist guard (validation fix loop scoping)
         if allowed_files is not None and name in ("create_file", "edit_file"):

@@ -171,7 +171,14 @@ IMPLEMENTATION_TOOLS: list[dict] = [
                 "asset compilation. Do NOT use this for testing (use run_tests), "
                 "linting (use run_lint), or formatting (use format_code). "
                 "Destructive commands (rm, dd, chmod, git push, etc.) require "
-                "user approval; other commands execute immediately."
+                "user approval; other commands execute immediately.\n\n"
+                "IMPORTANT:\n"
+                "- Commands run non-interactively (no stdin). Commands that "
+                "prompt for input will hang — use flags like --yes or -y.\n"
+                "- Output over ~2000 chars is saved to a file. You will receive "
+                "a tail preview and a file path — use read_file on that path "
+                "to see the full output before diagnosing failures.\n"
+                "- Failed commands include the exit code in the result."
             ),
             "parameters": {
                 "type": "object",

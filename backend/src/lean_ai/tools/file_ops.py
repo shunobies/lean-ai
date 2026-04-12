@@ -47,15 +47,26 @@ async def create_file(
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
     original = ""
+    overwritten = False
     if file_path.exists():
         original = file_path.read_text(encoding="utf-8")
+        overwritten = True
 
     file_path.write_text(content, encoding="utf-8")
     diff = _generate_diff(original, content, path)
 
+    output = f"Wrote {len(content)} bytes to {path}"
+    if overwritten:
+        output = (
+            f"WARNING: Overwrote existing file {path} "
+            f"({len(original)} bytes replaced). "
+            f"Use edit_file for targeted changes to existing files.\n"
+            f"{output}"
+        )
+
     return ToolResult(
         success=True,
-        output=f"Wrote {len(content)} bytes to {path}",
+        output=output,
         metadata={"file_path": path, "diff": diff},
     )
 

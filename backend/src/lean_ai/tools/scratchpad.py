@@ -41,8 +41,13 @@ async def update_scratchpad(content: str, repo_root: str, session_id: str) -> To
     """
     max_chars = _max_scratchpad_chars()
     if len(content) > max_chars:
-        content = content[:max_chars]
-        content += f"\n\n[SCRATCHPAD TRUNCATED at {max_chars} chars — keep entries concise]"
+        cut = content[:max_chars]
+        last_nl = cut.rfind("\n")
+        if last_nl > 0:
+            content = cut[:last_nl]
+        else:
+            content = cut  # no newlines — keep raw truncation as fallback
+        content += f"\n\n[SCRATCHPAD TRUNCATED at {len(content)} chars — keep entries concise]"
 
     path = scratchpad_path(repo_root, session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
