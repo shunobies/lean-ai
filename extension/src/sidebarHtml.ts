@@ -886,6 +886,65 @@ export function getWebviewHtml(chatFontSize: number): string {
         background: var(--vscode-errorForeground);
         color: var(--vscode-button-foreground);
     }
+
+    /* Execution checklist */
+    .execution-checklist {
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 8px;
+        background: var(--vscode-editor-background);
+        padding: 10px 12px;
+        margin: 6px 0;
+        align-self: stretch;
+    }
+    .execution-checklist .checklist-title {
+        font-weight: 600;
+        font-size: 12px;
+        margin-bottom: 8px;
+        opacity: 0.7;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .checklist-step {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 3px 0;
+        font-size: 12px;
+        line-height: 1.4;
+    }
+    .checklist-step .step-icon {
+        flex-shrink: 0;
+        width: 16px;
+        height: 16px;
+        text-align: center;
+        line-height: 16px;
+        font-size: 13px;
+    }
+    .checklist-step.pending .step-icon { opacity: 0.3; }
+    .checklist-step.running .step-icon {
+        color: var(--vscode-progressBar-background, #0078d4);
+    }
+    .checklist-step.running .step-icon svg {
+        animation: checklist-spin 1s linear infinite;
+    }
+    .checklist-step.completed .step-icon {
+        color: var(--vscode-testing-iconPassed, #28a745);
+    }
+    .checklist-step.completed .step-text { opacity: 0.55; }
+    .checklist-step .step-text {
+        flex: 1;
+        word-break: break-word;
+    }
+    .checklist-step .step-file {
+        font-family: var(--vscode-editor-font-family);
+        font-size: 10px;
+        opacity: 0.5;
+        margin-left: 4px;
+    }
+    @keyframes checklist-spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
 </style>
 </head>
 <body>
@@ -996,6 +1055,7 @@ export function getWebviewHtml(chatFontSize: number): string {
     let problemsActive = false;
     let debugActive = false;
     let visionAvailable = false; // Set by health check response
+    let checklistEl = null; // Execution checklist DOM element
 
     // --- Voice state ---
     const voiceControls = document.getElementById('voiceControls');
@@ -1867,6 +1927,9 @@ export function getWebviewHtml(chatFontSize: number): string {
                 if (msg.stage && !runtimeInterval) {
                     startRuntime();
                 }
+                if (!msg.stage) {
+                    checklistEl = null; // Allow new checklist for next workflow
+                }
                 break;
 
             case 'metricsUpdate':
@@ -1883,6 +1946,59 @@ export function getWebviewHtml(chatFontSize: number): string {
             case 'metricsReset':
                 resetMetrics();
                 break;
+
+            case 'executionChecklist': {
+                if (checklistEl) { checklistEl.remove(); }
+                checklistEl = document.createElement('div');
+                checklistEl.className = 'msg execution-checklist';
+                const titleDiv = document.createElement('div');
+                titleDiv.className = 'checklist-title';
+                titleDiv.textContent = 'Execution Progress';
+                checklistEl.appendChild(titleDiv);
+                const steps = msg.steps || [];
+                for (let i = 0; i < steps.length; i++) {
+                    const s = steps[i];
+                    const stepDiv = document.createElement('div');
+                    stepDiv.className = 'checklist-step pending';
+                    stepDiv.dataset.stepIndex = String(s.step_index);
+                    const icon = document.createElement('span');
+                    icon.className = 'step-icon';
+                    icon.textContent = '\u25CB';
+                    const textSpan = document.createElement('span');
+                    textSpan.className = 'step-text';
+                    let label = (i + 1) + '. ' + escapeHtml(s.description);
+                    if (s.file_path) {
+                        label += ' <span class="step-file">' + escapeHtml(s.file_path) + '</span>';
+                    }
+                    textSpan.innerHTML = label;
+                    stepDiv.appendChild(icon);
+                    stepDiv.appendChild(textSpan);
+                    checklistEl.appendChild(stepDiv);
+                }
+                messagesEl.appendChild(checklistEl);
+                scrollToBottom();
+                break;
+            }
+
+            case 'checkpointUpdate': {
+                if (!checklistEl) break;
+                const idx = msg.stepIndex;
+                const status = msg.status;
+                const stepEl = checklistEl.querySelector('[data-step-index="' + idx + '"]');
+                if (stepEl) {
+                    stepEl.classList.remove('pending', 'running', 'completed');
+                    stepEl.classList.add(status);
+                    const iconEl = stepEl.querySelector('.step-icon');
+                    if (status === 'running') {
+                        iconEl.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 1a6 6 0 1 1 0 12A6 6 0 0 1 8 2z" opacity="0.2"/><path d="M8 1a7 7 0 0 1 7 7h-1a6 6 0 0 0-6-6V1z"/></svg>';
+                    } else if (status === 'completed') {
+                        iconEl.innerHTML = '';
+                        iconEl.textContent = '\u2713';
+                    }
+                }
+                if (status === 'running') { scrollToBottom(); }
+                break;
+            }
 
             case 'setViewMode':
                 viewMode = msg.mode;
@@ -2096,6 +2212,7 @@ export function getWebviewHtml(chatFontSize: number): string {
                 if (sendTimeout) { clearTimeout(sendTimeout); sendTimeout = null; }
                 currentStreamDiv = null;
                 currentPlanningDiv = null;
+                checklistEl = null;
                 setStage(null);
                 resetMetrics();
                 thinkingEl.classList.remove('visible');

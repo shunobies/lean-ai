@@ -382,18 +382,28 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
             break;
         }
 
+        // --- Execution checklist: send full step list to webview ---
+        case "execution_checklist": {
+            ctx.postMessage({
+                type: "executionChecklist",
+                steps: raw.steps,
+                total: raw.total as number,
+            });
+            break;
+        }
+
         // --- Session History: checkpoint reached ---
         case "checkpoint": {
             const stepIdx = raw.step_index as number;
             const stepDesc = raw.step_description as string;
             const cpStatus = raw.status as string;
-            if (cpStatus === "completed") {
-                ctx.postMessage({
-                    type: "reply",
-                    text: `Checkpoint ${stepIdx + 1}: ${stepDesc} ✓`,
-                    cls: "msg-system",
-                });
-            }
+            // Forward all statuses to the webview for checklist updates
+            ctx.postMessage({
+                type: "checkpointUpdate",
+                stepIndex: stepIdx,
+                description: stepDesc,
+                status: cpStatus,
+            });
             break;
         }
 

@@ -66,6 +66,11 @@ class PlanStep(BaseModel):
     For ``run_tests`` / ``run_lint``: the exact command to run.
     """
 
+    reason: str = ""
+    """Why this change is needed — the problem it solves or the requirement
+    it satisfies.  The executor uses this to make informed decisions when the
+    exact instruction doesn't match the current file state."""
+
     context: str
     """Relevant file content the planner read during investigation.
 
@@ -130,6 +135,26 @@ class ExecutionPlan(BaseModel):
     """How to verify the changes work (included in run_tests steps)."""
 
 
+def _render_step(
+    parts: list[str], step: PlanStep, include_context: bool
+) -> None:
+    """Render a single plan step as markdown lines."""
+    tool_label = step.tool.upper().replace("_", " ")
+    if step.file_path:
+        parts.append(
+            f"{step.step_number}. **{tool_label}** `{step.file_path}`"
+            f" — {step.instruction}"
+        )
+    else:
+        parts.append(
+            f"{step.step_number}. **{tool_label}** — {step.instruction}"
+        )
+    if step.reason:
+        parts.append(f"   **Reason:** {step.reason}")
+    if include_context and step.context:
+        parts.append(f"   ```\n{step.context}\n   ```")
+
+
 def plan_to_markdown(
     plan: ExecutionPlan, *, include_context: bool = False
 ) -> str:
@@ -155,36 +180,14 @@ def plan_to_markdown(
     if plan.tdd_test_steps:
         parts.append("## TEST PHASE (Expert Model)\n")
         for step in plan.tdd_test_steps:
-            tool_label = step.tool.upper().replace("_", " ")
-            if step.file_path:
-                parts.append(
-                    f"{step.step_number}. **{tool_label}** `{step.file_path}`"
-                    f" — {step.instruction}"
-                )
-            else:
-                parts.append(
-                    f"{step.step_number}. **{tool_label}** — {step.instruction}"
-                )
-            if include_context and step.context:
-                parts.append(f"   ```\n{step.context}\n   ```")
+            _render_step(parts, step, include_context)
         parts.append("")
         parts.append("## IMPLEMENTATION PHASE (Primary Model)\n")
     else:
         parts.append("## Steps\n")
 
     for step in plan.steps:
-        tool_label = step.tool.upper().replace("_", " ")
-        if step.file_path:
-            parts.append(
-                f"{step.step_number}. **{tool_label}** `{step.file_path}`"
-                f" — {step.instruction}"
-            )
-        else:
-            parts.append(
-                f"{step.step_number}. **{tool_label}** — {step.instruction}"
-            )
-        if include_context and step.context:
-            parts.append(f"   ```\n{step.context}\n   ```")
+        _render_step(parts, step, include_context)
     parts.append("")
 
     parts.append("## Affected Files\n")

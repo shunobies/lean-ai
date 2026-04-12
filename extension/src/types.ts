@@ -32,7 +32,8 @@ export type WSMessage =
     | CheckpointMessage
     | MergeCompleteMessage
     | AssistantContentMessage
-    | MetricsUpdateMessage;
+    | MetricsUpdateMessage
+    | ExecutionChecklistMessage;
 
 export interface TokenMessage {
     type: "token";
@@ -142,6 +143,17 @@ export interface CheckpointMessage {
     step_description: string;
     status: string;
     head_commit_sha: string | null;
+}
+
+export interface ExecutionChecklistMessage {
+    type: "execution_checklist";
+    steps: Array<{
+        step_index: number;
+        description: string;
+        tool: string;
+        file_path: string;
+    }>;
+    total: number;
 }
 
 export interface MergeCompleteMessage {

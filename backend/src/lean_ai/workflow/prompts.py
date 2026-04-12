@@ -177,6 +177,8 @@ def build_step_user_message(
     if step.file_path:
         parts.append(f"File: {step.file_path}")
     parts.append(f"Instruction: {step.instruction}")
+    if step.reason:
+        parts.append(f"Reason: {step.reason}")
 
     if step.context:
         ctx_text = step.context

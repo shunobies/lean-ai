@@ -38,7 +38,11 @@ from lean_ai.llm.prompts import (
     PLAN_SCOPE_SYSTEM_PROMPT,
     PLAN_VERIFICATION_SYSTEM_PROMPT,
 )
-from lean_ai.llm.tool_definitions import build_design_tools, build_planning_tools
+from lean_ai.llm.tool_definitions import (
+    build_design_tools,
+    build_planning_tools,
+    build_planning_tools_with_scratchpad,
+)
 
 if TYPE_CHECKING:
     from lean_ai.llm.client import LLMClient
@@ -578,6 +582,14 @@ async def create_plan(
                 llm_client=explorer,
             )
             return result.output if result.success else result.error or "Error"
+        elif name == "update_scratchpad":
+            from lean_ai.tools.scratchpad import update_scratchpad
+            result = await update_scratchpad(
+                content=arguments.get("content", ""),
+                repo_root=repo_root,
+                session_id=session_id,
+            )
+            return result.output if result.success else result.error or "Error"
         elif name == "task_complete":
             return "Exploration marked complete."
         return f"Unknown tool: {name}"
@@ -691,19 +703,85 @@ async def create_plan(
 
     else:
         # ── Serial Phase 2 (num_parallel=1) ───────────────────────
+        # Scratchpad + context refresh for long explorations
+        from lean_ai.tools import scratchpad
+        from lean_ai.workflow.ws_handler import ws_send_nowait
+
+        # Inject existing scratchpad (crash recovery)
+        if session_id:
+            existing_pad = scratchpad.read_scratchpad(repo_root, session_id)
+            if existing_pad:
+                phase2_messages.append({
+                    "role": "user",
+                    "content": (
+                        "[SCRATCHPAD FROM PREVIOUS EXPLORATION — "
+                        "resume from here]\n\n" + existing_pad
+                    ),
+                })
+
+        def _build_phase2_refresh(
+            current_messages: list[dict],
+        ) -> list[dict]:
+            """Rebuild Phase 2 messages for context refresh."""
+            pad = scratchpad.read_scratchpad(repo_root, session_id)
+            new_messages: list[dict] = [
+                {"role": "system", "content": PLAN_EXPLORATION_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": registry.format(
+                        "planning.exploration_user",
+                        task=task, scope=scope, context=context,
+                    ),
+                },
+            ]
+            if pad:
+                new_messages.append({
+                    "role": "user",
+                    "content": (
+                        "[CONTEXT REFRESHED — scratchpad has your "
+                        "notes]\n\n" + pad
+                    ),
+                })
+            else:
+                new_messages.append({
+                    "role": "user",
+                    "content": (
+                        "[CONTEXT REFRESHED]\n\n"
+                        "Continue exploring the codebase for this task."
+                    ),
+                })
+            if ws:
+                ws_send_nowait(ws, "context_refreshed", {
+                    "message": "Phase 2 context refreshed.",
+                })
+            return new_messages
+
+        base_reminder = registry.format(
+            "planning.task_reminder", task=task,
+        )
+
+        def _phase2_reminder() -> str:
+            return (
+                base_reminder
+                + "\n\nCall update_scratchpad to save your progress "
+                "— key findings, files identified, what you've "
+                "explored, and what's left to explore."
+            )
+
         tool_calls, file_identification = await explorer.chat_with_tools(
             messages=phase2_messages,
-            tools=build_planning_tools(),
+            tools=build_planning_tools_with_scratchpad(),
             tool_executor_fn=_read_only_executor,
             max_turns=settings.implementation_max_turns,
             max_tokens=phase_max_tokens,
-            task_reminder=registry.format("planning.task_reminder", task=task),
+            task_reminder=_phase2_reminder,
             reminder_interval=15,
             on_tool_call=on_tool_call,
             on_tool_result=on_tool_result,
             on_content=on_content,
             on_thinking=on_thinking,
             on_metrics=on_metrics,
+            on_context_refresh=_build_phase2_refresh,
         )
 
     phase_timings["phase_2_file_identification"] = time.monotonic() - t0

@@ -1,14 +1,17 @@
 package com.leanai.plugin.completion
 
-import com.intellij.codeInsight.inline.completion.*
+import com.intellij.codeInsight.inline.completion.InlineCompletionEvent
+import com.intellij.codeInsight.inline.completion.InlineCompletionProvider
+import com.intellij.codeInsight.inline.completion.InlineCompletionProviderID
+import com.intellij.codeInsight.inline.completion.InlineCompletionRequest
 import com.intellij.codeInsight.inline.completion.elements.InlineCompletionGrayTextElement
+import com.intellij.codeInsight.inline.completion.suggestion.InlineCompletionSingleSuggestion
+import com.intellij.codeInsight.inline.completion.suggestion.InlineCompletionSuggestion
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.editor.Document
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.util.TextRange
 import com.leanai.plugin.backend.BackendClient
 import com.leanai.plugin.settings.LeanAiSettings
-import kotlinx.coroutines.flow.channelFlow
 
 /**
  * Inline completion provider — Copilot-style FIM predictions.
@@ -32,7 +35,7 @@ class LeanAiInlineCompletionProvider : InlineCompletionProvider {
     override suspend fun getSuggestion(request: InlineCompletionRequest): InlineCompletionSuggestion {
         // Check if inline predictions are enabled
         if (!LeanAiSettings.getInstance().state.enableInlinePredictions) {
-            return InlineCompletionSuggestion.empty()
+            return InlineCompletionSuggestion.Empty
         }
 
         val editor = request.editor
@@ -52,7 +55,7 @@ class LeanAiInlineCompletionProvider : InlineCompletionProvider {
 
         // Get file info
         val virtualFile = FileDocumentManager.getInstance().getFile(document)
-            ?: return InlineCompletionSuggestion.empty()
+            ?: return InlineCompletionSuggestion.Empty
 
         val language = virtualFile.fileType.name.lowercase()
         val filePath = virtualFile.path
@@ -73,15 +76,15 @@ class LeanAiInlineCompletionProvider : InlineCompletionProvider {
             )
         } catch (e: Exception) {
             log.debug("Prediction request failed: ${e.message}")
-            return InlineCompletionSuggestion.empty()
+            return InlineCompletionSuggestion.Empty
         }
 
         val completion = result?.completion
         if (completion.isNullOrEmpty()) {
-            return InlineCompletionSuggestion.empty()
+            return InlineCompletionSuggestion.Empty
         }
 
-        return InlineCompletionSuggestion.withFlow {
+        return InlineCompletionSingleSuggestion.build {
             emit(InlineCompletionGrayTextElement(completion))
         }
     }

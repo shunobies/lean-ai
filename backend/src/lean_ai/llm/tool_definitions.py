@@ -533,6 +533,15 @@ def build_planning_tools() -> list[dict]:
     return PLANNING_TOOLS + search_tools + _maybe_wiki_tools()
 
 
+def build_planning_tools_with_scratchpad() -> list[dict]:
+    """Planning tools + update_scratchpad for long serial explorations."""
+    scratchpad_tool = next(
+        t for t in IMPLEMENTATION_TOOLS
+        if t["function"]["name"] == "update_scratchpad"
+    )
+    return build_planning_tools() + [scratchpad_tool]
+
+
 # Search + task_complete tools for Phase 3 design synthesis
 DESIGN_TOOLS: list[dict] = [
     tool

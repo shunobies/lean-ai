@@ -425,6 +425,31 @@ async def _execute_plan(
     step_artifacts: dict[str, str] = {}  # {relative_path: file_content}
     _artifacts_lock = asyncio.Lock()  # guards shared state in parallel groups
 
+    # Send execution checklist to the extension for progress UI
+    checklist_steps = []
+    for step in plan.steps:
+        checklist_steps.append({
+            "step_index": step.step_number - 1,
+            "description": step.instruction[:120],
+            "tool": step.tool,
+            "file_path": step.file_path or "",
+        })
+    if getattr(plan, "tdd_test_steps", None):
+        tdd_steps = [
+            {
+                "step_index": s.step_number - 1,
+                "description": f"[TEST] {s.instruction[:110]}",
+                "tool": s.tool,
+                "file_path": s.file_path or "",
+            }
+            for s in plan.tdd_test_steps
+        ]
+        checklist_steps = tdd_steps + checklist_steps
+    await ws_send(ws, "execution_checklist", {
+        "steps": checklist_steps,
+        "total": len(checklist_steps),
+    })
+
     # Build the system prompt once (shared across all steps)
     # Use execution context (framework guide + custom docs) — step instructions
     # are specific enough that project_context.md is not needed here.
