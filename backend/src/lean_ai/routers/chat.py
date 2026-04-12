@@ -64,6 +64,8 @@ def _make_chat_tool_executor(repo_root: str | None = None):
         if name in (
             "read_file", "grep_files", "list_directory", "directory_tree",
             "save_note", "list_project_todos",
+            "list_recent_sessions", "get_session_summary",
+            "search_workspace_memory",
         ) and not repo_root:
             return f"ERROR: {name} requires an open workspace."
 
@@ -154,6 +156,39 @@ def _make_chat_tool_executor(repo_root: str | None = None):
                 return "\n".join(lines)
             finally:
                 await db.close()
+
+        # ── Session history tools (need repo_root) ──
+        elif name == "list_recent_sessions":
+            from lean_ai.memory.session_tools import list_recent_sessions
+
+            return await list_recent_sessions(
+                repo_root, limit=arguments.get("limit", 5),
+            )
+        elif name == "get_session_summary":
+            from lean_ai.memory.session_tools import get_session_summary
+            from lean_ai.routers.dependencies import worker_llm_client
+
+            return await get_session_summary(
+                repo_root,
+                session_id=arguments.get("session_id", ""),
+                llm=worker_llm_client,
+            )
+        elif name == "search_workspace_memory":
+            from lean_ai.memory.session_tools import (
+                search_session_history,
+                search_workspace_memories,
+            )
+
+            query = arguments.get("query", "")
+            # Search both session titles and extracted memories
+            sessions = await search_session_history(repo_root, query)
+            memories = search_workspace_memories(repo_root, query)
+            parts = []
+            if sessions and "No sessions found" not in sessions:
+                parts.append(sessions)
+            if memories and "No memories found" not in memories:
+                parts.append(memories)
+            return "\n\n".join(parts) if parts else f"No results for '{query}'."
 
         # ── Search tools (no workspace needed) ──
         elif name == "search_internet":
@@ -256,6 +291,21 @@ async def _build_chat_messages(
                 logger.warning("Chat URL fetch failed for %s: %s", url, e)
                 fetched_pages.append({"url": url, "content": f"(Failed to fetch: {e})"})
 
+    recent_activity: str = ""
+
+    async def _gather_session_context():
+        nonlocal recent_activity
+        if not (workspace and workspace.workspace_root):
+            return
+        try:
+            from lean_ai.memory.session_tools import get_recent_activity_context
+
+            recent_activity = await get_recent_activity_context(
+                workspace.workspace_root, request.message,
+            )
+        except Exception as e:
+            logger.debug("Session context lookup failed (non-fatal): %s", e)
+
     image_descriptions: str = ""
 
     async def _describe_attachments():
@@ -285,6 +335,7 @@ async def _build_chat_messages(
 
     await asyncio.gather(
         _gather_workspace_context(),
+        _gather_session_context(),
         _fetch_urls(),
         _refine_message(),
         _describe_attachments(),
@@ -307,6 +358,7 @@ async def _build_chat_messages(
         fetched_pages=fetched_pages or None,
         knowledge_context=knowledge_ctx,
         user_name=request.user_name,
+        recent_sessions=recent_activity or None,
     )
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
 

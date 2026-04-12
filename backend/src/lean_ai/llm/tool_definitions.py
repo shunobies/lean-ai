@@ -598,6 +598,68 @@ CHAT_TOOLS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_recent_sessions",
+            "description": (
+                "List recent coding sessions for this workspace. Shows what "
+                "was worked on, status, and when. Use when the user asks about "
+                "past work or what they've been doing."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max sessions to return (default 5).",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_session_summary",
+            "description": (
+                "Get a detailed summary of a specific session, including task, "
+                "files changed, tool usage, commits, and outcome."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "The session ID to summarize.",
+                    },
+                },
+                "required": ["session_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_workspace_memory",
+            "description": (
+                "Search memories and lessons learned from previous sessions. "
+                "Use when the user asks about past work or when you need "
+                "historical context about the project."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query for memories.",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
 ]
 
 def build_chat_tools() -> list[dict]:

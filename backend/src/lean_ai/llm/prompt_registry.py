@@ -443,7 +443,10 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
             "for every edit\n"
             "- When a step depends on output from a previous step, include the expected "
             "names/paths/signatures in the context field\n"
-            "- Never assume the executor will infer relationships between steps\n\n"
+            "- Never assume the executor will infer relationships between steps\n"
+            "- Include a 'reason' field explaining WHY this change is needed — the "
+            "requirement, test, or dependency that demands it. The executor uses this "
+            "to adapt when the file doesn't match the instruction exactly\n\n"
             "VERIFIED REFERENCES:\n"
             "When plan steps reference external framework patterns, APIs, or conventions, "
             "use ONLY the verified references from the file summary and design synthesis. "
@@ -470,7 +473,10 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
             "- Has read_file and implementation tools but NOT your design reasoning\n"
             "- Be explicit about test function names, imports, assertions, and file paths\n"
             "- Include existing test file patterns in step context so the executor can "
-            "replicate the style"
+            "replicate the style\n"
+            "- Include a 'reason' field explaining what behavior or requirement each "
+            "test step verifies — the executor uses this to adapt when files differ "
+            "from expectations"
         ),
     ))
 
@@ -775,6 +781,11 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
             "Do NOT use generic template comments like "
             "'// Example migration structure'. Provide concrete, "
             "copy-ready details — not placeholders or abstractions.\n"
+            "- REASON FIELD: Every step must include a 'reason' field "
+            "explaining WHY this change is needed — what requirement, "
+            "test, or dependency demands it. The executor sees this "
+            "when the literal instruction doesn't match the file "
+            "state, so it can adapt while preserving the intent.\n"
             "- Order steps so dependencies come first\n"
             "- EXISTING INFRASTRUCTURE: If the file summary shows "
             "that a resource already exists, do NOT create a "
@@ -793,6 +804,10 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
             "import/include at the top of the file: <exact import "
             "statement>. The import should go after the existing "
             'imports on line 8.",\n'
+            '  "reason": "The new ReviewHandler must be registered '
+            "in the handler config so the framework discovers it at "
+            "boot. Without this, requests to /reviews will return "
+            '404.",\n'
             '  "context": "Current file lines 5-12 and 30-36:\\n'
             "<actual file content from exploration showing the "
             'surrounding code at both modification points>"\n'
@@ -808,6 +823,10 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
             "Relationships: belongs to User, belongs to Item. "
             "Imports: <every import needed>. Follow the exact "
             'pattern from src/models/item.ext.",\n'
+            '  "reason": "The review feature needs a data model to '
+            "persist user ratings. The Item model already has a "
+            "has-many relationship pattern that this replicates "
+            'for reviews.",\n'
             '  "context": "Pattern from src/models/item.ext:\\n'
             "<15+ lines of actual content from the pattern file "
             "showing imports, structure, fields, and methods — "
@@ -1296,6 +1315,64 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
             "NOTE CONTENT:\n"
             "{note_content}\n"
             "{workspace_hint}"
+        ),
+    ))
+
+    # ── Memory ─────────────────────────────────────────────────────────
+
+    reg.register(PromptEntry(
+        key="memory.extract",
+        category="Memory",
+        name="Session Memory Extraction",
+        description=(
+            "Extracts reusable memories from a completed session."
+            " Worker model produces structured JSON with 0-5 items."
+        ),
+        template_vars=["session_summary"],
+        default_text=(
+            "Analyze this completed coding session and extract reusable memories.\n\n"
+            "Extract project-specific discoveries that would help future sessions:\n"
+            "- Architectural patterns or conventions confirmed during this session\n"
+            "- Build, test, or lint gotchas (things that failed and why)\n"
+            "- Naming conventions or code style patterns observed\n"
+            "- Environment-specific configuration requirements\n"
+            "- Dependencies or integration quirks discovered\n\n"
+            "DO NOT extract:\n"
+            "- Generic programming knowledge (e.g. 'Python uses indentation')\n"
+            "- Task-specific details that won't apply to future sessions\n"
+            "- Things obvious from looking at the file tree\n"
+            "- Speculative or unverified conclusions\n\n"
+            "For each memory, assign a category:\n"
+            "- architecture: structural patterns, module relationships\n"
+            "- build: build system, compilation, packaging quirks\n"
+            "- testing: test framework setup, test patterns, fixtures\n"
+            "- pattern: code patterns, design patterns in use\n"
+            "- gotcha: things that failed unexpectedly, pitfalls\n"
+            "- convention: naming, formatting, import style conventions\n\n"
+            "Return 0-5 memories. Most sessions yield 0-2. Only extract memories "
+            "that would genuinely help a future session working on this project.\n\n"
+            "SESSION DATA:\n"
+            "{session_summary}"
+        ),
+    ))
+
+    reg.register(PromptEntry(
+        key="memory.session_summary",
+        category="Memory",
+        name="Session Conversation Summary",
+        description=(
+            "Summarizes a session conversation for the chat LLM."
+            " Worker model produces a 3-5 sentence narrative."
+        ),
+        template_vars=["session_data"],
+        default_text=(
+            "Summarize this coding session in 3-5 sentences. Focus on:\n"
+            "- What was the goal\n"
+            "- What approach was taken\n"
+            "- What was the outcome (completed, partial, blocked)\n"
+            "- Any notable decisions or discoveries\n\n"
+            "Be concise and factual. Write from a third-person perspective.\n\n"
+            "{session_data}"
         ),
     ))
 

@@ -75,7 +75,7 @@ def _tool_response(name: str, args: dict, content: str = "") -> tuple[str, list,
 
 
 def test_chat_tools_contains_expected_tools():
-    assert len(CHAT_TOOLS) == 8
+    assert len(CHAT_TOOLS) == 11
 
 
 def test_chat_tools_names():
@@ -84,6 +84,8 @@ def test_chat_tools_names():
         "read_file", "list_directory", "directory_tree", "grep_files",
         "search_internet", "fetch_url",
         "save_note", "list_project_todos",
+        "list_recent_sessions", "get_session_summary",
+        "search_workspace_memory",
     }
 
 

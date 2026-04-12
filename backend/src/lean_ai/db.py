@@ -55,6 +55,16 @@ CREATE TABLE IF NOT EXISTS session_commits (
     message TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS session_memories (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    category TEXT NOT NULL,
+    content TEXT NOT NULL,
+    tags TEXT,
+    source_task TEXT,
+    created_at TEXT NOT NULL
+);
 """
 
 

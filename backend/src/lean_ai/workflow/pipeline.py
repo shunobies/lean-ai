@@ -861,6 +861,15 @@ async def _execute_plan(
     if settings.enable_integrations and settings.integration_auto_push:
         asyncio.create_task(_auto_push_integration(repo_root, session_id))
 
+    # ── Cross-session memory extraction (fire-and-forget) ──
+    if settings.enable_session_memory:
+        asyncio.create_task(
+            _auto_extract_session_memories(
+                repo_root, session_id, task, plan, llm_client,
+                files_modified, validation_results,
+            ),
+        )
+
     complete_data: dict = {"summary": summary, "files_modified": files_modified}
     if branch_name:
         complete_data["plan_branch"] = branch_name
@@ -919,3 +928,63 @@ async def _auto_push_integration(repo_root: str, session_id: str) -> None:
                     )
     except Exception:
         logger.debug("Auto-push integration failed (non-fatal)", exc_info=True)
+
+
+async def _auto_extract_session_memories(
+    repo_root: str,
+    session_id: str,
+    task: str,
+    plan: ExecutionPlan,
+    llm_client: "LLMClient",
+    files_modified: list[str],
+    validation_results: dict,
+) -> None:
+    """Extract cross-session memories from a completed session (best-effort)."""
+    try:
+        from lean_ai.db import get_db
+        from lean_ai.memory.extractor import (
+            build_session_summary_for_extraction,
+            schedule_extraction,
+        )
+        from lean_ai.routers.dependencies import worker_llm_client
+
+        # Use worker model if available, fall back to primary
+        extractor_llm = worker_llm_client or llm_client
+
+        # Gather tool call stats from DB
+        db = await get_db(repo_root)
+        try:
+            cursor = await db.execute(
+                "SELECT tool_name, COUNT(*) as cnt, "
+                "SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failures "
+                "FROM tool_logs WHERE session_id = ? GROUP BY tool_name",
+                (session_id,),
+            )
+            rows = await cursor.fetchall()
+            tool_stats = {row[0]: row[1] for row in rows}
+            failed_tools = [row[0] for row in rows if row[2] > 0]
+        finally:
+            await db.close()
+
+        # Build summary for extraction
+        plan_text = plan_to_markdown(plan) if plan else None
+        validation_passed = all(
+            r.get("success", True) for r in validation_results.values()
+        ) if validation_results else True
+
+        session_summary = build_session_summary_for_extraction(
+            task=task,
+            plan_text=plan_text,
+            tool_stats=tool_stats,
+            failed_tools=failed_tools,
+            validation_passed=validation_passed,
+            files_modified=files_modified,
+        )
+
+        schedule_extraction(
+            extractor_llm, repo_root, session_id, session_summary, task,
+        )
+    except Exception:
+        logger.debug(
+            "Session memory extraction failed (non-fatal)", exc_info=True,
+        )

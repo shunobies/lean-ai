@@ -291,6 +291,7 @@ def build_chat_system_prompt(
     web_search_results: str | None = None,
     knowledge_context: str | None = None,
     user_name: str | None = None,
+    recent_sessions: str | None = None,
     max_context_chars: int = 30000,
 ) -> str:
     """Build the chat system prompt with budget-gated context injection.
@@ -372,7 +373,11 @@ def build_chat_system_prompt(
             f"```\n{active_file_content}\n```",
         )
 
-    # Priority 2: Code search results — directly answers user's query
+    # Priority 2: Recent project activity — orients LLM on recent work
+    if recent_sessions and budget > 0:
+        _try_append("=== RECENT PROJECT ACTIVITY ===", recent_sessions)
+
+    # Priority 3: Code search results — directly answers user's query
     if search_results and budget > 0:
         sr_parts = []
         for result in search_results[:8]:
@@ -383,15 +388,15 @@ def build_chat_system_prompt(
             sr_parts.append(f"```\n{result['content']}\n```")
         _try_append("=== CODE SEARCH RESULTS ===", "\n".join(sr_parts))
 
-    # Priority 3: Project architecture — truncated to fit
+    # Priority 4: Project architecture — truncated to fit
     if project_context and budget > 0:
         _try_append("=== PROJECT ARCHITECTURE ===", project_context)
 
-    # Priority 4: Web search results
+    # Priority 5: Web search results
     if web_search_results and budget > 0:
         _try_append("=== WEB SEARCH RESULTS ===", web_search_results)
 
-    # Priority 5: Fetched pages
+    # Priority 6: Fetched pages
     if fetched_pages and budget > 0:
         for page in fetched_pages:
             if budget <= 0:
@@ -401,11 +406,11 @@ def build_chat_system_prompt(
                 page["content"],
             )
 
-    # Priority 6: File tree (drop if over budget)
+    # Priority 7: File tree (drop if over budget)
     if file_tree and budget > 0:
         _try_append("=== PROJECT FILES ===", "\n".join(file_tree))
 
-    # Priority 7: Domain knowledge (drop if over budget)
+    # Priority 8: Domain knowledge (drop if over budget)
     if knowledge_context and budget > 0:
         _try_append("=== DOMAIN KNOWLEDGE ===", knowledge_context)
 

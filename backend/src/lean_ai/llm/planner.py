@@ -52,6 +52,52 @@ logger = logging.getLogger(__name__)
 # detailed plans are not truncated (vs. the default 25% for general output).
 PLAN_OUTPUT_PERCENT = 0.40
 
+# Memory context budget: 2% of context window
+MEMORY_CONTEXT_PERCENT = 0.02
+
+
+def _retrieve_session_memories(repo_root: str, task: str) -> str:
+    """Retrieve relevant memories from previous sessions.
+
+    Returns a formatted string to append to the Phase 1 user message,
+    or an empty string if no memories are found.
+    Budget-gated at MEMORY_CONTEXT_PERCENT of the active context window.
+    """
+    try:
+        from lean_ai.memory.index import search_memories
+
+        results = search_memories(repo_root, task, limit=5)
+        if not results:
+            return ""
+
+        budget = int(
+            settings._active_context_window * MEMORY_CONTEXT_PERCENT * 3.5
+        )
+
+        lines = ["\n\nWORKSPACE MEMORY (from previous sessions):"]
+        used = len(lines[0])
+        for r in results:
+            category = r.get("category") or "general"
+            content = r["content"]
+            line = f"\n- [{category}] {content}"
+            if used + len(line) > budget:
+                break
+            lines.append(line)
+            used += len(line)
+
+        if len(lines) <= 1:
+            return ""
+
+        memory_text = "".join(lines)
+        logger.info(
+            "Injected %d memories into Phase 1 (%d chars)",
+            len(lines) - 1, len(memory_text),
+        )
+        return memory_text
+    except Exception:
+        logger.debug("Memory retrieval failed (non-fatal)", exc_info=True)
+        return ""
+
 
 def _save_debug_phase(
     repo_root: str,
@@ -389,19 +435,26 @@ async def create_plan(
     # rather than re-reading from disk.
     project_context = context
 
+    # ── Cross-session memory retrieval ──
+    memory_context = ""
+    if settings.enable_session_memory:
+        memory_context = _retrieve_session_memories(repo_root, task)
+
     # Phase 1: Scope Analysis
     await _send_stage(ws, "Phase 1: Analyzing scope...", model=explorer.model_name, phase=1)
     logger.info("Planning Phase 1: Scope analysis (model=%s)", explorer.model_name)
     t0 = time.monotonic()
+
+    phase1_user_content = registry.format(
+        "planning.scope_user", task=task, context=context,
+    )
+    if memory_context:
+        phase1_user_content += memory_context
+
     scope = await explorer.chat_raw(
         messages=[
             {"role": "system", "content": PLAN_SCOPE_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": registry.format(
-                    "planning.scope_user", task=task, context=context,
-                ),
-            },
+            {"role": "user", "content": phase1_user_content},
         ],
         max_tokens=phase_max_tokens,
         stream_callback=on_content,

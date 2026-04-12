@@ -330,6 +330,9 @@ class Settings(BaseSettings):
     post_validation_max_retries: int = 2  # Max LLM fix attempts (0 = no retries)
     post_validation_fix_turns: int = 30  # Tool-calling turns per fix attempt
 
+    # ── Cross-session memory ──
+    enable_session_memory: bool = True  # Extract and reuse memories across sessions
+
     # ── Integrations (Jira, ServiceNow, etc.) ──
     enable_integrations: bool = False  # Master switch for external integrations
     integration_auto_push: bool = True  # Auto-push session summaries on completion
