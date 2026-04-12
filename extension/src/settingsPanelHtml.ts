@@ -1547,6 +1547,7 @@ export function getSettingsPanelHtml(): string {
         { comboboxId: 'ollamaModelCombobox',       inputId: 'ollamaModel' },
         { comboboxId: 'ollamaModelExpertCombobox', inputId: 'ollamaModelExpert' },
         { comboboxId: 'ollamaModelRequestCombobox', inputId: 'ollamaModelRequest' },
+        { comboboxId: 'ollamaModelWorkerCombobox',  inputId: 'ollamaModelWorker' },
         { comboboxId: 'inlineModelCombobox',       inputId: 'inlineModel' },
         { comboboxId: 'embeddingModelCombobox',    inputId: 'embeddingModel' },
         { comboboxId: 'visionModelCombobox',      inputId: 'visionModel' },

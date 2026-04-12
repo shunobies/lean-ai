@@ -23,6 +23,7 @@ from lean_ai.routers.context_helpers import (
 from lean_ai.routers.dependencies import llm_client, refiner, request_llm_client
 from lean_ai.routers.models import ChatRequest, ChatResponse
 from lean_ai.tools import internet
+from lean_ai.tools.descriptions import humanize_tool_call
 
 logger = logging.getLogger(__name__)
 
@@ -458,19 +459,7 @@ async def _stream_chat_with_tools(
         await queue.put({"type": "thinking", "content": token})
 
     async def _on_tool_call(name: str, args: dict) -> None:
-        desc = name
-        if name == "read_file":
-            desc = f"Reading {args.get('path', '...')}"
-        elif name == "grep_files":
-            desc = f"Searching for '{args.get('pattern', '...')}'"
-        elif name == "list_directory":
-            desc = f"Listing {args.get('path', '') or '.'}"
-        elif name == "directory_tree":
-            desc = f"Tree of {args.get('path', '') or '.'}"
-        elif name == "search_internet":
-            desc = f"Searching: {args.get('query', '...')}"
-        elif name == "fetch_url":
-            desc = f"Fetching {args.get('url', '...')}"
+        desc = humanize_tool_call(name, args)
         await queue.put({"type": "tool_call", "name": name, "description": desc})
 
     async def _on_tool_result(name: str, result: str) -> None:

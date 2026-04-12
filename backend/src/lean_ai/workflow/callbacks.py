@@ -13,6 +13,7 @@ from typing import NamedTuple
 
 from fastapi import WebSocket
 
+from lean_ai.tools.descriptions import humanize_tool_call
 from lean_ai.workflow.ws_handler import ws_send_nowait
 
 logger = logging.getLogger(__name__)
@@ -65,12 +66,17 @@ def build_workflow_callbacks(
         ``"streaming": True`` (used for planning-phase token streaming).
     """
 
+    # Track last description per tool so on_tool_result can forward it.
+    _last_tool_desc: dict[str, str] = {}
+
     async def on_tool_call(name: str, args: dict) -> None:
-        desc = f"{name} {args.get('path', args.get('command', ''))}"
+        desc = humanize_tool_call(name, args)
+        full_desc = f"{description_prefix}{desc}"
+        _last_tool_desc[name] = full_desc
         ws_send_nowait(ws, "tool_progress", {
             "tool": name,
             "status": "running",
-            "description": f"{description_prefix}{desc}",
+            "description": full_desc,
         })
         if conversation_logger:
             t = asyncio.create_task(conversation_logger(
@@ -81,11 +87,14 @@ def build_workflow_callbacks(
 
     async def on_tool_result(name: str, result: str) -> None:
         is_error = result.startswith("ERROR:")
-        ws_send_nowait(ws, "tool_progress", {
+        payload: dict = {
             "tool": name,
             "status": "error" if is_error else "complete",
-            "output": result[:500],
-        })
+            "description": _last_tool_desc.pop(name, name),
+        }
+        if is_error:
+            payload["output"] = result[:500]
+        ws_send_nowait(ws, "tool_progress", payload)
         if conversation_logger:
             t = asyncio.create_task(conversation_logger(
                 "tool_result", result[:2000],
