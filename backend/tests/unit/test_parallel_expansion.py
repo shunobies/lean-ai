@@ -243,10 +243,10 @@ class TestExpandParallel:
 
         with (
             patch("lean_ai.indexer.tree.list_repo_tree") as mock_tree,
-            patch("lean_ai.context.generation.extract_metadata_cached") as mock_meta,
-            patch("lean_ai.context.generation._collect_priority_file_contents") as mock_priority,
-            patch("lean_ai.context.generation._collect_all_ranked_candidates") as mock_candidates,
-            patch("lean_ai.context.generation._batch_file_contents") as mock_batch,
+            patch("lean_ai.context.expansion.extract_metadata_cached") as mock_meta,
+            patch("lean_ai.context.expansion._collect_priority_file_contents") as mock_priority,
+            patch("lean_ai.context.expansion._collect_all_ranked_candidates") as mock_candidates,
+            patch("lean_ai.context.expansion._batch_file_contents") as mock_batch,
         ):
             # Minimal stubs for the tree/metadata pipeline.
             mock_tree.return_value = []

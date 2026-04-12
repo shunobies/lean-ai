@@ -1,5 +1,10 @@
 /**
  * HTTP + WebSocket client for communicating with the Lean AI Python backend.
+ *
+ * Core infrastructure (singleton, HTTP helpers, session CRUD, health check,
+ * WebSocket) lives here.  Domain-specific methods delegate to:
+ *   - `./backendVoiceClient`     — voice / STT / TTS / wake word
+ *   - `./backendWorkspaceClient` — workspace ops, scaffolding, prompts, notes, chat, predict
  */
 
 import * as http from "http";
@@ -23,15 +28,63 @@ import type {
     WSMessage,
 } from "./types";
 
+// Voice
+import {
+    sttWarmup as _sttWarmup,
+    sttStart as _sttStart,
+    sttStop as _sttStop,
+    ttsSynthesize as _ttsSynthesize,
+    ttsStream as _ttsStream,
+    ttsStreamPcm as _ttsStreamPcm,
+    listVoices as _listVoices,
+    ensureTtsModels as _ensureTtsModels,
+    voiceConfig as _voiceConfig,
+    wakeWordStart as _wakeWordStart,
+    wakeWordStop as _wakeWordStop,
+    connectVoiceEvents as _connectVoiceEvents,
+    disconnectVoiceEvents as _disconnectVoiceEvents,
+    createVoiceEventState,
+    type VoiceEventState,
+} from "./backendVoiceClient";
+
+// Workspace
+import {
+    indexWorkspace as _indexWorkspace,
+    generateProjectContext as _generateProjectContext,
+    generateStyleGuide as _generateStyleGuide,
+    listScaffolds as _listScaffolds,
+    scaffold as _scaffold,
+    getPrompts as _getPrompts,
+    updatePrompts as _updatePrompts,
+    resetPrompts as _resetPrompts,
+    createNote as _createNote,
+    listNotes as _listNotes,
+    getNote as _getNote,
+    updateNote as _updateNote,
+    deleteNote as _deleteNote,
+    searchNotes as _searchNotes,
+    listNoteProjects as _listNoteProjects,
+    updateTodo as _updateTodo,
+    deleteTodo as _deleteTodo,
+    addTodo as _addTodo,
+    chat as _chat,
+    chatStream as _chatStream,
+    predict as _predict,
+} from "./backendWorkspaceClient";
+
 export class BackendClient {
     private static instance: BackendClient | undefined;
 
     private baseUrl: string;
     private wsBaseUrl: string;
 
+    /** Mutable state for the voice-events SSE connection. */
+    private _voiceState: VoiceEventState;
+
     private constructor() {
         this.baseUrl = this.getBackendUrl();
         this.wsBaseUrl = this.baseUrl.replace(/^http/, "ws");
+        this._voiceState = createVoiceEventState();
     }
 
     static getInstance(): BackendClient {
@@ -46,6 +99,10 @@ export class BackendClient {
         return config.get<string>("backendUrl") || DEFAULT_BACKEND_URL;
     }
 
+    // -----------------------------------------------------------------------
+    // Low-level HTTP helpers (used by workspace delegates)
+    // -----------------------------------------------------------------------
+
     /**
      * POST JSON to the backend with NO timeout.
      *
@@ -56,7 +113,7 @@ export class BackendClient {
      * the raw `http`/`https` module with `socket.setTimeout(0)` so the
      * connection stays open indefinitely.
      */
-    private _postJsonNoTimeout(path: string, body: unknown): Promise<unknown> {
+    _postJsonNoTimeout(path: string, body: unknown): Promise<unknown> {
         return new Promise((resolve, reject) => {
             const fullUrl = new URL(`${this.baseUrl}${path}`);
             const isHttps = fullUrl.protocol === "https:";
@@ -85,7 +142,7 @@ export class BackendClient {
                 });
 
                 res.on("error", (err: Error) => {
-                    // Capture the error — 'end' may still fire after this.
+                    // Capture the error -- 'end' may still fire after this.
                     // If 'end' never fires, we reject in the fallback below.
                     streamError = err;
                     reject(new Error(`Response stream error: ${err.message}`));
@@ -141,7 +198,7 @@ export class BackendClient {
      * Resolves with the payload of the ``result`` SSE event.
      * Rejects on ``error`` events or HTTP-level failures.
      */
-    private _postSseNoTimeout(
+    _postSseNoTimeout(
         path: string,
         body: unknown,
         onThinking?: (token: string) => void,
@@ -197,7 +254,7 @@ export class BackendClient {
                                         : (data["message"] as string) || "Stream error",
                                 ));
                             }
-                            // "done" is ignored — we resolve/reject on result/error
+                            // "done" is ignored -- we resolve/reject on result/error
                         } catch {
                             // skip malformed SSE lines
                         }
@@ -222,7 +279,9 @@ export class BackendClient {
         });
     }
 
-    // --- REST Methods ---
+    // -----------------------------------------------------------------------
+    // Session CRUD
+    // -----------------------------------------------------------------------
 
     async createSession(repoRoot: string): Promise<CreateSessionResponse> {
         const resp = await fetch(`${this.baseUrl}/api/sessions`, {
@@ -279,158 +338,9 @@ export class BackendClient {
         }
     }
 
-    async predict(context: InlinePredictionContext): Promise<PredictionResult> {
-        const resp = await fetch(`${this.baseUrl}/api/predict`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(context),
-        });
-        if (!resp.ok) {
-            return { completion: "", confidence: 0 };
-        }
-        return resp.json() as Promise<PredictionResult>;
-    }
-
-    async chat(
-        message: string,
-        history: Array<{ role: string; content: string }>,
-        workspace?: {
-            workspace_name?: string;
-            workspace_root?: string;
-            active_file?: string;
-            active_language?: string;
-            active_selection?: string;
-        },
-        userName?: string,
-    ): Promise<{ reply: string; tokens_per_second?: number | null; eval_count?: number | null }> {
-        const body: Record<string, unknown> = { message, history };
-        if (workspace) {
-            body.workspace = workspace;
-        }
-        if (userName) { body.user_name = userName; }
-        // Uses http module — fetch (undici) has a hardcoded 5-min timeout
-        // that kills long-running LLM calls with large local models.
-        const data = (await this._postJsonNoTimeout("/api/chat", body)) as {
-            reply: string;
-            tokens_per_second?: number | null;
-            eval_count?: number | null;
-        };
-        return data;
-    }
-
-    /**
-     * Stream chat tokens from the backend via Server-Sent Events.
-     *
-     * Uses the raw http/https module (same as _postJsonNoTimeout) to avoid
-     * Node/undici's hardcoded 5-minute headersTimeout.
-     *
-     * @param onToken  Called for each token as it arrives. `isFirst` is true
-     *                 only for the very first token in the response.
-     * @returns        Promise that resolves with `{ receivedDone }` when the stream ends.
-     */
-    chatStream(
-        message: string,
-        history: Array<{ role: string; content: string }>,
-        workspace: {
-            workspace_name?: string;
-            workspace_root?: string;
-            active_file?: string;
-            active_language?: string;
-            active_selection?: string;
-        } | undefined,
-        onToken: (token: string, isFirst: boolean) => void,
-        attachments?: Array<{ data: string; filename?: string; mime_type?: string }>,
-        onThinking?: (token: string) => void,
-        userName?: string,
-        skipWebSearch?: boolean,
-        onVisionDescription?: (desc: string) => void,
-        onToolCall?: (name: string, description: string) => void,
-        onToolResult?: (name: string, success: boolean) => void,
-    ): Promise<{ receivedDone: boolean }> {
-        return new Promise((resolve, reject) => {
-            const fullUrl = new URL(`${this.baseUrl}/api/chat/stream`);
-            const isHttps = fullUrl.protocol === "https:";
-            const transport = isHttps ? https : http;
-
-            const body: Record<string, unknown> = { message, history };
-            if (workspace) { body.workspace = workspace; }
-            if (attachments && attachments.length > 0) { body.attachments = attachments; }
-            if (userName) { body.user_name = userName; }
-            if (skipWebSearch) { body.skip_web_search = true; }
-            const postData = JSON.stringify(body);
-
-            const options: http.RequestOptions = {
-                hostname: fullUrl.hostname,
-                port: fullUrl.port || (isHttps ? "443" : "80"),
-                path: fullUrl.pathname,
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Content-Length": Buffer.byteLength(postData),
-                },
-                timeout: 0,
-            };
-
-            let buffer = "";
-            let isFirst = true;
-            let resolved = false;
-
-            const req = transport.request(options, (res) => {
-                if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
-                    reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
-                    return;
-                }
-
-                res.on("data", (chunk: Buffer | string) => {
-                    buffer += chunk.toString();
-                    const lines = buffer.split("\n");
-                    buffer = lines.pop()!; // keep incomplete last line in buffer
-
-                    for (const line of lines) {
-                        if (!line.startsWith("data: ")) { continue; }
-                        try {
-                            const data = JSON.parse(line.slice(6)) as Record<string, unknown>;
-                            if (data["type"] === "token" && data["content"]) {
-                                onToken(data["content"] as string, isFirst);
-                                isFirst = false;
-                            } else if (data["type"] === "thinking" && data["content"] && onThinking) {
-                                onThinking(data["content"] as string);
-                            } else if (data["type"] === "vision_description" && data["descriptions"] && onVisionDescription) {
-                                onVisionDescription(data["descriptions"] as string);
-                            } else if (data["type"] === "tool_call" && data["name"] && onToolCall) {
-                                onToolCall(data["name"] as string, (data["description"] as string) || "");
-                            } else if (data["type"] === "tool_result" && data["name"] && onToolResult) {
-                                onToolResult(data["name"] as string, data["success"] as boolean);
-                            } else if (data["type"] === "done") {
-                                resolved = true;
-                                resolve({ receivedDone: true });
-                            } else if (data["type"] === "error") {
-                                reject(new Error((data["message"] as string) || "Stream error"));
-                            }
-                        } catch {
-                            // skip malformed SSE lines
-                        }
-                    }
-                });
-
-                res.on("end", () => {
-                    if (!resolved) {
-                        console.warn("[Lean AI] Chat stream ended without 'done' event — response may be truncated");
-                        resolve({ receivedDone: false });
-                    }
-                });
-
-                res.on("error", (err) => { reject(err); });
-            });
-
-            req.on("socket", (socket) => { socket.setTimeout(0); });
-            req.on("error", (err) => { reject(err); });
-            req.write(postData);
-            req.end();
-        });
-    }
-
-    // --- Session History Methods ---
+    // -----------------------------------------------------------------------
+    // Session History
+    // -----------------------------------------------------------------------
 
     async listSessions(filters?: SessionFilters, limit?: number, offset?: number): Promise<SessionSummary[]> {
         const params = new URLSearchParams();
@@ -557,18 +467,11 @@ export class BackendClient {
         return resp.json() as Promise<Record<string, unknown>>;
     }
 
-    /**
-     * Find the most recent session that can be rejected/approved (has a branch,
-     * status is completed/cancelled/active). Used as fallback when the extension
-     * lost track of the session ID.
-     */
     async getLatestRejectableSession(repoRoot: string): Promise<string | undefined> {
         const params = new URLSearchParams({ repo_root: repoRoot });
         const resp = await fetch(`${this.baseUrl}/api/sessions?${params}`);
         if (!resp.ok) { return undefined; }
         const sessions = await resp.json() as Array<Record<string, unknown>>;
-        // Sessions are returned newest-first. Find the first with a branch
-        // in a rejectable state.
         const rejectable = sessions.find(
             (s) =>
                 s.plan_branch &&
@@ -605,8 +508,21 @@ export class BackendClient {
         if (!resp.ok) {
             throw new Error(`Failed to get conversation log: ${resp.statusText}`);
         }
-        return resp.json() as Promise<ReturnType<typeof this.getConversationLog> extends Promise<infer T> ? T : never>;
+        return resp.json() as Promise<{
+            session_id: string;
+            entries: Array<{
+                role: string;
+                content: string;
+                tool_name: string | null;
+                tool_args: string | null;
+                created_at: string;
+            }>;
+        }>;
     }
+
+    // -----------------------------------------------------------------------
+    // Health Check
+    // -----------------------------------------------------------------------
 
     /** Last known vision capability from the backend. */
     visionAvailable = false;
@@ -641,554 +557,148 @@ export class BackendClient {
         }
     }
 
-    // --- Init Workspace ---
+    // -----------------------------------------------------------------------
+    // Workspace delegates  (→ backendWorkspaceClient)
+    // -----------------------------------------------------------------------
 
-    async indexWorkspace(
-        repoRoot: string,
-        forceReindex = false,
-    ): Promise<{
-        index_status: string;
-        index_file_count?: number;
-        index_chunk_count?: number;
-        num_parallel?: number;
-    }> {
-        // 60s timeout — indexing is local file I/O, should be fast
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 60_000);
-        try {
-            const resp = await fetch(`${this.baseUrl}/api/init-workspace`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    repo_root: repoRoot,
-                    force_reindex: forceReindex,
-                }),
-                signal: controller.signal,
-            });
-            if (!resp.ok) {
-                throw new Error(`Index workspace failed: ${resp.statusText}`);
-            }
-            return resp.json() as Promise<{
-                index_status: string;
-                index_file_count?: number;
-                index_chunk_count?: number;
-                num_parallel?: number;
-            }>;
-        } finally {
-            clearTimeout(timeout);
-        }
+    indexWorkspace(repoRoot: string, forceReindex = false) {
+        return _indexWorkspace(this.baseUrl, repoRoot, forceReindex);
     }
 
-    async generateProjectContext(
-        repoRoot: string,
-        force: boolean = false,
+    generateProjectContext(repoRoot: string, force = false, onThinking?: (token: string) => void) {
+        return _generateProjectContext(
+            repoRoot, force,
+            (p, b) => this._postJsonNoTimeout(p, b),
+            (p, b, cb) => this._postSseNoTimeout(p, b, cb),
+            onThinking,
+        );
+    }
+
+    generateStyleGuide(repoRoot: string, force = false, onThinking?: (token: string) => void) {
+        return _generateStyleGuide(
+            repoRoot, force,
+            (p, b) => this._postJsonNoTimeout(p, b),
+            (p, b, cb) => this._postSseNoTimeout(p, b, cb),
+            onThinking,
+        );
+    }
+
+    listScaffolds() { return _listScaffolds(this.baseUrl); }
+
+    scaffold(scaffoldName: string, projectName: string, parentDir: string) {
+        return _scaffold(this.baseUrl, scaffoldName, projectName, parentDir);
+    }
+
+    getPrompts(repoRoot: string) { return _getPrompts(this.baseUrl, repoRoot); }
+    updatePrompts(repoRoot: string, overrides: Record<string, string>) { return _updatePrompts(this.baseUrl, repoRoot, overrides); }
+    resetPrompts(repoRoot: string, keys?: string[]) { return _resetPrompts(this.baseUrl, repoRoot, keys); }
+
+    createNote(content: string, sourceWorkspace?: string) { return _createNote(this.baseUrl, content, sourceWorkspace); }
+    listNotes(project?: string) { return _listNotes(this.baseUrl, project); }
+    getNote(noteId: string) { return _getNote(this.baseUrl, noteId); }
+    updateNote(noteId: string, data: { content?: string; project?: string; tags?: string[] }) { return _updateNote(this.baseUrl, noteId, data); }
+    deleteNote(noteId: string) { return _deleteNote(this.baseUrl, noteId); }
+    searchNotes(query: string) { return _searchNotes(this.baseUrl, query); }
+    listNoteProjects() { return _listNoteProjects(this.baseUrl); }
+    updateTodo(todoId: number, data: { description?: string; completed?: boolean }) { return _updateTodo(this.baseUrl, todoId, data); }
+    deleteTodo(todoId: number) { return _deleteTodo(this.baseUrl, todoId); }
+    addTodo(noteId: string, description: string) { return _addTodo(this.baseUrl, noteId, description); }
+
+    chat(
+        message: string,
+        history: Array<{ role: string; content: string }>,
+        workspace?: {
+            workspace_name?: string;
+            workspace_root?: string;
+            active_file?: string;
+            active_language?: string;
+            active_selection?: string;
+        },
+        userName?: string,
+    ) {
+        return _chat((p, b) => this._postJsonNoTimeout(p, b), message, history, workspace, userName);
+    }
+
+    chatStream(
+        message: string,
+        history: Array<{ role: string; content: string }>,
+        workspace: {
+            workspace_name?: string;
+            workspace_root?: string;
+            active_file?: string;
+            active_language?: string;
+            active_selection?: string;
+        } | undefined,
+        onToken: (token: string, isFirst: boolean) => void,
+        attachments?: Array<{ data: string; filename?: string; mime_type?: string }>,
         onThinking?: (token: string) => void,
-    ): Promise<{ path: string; chars: number; skipped?: boolean }> {
-        const body = { repo_root: repoRoot, skip_if_exists: !force, stream: !!onThinking };
-        if (onThinking) {
-            return (await this._postSseNoTimeout(
-                "/api/generate-project-context", body, onThinking,
-            )) as { path: string; chars: number; skipped?: boolean };
-        }
-        return (await this._postJsonNoTimeout(
-            "/api/generate-project-context", body,
-        )) as { path: string; chars: number; skipped?: boolean };
+        userName?: string,
+        skipWebSearch?: boolean,
+        onVisionDescription?: (desc: string) => void,
+        onToolCall?: (name: string, description: string) => void,
+        onToolResult?: (name: string, success: boolean) => void,
+    ) {
+        return _chatStream(
+            this.baseUrl, message, history, workspace, onToken,
+            attachments, onThinking, userName, skipWebSearch,
+            onVisionDescription, onToolCall, onToolResult,
+        );
     }
 
-    async generateStyleGuide(
-        repoRoot: string,
-        force: boolean = false,
-        onThinking?: (token: string) => void,
-    ): Promise<{ path: string; chars: number; skipped?: boolean }> {
-        const body = { repo_root: repoRoot, skip_if_exists: !force, stream: !!onThinking };
-        if (onThinking) {
-            return (await this._postSseNoTimeout(
-                "/api/generate-style-guide", body, onThinking,
-            )) as { path: string; chars: number; skipped?: boolean };
-        }
-        return (await this._postJsonNoTimeout(
-            "/api/generate-style-guide", body,
-        )) as { path: string; chars: number; skipped?: boolean };
+    predict(context: InlinePredictionContext) { return _predict(this.baseUrl, context); }
+
+    // -----------------------------------------------------------------------
+    // Voice delegates  (→ backendVoiceClient)
+    // -----------------------------------------------------------------------
+
+    sttWarmup() { return _sttWarmup(this.baseUrl); }
+    sttStart(autoStop = false) { return _sttStart(this.baseUrl, autoStop); }
+    sttStop() { return _sttStop(this.baseUrl); }
+
+    ttsSynthesize(text: string, voice?: string, speed?: number, signal?: AbortSignal) {
+        return _ttsSynthesize(this.baseUrl, text, voice, speed, signal);
     }
-
-    async listScaffolds(): Promise<{
-        scaffolds: Array<{
-            name: string;
-            display_name: string;
-            description: string;
-            language: string;
-            framework: string | null;
-            aliases: string[];
-            setup_type: string;
-        }>;
-    }> {
-        const resp = await fetch(`${this.baseUrl}/api/scaffold/list`);
-        if (!resp.ok) {
-            throw new Error(`List scaffolds failed: ${resp.statusText}`);
-        }
-        return resp.json() as Promise<ReturnType<typeof this.listScaffolds> extends Promise<infer T> ? T : never>;
-    }
-
-    async scaffold(
-        scaffoldName: string,
-        projectName: string,
-        parentDir: string,
-    ): Promise<{
-        scaffold_name: string;
-        project_dir: string;
-        files_created: string[];
-        command_output: string;
-        message: string;
-    }> {
-        const resp = await fetch(`${this.baseUrl}/api/scaffold`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                scaffold_name: scaffoldName,
-                project_name: projectName,
-                parent_dir: parentDir,
-            }),
-        });
-        if (!resp.ok) {
-            const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
-            throw new Error(err.detail ?? resp.statusText);
-        }
-        return resp.json() as Promise<ReturnType<typeof this.scaffold> extends Promise<infer T> ? T : never>;
-    }
-
-    // --- Voice ---
-
-    async sttWarmup(): Promise<void> {
-        try {
-            await fetch(`${this.baseUrl}/api/voice/stt/warmup`, { method: "POST" });
-        } catch { /* fire-and-forget */ }
-    }
-
-    async sttStart(autoStop = false): Promise<void> {
-        const resp = await fetch(`${this.baseUrl}/api/voice/stt/start`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ auto_stop: autoStop }),
-        });
-        if (!resp.ok) {
-            const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
-            throw new Error(err.detail ?? resp.statusText);
-        }
-    }
-
-    async sttStop(): Promise<{ text: string; language?: string; duration_seconds: number }> {
-        const resp = await fetch(`${this.baseUrl}/api/voice/stt/stop`, {
-            method: "POST",
-        });
-        if (!resp.ok) {
-            const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
-            throw new Error(err.detail ?? resp.statusText);
-        }
-        return resp.json() as Promise<{ text: string; language?: string; duration_seconds: number }>;
-    }
-
-    async ttsSynthesize(
-        text: string,
-        voice?: string,
-        speed?: number,
-        signal?: AbortSignal,
-    ): Promise<{ audio_base64: string; duration_seconds: number }> {
-        const resp = await fetch(`${this.baseUrl}/api/voice/tts`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text, voice: voice || "", speed: speed || 0 }),
-            signal,
-        });
-        if (!resp.ok) {
-            const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
-            throw new Error(err.detail ?? resp.statusText);
-        }
-        return resp.json() as Promise<{ audio_base64: string; duration_seconds: number }>;
-    }
-
-    async ttsStream(
+    ttsStream(
         text: string,
         voice: string | undefined,
         speed: number | undefined,
         onChunk: (base64: string) => void,
         signal?: AbortSignal,
-    ): Promise<void> {
-        const resp = await fetch(`${this.baseUrl}/api/voice/tts/stream`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text, voice: voice || "", speed: speed || 0 }),
-            signal,
-        });
-        if (!resp.ok) {
-            const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
-            throw new Error(err.detail ?? resp.statusText);
-        }
-        const reader = resp.body?.getReader();
-        if (!reader) { return; }
-        const decoder = new TextDecoder();
-        let buffer = "";
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) { break; }
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
-            for (const line of lines) {
-                if (line.startsWith("data: ")) {
-                    try {
-                        const data = JSON.parse(line.slice(6)) as { type?: string; audio_base64?: string };
-                        if (data.type === "done") { return; }
-                        if (data.audio_base64) { onChunk(data.audio_base64); }
-                    } catch { /* skip malformed */ }
-                }
-            }
-        }
+    ) {
+        return _ttsStream(this.baseUrl, text, voice, speed, onChunk, signal);
     }
-
-    async ttsStreamPcm(
+    ttsStreamPcm(
         text: string,
         voice: string | undefined,
         speed: number | undefined,
         onChunk: (pcmBase64: string, sampleRate: number) => void,
         signal?: AbortSignal,
-    ): Promise<void> {
-        const resp = await fetch(`${this.baseUrl}/api/voice/tts/stream-pcm`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text, voice: voice || "", speed: speed || 0 }),
-            signal,
-        });
-        if (!resp.ok) {
-            const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
-            throw new Error(err.detail ?? resp.statusText);
-        }
-        const reader = resp.body?.getReader();
-        if (!reader) { return; }
-        const decoder = new TextDecoder();
-        let buffer = "";
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) { break; }
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
-            for (const line of lines) {
-                if (line.startsWith("data: ")) {
-                    try {
-                        const data = JSON.parse(line.slice(6)) as {
-                            type?: string; pcm_base64?: string; sample_rate?: number;
-                        };
-                        if (data.type === "done") { return; }
-                        if (data.pcm_base64 && data.sample_rate) {
-                            onChunk(data.pcm_base64, data.sample_rate);
-                        }
-                    } catch { /* skip malformed */ }
-                }
-            }
-        }
+    ) {
+        return _ttsStreamPcm(this.baseUrl, text, voice, speed, onChunk, signal);
     }
 
-    async wakeWordStart(): Promise<void> {
-        const resp = await fetch(`${this.baseUrl}/api/voice/wakeword/start`, {
-            method: "POST",
-        });
-        if (!resp.ok) {
-            const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
-            throw new Error(err.detail ?? resp.statusText);
-        }
-    }
+    wakeWordStart() { return _wakeWordStart(this.baseUrl); }
+    wakeWordStop() { return _wakeWordStop(this.baseUrl); }
 
-    async wakeWordStop(): Promise<void> {
-        const resp = await fetch(`${this.baseUrl}/api/voice/wakeword/stop`, {
-            method: "POST",
-        });
-        if (!resp.ok) {
-            const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
-            throw new Error(err.detail ?? resp.statusText);
-        }
-    }
-
-    async listVoices(): Promise<Array<{ id: string; name: string; language: string; gender?: string }>> {
-        const resp = await fetch(`${this.baseUrl}/api/voice/tts/voices`);
-        if (!resp.ok) { return []; }
-        const data = await resp.json() as { voices: Array<{ id: string; name: string; language: string; gender?: string }> };
-        return data.voices || [];
-    }
-
-    async ensureTtsModels(): Promise<{ downloaded: boolean; size_mb: number }> {
-        const resp = await fetch(`${this.baseUrl}/api/voice/tts/ensure-models`, {
-            method: "POST",
-        });
-        if (!resp.ok) {
-            const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
-            throw new Error(err.detail ?? resp.statusText);
-        }
-        return resp.json() as Promise<{ downloaded: boolean; size_mb: number }>;
-    }
-
-    async voiceConfig(voice?: string, speed?: number): Promise<void> {
-        await fetch(`${this.baseUrl}/api/voice/config`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ voice: voice || "", speed: speed || 0 }),
-        });
-    }
-
-    /**
-     * SSE connection for wake word events.
-     *
-     * Uses http.request (not fetch) to avoid Node/undici's hardcoded
-     * 5-minute headersTimeout — wake word may sit idle for long periods.
-     * Auto-reconnects on connection loss.
-     */
-    private _voiceEventReq: http.ClientRequest | null = null;
-    private _voiceReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    listVoices() { return _listVoices(this.baseUrl); }
+    ensureTtsModels() { return _ensureTtsModels(this.baseUrl); }
+    voiceConfig(voice?: string, speed?: number) { return _voiceConfig(this.baseUrl, voice, speed); }
 
     connectVoiceEvents(
         onWakeWord: () => void,
         onSttAutoStop?: () => void,
         onError?: () => void,
-    ): void {
-        this.disconnectVoiceEvents();
-
-        const connect = () => {
-            const fullUrl = new URL(`${this.baseUrl}/api/voice/events`);
-            const isHttps = fullUrl.protocol === "https:";
-            const transport = isHttps ? https : http;
-
-            const options: http.RequestOptions = {
-                hostname: fullUrl.hostname,
-                port: fullUrl.port || (isHttps ? "443" : "80"),
-                path: fullUrl.pathname,
-                method: "GET",
-                timeout: 0,
-            };
-
-            let buffer = "";
-
-            const req = transport.request(options, (res) => {
-                if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
-                    console.error(`[Lean AI] Voice events SSE: HTTP ${res.statusCode}`);
-                    scheduleReconnect();
-                    return;
-                }
-
-                console.log("[Lean AI] Voice events SSE: connected");
-
-                res.on("data", (chunk: Buffer | string) => {
-                    buffer += chunk.toString();
-                    const lines = buffer.split("\n");
-                    buffer = lines.pop()!;
-
-                    for (const line of lines) {
-                        if (line.startsWith(":") || line === "") { continue; }
-                        if (!line.startsWith("data: ")) { continue; }
-                        try {
-                            const data = JSON.parse(line.slice(6)) as { type?: string };
-                            if (data.type === "wake_word_detected") {
-                                onWakeWord();
-                            } else if (data.type === "stt_auto_stopped" && onSttAutoStop) {
-                                onSttAutoStop();
-                            } else if (data.type === "wake_word_error" && onError) {
-                                onError();
-                            }
-                        } catch { /* skip malformed SSE lines */ }
-                    }
-                });
-
-                res.on("end", () => {
-                    console.warn("[Lean AI] Voice events SSE: connection ended, reconnecting...");
-                    scheduleReconnect();
-                });
-
-                res.on("error", (err) => {
-                    console.error("[Lean AI] Voice events SSE: stream error:", err.message);
-                    scheduleReconnect();
-                });
-            });
-
-            req.on("socket", (socket) => { socket.setTimeout(0); });
-            req.on("error", (err) => {
-                console.error("[Lean AI] Voice events SSE: request error:", err.message);
-                scheduleReconnect();
-            });
-            req.end();
-
-            this._voiceEventReq = req;
-        };
-
-        const scheduleReconnect = () => {
-            if (this._voiceEventReq === null && this._voiceReconnectTimer === null) { return; }
-            this._voiceEventReq = null;
-            this._voiceReconnectTimer = setTimeout(() => {
-                this._voiceReconnectTimer = null;
-                connect();
-            }, 3000);
-        };
-
-        connect();
+    ) {
+        _connectVoiceEvents(this.baseUrl, this._voiceState, onWakeWord, onSttAutoStop, onError);
     }
 
-    disconnectVoiceEvents(): void {
-        if (this._voiceReconnectTimer !== null) {
-            clearTimeout(this._voiceReconnectTimer);
-            this._voiceReconnectTimer = null;
-        }
-        const req = this._voiceEventReq;
-        this._voiceEventReq = null;
-        if (req) {
-            req.destroy();
-        }
+    disconnectVoiceEvents() {
+        _disconnectVoiceEvents(this._voiceState);
     }
 
-    // --- Prompts ---
-
-    async getPrompts(repoRoot: string): Promise<{ prompts: unknown[]; categories: string[] }> {
-        const params = new URLSearchParams({ repo_root: repoRoot });
-        const resp = await fetch(`${this.baseUrl}/api/prompts?${params}`);
-        if (!resp.ok) {
-            throw new Error(`Failed to load prompts: ${resp.statusText}`);
-        }
-        return resp.json() as Promise<{ prompts: unknown[]; categories: string[] }>;
-    }
-
-    async updatePrompts(repoRoot: string, overrides: Record<string, string>): Promise<void> {
-        const resp = await fetch(`${this.baseUrl}/api/prompts`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ repo_root: repoRoot, overrides }),
-        });
-        if (!resp.ok) {
-            const body = await resp.text();
-            throw new Error(`Failed to save prompts: ${resp.statusText} — ${body}`);
-        }
-    }
-
-    async resetPrompts(repoRoot: string, keys?: string[]): Promise<void> {
-        const resp = await fetch(`${this.baseUrl}/api/prompts/reset`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ repo_root: repoRoot, keys: keys ?? null }),
-        });
-        if (!resp.ok) {
-            throw new Error(`Failed to reset prompts: ${resp.statusText}`);
-        }
-    }
-
-    // --- Notes ---
-
-    async createNote(
-        content: string,
-        sourceWorkspace?: string,
-    ): Promise<{ id: string; content: string; project: string | null; tags: string[] }> {
-        const resp = await fetch(`${this.baseUrl}/api/notes`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content, source_workspace: sourceWorkspace || null }),
-        });
-        if (!resp.ok) {
-            throw new Error(`Failed to create note: ${resp.statusText}`);
-        }
-        return resp.json() as Promise<{ id: string; content: string; project: string | null; tags: string[] }>;
-    }
-
-    async listNotes(project?: string): Promise<unknown[]> {
-        const params = new URLSearchParams();
-        if (project) { params.set("project", project); }
-        const qs = params.toString();
-        const resp = await fetch(`${this.baseUrl}/api/notes${qs ? `?${qs}` : ""}`);
-        if (!resp.ok) {
-            throw new Error(`Failed to list notes: ${resp.statusText}`);
-        }
-        return resp.json() as Promise<unknown[]>;
-    }
-
-    async getNote(noteId: string): Promise<unknown> {
-        const resp = await fetch(`${this.baseUrl}/api/notes/${noteId}`);
-        if (!resp.ok) {
-            throw new Error(`Failed to get note: ${resp.statusText}`);
-        }
-        return resp.json();
-    }
-
-    async updateNote(
-        noteId: string,
-        data: { content?: string; project?: string; tags?: string[] },
-    ): Promise<unknown> {
-        const resp = await fetch(`${this.baseUrl}/api/notes/${noteId}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(data),
-        });
-        if (!resp.ok) {
-            throw new Error(`Failed to update note: ${resp.statusText}`);
-        }
-        return resp.json();
-    }
-
-    async deleteNote(noteId: string): Promise<void> {
-        const resp = await fetch(`${this.baseUrl}/api/notes/${noteId}`, {
-            method: "DELETE",
-        });
-        if (!resp.ok) {
-            throw new Error(`Failed to delete note: ${resp.statusText}`);
-        }
-    }
-
-    async searchNotes(query: string): Promise<unknown[]> {
-        const params = new URLSearchParams({ q: query });
-        const resp = await fetch(`${this.baseUrl}/api/notes/search?${params}`);
-        if (!resp.ok) {
-            throw new Error(`Failed to search notes: ${resp.statusText}`);
-        }
-        return resp.json() as Promise<unknown[]>;
-    }
-
-    async listNoteProjects(): Promise<string[]> {
-        const resp = await fetch(`${this.baseUrl}/api/notes/projects`);
-        if (!resp.ok) {
-            throw new Error(`Failed to list projects: ${resp.statusText}`);
-        }
-        return resp.json() as Promise<string[]>;
-    }
-
-    async updateTodo(
-        todoId: number,
-        data: { description?: string; completed?: boolean },
-    ): Promise<unknown> {
-        const resp = await fetch(`${this.baseUrl}/api/notes/todos/${todoId}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(data),
-        });
-        if (!resp.ok) {
-            throw new Error(`Failed to update todo: ${resp.statusText}`);
-        }
-        return resp.json();
-    }
-
-    async deleteTodo(todoId: number): Promise<void> {
-        const resp = await fetch(`${this.baseUrl}/api/notes/todos/${todoId}`, {
-            method: "DELETE",
-        });
-        if (!resp.ok) {
-            throw new Error(`Failed to delete todo: ${resp.statusText}`);
-        }
-    }
-
-    async addTodo(noteId: string, description: string): Promise<unknown> {
-        const resp = await fetch(`${this.baseUrl}/api/notes/${noteId}/todos`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ description }),
-        });
-        if (!resp.ok) {
-            throw new Error(`Failed to add todo: ${resp.statusText}`);
-        }
-        return resp.json();
-    }
-
-    // --- WebSocket ---
+    // -----------------------------------------------------------------------
+    // WebSocket
+    // -----------------------------------------------------------------------
 
     connectWebSocket(
         sessionId: string,
