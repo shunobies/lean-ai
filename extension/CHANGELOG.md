@@ -2,6 +2,47 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.7.9] - 2026-04-12
+
+### Added
+- **Cross-session memory** — the agent now automatically extracts and stores reusable findings (architecture patterns, gotchas, conventions, discoveries) from completed sessions. Memories are indexed with Whoosh for full-text search and auto-injected into future sessions when relevant.
+- **Search result caching** — when the agent uses `search_internet` or `fetch_url`, findings are stored as "discovery" memories. Future sessions check workspace memory before hitting the network, saving time on repeated lookups for API behaviors, library quirks, and version-specific details.
+- **Session journal** — new `add_journal_entry` tool provides append-only, persistent progress tracking that survives crashes and context refreshes. Complements the existing overwrite-based scratchpad with a permanent record of milestones and findings.
+- **Chat memory tools** — the chat assistant has `recall_memories` and `save_memory` tools for searching and storing project-specific knowledge during conversations.
+- **Plan step reasoning** — each plan step now includes a `reason` field explaining why the change is needed, helping the agent recover when the original approach doesn't work.
+- **Execution checklist UI** — plan execution now shows a checklist of steps with real-time progress updates in the frontend.
+
+### Changed
+- **Required citations** — replaced the confidence/framework guide system with mandatory online documentation verification before the agent uses external frameworks, libraries, or APIs. More reliable than self-assessed confidence scores.
+- **Worker model** — new fourth model role (small, fast — e.g. `qwen3.5:2b`) for auxiliary tasks: compressing large tool outputs and summarizing web content. Configurable from the settings UI with its own model dropdown.
+- **32k context window support** — adaptive behavior at small context windows: TDD auto-disables, tool output limits scale down, Phase 4 drops redundant context re-injection.
+- **Tool executor hardening** — catch-all exception handler prevents unhandled errors from crashing turns; required parameter validation catches missing/empty args with clear error messages; journal correctly reports failure when full; `create_file` warns when overwriting existing files.
+- **`run_command` description** — now tells the agent that commands run non-interactively (use `--yes` flags), large output is saved to files (use `read_file` to view), and failed commands include exit codes.
+- **Scratchpad/journal truncation** — both now truncate at line boundaries instead of arbitrary character positions, preventing mid-character corruption.
+- **Tool progress display** — cleaned up tool call progress rendering in the frontend.
+
+### Fixed
+- **State injection gaps** — scratchpad and journal are now properly re-injected after context refresh in the validation fix loop, investigation phase, and Phase 2→3 planning transition. Previously, state written to disk was lost when context was refreshed.
+- **Worker model dropdown** — fixed the worker model selection not appearing correctly in settings.
+
+## [0.7.5] - 2026-04-07
+
+### Added
+- **JetBrains plugin** — Lean AI is now available for all IntelliJ-based IDEs (IntelliJ IDEA, PyCharm, WebStorm, GoLand, etc.) with a native plugin. GitHub Actions workflow for JetBrains Marketplace publishing.
+- **Claim verification** — the agent is nudged to verify external claims via web search before asserting that something "doesn't exist", "is deprecated", or "is only available in a future version". Prevents hallucinated API limitations.
+- **External file access** — file operations outside the repo root now prompt for user approval instead of being silently blocked. Useful for reading log files, system configs, and shared libraries.
+
+### Changed
+- **Streaming thinking tokens** — Anthropic, OpenAI, and Gemini providers now stream thinking/reasoning tokens during planning and context generation, showing real-time progress.
+- **LLM-driven chat search** — chat's web search now uses the LLM to extract search queries instead of naive keyword extraction, producing more relevant results.
+
+### Fixed
+- **External file read in planner** — fixed planner and chat not requesting approval for files outside the repo root.
+- **SQLite concurrent writes** — fixed crash when creating multiple notes simultaneously.
+- **Planning phase permissions** — fixed missing permission prompts in planning phase.
+- **Python 3.14 compatibility** — fixed `asyncio` issue affecting Python 3.14.
+- **JetBrains build errors** — fixed plugin build configuration and added JDK install docs.
+
 ## [0.7.0] - 2026-04-02
 
 ### Added
