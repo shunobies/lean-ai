@@ -465,6 +465,15 @@ def make_tool_executor(
             )
             return result.output if result.success else f"ERROR: {result.error}"
 
+        elif name == "add_journal_entry":
+            from lean_ai.tools.journal import add_journal_entry
+            result = await add_journal_entry(
+                content=arguments["content"],
+                repo_root=repo_root,
+                session_id=session_id,
+            )
+            return result.output if result.success else f"ERROR: {result.error}"
+
         elif name == "directory_tree":
             from lean_ai.indexer.tree import list_repo_tree
             sub_path = arguments.get("path", "")

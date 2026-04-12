@@ -382,17 +382,27 @@ async def session_stream(websocket: WebSocket, session_id: str):
                             except Exception:
                                 logger.debug("Failed to log conversation entry", exc_info=True)
 
-                        # Build resume task from original task + scratchpad
+                        # Build resume task from original task + journal + scratchpad
+                        from lean_ai.tools.journal import read_journal
                         from lean_ai.tools.scratchpad import read_scratchpad
                         original_task = session.get("task", "")
                         pad_content = read_scratchpad(repo_root, session_id)
+                        journal_content = read_journal(repo_root, session_id)
 
+                        resume_parts = [f"ORIGINAL TASK:\n{original_task}"]
+                        if journal_content:
+                            resume_parts.append(
+                                f"SESSION JOURNAL (permanent findings):\n{journal_content}"
+                            )
                         if pad_content:
-                            resume_task = (
-                                f"ORIGINAL TASK:\n{original_task}\n\n"
-                                f"SESSION SCRATCHPAD (resume from here):\n{pad_content}\n\n"
+                            resume_parts.append(
+                                f"SESSION SCRATCHPAD (resume from here):\n{pad_content}"
+                            )
+                        if journal_content or pad_content:
+                            resume_parts.append(
                                 "Continue where you left off. Do NOT redo completed work."
                             )
+                            resume_task = "\n\n".join(resume_parts)
                         else:
                             resume_task = original_task
 
@@ -522,9 +532,11 @@ async def merge_session(session_id: str, repo_root: str):
         if merge_sha:
             await log_commit(db, session_id, merge_sha, f"merge: {branch_name}")
 
-        # Clean up per-session scratchpad
+        # Clean up per-session scratchpad and journal
+        from lean_ai.tools.journal import delete_journal
         from lean_ai.tools.scratchpad import delete_scratchpad
         delete_scratchpad(repo_root, session_id)
+        delete_journal(repo_root, session_id)
 
         await update_session(
             db, session_id, status="merged", merge_commit_sha=merge_sha,
@@ -577,9 +589,11 @@ async def abandon_session(session_id: str, repo_root: str):
         if stashed:
             await git_stash_pop(repo_root)
 
-        # Clean up per-session scratchpad
+        # Clean up per-session scratchpad and journal
+        from lean_ai.tools.journal import delete_journal
         from lean_ai.tools.scratchpad import delete_scratchpad
         delete_scratchpad(repo_root, session_id)
+        delete_journal(repo_root, session_id)
 
         await update_session(db, session_id, status="abandoned")
 

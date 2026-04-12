@@ -590,6 +590,14 @@ async def create_plan(
                 session_id=session_id,
             )
             return result.output if result.success else result.error or "Error"
+        elif name == "add_journal_entry":
+            from lean_ai.tools.journal import add_journal_entry
+            result = await add_journal_entry(
+                content=arguments.get("content", ""),
+                repo_root=repo_root,
+                session_id=session_id,
+            )
+            return result.output if result.success else result.error or "Error"
         elif name == "task_complete":
             return "Exploration marked complete."
         return f"Unknown tool: {name}"
@@ -705,11 +713,21 @@ async def create_plan(
         # ── Serial Phase 2 (num_parallel=1) ───────────────────────
         # Scratchpad + context refresh for long explorations
         from lean_ai.tools import scratchpad
+        from lean_ai.tools.journal import read_journal
         from lean_ai.workflow.ws_handler import ws_send_nowait
 
-        # Inject existing scratchpad (crash recovery)
+        # Inject existing scratchpad + journal (crash recovery)
         if session_id:
             existing_pad = scratchpad.read_scratchpad(repo_root, session_id)
+            existing_journal = read_journal(repo_root, session_id)
+            if existing_journal:
+                phase2_messages.append({
+                    "role": "user",
+                    "content": (
+                        "[JOURNAL FROM PREVIOUS EXPLORATION]\n\n"
+                        + existing_journal
+                    ),
+                })
             if existing_pad:
                 phase2_messages.append({
                     "role": "user",
@@ -724,6 +742,7 @@ async def create_plan(
         ) -> list[dict]:
             """Rebuild Phase 2 messages for context refresh."""
             pad = scratchpad.read_scratchpad(repo_root, session_id)
+            jrnl = read_journal(repo_root, session_id)
             new_messages: list[dict] = [
                 {"role": "system", "content": PLAN_EXPLORATION_SYSTEM_PROMPT},
                 {
@@ -734,13 +753,19 @@ async def create_plan(
                     ),
                 },
             ]
+            refresh_parts = ["[CONTEXT REFRESHED]"]
+            if jrnl:
+                refresh_parts.append(
+                    f"SESSION JOURNAL (permanent findings):\n{jrnl}"
+                )
             if pad:
+                refresh_parts.append(
+                    f"SCRATCHPAD (current state):\n{pad}"
+                )
+            if pad or jrnl:
                 new_messages.append({
                     "role": "user",
-                    "content": (
-                        "[CONTEXT REFRESHED — scratchpad has your "
-                        "notes]\n\n" + pad
-                    ),
+                    "content": "\n\n".join(refresh_parts),
                 })
             else:
                 new_messages.append({
@@ -763,9 +788,9 @@ async def create_plan(
         def _phase2_reminder() -> str:
             return (
                 base_reminder
-                + "\n\nCall update_scratchpad to save your progress "
-                "— key findings, files identified, what you've "
-                "explored, and what's left to explore."
+                + "\n\nCall update_scratchpad to save volatile progress "
+                "and add_journal_entry for key findings that must "
+                "survive context refresh."
             )
 
         tool_calls, file_identification = await explorer.chat_with_tools(

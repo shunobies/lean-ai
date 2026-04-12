@@ -329,6 +329,39 @@ IMPLEMENTATION_TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "add_journal_entry",
+            "description": (
+                "Record a permanent milestone, key finding, or decision that "
+                "must survive context refresh. Unlike the scratchpad (volatile "
+                "working memory you overwrite each time), journal entries are "
+                "append-only and never lost.\n\n"
+                "WHEN TO JOURNAL:\n"
+                "- A key architectural decision or discovery\n"
+                "- A dependency or constraint found during investigation\n"
+                "- Completion of a significant milestone\n"
+                "- A cross-file relationship that must not be forgotten\n"
+                "- An error pattern and its root cause\n\n"
+                "Keep each entry to 1-2 sentences. The journal has a "
+                "separate budget from the scratchpad."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": (
+                            "A concise entry (1-2 sentences) describing "
+                            "a milestone, finding, or decision."
+                        ),
+                    },
+                },
+                "required": ["content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "search_internet",
             "description": (
                 "Search the web for information on a topic. "
@@ -534,12 +567,12 @@ def build_planning_tools() -> list[dict]:
 
 
 def build_planning_tools_with_scratchpad() -> list[dict]:
-    """Planning tools + update_scratchpad for long serial explorations."""
-    scratchpad_tool = next(
+    """Planning tools + update_scratchpad + add_journal_entry for long serial explorations."""
+    memory_tools = [
         t for t in IMPLEMENTATION_TOOLS
-        if t["function"]["name"] == "update_scratchpad"
-    )
-    return build_planning_tools() + [scratchpad_tool]
+        if t["function"]["name"] in ("update_scratchpad", "add_journal_entry")
+    ]
+    return build_planning_tools() + memory_tools
 
 
 # Search + task_complete tools for Phase 3 design synthesis
@@ -684,7 +717,7 @@ INVESTIGATION_TOOLS: list[dict] = [
         "read_file", "list_directory", "directory_tree", "grep_files",
         "run_tests", "run_lint",
         "search_internet", "fetch_url",
-        "update_scratchpad", "task_complete",
+        "update_scratchpad", "add_journal_entry", "task_complete",
     )
 ]
 

@@ -25,6 +25,7 @@ from lean_ai.llm.tool_definitions import (
 )
 from lean_ai.routers.context_helpers import load_execution_context
 from lean_ai.tools import scratchpad
+from lean_ai.tools.journal import read_journal
 from lean_ai.workflow.callbacks import build_workflow_callbacks
 from lean_ai.workflow.fix_mode import _run_fix  # noqa: F401 — used by run_workflow
 from lean_ai.workflow.prompts import (
@@ -506,14 +507,24 @@ async def _execute_plan(
                 step_artifacts=step_artifacts,
             )
             pad = scratchpad.read_scratchpad(repo_root, session_id)
+            jrnl = read_journal(repo_root, session_id)
             new_messages: list[dict] = [
                 {"role": "system", "content": fresh_sys},
                 {"role": "user", "content": fresh_user},
             ]
+            refresh_parts = ["[CONTEXT REFRESHED]"]
+            if jrnl:
+                refresh_parts.append(
+                    f"SESSION JOURNAL (permanent findings):\n{jrnl}"
+                )
             if pad:
+                refresh_parts.append(
+                    f"SCRATCHPAD (current state):\n{pad}"
+                )
+            if pad or jrnl:
                 new_messages.append({
                     "role": "user",
-                    "content": f"[CONTEXT REFRESHED]\n\n{pad}",
+                    "content": "\n\n".join(refresh_parts),
                 })
             else:
                 new_messages.append({
@@ -843,6 +854,10 @@ async def _execute_plan(
                 summary += f"\n  {name}: {result['output'][:200]}"
         else:
             summary += "\n\n✓ Post-validation passed."
+
+    journal_content = read_journal(repo_root, session_id)
+    if journal_content:
+        summary += f"\n\nSession Journal:\n{journal_content}"
 
     # ── Incremental project_context.md update ──
     if files_modified and settings.enable_project_context:

@@ -305,15 +305,22 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
     reg.register(PromptEntry(
         key="policy.scratchpad",
         category="Core Policy",
-        name="Scratchpad Policy",
+        name="Scratchpad & Journal Policy",
         description=(
-            "How to use the scratchpad for progress"
+            "How to use the scratchpad and journal for progress"
             " tracking. Shared across execution modes."
         ),
         default_text=(
-            "Use update_scratchpad after each logical step to record progress. "
-            "Check the scratchpad before starting to avoid redoing completed work. "
-            'Items under "## Completed" are done — do not revert them.'
+            "SCRATCHPAD (volatile): Use update_scratchpad after each logical step "
+            "to record current working state. Write the ENTIRE content each time "
+            "(it overwrites). Use for: what you are doing now, current errors, "
+            "files being modified, next step.\n"
+            "JOURNAL (permanent): Use add_journal_entry to record milestones and "
+            "findings that must survive context refresh. Each call appends one "
+            "entry (never lost). Use for: key discoveries, architectural decisions, "
+            "dependency constraints, completed milestones, cross-file relationships.\n"
+            'Items under scratchpad "## Completed" are done — do not revert them. '
+            "Journal entries are your permanent record — check them before starting."
         ),
     ))
 

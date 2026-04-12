@@ -13,6 +13,7 @@ from lean_ai.config import settings
 from lean_ai.llm.tool_definitions import build_implementation_tools, build_investigation_tools
 from lean_ai.routers.context_helpers import load_condensed_context
 from lean_ai.tools import scratchpad
+from lean_ai.tools.journal import read_journal
 from lean_ai.workflow.callbacks import build_workflow_callbacks
 from lean_ai.workflow.prompts import (
     build_fix_investigation_prompt,
@@ -98,8 +99,17 @@ async def _run_fix(
             {"role": "user", "content": task},
         ]
 
-        # Inject existing scratchpad for session recovery
+        # Inject existing journal + scratchpad for session recovery
         if session_id:
+            existing_journal = read_journal(repo_root, session_id)
+            if existing_journal:
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "[JOURNAL FROM PREVIOUS EXECUTION]\n"
+                        f"{existing_journal}"
+                    ),
+                })
             existing_pad = scratchpad.read_scratchpad(repo_root, session_id)
             if existing_pad:
                 messages.append({
@@ -142,8 +152,17 @@ async def _run_fix(
             {"role": "user", "content": task},
         ]
 
-        # Inject existing scratchpad for session recovery (resume after crash)
+        # Inject existing journal + scratchpad for session recovery (resume after crash)
         if session_id:
+            existing_journal = read_journal(repo_root, session_id)
+            if existing_journal:
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "[JOURNAL FROM PREVIOUS EXECUTION]\n"
+                        f"{existing_journal}"
+                    ),
+                })
             existing_pad = scratchpad.read_scratchpad(repo_root, session_id)
             if existing_pad:
                 messages.append({
@@ -156,6 +175,9 @@ async def _run_fix(
 
     def _build_fix_reminder() -> str:
         parts = [f"REMINDER — Your task: {task}"]
+        jrnl = read_journal(repo_root, session_id)
+        if jrnl:
+            parts.append(f"\nYour session journal:\n{jrnl}")
         pad = scratchpad.read_scratchpad(repo_root, session_id)
         if pad:
             parts.append(f"\nYour current scratchpad:\n{pad}")
@@ -175,15 +197,25 @@ async def _run_fix(
                 fresh_context, test_command=commands.get("test", ""),
             )
         pad = scratchpad.read_scratchpad(repo_root, session_id)
+        jrnl = read_journal(repo_root, session_id)
 
         new_messages: list[dict] = [
             {"role": "system", "content": fresh_system_prompt},
             {"role": "user", "content": task},
         ]
+        refresh_parts = ["[CONTEXT REFRESHED]"]
+        if jrnl:
+            refresh_parts.append(
+                f"SESSION JOURNAL (permanent findings):\n{jrnl}"
+            )
         if pad:
+            refresh_parts.append(
+                f"SCRATCHPAD (current state):\n{pad}"
+            )
+        if pad or jrnl:
             new_messages.append({
                 "role": "user",
-                "content": f"[CONTEXT REFRESHED]\n\n{pad}",
+                "content": "\n\n".join(refresh_parts),
             })
         else:
             new_messages.append({
@@ -192,7 +224,7 @@ async def _run_fix(
             })
 
         ws_send_nowait(ws, "context_refreshed", {
-            "message": "Context refreshed — scratchpad provides continuity.",
+            "message": "Context refreshed — journal and scratchpad provide continuity.",
         })
         return new_messages
 
@@ -266,6 +298,10 @@ async def _run_fix(
                 summary += f"\n  {name}: {result['output'][:200]}"
         else:
             summary += "\n\n✓ Post-validation passed."
+
+    journal_content = read_journal(repo_root, session_id)
+    if journal_content:
+        summary += f"\n\nSession Journal:\n{journal_content}"
 
     # ── Incremental project_context.md update ──
     if files_modified and settings.enable_project_context:

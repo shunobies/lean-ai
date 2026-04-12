@@ -38,6 +38,8 @@ def humanize_tool_call(name: str, args: dict) -> str:
         return f"Fetching wiki: {args.get('title', '...')}"
     if name == "update_scratchpad":
         return "Updating scratchpad"
+    if name == "add_journal_entry":
+        return "Recording journal entry"
     if name == "task_complete":
         return "Task complete"
     if name == "request_test_change":
