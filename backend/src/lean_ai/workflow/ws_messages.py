@@ -176,7 +176,7 @@ class MetricsUpdateMessage(TypedDict, total=False):
     type: Literal["metrics_update"]  # pyright: ignore[reportGeneralTypeIssues]
     prompt_tokens: int
     context_window: int
-    context_pct: int
+    context_percent: int
 
 
 class BranchCreatedMessage(TypedDict):
@@ -391,11 +391,11 @@ def fire_context_refreshed(
 
 def fire_metrics_update(
     ws: WebSocket, *, prompt_tokens: int, context_window: int,
-    context_pct: int,
+    context_percent: int,
 ) -> None:
     """Fire-and-forget metrics update (non-blocking)."""
     ws_send_nowait(ws, "metrics_update", {
         "prompt_tokens": prompt_tokens,
         "context_window": context_window,
-        "context_pct": context_pct,
+        "context_percent": context_percent,
     })

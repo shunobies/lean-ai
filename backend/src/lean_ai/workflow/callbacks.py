@@ -124,7 +124,7 @@ def build_workflow_callbacks(
     on_metrics: Callable | None = None
     if include_metrics:
         async def _on_metrics(prompt_tokens: int, context_window: int) -> None:
-            context_pct = (
+            context_percent = (
                 round((prompt_tokens / context_window) * 100)
                 if context_window else 0
             )
@@ -132,7 +132,7 @@ def build_workflow_callbacks(
                 ws,
                 prompt_tokens=prompt_tokens,
                 context_window=context_window,
-                context_pct=context_pct,
+                context_percent=context_percent,
             )
 
         on_metrics = _on_metrics
