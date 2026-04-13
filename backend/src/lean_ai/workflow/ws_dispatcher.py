@@ -69,6 +69,36 @@ class WSMessageDispatcher:
         """
         self._execution_mode = True
 
+    # ── Queue helpers ──────────────────────────────────────────────
+
+    def _safe_put(self, queue: asyncio.Queue, data: dict) -> None:
+        """Enqueue *data* without crashing on overflow.
+
+        On ``QueueFull``, drops the oldest item and retries once.
+        If still full, logs an error and moves on — the listener
+        must never crash from a full queue.
+        """
+        try:
+            queue.put_nowait(data)
+        except asyncio.QueueFull:
+            logger.warning(
+                "WSMessageDispatcher: queue full (size=%d), "
+                "dropping oldest message to make room",
+                queue.maxsize,
+            )
+            try:
+                queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                queue.put_nowait(data)
+            except asyncio.QueueFull:
+                logger.error(
+                    "WSMessageDispatcher: still full after drop, "
+                    "message lost: %s",
+                    data.get("type", "?"),
+                )
+
     # ── Background listener ───────────────────────────────────────
 
     async def _listen(self) -> None:
@@ -82,12 +112,12 @@ class WSMessageDispatcher:
                     logger.info("Cancel requested by user")
                     self._cancel_event.set()
                     # Also unblock anyone waiting on the approval queue
-                    self._approval_queue.put_nowait({"type": "cancel"})
+                    self._safe_put(self._approval_queue, {"type": "cancel"})
                 elif msg_type == "user_message":
                     if self._execution_mode:
-                        self._user_messages.put_nowait(data)
+                        self._safe_put(self._user_messages, data)
                     else:
-                        self._approval_queue.put_nowait(data)
+                        self._safe_put(self._approval_queue, data)
                 elif msg_type == "ping":
                     # Handle keepalive inline — no need to route
                     try:
@@ -96,18 +126,18 @@ class WSMessageDispatcher:
                         pass
                 else:
                     # approve, approve_tool, deny_tool, feedback, etc.
-                    self._approval_queue.put_nowait(data)
+                    self._safe_put(self._approval_queue, data)
         except WebSocketDisconnect:
             logger.info("WebSocket disconnected in dispatcher listener")
             # Signal cancel so any waiting coroutines unblock
             self._cancel_event.set()
-            self._approval_queue.put_nowait({"type": "cancel"})
+            self._safe_put(self._approval_queue, {"type": "cancel"})
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("Unexpected error in dispatcher listener")
             self._cancel_event.set()
-            self._approval_queue.put_nowait({"type": "cancel"})
+            self._safe_put(self._approval_queue, {"type": "cancel"})
 
     # ── Cancellation ──────────────────────────────────────────────
 
@@ -116,9 +146,15 @@ class WSMessageDispatcher:
         return self._cancel_event.is_set()
 
     def check_cancelled(self) -> None:
-        """Raise ``WorkflowCancelledError`` if the user requested cancellation."""
+        """Raise ``WorkflowCancelledError`` if cancelled or listener died."""
         if self._cancel_event.is_set():
             raise WorkflowCancelledError()
+        # Detect silently-dead listener (e.g. unhandled exception)
+        if self._listener_task and self._listener_task.done():
+            exc = self._listener_task.exception()
+            if exc and not isinstance(exc, asyncio.CancelledError):
+                logger.error("Dispatcher listener died: %s", exc)
+                raise WorkflowCancelledError()
 
     # ── User message injection ────────────────────────────────────
 
@@ -141,13 +177,34 @@ class WSMessageDispatcher:
 
         Returns the message dict, or ``None`` on disconnect / cancel.
         Raises ``WorkflowCancelledError`` if the user pressed stop.
+
+        Uses ``asyncio.wait`` to race the queue against the cancel
+        event, preventing deadlocks when cancel fires while blocked.
         """
         if self._cancel_event.is_set():
             raise WorkflowCancelledError()
 
-        msg = await self._approval_queue.get()
+        # Race: either a message arrives or cancel is signalled
+        cancel_waiter = asyncio.ensure_future(self._cancel_event.wait())
+        queue_getter = asyncio.ensure_future(self._approval_queue.get())
 
-        if msg.get("type") == "cancel":
-            raise WorkflowCancelledError()
+        done, pending = await asyncio.wait(
+            {cancel_waiter, queue_getter},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
 
-        return msg
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        if queue_getter in done:
+            msg = queue_getter.result()
+            if msg.get("type") == "cancel":
+                raise WorkflowCancelledError()
+            return msg
+
+        # Cancel event won the race
+        raise WorkflowCancelledError()

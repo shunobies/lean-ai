@@ -7,7 +7,7 @@ that translates the detailed instruction into a single tool invocation.
 
 import logging
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,13 @@ class PlanStep(BaseModel):
     For ``run_tests`` / ``run_lint``: the exact command to run.
     """
 
+    @field_validator("instruction")
+    @classmethod
+    def instruction_not_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("PlanStep instruction must not be empty")
+        return v
+
     reason: str = ""
     """Why this change is needed — the problem it solves or the requirement
     it satisfies.  The executor uses this to make informed decisions when the
@@ -83,6 +90,18 @@ class PlanStep(BaseModel):
     Empty string for ``run_command`` / ``run_tests`` / ``run_lint`` /
     ``format_code``.
     """
+
+    _FILE_TOOLS = frozenset({"create_file", "edit_file", "read_file"})
+
+    @model_validator(mode="after")
+    def warn_missing_file_path(self) -> "PlanStep":
+        if self.tool in self._FILE_TOOLS and not self.file_path.strip():
+            logger.warning(
+                "PlanStep tool '%s' should have a file_path but got "
+                "empty string (step %d)",
+                self.tool, self.step_number,
+            )
+        return self
 
 
 class VerificationPlan(BaseModel):

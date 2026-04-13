@@ -14,7 +14,12 @@ from typing import NamedTuple
 from fastapi import WebSocket
 
 from lean_ai.tools.descriptions import humanize_tool_call
-from lean_ai.workflow.ws_handler import ws_send_nowait
+from lean_ai.workflow.ws_messages import (
+    fire_assistant_content,
+    fire_metrics_update,
+    fire_thinking_content,
+    fire_tool_progress,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,11 +78,9 @@ def build_workflow_callbacks(
         desc = humanize_tool_call(name, args)
         full_desc = f"{description_prefix}{desc}"
         _last_tool_desc[name] = full_desc
-        ws_send_nowait(ws, "tool_progress", {
-            "tool": name,
-            "status": "running",
-            "description": full_desc,
-        })
+        fire_tool_progress(
+            ws, tool=name, status="running", description=full_desc,
+        )
         if conversation_logger:
             t = asyncio.create_task(conversation_logger(
                 "tool_call", desc,
@@ -87,14 +90,13 @@ def build_workflow_callbacks(
 
     async def on_tool_result(name: str, result: str) -> None:
         is_error = result.startswith("ERROR:")
-        payload: dict = {
-            "tool": name,
-            "status": "error" if is_error else "complete",
-            "description": _last_tool_desc.pop(name, name),
-        }
-        if is_error:
-            payload["output"] = result[:500]
-        ws_send_nowait(ws, "tool_progress", payload)
+        fire_tool_progress(
+            ws,
+            tool=name,
+            status="error" if is_error else "complete",
+            description=_last_tool_desc.pop(name, name),
+            output=result[:500] if is_error else None,
+        )
         if conversation_logger:
             t = asyncio.create_task(conversation_logger(
                 "tool_result", result[:2000],
@@ -103,10 +105,11 @@ def build_workflow_callbacks(
             t.add_done_callback(log_task_exception)
 
     async def on_content(text: str) -> None:
-        payload: dict = {"content": f"{content_prefix}{text}"}
-        if streaming:
-            payload["streaming"] = True
-        ws_send_nowait(ws, "assistant_content", payload)
+        fire_assistant_content(
+            ws,
+            content=f"{content_prefix}{text}",
+            streaming=streaming,
+        )
         if conversation_logger:
             t = asyncio.create_task(conversation_logger("assistant", text))
             t.add_done_callback(log_task_exception)
@@ -114,10 +117,7 @@ def build_workflow_callbacks(
     on_thinking: Callable | None = None
     if include_thinking:
         async def _on_thinking(text: str) -> None:
-            payload: dict = {"content": text}
-            if streaming:
-                payload["streaming"] = True
-            ws_send_nowait(ws, "thinking_content", payload)
+            fire_thinking_content(ws, content=text, streaming=streaming)
 
         on_thinking = _on_thinking
 
@@ -128,11 +128,12 @@ def build_workflow_callbacks(
                 round((prompt_tokens / context_window) * 100)
                 if context_window else 0
             )
-            ws_send_nowait(ws, "metrics_update", {
-                "context_percent": context_pct,
-                "prompt_tokens": prompt_tokens,
-                "context_window": context_window,
-            })
+            fire_metrics_update(
+                ws,
+                prompt_tokens=prompt_tokens,
+                context_window=context_window,
+                context_pct=context_pct,
+            )
 
         on_metrics = _on_metrics
 

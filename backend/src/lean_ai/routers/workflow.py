@@ -23,6 +23,7 @@ from lean_ai.tools.git_ops import (
     git_add_and_commit,
     git_checkout,
     git_create_branch,
+    git_current_branch,
     git_current_sha,
     git_default_branch,
     git_delete_branch,
@@ -102,6 +103,13 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                 base_branch = await git_default_branch(repo_root)
                                 branch_name = f"lean-ai/{session_id}"
 
+                                # Remember original branch for recovery
+                                orig_branch_result = await git_current_branch(repo_root)
+                                original_branch = (
+                                    orig_branch_result.output.strip()
+                                    if orig_branch_result.success else ""
+                                )
+
                                 # Stash uncommitted changes before switching
                                 stashed = await git_stash_push(repo_root)
 
@@ -126,6 +134,29 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                         branch_name, create_result.error,
                                     )
                                     branch_name = ""
+                                    # Recover stashed changes
+                                    if stashed:
+                                        if original_branch:
+                                            await git_checkout(
+                                                original_branch, repo_root,
+                                            )
+                                        pop_result = await git_stash_pop(
+                                            repo_root,
+                                        )
+                                        if pop_result.success:
+                                            stashed = False
+                                            logger.info(
+                                                "Recovered stashed changes "
+                                                "after branch failure",
+                                            )
+                                        else:
+                                            logger.error(
+                                                "Failed to recover stash "
+                                                "after branch failure: %s "
+                                                "— run 'git stash pop' "
+                                                "manually",
+                                                pop_result.error,
+                                            )
 
                             # --- Load context and run workflow ---
                             context = load_planning_context(repo_root)

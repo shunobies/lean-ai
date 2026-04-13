@@ -11,7 +11,11 @@ from fastapi import WebSocket
 from lean_ai.config import settings
 from lean_ai.tools import file_ops, scratchpad, shell
 from lean_ai.tools.command_safety import CommandRisk, check_command
-from lean_ai.workflow.ws_handler import ws_send
+from lean_ai.workflow.ws_messages import (
+    send_diff,
+    send_test_result,
+    send_tool_approval_required,
+)
 
 if TYPE_CHECKING:
     from lean_ai.llm.facade import LLMClient
@@ -101,21 +105,34 @@ async def _request_tool_approval(
     Returns ``True`` if the user approves, ``False`` otherwise (denied,
     disconnected, or cancelled).
     """
-    await ws_send(ws, "tool_approval_required", {
-        "tool": tool, "command": command, "reason": reason,
-    })
+    await send_tool_approval_required(
+        ws, tool=tool, command=command, reason=reason,
+    )
     if dispatcher:
         from lean_ai.workflow.ws_dispatcher import WorkflowCancelledError
-        try:
-            approval_msg = await dispatcher.wait_for_approval()
-        except WorkflowCancelledError:
-            return False
+        # Loop to skip unexpected message types (e.g. stale user_message)
+        while True:
+            try:
+                approval_msg = await dispatcher.wait_for_approval()
+            except WorkflowCancelledError:
+                return False
+            if approval_msg is None:
+                return False
+            msg_type = approval_msg.get("type")
+            if msg_type == "approve_tool":
+                return True
+            if msg_type == "deny_tool":
+                return False
+            logger.debug(
+                "Skipping unexpected '%s' message during tool approval",
+                msg_type,
+            )
     else:
         from lean_ai.workflow.ws_handler import safe_receive
         approval_msg = await safe_receive(ws)
-    if approval_msg is None:
-        return False
-    return approval_msg.get("type") == "approve_tool"
+        if approval_msg is None:
+            return False
+        return approval_msg.get("type") == "approve_tool"
 
 
 # Tools eligible for worker-model compression
@@ -335,7 +352,7 @@ def make_tool_executor(
             )
             diff = result.metadata.get("diff", "")
             if diff:
-                await ws_send(ws, "diff", {"file": target_path, "diff": diff})
+                await send_diff(ws, file=target_path, diff=diff)
             return result.output if result.success else f"ERROR: {result.error}"
 
         elif name == "edit_file":
@@ -357,7 +374,7 @@ def make_tool_executor(
             )
             diff = result.metadata.get("diff", "")
             if diff:
-                await ws_send(ws, "diff", {"file": target_path, "diff": diff})
+                await send_diff(ws, file=target_path, diff=diff)
             return result.output if result.success else f"ERROR: {result.error}"
 
         elif name == "read_file":
@@ -397,11 +414,12 @@ def make_tool_executor(
             }[name]
             result = await handler(command=command, repo_root=repo_root)
             if name == "run_tests":
-                await ws_send(ws, "test_result", {
-                    "command": command,
-                    "passed": result.success,
-                    "output": result.output[:2000],
-                })
+                await send_test_result(
+                    ws,
+                    passed=result.success,
+                    output=result.output[:2000],
+                    command=command,
+                )
             if result.success:
                 output = result.output or ""
             else:

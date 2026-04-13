@@ -86,9 +86,21 @@ def _make_read_only_executor(
                 end_line=end_line,
                 allow_external=external,
             )
-            return (
+            output = (
                 result.output if result.success else result.error or "Error"
             )
+            # Notify the LLM when a small-context cap truncated the file
+            if (
+                small_ctx
+                and end_line is not None
+                and result.success
+                and "[END OF FILE]" not in output
+            ):
+                output += (
+                    f"\n\n[TRUNCATED at line {end_line} — small context "
+                    f"window. Use start_line={end_line + 1} to read more.]"
+                )
+            return output
         elif name == "grep_files":
             result = await grep_files(
                 pattern=arguments.get("pattern", ""),
@@ -368,11 +380,27 @@ async def _run_parallel_exploration(
     )
 
     dive_results = await asyncio.gather(
-        *[_deep_dive(chunk) for chunk in chunks]
+        *[_deep_dive(chunk) for chunk in chunks],
+        return_exceptions=True,
     )
+
+    # Collect successful results, log failures
+    good_results: list[str] = []
+    for i, result in enumerate(dive_results):
+        if isinstance(result, BaseException):
+            logger.warning(
+                "Phase 2b worker %d/%d failed: %s",
+                i + 1, len(dive_results), result,
+            )
+        elif isinstance(result, str):
+            good_results.append(result)
+
+    if not good_results:
+        return scan_output
+
     return (
         scan_output + "\n\n"
-        + "\n\n".join(dive_results)
+        + "\n\n".join(good_results)
     )
 
 

@@ -7,6 +7,7 @@ Handles both normal execution and TDD three-phase execution
 import asyncio
 import logging
 import os
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -52,6 +53,28 @@ _BARRIER_TOOLS = frozenset({
 })
 
 
+def _normalize_path(p: str) -> str:
+    """Strip leading ``./`` for consistent path comparison."""
+    while p.startswith("./"):
+        p = p[2:]
+    return p
+
+
+def _path_mentioned_in(fpath: str, text: str) -> bool:
+    """Check if *fpath* is explicitly referenced in *text*.
+
+    Uses boundary-aware matching so that ``a.py`` does not falsely
+    match ``baa.py`` or other longer strings.
+    """
+    if not fpath or not text:
+        return False
+    escaped = re.escape(_normalize_path(fpath))
+    # Boundary: start-of-string or common delimiters.
+    # Trailing boundary excludes '.' to prevent config.py matching config.py.bak
+    pattern = r"(?:^|[\s`\"'(,\[])" + escaped + r"(?:[\s`\"')\],;:\n]|$)"
+    return bool(re.search(pattern, text))
+
+
 def _build_step_groups(
     steps: list[PlanStep],
 ) -> list[list[PlanStep]]:
@@ -60,7 +83,7 @@ def _build_step_groups(
     Rules:
     - Same ``file_path`` → sequential (same group boundary).
     - Step B's instruction/context mentions step A's ``file_path``
-      → cross-file dependency.
+      → cross-file dependency (boundary-aware matching).
     - Barrier tools (run_tests, run_lint, etc.) depend on ALL prior steps.
     - Steps with no dependency on each other land in the same parallel group.
 
@@ -76,37 +99,43 @@ def _build_step_groups(
     # Map file_path → latest step index that touches it
     file_owners: dict[str, int] = {}
 
+    # Minimum group for steps following the most recent barrier
+    min_group_after_barrier = 0
+
     for i, step in enumerate(steps):
-        max_dep_group = -1
+        max_dep_group = min_group_after_barrier - 1
 
         # Barrier tool: depends on everything before it
         if step.tool in _BARRIER_TOOLS:
             if group_idx:
-                max_dep_group = max(group_idx)
+                max_dep_group = max(max_dep_group, max(group_idx))
             group_idx.append(max_dep_group + 1)
-            # After a barrier, subsequent steps start fresh
+            # Steps after a barrier must come after the barrier group
+            min_group_after_barrier = max_dep_group + 2
             file_owners.clear()
             continue
 
+        step_path = _normalize_path(step.file_path or "")
+
         # Same file_path → sequential dependency
-        if step.file_path and step.file_path in file_owners:
-            dep_step = file_owners[step.file_path]
+        if step_path and step_path in file_owners:
+            dep_step = file_owners[step_path]
             max_dep_group = max(max_dep_group, group_idx[dep_step])
 
         # Cross-file reference: check if instruction/context mentions
-        # any previously-touched file
+        # any previously-touched file (boundary-aware)
         searchable = (
             (step.instruction or "") + " " + (step.file_path or "")
         )
         for fpath, dep_step in file_owners.items():
-            if fpath and fpath in searchable:
+            if _path_mentioned_in(fpath, searchable):
                 max_dep_group = max(max_dep_group, group_idx[dep_step])
 
         group_idx.append(max_dep_group + 1)
 
         # Register this step's file
-        if step.file_path:
-            file_owners[step.file_path] = i
+        if step_path:
+            file_owners[step_path] = i
 
     # Collect groups
     num_groups = max(group_idx) + 1 if group_idx else 0

@@ -81,3 +81,49 @@ class TestCaseInsensitive:
 
     def test_mixed_case_approval(self):
         assert check_command("Git Push origin main")[0] == CommandRisk.REQUIRES_APPROVAL
+
+
+class TestCompoundCommands:
+    def test_safe_compound(self):
+        assert check_command("npm install && npm run build")[0] == CommandRisk.SAFE
+        assert check_command("ls -la && cat README.md")[0] == CommandRisk.SAFE
+
+    def test_compound_with_blocked(self):
+        assert check_command("echo hello && rm -rf /")[0] == CommandRisk.ALWAYS_BLOCK
+        assert check_command("ls; rm -rf /")[0] == CommandRisk.ALWAYS_BLOCK
+
+    def test_compound_with_approval(self):
+        risk, _ = check_command("npm install && git push origin main")
+        assert risk == CommandRisk.REQUIRES_APPROVAL
+
+    def test_semicolon_separator(self):
+        risk, _ = check_command("ls; rm foo.txt")
+        assert risk == CommandRisk.REQUIRES_APPROVAL
+
+    def test_or_separator(self):
+        risk, _ = check_command("test -f file || rm stale.lock")
+        assert risk == CommandRisk.REQUIRES_APPROVAL
+
+
+class TestShellWrappers:
+    def test_bash_c_requires_approval(self):
+        risk, reason = check_command("bash -c 'echo hello'")
+        assert risk == CommandRisk.REQUIRES_APPROVAL
+        assert "bash -c" in reason
+
+    def test_sh_c_requires_approval(self):
+        risk, _ = check_command("sh -c 'npm run build'")
+        assert risk == CommandRisk.REQUIRES_APPROVAL
+
+    def test_eval_requires_approval(self):
+        risk, _ = check_command("eval 'echo test'")
+        assert risk == CommandRisk.REQUIRES_APPROVAL
+
+    def test_exec_requires_approval(self):
+        risk, _ = check_command("exec python3 app.py")
+        assert risk == CommandRisk.REQUIRES_APPROVAL
+
+    def test_wrapper_with_blocked_inner(self):
+        """Shell wrapper containing a blocked command is still ALWAYS_BLOCK."""
+        assert check_command("bash -c 'rm -rf /'")[0] == CommandRisk.ALWAYS_BLOCK
+        assert check_command("sh -c 'rm -rf ~'")[0] == CommandRisk.ALWAYS_BLOCK
