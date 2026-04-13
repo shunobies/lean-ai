@@ -2,7 +2,7 @@
   "name": "lean-ai",
   "displayName": "Lean AI",
   "description": "Single-Model Deterministic Agentic Architecture - Chat Agent & Inline Predictions",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "publisher": "lean-ai",
   "icon": "icon.png",
   "repository": {
