@@ -1771,12 +1771,15 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
         category="Advanced",
         name="Claim Verification Nudge",
         description=(
-            "Injected when the model makes unverified claims"
-            " about external libraries/APIs/features."
+            "Injected when tests fail repeatedly and the model's"
+            " response suggests stale API knowledge."
         ),
         default_text=(
-            "Your response contains a claim about an external library, API, or feature "
-            "that may be outdated. Call search_internet to verify before proceeding."
+            "Tests have failed multiple times and your response suggests the issue "
+            "may involve an outdated or deprecated API, renamed function, or changed "
+            "library interface. Your training data may not reflect the current state. "
+            "Call search_internet to look up the current documentation for the "
+            "relevant dependency before attempting another fix."
         ),
     ))
 

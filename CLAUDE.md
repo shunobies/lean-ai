@@ -106,7 +106,7 @@ Lightweight control mechanisms in the `chat_with_tools` orchestration loop. Afte
 | Context refresh | Token usage crosses 70% of context window | Drop old messages, re-read from disk |
 | Task reminder | Every N turns (default 10) | Re-inject task description |
 | Cancel/interrupt | User sends cancel or new message | Raise error or inject interrupt |
-| Claim verification | LLM claims something doesn't exist / is future / is deprecated | Inject "verify via search_internet" nudge |
+| Claim verification | Tests/lint failed ≥2 times AND LLM claims something doesn't exist / is deprecated | Inject "search for current docs" nudge (resets counter) |
 
 Post-execution controls:
 

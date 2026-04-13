@@ -50,9 +50,18 @@ class _TurnState:
     max_text_only: int = 3
     max_truncated: int = 5
     loop_detection_threshold: int = 3
+    recent_test_failures: int = 0
 
 
 # ── Claim verification ────────────────────────────────────────────
+
+# Tools whose results provide evidence for claims — suppress the
+# verification nudge when any of these were called in the current turn.
+_VERIFICATION_TOOLS = frozenset({
+    "search_internet", "fetch_url",
+    "search_wiki", "fetch_wiki_page",
+    "grep_files", "read_file", "list_directory", "directory_tree",
+})
 
 # Patterns indicating the LLM is making an unverified external claim.
 _CLAIM_PATTERNS = re.compile(
@@ -401,6 +410,15 @@ class LLMClient:
                     )
                     messages.extend(result_msgs)
 
+                    # Track test/lint failure streak for claim verification
+                    if tc.name in ("run_tests", "run_lint"):
+                        if isinstance(result_str, str) and (
+                            result_str.startswith("FAILED")
+                        ):
+                            state.recent_test_failures += 1
+                        else:
+                            state.recent_test_failures = 0
+
                     # Loop detection (inline — can coexist with reminders)
                     if state.loop_detection_threshold > 0:
                         call_sig = (
@@ -480,24 +498,31 @@ class LLMClient:
                 if not tool_calls:
                     continue  # Skip to next turn for text-only nudges
 
-            # ── Claim verification nudge (independent of turn verdict) ──
+            # ── Claim verification nudge (loop-aware) ──
+            # Only fire when the model is stuck: tests/lint have failed
+            # repeatedly AND the model's response suggests stale API
+            # knowledge.  This helps the model break out of fix loops
+            # caused by deprecated or renamed APIs in its training data.
             if (
                 settings.enable_claim_verification
+                and state.recent_test_failures >= 2
                 and content.strip()
                 and _detect_unverified_claims(content)
                 and not any(
-                    tc.name == "search_internet" for tc in (tool_calls or [])
+                    tc.name in _VERIFICATION_TOOLS for tc in (tool_calls or [])
                 )
             ):
                 logger.info(
-                    "chat_with_tools: unverified claim detected, "
-                    "nudging verification"
+                    "chat_with_tools: repeated test failures + unverified "
+                    "claim detected, nudging internet search"
                 )
                 from lean_ai.llm.prompt_registry import registry
                 messages.append({
                     "role": "user",
                     "content": registry.get("nudge.claim_verification"),
                 })
+                # Reset so we don't nudge every turn once triggered
+                state.recent_test_failures = 0
 
             # ── Confidence verification nudge ──
             # Detect [UNVERIFIED] markers in model output. Only nudge if
