@@ -48,3 +48,6 @@ jetbrains-plugin/src/main/resources/backend/
 .DS_Store
 Thumbs.db
 CLAUDE.md
+
+# lean-ai — generated workspace files (do not commit)
+.lean_ai/scratchpads/
