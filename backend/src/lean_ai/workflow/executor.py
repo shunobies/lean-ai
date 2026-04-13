@@ -291,12 +291,24 @@ async def execute_plan(
             })
             return new_messages
 
+        def _build_step_reminder() -> str:
+            parts = [
+                f"REMINDER — STEP {step.step_number} OF {total_steps}",
+                f"Tool: {step.tool}",
+            ]
+            if step.file_path:
+                parts.append(f"File: {step.file_path}")
+            parts.append(f"Instruction: {step.instruction}")
+            return "\n".join(parts)
+
         executed, explanation = await client.chat_with_tools(
             messages=messages,
             tools=tools,
             tool_executor_fn=executor,
             max_turns=settings.implementation_max_turns,
             max_tokens=settings.implementation_max_tokens,
+            task_reminder=_build_step_reminder,
+            reminder_interval=1,
             on_tool_call=cb.on_tool_call,
             on_tool_result=cb.on_tool_result,
             on_content=cb.on_content,

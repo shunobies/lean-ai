@@ -344,6 +344,13 @@ async def _run_validation_fix_loop(
             })
             return refreshed
 
+        def _build_validation_reminder() -> str:
+            parts = [
+                "REMINDER — Fix validation failures:",
+                failure_text[:500],
+            ]
+            return "\n".join(parts)
+
         fix_tools = (
             build_tdd_implementation_tools()
             if tdd_fix_protect
@@ -362,6 +369,8 @@ async def _run_validation_fix_loop(
             tool_executor_fn=tool_executor,
             max_turns=settings.post_validation_fix_turns,
             max_tokens=settings.implementation_max_tokens,
+            task_reminder=_build_validation_reminder,
+            reminder_interval=1,
             on_tool_call=cb.on_tool_call,
             on_tool_result=cb.on_tool_result,
             on_content=cb.on_content,
