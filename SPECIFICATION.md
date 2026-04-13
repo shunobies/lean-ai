@@ -124,7 +124,7 @@ Core design tenets:
 | Gitignore patterns | pathspec | >=0.12.0,<2.0 |
 | WebSocket client | websockets | >=13.0,<17.0 |
 | Knowledge: EPUB | ebooklib (optional) | >=0.18,<1.0 |
-| Knowledge: PDF | pypdf (optional) | >=5.0.0,<6.0 |
+| Knowledge: PDF | pypdf (optional) | >=6.7.5,<7.0 |
 | Knowledge: Word | python-docx (optional) | >=1.1.0,<2.0 |
 | Testing | pytest + pytest-asyncio | >=8.0.0,<10.0 |
 | Linting | ruff | >=0.8.0,<1.0 |

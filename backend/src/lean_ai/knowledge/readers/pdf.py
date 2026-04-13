@@ -1,6 +1,6 @@
 """PDF document reader.
 
-Optional dependency: ``pypdf>=5.0``.  Install with:
+Optional dependency: ``pypdf>=6.7.5``.  Install with:
 
     pip install "lean-ai[knowledge]"
 
