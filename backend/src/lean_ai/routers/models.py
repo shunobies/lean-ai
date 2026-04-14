@@ -24,6 +24,10 @@ class InitWorkspaceResponse(BaseModel):
     index_chunk_count: int | None = None
     commands_detected: dict[str, str] | None = None
     num_parallel: int = 1
+    knowledge_status: str | None = None
+    knowledge_doc_count: int | None = None
+    knowledge_chunk_count: int | None = None
+    knowledge_skipped_extensions: list[str] | None = None
 
 
 class GenerateProjectContextRequest(BaseModel):
@@ -75,6 +79,7 @@ class IndexKnowledgeResponse(BaseModel):
     status: str
     doc_count: int = 0
     chunk_count: int = 0
+    embedding_count: int = 0
 
 
 class WorkspaceContext(BaseModel):

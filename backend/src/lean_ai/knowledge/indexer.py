@@ -114,12 +114,34 @@ def index_knowledge(repo_root: str) -> dict:
     kdir = knowledge_dir_path(repo_root)
 
     if not kdir.is_dir():
-        logger.debug("Knowledge dir not found at %s — skipping", kdir)
+        logger.info("Knowledge dir not found at %s — skipping", kdir)
         return {"status": "no_knowledge_dir", "doc_count": 0, "chunk_count": 0}
 
     files = _list_knowledge_files(kdir)
     if not files:
-        logger.debug("Knowledge dir %s is empty — skipping", kdir)
+        # Check if files exist but aren't supported (missing optional deps).
+        all_files = [p for p in kdir.rglob("*") if p.is_file()]
+        if all_files:
+            from lean_ai.knowledge.readers.registry import supported_extensions
+            exts = set(supported_extensions())
+            unsupported = sorted({
+                p.suffix.lower() for p in all_files
+                if p.suffix.lower() and p.suffix.lower() not in exts
+            })
+            logger.warning(
+                "Knowledge dir %s has %d file(s) but none match supported "
+                "extensions %s. Found extensions: %s. "
+                "Install optional deps: pip install 'lean-ai[knowledge]'",
+                kdir, len(all_files), sorted(exts), unsupported,
+            )
+            return {
+                "status": "unsupported_files",
+                "doc_count": 0,
+                "chunk_count": 0,
+                "total_files_found": len(all_files),
+                "skipped_extensions": unsupported,
+            }
+        logger.info("Knowledge dir %s is empty — skipping", kdir)
         return {"status": "empty", "doc_count": 0, "chunk_count": 0}
 
     idx_path = knowledge_index_dir(repo_root)
@@ -361,15 +383,78 @@ def _incremental_knowledge_index(
     return stats
 
 
+async def generate_knowledge_embeddings(
+    repo_root: str,
+    llm_client,
+    batch_size: int = 32,
+) -> int:
+    """Generate embeddings for all knowledge chunks.
+
+    Reuses :class:`~lean_ai.indexer.embeddings.EmbeddingStore` pointed at
+    the knowledge index directory.  Always performs a full regeneration
+    (clear + rebuild) matching the code embedding pattern.
+
+    This is an **async** operation — call directly in async contexts.
+    """
+    from lean_ai.indexer.embeddings import EmbeddingStore
+
+    idx_path = knowledge_index_dir(repo_root)
+    if not exists_in(idx_path):
+        return 0
+
+    store = EmbeddingStore(idx_path)
+    store.clear()
+
+    ix = open_dir(idx_path)
+    reader = ix.reader()
+
+    chunk_ids: list[str] = []
+    texts: list[str] = []
+
+    for doc_num in reader.all_doc_ids():
+        stored = reader.stored_fields(doc_num)
+        chunk_ids.append(stored["chunk_id"])
+        # Richer embedding text: title + section give context to the chunk.
+        title = stored.get("doc_title", "")
+        section = stored.get("section", "")
+        content = stored.get("content", "")
+        header = f"{title} — {section}" if section else title
+        texts.append(f"{header}\n{content}" if header else content)
+
+    reader.close()
+
+    if not texts:
+        return 0
+
+    total = 0
+    for i in range(0, len(texts), batch_size):
+        batch_ids = chunk_ids[i : i + batch_size]
+        batch_texts = texts[i : i + batch_size]
+
+        try:
+            embeddings = await llm_client.embed(batch_texts)
+            store.save_batch(batch_ids, embeddings)
+            total += len(embeddings)
+        except Exception as e:
+            logger.warning("Knowledge embedding batch %d failed: %s", i // batch_size, e)
+
+    store.flush_index()
+    logger.info("Generated %d knowledge embeddings", total)
+    return total
+
+
 def search_knowledge(
     repo_root: str,
     query: str,
     limit: int = 10,
+    query_embedding: list[float] | None = None,
 ) -> list[dict]:
     """Search the knowledge index with BM25F full-text search.
 
     Searches across ``content``, ``doc_title``, and ``section`` fields.
-    Returns matching chunks sorted by relevance score.
+    Returns matching chunks sorted by relevance score.  When
+    *query_embedding* is provided and an embedding store exists,
+    results are re-ranked using Reciprocal Rank Fusion (BM25 + semantic).
 
     Returns an empty list when no knowledge index exists or the query
     produces no results.
@@ -418,6 +503,16 @@ def search_knowledge(
                 })
     except Exception as e:
         logger.warning("Knowledge search failed for %r: %s", query, e)
+
+    # RRF re-ranking when embeddings are available.
+    if query_embedding and results:
+        try:
+            from lean_ai.indexer.embeddings import EmbeddingStore, semantic_rerank
+            store = EmbeddingStore(idx_path)
+            if store.get_all_embeddings():
+                results = semantic_rerank(results, query_embedding, store)
+        except Exception as e:
+            logger.debug("Knowledge RRF re-ranking skipped: %s", e)
 
     return results
 

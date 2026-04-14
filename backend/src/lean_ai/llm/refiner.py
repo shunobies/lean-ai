@@ -280,9 +280,19 @@ class PromptRefiner:
         if not is_knowledge_available(repo_root):
             return None
 
+        # Generate query embedding for RRF re-ranking (best-effort).
+        query_embedding: list[float] | None = None
+        if self._ollama is not None:
+            try:
+                embeddings = await self._ollama.embed([query])
+                if embeddings:
+                    query_embedding = embeddings[0]
+            except Exception:
+                pass  # Fall back to BM25-only
+
         try:
             chunks = await asyncio.to_thread(
-                search_knowledge, repo_root, query, limit,
+                search_knowledge, repo_root, query, limit, query_embedding,
             )
         except Exception as e:
             logger.debug("Knowledge query failed: %s", e)
