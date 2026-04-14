@@ -35,8 +35,9 @@ generation_router = APIRouter()
 async def init_workspace(request: InitWorkspaceRequest):
     """Index the workspace and prepare for agent workflows.
 
-    Builds the Whoosh search index, fires background embedding generation,
-    and triggers knowledge base indexing.
+    Builds the Whoosh search index, generates embeddings, and triggers
+    knowledge base indexing.  Embedding generation is awaited (not
+    fire-and-forget) so the caller sees the actual result.
     """
     _gitignore_entries = [
         ".lean_ai/",
@@ -107,28 +108,56 @@ async def init_workspace(request: InitWorkspaceRequest):
             logger.warning("Knowledge indexing failed: %s", exc)
             knowledge_status = "failed"
 
-        # Background embedding generation (code + knowledge)
-        if settings.enable_embeddings:
-            _knowledge_chunks = knowledge_chunk_count or 0
+        # Embedding generation (code + knowledge) — awaited, not background
+        embedding_status = "skipped"
+        embedding_code_count = 0
+        embedding_knowledge_count = 0
+        embedding_message = ""
 
-            async def _embed_background() -> None:
-                try:
-                    await _generate_embeddings(request.repo_root, llm_client)
-                    logger.info("Background code embedding complete for %s", request.repo_root)
-                except Exception as exc:
-                    logger.warning("Code embedding failed (non-fatal): %s", exc)
+        embed_ok, embed_msg = await llm_client.check_embedding_model()
+        if not embed_ok:
+            embedding_status = "skipped"
+            embedding_message = embed_msg
+            logger.info("Embedding skipped: %s", embed_msg)
+        else:
+            try:
+                embedding_code_count = await _generate_embeddings(
+                    request.repo_root, llm_client,
+                )
+                logger.info(
+                    "Code embedding complete: %d chunks for %s",
+                    embedding_code_count, request.repo_root,
+                )
+
+                _knowledge_chunks = knowledge_chunk_count or 0
                 if _knowledge_chunks > 0:
                     try:
                         from lean_ai.knowledge.indexer import generate_knowledge_embeddings
-                        await generate_knowledge_embeddings(request.repo_root, llm_client)
+                        embedding_knowledge_count = (
+                            await generate_knowledge_embeddings(
+                                request.repo_root, llm_client,
+                            )
+                        )
                         logger.info(
-                            "Background knowledge embedding complete for %s",
-                            request.repo_root,
+                            "Knowledge embedding complete: %d chunks for %s",
+                            embedding_knowledge_count, request.repo_root,
                         )
                     except Exception as exc:
-                        logger.warning("Knowledge embedding failed (non-fatal): %s", exc)
+                        logger.warning("Knowledge embedding failed: %s", exc)
 
-            asyncio.create_task(_embed_background())
+                embedding_status = "success"
+                parts = []
+                if embedding_code_count:
+                    parts.append(f"{embedding_code_count} code chunks")
+                if embedding_knowledge_count:
+                    parts.append(f"{embedding_knowledge_count} knowledge chunks")
+                embedding_message = (
+                    ", ".join(parts) if parts else "No chunks to embed"
+                )
+            except Exception as exc:
+                embedding_status = "failed"
+                embedding_message = str(exc)
+                logger.warning("Embedding generation failed: %s", exc)
 
     except Exception as e:
         logger.warning("Init workspace indexing failed: %s", e)
@@ -138,6 +167,10 @@ async def init_workspace(request: InitWorkspaceRequest):
         knowledge_doc_count = None
         knowledge_chunk_count = None
         knowledge_skipped_extensions = None
+        embedding_status = "failed"
+        embedding_code_count = 0
+        embedding_knowledge_count = 0
+        embedding_message = str(e)
 
     return InitWorkspaceResponse(
         index_status=index_status,
@@ -152,6 +185,10 @@ async def init_workspace(request: InitWorkspaceRequest):
         knowledge_doc_count=knowledge_doc_count,
         knowledge_chunk_count=knowledge_chunk_count,
         knowledge_skipped_extensions=knowledge_skipped_extensions,
+        embedding_status=embedding_status,
+        embedding_code_count=embedding_code_count,
+        embedding_knowledge_count=embedding_knowledge_count,
+        embedding_message=embedding_message,
     )
 
 

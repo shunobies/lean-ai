@@ -34,11 +34,11 @@ export async function handleInitCommand(
     const repoRoot = ctx.getRepoRoot();
     let anyFailure = false;
 
-    // ── Step 1: Index workspace (fast — local file I/O) ──
+    // ── Step 1: Index workspace + embeddings ──
     ctx.postMessage({
         type: "thinking",
         show: true,
-        text: "Indexing workspace...",
+        text: "Indexing workspace and generating embeddings...",
     });
 
     let indexResult: any = { num_parallel: 1 };
@@ -103,6 +103,34 @@ export async function handleInitCommand(
                 });
             }
         }
+    }
+
+    // ── Embedding status ──
+    const es = indexResult.embedding_status;
+    if (es === "success") {
+        const codeCnt = indexResult.embedding_code_count ?? 0;
+        const knowledgeCnt = indexResult.embedding_knowledge_count ?? 0;
+        const parts: string[] = [];
+        if (codeCnt > 0) { parts.push(`${codeCnt} code chunks`); }
+        if (knowledgeCnt > 0) { parts.push(`${knowledgeCnt} knowledge chunks`); }
+        ctx.postMessage({
+            type: "reply",
+            text: `Embeddings generated: ${parts.join(" + ")}.`,
+            cls: "msg-system",
+        });
+    } else if (es === "failed") {
+        anyFailure = true;
+        ctx.postMessage({
+            type: "reply",
+            text: `Embedding generation failed: ${indexResult.embedding_message ?? "unknown error"}`,
+            cls: "msg-system",
+        });
+    } else if (es === "skipped" && indexResult.embedding_message) {
+        ctx.postMessage({
+            type: "reply",
+            text: `Embeddings skipped: ${indexResult.embedding_message}`,
+            cls: "msg-system",
+        });
     }
 
     // ── Step 2: Generate project context ──

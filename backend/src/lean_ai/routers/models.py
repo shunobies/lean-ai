@@ -28,6 +28,10 @@ class InitWorkspaceResponse(BaseModel):
     knowledge_doc_count: int | None = None
     knowledge_chunk_count: int | None = None
     knowledge_skipped_extensions: list[str] | None = None
+    embedding_status: str = "skipped"
+    embedding_code_count: int = 0
+    embedding_knowledge_count: int = 0
+    embedding_message: str = ""
 
 
 class GenerateProjectContextRequest(BaseModel):

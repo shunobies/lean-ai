@@ -234,6 +234,34 @@ class LLMClient:
             return []
         return await self._ollama.embed(texts, model)
 
+    async def check_embedding_model(self) -> tuple[bool, str]:
+        """Check if the embedding model is available in Ollama.
+
+        Returns ``(True, model_name)`` on success,
+        ``(False, reason)`` on failure.
+        """
+        if not settings.enable_embeddings:
+            return False, "Embeddings disabled (LEAN_AI_ENABLE_EMBEDDINGS=false)"
+        if self._ollama is None:
+            return False, "No Ollama provider available for embeddings"
+        embed_model = settings.embedding_model
+        if not embed_model:
+            return False, "No embedding model configured (LEAN_AI_EMBEDDING_MODEL)"
+        try:
+            models = await self._ollama._client.list()
+            model_names = [
+                m.get("name", "") for m in models.get("models", [])
+            ]
+            if any(embed_model in name for name in model_names):
+                return True, embed_model
+            return (
+                False,
+                f"Embedding model '{embed_model}' not found in Ollama. "
+                f"Run: ollama pull {embed_model}",
+            )
+        except Exception as exc:
+            return False, f"Cannot reach Ollama to verify embedding model: {exc}"
+
     # ── Multi-turn tool calling orchestration loop ──
 
     async def chat_with_tools(

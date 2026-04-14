@@ -565,7 +565,10 @@ export class BackendClient {
     // -----------------------------------------------------------------------
 
     indexWorkspace(repoRoot: string, forceReindex = false) {
-        return _indexWorkspace(this.baseUrl, repoRoot, forceReindex);
+        return _indexWorkspace(
+            (p, b) => this._postJsonNoTimeout(p, b),
+            repoRoot, forceReindex,
+        );
     }
 
     generateProjectContext(

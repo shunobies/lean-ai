@@ -29,7 +29,7 @@ export type PostSseFn = (
 // ---------------------------------------------------------------------------
 
 export async function indexWorkspace(
-    baseUrl: string,
+    postJson: PostJsonFn,
     repoRoot: string,
     forceReindex = false,
 ): Promise<{
@@ -41,36 +41,30 @@ export async function indexWorkspace(
     knowledge_doc_count?: number;
     knowledge_chunk_count?: number;
     knowledge_skipped_extensions?: string[];
+    embedding_status?: string;
+    embedding_code_count?: number;
+    embedding_knowledge_count?: number;
+    embedding_message?: string;
 }> {
-    // 60s timeout -- indexing is local file I/O, should be fast
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60_000);
-    try {
-        const resp = await fetch(`${baseUrl}/api/init-workspace`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                repo_root: repoRoot,
-                force_reindex: forceReindex,
-            }),
-            signal: controller.signal,
-        });
-        if (!resp.ok) {
-            throw new Error(`Index workspace failed: ${resp.statusText}`);
-        }
-        return resp.json() as Promise<{
-            index_status: string;
-            index_file_count?: number;
-            index_chunk_count?: number;
-            num_parallel?: number;
-            knowledge_status?: string;
-            knowledge_doc_count?: number;
-            knowledge_chunk_count?: number;
-            knowledge_skipped_extensions?: string[];
-        }>;
-    } finally {
-        clearTimeout(timeout);
-    }
+    // No timeout — embedding generation can take minutes for large repos.
+    // Uses PostJsonFn which goes through _postJsonNoTimeout (no timeout).
+    return (await postJson("/api/init-workspace", {
+        repo_root: repoRoot,
+        force_reindex: forceReindex,
+    })) as {
+        index_status: string;
+        index_file_count?: number;
+        index_chunk_count?: number;
+        num_parallel?: number;
+        knowledge_status?: string;
+        knowledge_doc_count?: number;
+        knowledge_chunk_count?: number;
+        knowledge_skipped_extensions?: string[];
+        embedding_status?: string;
+        embedding_code_count?: number;
+        embedding_knowledge_count?: number;
+        embedding_message?: string;
+    };
 }
 
 // ---------------------------------------------------------------------------
