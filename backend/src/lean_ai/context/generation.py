@@ -1,7 +1,6 @@
 """LLM-based project context generation and post-processing.
 
-Contains the public API (generate, write, update) and single-pass generation.
-Multi-round expansion logic lives in ``expansion.py``; pure text processing
+Contains the public API (generate, write, update).  Pure text processing
 utilities live in ``text_processing.py``.
 
 The primary generation approach is **iterative file-by-file**: a skeleton is
@@ -17,7 +16,6 @@ from typing import TYPE_CHECKING
 
 from .constants import (
     _ADDITIVE_EXPANSION_PROMPT,
-    _CONTEXT_GENERATION_SYSTEM_PROMPT,
     _ITERATIVE_INPUT_BUDGET_CHARS,
     _MAX_FILE_CHARS,
     _PARALLEL_EXPANSION_PROMPT,
@@ -28,23 +26,15 @@ from .constants import (
 from .content import (
     _collect_all_ranked_candidates,
     build_additive_expansion_prompt,
-    build_generation_prompt,
     build_single_file_headings_prompt,
     build_single_file_update_prompt,
     build_skeleton_generation_prompt,
     extract_section_headings,
 )
-from .expansion import (  # noqa: F401 — re-exported for backward compatibility
-    _expand_project_context,
-    _generate_project_context_multi_round,
-    _merge_additions_into_doc,
-)
-from .text_processing import (  # noqa: F401 — re-exported for backward compatibility
-    _EXPANSION_ARTIFACT_HEADINGS,
-    _appears_truncated,
+from .expansion import _merge_additions_into_doc
+from .text_processing import (
     _deduplicate_sections,
     _deduplicate_subsections,
-    _normalize_h2,
     _truncate_repetition,
 )
 
@@ -63,42 +53,6 @@ async def _emit_progress(
     """Fire a progress event if *callback* is set."""
     if callback:
         await callback(kwargs)
-
-
-async def _generate_project_context_single_pass(
-    repo_root: str,
-    llm_client: "LLMClient",
-    caps: dict[str, int],
-    max_out: int,
-    thinking_callback: Callable[[str], Awaitable[None]] | None = None,
-) -> str:
-    """Single-pass project context generation.
-
-    Builds one large prompt from structural metadata + key files and
-    calls the LLM once.  Suitable for context windows >= 64K.
-    """
-    user_prompt = build_generation_prompt(repo_root, section_caps=caps)
-
-    messages = [
-        {"role": "system", "content": _CONTEXT_GENERATION_SYSTEM_PROMPT},
-        {"role": "user", "content": user_prompt},
-    ]
-
-    content = await llm_client.chat_raw(
-        messages=messages,
-        max_tokens=max_out,
-        thinking_callback=thinking_callback,
-    )
-
-    if _appears_truncated(content):
-        logger.warning(
-            "Single-pass context output appears truncated (%d chars). "
-            "Consider increasing LEAN_AI_OLLAMA_CONTEXT_WINDOW or "
-            "LEAN_AI_OLLAMA_MAX_TOKENS.",
-            len(content),
-        )
-
-    return _truncate_repetition(content)
 
 
 async def generate_project_context(

@@ -1,21 +1,15 @@
-"""Tests for parallel expansion pipeline — merge, heading extraction, and orchestration.
+"""Tests for expansion merge, heading extraction, and LLM concurrency.
 
 Pure unit tests — no LLM, no network calls required.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from lean_ai.context.content import (
-    build_parallel_expansion_prompt,
-    extract_section_headings,
-)
-from lean_ai.context.generation import (
-    _expand_project_context,
-    _merge_additions_into_doc,
-)
+from lean_ai.context.content import extract_section_headings
+from lean_ai.context.expansion import _merge_additions_into_doc
 from lean_ai.llm.base import LLMMetrics
 from lean_ai.llm.facade import LLMClient
 
@@ -47,29 +41,6 @@ class TestExtractSectionHeadings:
     def test_strips_whitespace(self):
         doc = "  ## Indented  \n## Normal\n"
         assert extract_section_headings(doc) == ["## Indented", "## Normal"]
-
-
-# ---------------------------------------------------------------------------
-# build_parallel_expansion_prompt
-# ---------------------------------------------------------------------------
-
-
-class TestBuildParallelExpansionPrompt:
-    def test_contains_headings_and_files(self):
-        headings = ["## Module Map", "## Key Abstractions"]
-        files = "--- src/foo.py ---\ndef bar(): pass\n"
-        result = build_parallel_expansion_prompt(headings, files)
-        assert "## Module Map" in result
-        assert "## Key Abstractions" in result
-        assert "src/foo.py" in result
-
-    def test_does_not_contain_full_doc(self):
-        """The parallel prompt should only have headings, not the full doc."""
-        headings = ["## Module Map"]
-        files = "--- src/foo.py ---\ncontent\n"
-        result = build_parallel_expansion_prompt(headings, files)
-        assert "EXISTING DOCUMENT HEADINGS" in result
-        assert "EXISTING DOCUMENT ===" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -210,60 +181,3 @@ class TestChatRawSemaphore:
         await asyncio.gather(*tasks)
 
         assert max_concurrent == 5
-
-
-# ---------------------------------------------------------------------------
-# _expand_project_context (parallel mode integration)
-# ---------------------------------------------------------------------------
-
-
-class TestExpandParallel:
-    @pytest.mark.asyncio
-    async def test_parallel_mode_merges_results(self):
-        """Parallel expansion merges additions from multiple batches."""
-        base = (
-            "# Project Context\n\n"
-            "## Module Map\n- `src/` — source\n\n"
-            "## Key Abstractions\n- `App`: main class\n"
-        )
-
-        call_count = 0
-
-        async def mock_chat_raw(messages, max_tokens=None, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            # Expansion batches return additions-only.
-            return (
-                "## Key Abstractions\n"
-                f"- `Worker{call_count}`: processes tasks\n"
-            )
-
-        mock_client = AsyncMock()
-        mock_client.chat_raw = AsyncMock(side_effect=mock_chat_raw)
-
-        with (
-            patch("lean_ai.indexer.tree.list_repo_tree") as mock_tree,
-            patch("lean_ai.context.expansion.extract_metadata_cached") as mock_meta,
-            patch("lean_ai.context.expansion._collect_priority_file_contents") as mock_priority,
-            patch("lean_ai.context.expansion._collect_all_ranked_candidates") as mock_candidates,
-            patch("lean_ai.context.expansion._batch_file_contents") as mock_batch,
-        ):
-            # Minimal stubs for the tree/metadata pipeline.
-            mock_tree.return_value = []
-            mock_meta.return_value = type("M", (), {"fan_in": {}})()
-            mock_priority.return_value = ("", set())
-            mock_candidates.return_value = [
-                ("file1.py", "content1"),
-                ("file2.py", "content2"),
-            ]
-            mock_batch.return_value = ["batch1_content", "batch2_content"]
-
-            result = await _expand_project_context(
-                base, "/fake/repo", mock_client,
-                caps={}, max_out=4096, context_window=131072,
-            )
-
-        # Both batch additions should be merged in.
-        assert "Worker" in result
-        # Original content preserved.
-        assert "- `App`: main class" in result

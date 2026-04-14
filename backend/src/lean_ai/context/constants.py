@@ -92,42 +92,6 @@ _MAX_INDEX_CHARS = 40000
 _MAX_IMPORT_GRAPH_CHARS = 10000
 
 
-_EXPANSION_SYSTEM_PROMPT = """\
-Use your knowledge of software architecture to update the existing project context \
-document with findings from additional source files not yet covered in the document.
-
-You are given:
-1. EXISTING PROJECT CONTEXT — the document produced so far
-2. ADDITIONAL FILE CONTENTS — more source files from the same codebase
-
-Your task: write the COMPLETE updated document, merging what you learn from the \
-additional files into the relevant sections already present in the document.
-
-Rules:
-- Reproduce ALL sections from the existing document — do not omit any content
-- Merge new class names, functions, endpoints, and relationships into the correct
-  existing section — do not place them at the end of the document
-- Do NOT contradict or duplicate existing content — only update it in place
-- If new files reveal a module not yet described, insert it into the Module Map section
-- Use EXACT names from the provided files — never invent names
-- Keep the same Markdown structure (# Project Context, ## Architecture Overview, etc.)
-- Keep the total document under 6000 words
-
-CRITICAL — no new top-level headings:
-- NEVER create sections named "Additional Information", "New Classes and Functions",
-  "Additional Files", "Updated Module Map", or any other new top-level heading.
-- New findings belong INSIDE the existing named sections, not after them.
-  New modules → insert into ## Module Map.  New classes/functions → insert into
-  ## Key Abstractions under the correct file heading.  New endpoints → insert into
-  ## API Endpoints.  New relationships → insert into ## Integration Points.
-- The output must have the same top-level ## headings as the input, no more.
-
-CRITICAL — accuracy:
-- Only reference class names, function names, and file paths visible in the data
-  you have been given.  Do not invent or generalize.\
-"""
-
-
 _ADDITIVE_EXPANSION_PROMPT = """\
 This is an additive expansion round. You are given:
 1. EXISTING DOCUMENT — the project context document produced so far
@@ -170,97 +134,6 @@ Rules:
 - If a file reveals new classes/functions, place them under ## Key Abstractions.
 - If a file reveals new API endpoints, place them under ## API Surface.
 - If a file reveals new integration points, place them under ## Integration Points.\
-"""
-
-
-_CONTEXT_GENERATION_SYSTEM_PROMPT = """\
-Use your knowledge of software architecture to analyze this codebase and produce \
-a factual project overview document. You are given:
-1. The file tree
-2. A CLASS AND FUNCTION INDEX extracted directly from the source code
-3. An IMPORT GRAPH showing which modules depend on which
-4. Contents of key files
-
-ONLY describe things you can see in the provided data. \
-NEVER invent class names, function names, or relationships that are not shown.
-
-STRUCTURE RULES:
-- Each ## heading must appear EXACTLY ONCE in your output.
-- ALL 7 ## headings listed below MUST appear in your output. If you have no \
-data for a section, write the heading followed by a single line: \
-"No data extracted yet."
-- Within each section use ONE coherent list or narrative. Do not restart \
-numbering or start a second list covering the same topic.
-
-Write the document in Markdown with EXACTLY these sections:
-
-# Project Context
-
-## Architecture Overview
-One paragraph: what this project does, its purpose, and high-level \
-architecture pattern. Reference the actual entry points and frameworks you see.
-
-## Module Map
-For each major directory/module shown in the file tree:
-- What it is responsible for (based on the files you can see)
-- Key files and their actual roles
-- List class/function names defined there but do NOT describe their internals — \
-save detailed descriptions for the Key Abstractions section
-
-## Key Abstractions
-List the ACTUAL classes and important functions from the CLASS AND FUNCTION INDEX. \
-For each one:
-- State its file path
-- Describe its responsibility based on the code you can see
-- Note which other classes/modules it interacts with (use the IMPORT GRAPH)
-
-DO NOT describe classes that are not in the index. \
-DO NOT rename or generalize — use the exact names from the code. \
-IMPORTANT: If a file contains only functions and no class definition, list those \
-functions directly — do NOT invent a class name to wrap them. A module of functions \
-is not a class.
-
-## Data Flow
-How requests or data flow through the system. Trace the path using ACTUAL \
-function and class names from the code. Use the IMPORT GRAPH to determine \
-which modules call which. Use numbered steps. \
-Each step must reference a real file, class, or function.
-
-## Conventions
-Based on patterns you observe in the provided code:
-- Naming patterns (files, functions, classes) — cite actual examples
-- Error handling approach — cite what you see
-- Test organization and patterns
-- Configuration approach
-
-## Integration Points
-Use the IMPORT GRAPH to describe how modules connect at the DIRECTORY level. \
-Group imports by source directory → target directory. Do NOT list every individual \
-import statement — summarize by module/directory relationship. Example:
-- `app/Http/Controllers/` → `app/Models/` — controllers import model classes
-- `app/Services/` → `app/Repositories/` — services use repository interfaces
-
-Only list cross-module connections (different directories). Skip framework/stdlib \
-imports — only list project-internal connections.
-
-DO NOT invent integration points that are not visible in the IMPORT GRAPH.
-
-## API Surface
-List ALL REST and WebSocket endpoints from the API ENDPOINTS data. \
-For each endpoint show: HTTP method, URL path, and handler function name. \
-Group endpoints by resource (sessions, traceability, chat, etc.).
-Also list public methods of key client/service classes from the CLASS AND \
-FUNCTION INDEX — especially classes that serve as API facades or SDK clients \
-(e.g. BackendClient, LLMClient), so consumers know the actual callable surface. \
-Do NOT invent endpoints or methods that are not in the provided data.
-
-CRITICAL RULES:
-- ONLY reference class names, function names, and file paths that appear in the \
-provided data. If a name is not in the file tree or class/function index, do not mention it.
-- If you cannot determine something, say "Not visible in provided code samples."
-- Do NOT use generic descriptions like "manages various tools" — state which \
-specific classes/functions do what.
-- Keep the total document under 6000 words.
 """
 
 
@@ -358,35 +231,31 @@ Rules:
 
 
 # ---------------------------------------------------------------------------
-# Fixed token overhead for the context-generation LLM call
+# Fixed token overhead for the skeleton generation LLM call
 # ---------------------------------------------------------------------------
 
-_GENERATION_PROMPT_WRAPPER_CHARS: int = len(
-    "Analyze this repository and produce the project context document.\n\n"
-    "=== FILE TREE ===\n"
-    "\n\n"
+_SKELETON_PROMPT_WRAPPER_CHARS: int = len(
+    "Analyze this repository and produce a structural overview "
+    "document. Source file details will be added in later passes.\n\n"
+    "=== FILE TREE ===\n\n\n"
     "=== CLASS AND FUNCTION INDEX ===\n"
-    "These are the ACTUAL class and function definitions found in the source code. "
-    "Use ONLY these names in your document — do not invent others.\n\n"
-    "\n\n"
+    "These are the ACTUAL class and function definitions found in "
+    "the source code. Use ONLY these names in your document — "
+    "do not invent others.\n\n\n"
     "=== IMPORT GRAPH ===\n"
     "These are the ACTUAL import relationships between modules. "
-    "Use this to describe how modules connect — do not guess connections.\n\n"
-    "\n\n"
+    "Use this to describe how modules connect — do not guess "
+    "connections.\n\n\n"
     "=== API ENDPOINTS ===\n"
-    "These are the ACTUAL REST and WebSocket endpoint routes defined in "
-    "the source code. Include ALL of these in your API Surface section — "
-    "do not invent endpoints that are not listed here.\n\n"
-    "\n\n"
-    "=== KEY FILE CONTENTS ===\n"
-    "\n\n"
-    "Now write the project context document. Remember: ONLY reference "
-    "class names, function names, and files that appear above. "
-    "Do NOT invent or generalize."
+    "These are the ACTUAL REST and WebSocket endpoint routes "
+    "defined in the source code.\n\n\n"
+    "Now write the structural overview document. Remember: ONLY "
+    "reference class names, function names, and files that appear "
+    "above. Do NOT invent or generalize."
 )
 
 _GENERATION_FIXED_OVERHEAD_TOKENS: int = int(
-    (len(_CONTEXT_GENERATION_SYSTEM_PROMPT) + _GENERATION_PROMPT_WRAPPER_CHARS)
+    (len(_SKELETON_GENERATION_SYSTEM_PROMPT) + _SKELETON_PROMPT_WRAPPER_CHARS)
     / 4.2
     * 1.2
 )
