@@ -526,7 +526,10 @@ class OllamaProvider(LLMProvider):
     async def check_health(self) -> bool:
         try:
             models = await self._client.list()
-            model_names = [m.get("name", "") for m in models.get("models", [])]
+            model_names = [
+                m.get("model", "") or m.get("name", "")
+                for m in models.get("models", [])
+            ]
             return any(self._model in name for name in model_names)
         except Exception:
             logger.exception("Ollama health check failed")
