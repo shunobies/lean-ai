@@ -239,6 +239,9 @@ class LLMClient:
 
         Returns ``(True, model_name)`` on success,
         ``(False, reason)`` on failure.
+
+        Uses a test embed call rather than model listing to avoid
+        SDK response format mismatches.
         """
         if not settings.enable_embeddings:
             return False, "Embeddings disabled (LEAN_AI_ENABLE_EMBEDDINGS=false)"
@@ -248,19 +251,12 @@ class LLMClient:
         if not embed_model:
             return False, "No embedding model configured (LEAN_AI_EMBEDDING_MODEL)"
         try:
-            models = await self._ollama._client.list()
-            model_names = [
-                m.get("name", "") for m in models.get("models", [])
-            ]
-            if any(embed_model in name for name in model_names):
+            result = await self._ollama.embed(["test"], model=embed_model)
+            if result:
                 return True, embed_model
-            return (
-                False,
-                f"Embedding model '{embed_model}' not found in Ollama. "
-                f"Run: ollama pull {embed_model}",
-            )
+            return False, f"Embedding model '{embed_model}' returned empty result"
         except Exception as exc:
-            return False, f"Cannot reach Ollama to verify embedding model: {exc}"
+            return False, f"Embedding model '{embed_model}' not available: {exc}"
 
     # ── Multi-turn tool calling orchestration loop ──
 
