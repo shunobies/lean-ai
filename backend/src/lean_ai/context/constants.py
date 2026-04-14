@@ -138,75 +138,44 @@ Rules:
 
 
 _SKELETON_GENERATION_SYSTEM_PROMPT = """\
-Use your knowledge of software architecture to analyze this codebase and produce \
-a structural overview document. You are given:
-1. The file tree
-2. A CLASS AND FUNCTION INDEX extracted directly from the source code
-3. An IMPORT GRAPH showing which modules depend on which
-4. API ENDPOINTS defined in the source code
+Produce a structural overview document for this codebase using the provided \
+metadata (file tree, class/function index, import graph, API endpoints). \
+Use only names visible in the data — do not invent names or relationships. \
+Source file contents will be added in later passes; keep descriptions brief.
 
-NOTE: You do NOT have source file contents yet. Source files will be fed to you \
-one at a time in subsequent passes to add detail. For now, produce the structural \
-skeleton based purely on the metadata above.
+If a section has no relevant data, write the heading then "No data extracted yet."
 
-ONLY describe things you can see in the provided data. \
-NEVER invent class names, function names, or relationships that are not shown.
-
-STRUCTURE RULES:
-- Each ## heading must appear EXACTLY ONCE in your output.
-- ALL 7 ## headings listed below MUST appear in your output. If you have no \
-data for a section, write the heading followed by a single line: \
-"No data extracted yet."
-- Within each section use ONE coherent list or narrative. Do not restart \
-numbering or start a second list covering the same topic.
-
-Write the document in Markdown with EXACTLY these sections:
+Output the document in Markdown with these sections:
 
 # Project Context
 
 ## Architecture Overview
-One paragraph: what this project does, its purpose, and high-level \
-architecture pattern. Reference the actual entry points and frameworks you see.
+One paragraph: what this project does, its high-level architecture, entry \
+points, and frameworks visible in the data.
 
 ## Module Map
-For each major directory/module shown in the file tree:
-- What it is responsible for (based on the metadata you can see)
-- Key files listed there
-- Class/function names defined there (from the index)
+For each major directory in the file tree: its responsibility, key files, \
+and class/function names from the index.
 
 ## Key Abstractions
-List the ACTUAL classes and important functions from the CLASS AND FUNCTION INDEX. \
-For each one:
-- State its file path
-- Describe its likely responsibility based on its name and location
-- Note which other classes/modules it interacts with (use the IMPORT GRAPH)
-
-DO NOT describe classes that are not in the index. \
-DO NOT rename or generalize — use the exact names from the code.
+Classes and important functions from the CLASS AND FUNCTION INDEX. \
+For each: file path, likely responsibility, and interactions from the import graph.
 
 ## Data Flow
-How requests or data likely flow through the system based on the IMPORT GRAPH. \
-Trace the path using ACTUAL function and class names. Use numbered steps. \
-Mark any inferred connections with "(inferred from imports)".
+How data flows through the system based on the import graph. Use numbered \
+steps with actual names. Mark inferred connections with "(inferred)".
 
 ## Conventions
-Based on patterns you observe in the file tree and index:
-- Naming patterns (files, functions, classes)
-- Project structure conventions
-- Configuration approach (config files visible in tree)
+Naming patterns, project structure conventions, and configuration approach \
+observed in the file tree and index.
 
 ## Integration Points
-Use the IMPORT GRAPH to describe how modules connect at the DIRECTORY level. \
-Group imports by source directory → target directory.
+How modules connect at the directory level based on the import graph. \
+Group by source directory → target directory.
 
 ## API Surface
-List ALL REST and WebSocket endpoints from the API ENDPOINTS data. \
-For each endpoint show: HTTP method, URL path, and handler function name.
-
-CRITICAL RULES:
-- ONLY reference names that appear in the provided data.
-- Keep descriptions brief — details will be added in file-by-file passes.
-- Keep the total document under 4000 words.\
+REST and WebSocket endpoints from the API ENDPOINTS data: HTTP method, \
+URL path, and handler function name.\
 """
 
 
@@ -235,23 +204,11 @@ Rules:
 # ---------------------------------------------------------------------------
 
 _SKELETON_PROMPT_WRAPPER_CHARS: int = len(
-    "Analyze this repository and produce a structural overview "
-    "document. Source file details will be added in later passes.\n\n"
     "=== FILE TREE ===\n\n\n"
-    "=== CLASS AND FUNCTION INDEX ===\n"
-    "These are the ACTUAL class and function definitions found in "
-    "the source code. Use ONLY these names in your document — "
-    "do not invent others.\n\n\n"
-    "=== IMPORT GRAPH ===\n"
-    "These are the ACTUAL import relationships between modules. "
-    "Use this to describe how modules connect — do not guess "
-    "connections.\n\n\n"
-    "=== API ENDPOINTS ===\n"
-    "These are the ACTUAL REST and WebSocket endpoint routes "
-    "defined in the source code.\n\n\n"
-    "Now write the structural overview document. Remember: ONLY "
-    "reference class names, function names, and files that appear "
-    "above. Do NOT invent or generalize."
+    "=== CLASS AND FUNCTION INDEX ===\n\n\n"
+    "=== IMPORT GRAPH ===\n\n\n"
+    "=== API ENDPOINTS ===\n\n\n"
+    "Write the structural overview document using only the data above."
 )
 
 _GENERATION_FIXED_OVERHEAD_TOKENS: int = int(

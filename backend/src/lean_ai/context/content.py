@@ -180,27 +180,15 @@ def build_skeleton_generation_prompt(
     )
 
     return (
-        "Analyze this repository and produce a structural overview "
-        "document. Source file details will be added in later passes.\n\n"
         "=== FILE TREE ===\n"
         f"{tree}\n\n"
         "=== CLASS AND FUNCTION INDEX ===\n"
-        "These are the ACTUAL class and function definitions found in "
-        "the source code. Use ONLY these names in your document — "
-        "do not invent others.\n\n"
         f"{class_index}\n\n"
         "=== IMPORT GRAPH ===\n"
-        "These are the ACTUAL import relationships between modules. "
-        "Use this to describe how modules connect — do not guess "
-        "connections.\n\n"
         f"{import_graph}\n\n"
         "=== API ENDPOINTS ===\n"
-        "These are the ACTUAL REST and WebSocket endpoint routes "
-        "defined in the source code.\n\n"
         f"{api_endpoints}\n\n"
-        "Now write the structural overview document. Remember: ONLY "
-        "reference class names, function names, and files that appear "
-        "above. Do NOT invent or generalize."
+        "Write the structural overview document using only the data above."
     )
 
 
