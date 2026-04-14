@@ -88,34 +88,56 @@ async def init_workspace(request: InitWorkspaceRequest):
             write_commands_json(request.repo_root, detected_commands)
             logger.info("Auto-detected commands: %s", detected_commands)
 
-        # Background embedding generation
+        # Knowledge indexing (awaited — fast I/O, results needed for response)
+        knowledge_status: str | None = None
+        knowledge_doc_count: int | None = None
+        knowledge_chunk_count: int | None = None
+        knowledge_skipped_extensions: list[str] | None = None
+        try:
+            from lean_ai.knowledge.indexer import index_knowledge
+            kstats = await asyncio.to_thread(index_knowledge, request.repo_root)
+            knowledge_status = kstats.get("status")
+            knowledge_doc_count = kstats.get("doc_count", 0)
+            knowledge_chunk_count = kstats.get("chunk_count", 0)
+            knowledge_skipped_extensions = kstats.get("skipped_extensions")
+            logger.info("Knowledge indexing complete: %s", kstats)
+        except ImportError:
+            logger.debug("Knowledge module not available")
+        except Exception as exc:
+            logger.warning("Knowledge indexing failed: %s", exc)
+            knowledge_status = "failed"
+
+        # Background embedding generation (code + knowledge)
         if settings.enable_embeddings:
+            _knowledge_chunks = knowledge_chunk_count or 0
+
             async def _embed_background() -> None:
                 try:
                     await _generate_embeddings(request.repo_root, llm_client)
-                    logger.info("Background embedding complete for %s", request.repo_root)
+                    logger.info("Background code embedding complete for %s", request.repo_root)
                 except Exception as exc:
-                    logger.debug("Background embedding failed (non-fatal): %s", exc)
+                    logger.warning("Code embedding failed (non-fatal): %s", exc)
+                if _knowledge_chunks > 0:
+                    try:
+                        from lean_ai.knowledge.indexer import generate_knowledge_embeddings
+                        await generate_knowledge_embeddings(request.repo_root, llm_client)
+                        logger.info(
+                            "Background knowledge embedding complete for %s",
+                            request.repo_root,
+                        )
+                    except Exception as exc:
+                        logger.warning("Knowledge embedding failed (non-fatal): %s", exc)
 
             asyncio.create_task(_embed_background())
-
-        # Background knowledge indexing
-        async def _index_knowledge_background() -> None:
-            try:
-                from lean_ai.knowledge.indexer import index_knowledge
-                stats = await asyncio.to_thread(index_knowledge, request.repo_root)
-                logger.info("Knowledge indexing complete: %s", stats)
-            except ImportError:
-                logger.debug("Knowledge module not yet available")
-            except Exception as exc:
-                logger.debug("Knowledge indexing failed (non-fatal): %s", exc)
-
-        asyncio.create_task(_index_knowledge_background())
 
     except Exception as e:
         logger.warning("Init workspace indexing failed: %s", e)
         index_status = "failed"
         detected_commands = {}
+        knowledge_status = None
+        knowledge_doc_count = None
+        knowledge_chunk_count = None
+        knowledge_skipped_extensions = None
 
     return InitWorkspaceResponse(
         index_status=index_status,
@@ -126,6 +148,10 @@ async def init_workspace(request: InitWorkspaceRequest):
             else None
         ),
         num_parallel=settings.num_parallel,
+        knowledge_status=knowledge_status,
+        knowledge_doc_count=knowledge_doc_count,
+        knowledge_chunk_count=knowledge_chunk_count,
+        knowledge_skipped_extensions=knowledge_skipped_extensions,
     )
 
 
@@ -236,6 +262,9 @@ def _sse_generation_response(
         async def thinking_cb(token: str) -> None:
             await queue.put({"type": "thinking", "content": token})
 
+        async def progress_cb(event: dict) -> None:
+            await queue.put({"type": "progress", **event})
+
         async def _run() -> None:
             try:
                 _client = request_llm_client or llm_client
@@ -246,7 +275,9 @@ def _sse_generation_response(
                         write_project_context,
                     )
                     content = await generate_project_context(
-                        repo_root, _client, thinking_callback=thinking_cb,
+                        repo_root, _client,
+                        thinking_callback=thinking_cb,
+                        progress_callback=progress_cb,
                     )
                     path = write_project_context(repo_root, content)
                     await queue.put({

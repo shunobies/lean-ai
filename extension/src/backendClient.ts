@@ -202,6 +202,7 @@ export class BackendClient {
         path: string,
         body: unknown,
         onThinking?: (token: string) => void,
+        onProgress?: (event: Record<string, unknown>) => void,
     ): Promise<unknown> {
         return new Promise((resolve, reject) => {
             const fullUrl = new URL(`${this.baseUrl}${path}`);
@@ -242,6 +243,8 @@ export class BackendClient {
                             const data = JSON.parse(line.slice(6)) as Record<string, unknown>;
                             if (data["type"] === "thinking" && data["content"] && onThinking) {
                                 onThinking(data["content"] as string);
+                            } else if (data["type"] === "progress" && onProgress) {
+                                onProgress(data);
                             } else if (data["type"] === "result") {
                                 resolved = true;
                                 resolve(data);
@@ -565,12 +568,18 @@ export class BackendClient {
         return _indexWorkspace(this.baseUrl, repoRoot, forceReindex);
     }
 
-    generateProjectContext(repoRoot: string, force = false, onThinking?: (token: string) => void) {
+    generateProjectContext(
+        repoRoot: string,
+        force = false,
+        onThinking?: (token: string) => void,
+        onProgress?: (event: Record<string, unknown>) => void,
+    ) {
         return _generateProjectContext(
             repoRoot, force,
             (p, b) => this._postJsonNoTimeout(p, b),
-            (p, b, cb) => this._postSseNoTimeout(p, b, cb),
+            (p, b, cb, prog) => this._postSseNoTimeout(p, b, cb, prog),
             onThinking,
+            onProgress,
         );
     }
 

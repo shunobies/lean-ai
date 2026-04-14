@@ -263,6 +263,100 @@ specific classes/functions do what.
 - Keep the total document under 6000 words.
 """
 
+
+_SKELETON_GENERATION_SYSTEM_PROMPT = """\
+Use your knowledge of software architecture to analyze this codebase and produce \
+a structural overview document. You are given:
+1. The file tree
+2. A CLASS AND FUNCTION INDEX extracted directly from the source code
+3. An IMPORT GRAPH showing which modules depend on which
+4. API ENDPOINTS defined in the source code
+
+NOTE: You do NOT have source file contents yet. Source files will be fed to you \
+one at a time in subsequent passes to add detail. For now, produce the structural \
+skeleton based purely on the metadata above.
+
+ONLY describe things you can see in the provided data. \
+NEVER invent class names, function names, or relationships that are not shown.
+
+STRUCTURE RULES:
+- Each ## heading must appear EXACTLY ONCE in your output.
+- ALL 7 ## headings listed below MUST appear in your output. If you have no \
+data for a section, write the heading followed by a single line: \
+"No data extracted yet."
+- Within each section use ONE coherent list or narrative. Do not restart \
+numbering or start a second list covering the same topic.
+
+Write the document in Markdown with EXACTLY these sections:
+
+# Project Context
+
+## Architecture Overview
+One paragraph: what this project does, its purpose, and high-level \
+architecture pattern. Reference the actual entry points and frameworks you see.
+
+## Module Map
+For each major directory/module shown in the file tree:
+- What it is responsible for (based on the metadata you can see)
+- Key files listed there
+- Class/function names defined there (from the index)
+
+## Key Abstractions
+List the ACTUAL classes and important functions from the CLASS AND FUNCTION INDEX. \
+For each one:
+- State its file path
+- Describe its likely responsibility based on its name and location
+- Note which other classes/modules it interacts with (use the IMPORT GRAPH)
+
+DO NOT describe classes that are not in the index. \
+DO NOT rename or generalize — use the exact names from the code.
+
+## Data Flow
+How requests or data likely flow through the system based on the IMPORT GRAPH. \
+Trace the path using ACTUAL function and class names. Use numbered steps. \
+Mark any inferred connections with "(inferred from imports)".
+
+## Conventions
+Based on patterns you observe in the file tree and index:
+- Naming patterns (files, functions, classes)
+- Project structure conventions
+- Configuration approach (config files visible in tree)
+
+## Integration Points
+Use the IMPORT GRAPH to describe how modules connect at the DIRECTORY level. \
+Group imports by source directory → target directory.
+
+## API Surface
+List ALL REST and WebSocket endpoints from the API ENDPOINTS data. \
+For each endpoint show: HTTP method, URL path, and handler function name.
+
+CRITICAL RULES:
+- ONLY reference names that appear in the provided data.
+- Keep descriptions brief — details will be added in file-by-file passes.
+- Keep the total document under 4000 words.\
+"""
+
+
+_SINGLE_FILE_UPDATE_PROMPT = """\
+This is a single-file update round. You are given:
+1. EXISTING DOCUMENT — the project context document built so far
+2. SOURCE FILE — one source file not yet analyzed in the document
+
+Your task: update the existing document by incorporating any new information \
+from this source file under the proper existing headings. Return the complete \
+updated document.
+
+Rules:
+- Do NOT remove or rephrase existing content — only add or refine entries.
+- Place new findings under the correct existing ## headings.
+- Use EXACT class names, function names, and file paths from the source file.
+- Do not invent or generalize names not visible in the provided data.
+- Keep the same Markdown structure and heading order.
+- If the file adds nothing new to a section, leave that section unchanged.
+- Keep the total document under 6000 words.\
+"""
+
+
 # ---------------------------------------------------------------------------
 # Fixed token overhead for the context-generation LLM call
 # ---------------------------------------------------------------------------
@@ -298,11 +392,27 @@ _GENERATION_FIXED_OVERHEAD_TOKENS: int = int(
 )
 
 
+_CONTEXT_GENERATION_CAP_TOKENS: int = 65536
+"""Hard cap on the effective context window used for generation budget
+calculations.  Prevents oversized single-pass prompts on large-context models
+(e.g. 256k) by keeping generation input within a manageable size."""
+
+# 70% of the capped context window, used as the threshold for switching
+# to headings-only mode during iterative file-by-file generation.
+_ITERATIVE_INPUT_BUDGET_CHARS: int = int(
+    int(_CONTEXT_GENERATION_CAP_TOKENS * 0.70) * 3.3
+)
+
+
 def _scale_generation_caps(context_window: int, max_output_tokens: int) -> dict[str, int]:
     """Compute input-section size caps for the context-generation prompt.
 
     Scales each section proportionally to the available input token budget
     so the generation prompt always fits within the model's context window.
+
+    The effective context window is capped at ``_CONTEXT_GENERATION_CAP_TOKENS``
+    (65 536) regardless of the model's actual window to keep prompts
+    manageable for local LLMs.
 
     Allocations (of input budget chars):
         index         35% — class/function index (code-dense)
@@ -313,13 +423,14 @@ def _scale_generation_caps(context_window: int, max_output_tokens: int) -> dict[
     Total: 84%, leaving ~16% headroom for the file tree section and
     tokeniser variance.
     """
+    effective_window = min(context_window, _CONTEXT_GENERATION_CAP_TOKENS)
     input_budget_tokens = max(
-        0, context_window - max_output_tokens - _GENERATION_FIXED_OVERHEAD_TOKENS
+        0, effective_window - max_output_tokens - _GENERATION_FIXED_OVERHEAD_TOKENS
     )
     input_budget_chars = int(input_budget_tokens * 3.3)
 
     baseline = 32768
-    scale = max(1.0, context_window / baseline)
+    scale = max(1.0, effective_window / baseline)
 
     return {
         "index":              min(_MAX_INDEX_CHARS * 10,        int(input_budget_chars * 0.35)),
@@ -328,5 +439,5 @@ def _scale_generation_caps(context_window: int, max_output_tokens: int) -> dict[
         "api_endpoints":      min(80000,                        int(input_budget_chars * 0.11)),
         "max_file_chars":     min(25000, max(3000, int(_MAX_FILE_CHARS     * scale))),
         "max_doc_file_chars": min(30000, max(3600, int(_MAX_DOC_FILE_CHARS * scale))),
-        "max_sampled_files":  min(100,   max(15,   int(15                  * scale))),
+        "max_sampled_files":  min(25,    max(15,   int(15                  * scale))),
     }

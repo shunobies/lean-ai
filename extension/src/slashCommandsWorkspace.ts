@@ -74,6 +74,37 @@ export async function handleInitCommand(
         });
     }
 
+    // ── Knowledge index status ──
+    const ks = indexResult.knowledge_status;
+    if (ks && ks !== "no_knowledge_dir" && ks !== "empty") {
+        if (ks === "failed") {
+            anyFailure = true;
+            ctx.postMessage({
+                type: "reply",
+                text: "Knowledge indexing failed.",
+                cls: "msg-system",
+            });
+        } else if (ks === "unsupported_files") {
+            const exts = (indexResult.knowledge_skipped_extensions ?? []).join(", ");
+            ctx.postMessage({
+                type: "reply",
+                text: `Knowledge: found files but no reader for ${exts}. Install deps: pip install 'lean-ai[knowledge]'`,
+                cls: "msg-system",
+            });
+        } else {
+            const docCount = indexResult.knowledge_doc_count ?? 0;
+            const chunkCount = indexResult.knowledge_chunk_count ?? 0;
+            if (docCount > 0) {
+                const kMode = ks === "already_indexed" ? "already up to date" : "complete";
+                ctx.postMessage({
+                    type: "reply",
+                    text: `Knowledge index ${kMode}: ${docCount} docs, ${chunkCount} chunks.`,
+                    cls: "msg-system",
+                });
+            }
+        }
+    }
+
     // ── Step 2: Generate project context ──
     const startTime = Date.now();
 
@@ -86,26 +117,39 @@ export async function handleInitCommand(
             : `${secs}s`;
     };
 
+    // Progress message updated by both the ticker and progress events.
+    let lastProgressMsg = "Generating project context...";
+
     const ticker = setInterval(() => {
         ctx.postMessage({
             type: "thinking",
             show: true,
-            text: `Generating project context... (${formatElapsed()})`,
+            text: `${lastProgressMsg} (${formatElapsed()})`,
         });
     }, 5_000);
 
     ctx.postMessage({
         type: "thinking",
         show: true,
-        text: "Generating project context...",
+        text: lastProgressMsg,
     });
 
     const thinkingCb = (token: string) => {
         ctx.postMessage({ type: "llmThinking", text: token, streaming: true });
     };
 
+    const progressCb = (event: Record<string, unknown>) => {
+        const msg = (event["message"] as string) || `${event["phase"]}...`;
+        lastProgressMsg = msg;
+        ctx.postMessage({
+            type: "thinking",
+            show: true,
+            text: `${msg} (${formatElapsed()})`,
+        });
+    };
+
     try {
-        const ctxResult = await ctx.client.generateProjectContext(repoRoot, force, thinkingCb);
+        const ctxResult = await ctx.client.generateProjectContext(repoRoot, force, thinkingCb, progressCb);
         if (ctxResult.skipped) {
             ctx.postMessage({
                 type: "reply",

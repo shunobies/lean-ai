@@ -3,6 +3,11 @@
 Contains the public API (generate, write, update) and single-pass generation.
 Multi-round expansion logic lives in ``expansion.py``; pure text processing
 utilities live in ``text_processing.py``.
+
+The primary generation approach is **iterative file-by-file**: a skeleton is
+produced from structural metadata, then each source file is processed
+individually in a read-modify-write loop with progress feedback and
+intermediate disk writes.
 """
 
 import logging
@@ -13,12 +18,21 @@ from typing import TYPE_CHECKING
 from .constants import (
     _ADDITIVE_EXPANSION_PROMPT,
     _CONTEXT_GENERATION_SYSTEM_PROMPT,
+    _ITERATIVE_INPUT_BUDGET_CHARS,
     _MAX_FILE_CHARS,
+    _PARALLEL_EXPANSION_PROMPT,
+    _SINGLE_FILE_UPDATE_PROMPT,
+    _SKELETON_GENERATION_SYSTEM_PROMPT,
     _scale_generation_caps,
 )
 from .content import (
+    _collect_all_ranked_candidates,
     build_additive_expansion_prompt,
     build_generation_prompt,
+    build_single_file_headings_prompt,
+    build_single_file_update_prompt,
+    build_skeleton_generation_prompt,
+    extract_section_headings,
 )
 from .expansion import (  # noqa: F401 — re-exported for backward compatibility
     _expand_project_context,
@@ -38,6 +52,17 @@ if TYPE_CHECKING:
     from lean_ai.llm.client import LLMClient
 
 logger = logging.getLogger(__name__)
+
+
+ProgressCallback = Callable[[dict], Awaitable[None]]
+
+
+async def _emit_progress(
+    callback: ProgressCallback | None, **kwargs: object,
+) -> None:
+    """Fire a progress event if *callback* is set."""
+    if callback:
+        await callback(kwargs)
 
 
 async def _generate_project_context_single_pass(
@@ -80,63 +105,213 @@ async def generate_project_context(
     repo_root: str,
     llm_client: "LLMClient",
     thinking_callback: Callable[[str], Awaitable[None]] | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> str:
-    """Generate a project context document using the LLM.
+    """Generate a project context document using iterative file-by-file passes.
 
-    Dispatches to single-pass or multi-round generation depending on
-    context window size.
+    **Phase 1 — Skeleton:** Produce a structural overview from metadata
+    (file tree, class/function index, import graph, API endpoints) with
+    no source file contents.  Written to disk immediately.
+
+    **Phase 2 — File-by-file:** For each source file (ranked by fan-in),
+    read the current document + the single file, ask the LLM to update the
+    document, validate the output, and write to disk.  Emits per-file
+    progress events.
+
+    When the document grows too large for the context budget the loop
+    switches to *headings-only mode*: only section headings are sent
+    instead of the full document, and the LLM's additions are merged back
+    programmatically.
     """
     from lean_ai.config import settings
 
     logger.info("Generating project context for %s", repo_root)
 
-    max_out = settings.ollama_max_tokens or settings.ollama_context_window // 4
+    max_out = (
+        settings.ollama_max_tokens
+        or settings.ollama_context_window // 4
+    )
     caps = _scale_generation_caps(settings.ollama_context_window, max_out)
+    max_file = caps.get("max_file_chars", _MAX_FILE_CHARS)
 
-    use_multi_round = (
-        settings.enable_multi_round_context
-        and settings.ollama_context_window < 65536
+    # ── Phase 1: skeleton from structural metadata ──────────────────
+    await _emit_progress(
+        progress_callback,
+        phase="skeleton",
+        message="Generating structural skeleton...",
+        current=0,
+        total=0,
+        chars=0,
     )
 
-    if use_multi_round:
+    skeleton_prompt = build_skeleton_generation_prompt(
+        repo_root, section_caps=caps,
+    )
+    messages = [
+        {"role": "system", "content": _SKELETON_GENERATION_SYSTEM_PROMPT},
+        {"role": "user", "content": skeleton_prompt},
+    ]
+
+    content = await llm_client.chat_raw(
+        messages=messages,
+        max_tokens=max_out,
+        thinking_callback=thinking_callback,
+    )
+    content = _truncate_repetition(content)
+
+    if not content.strip():
+        logger.warning("Skeleton generation produced empty output")
+        content = "# Project Context\n\n(skeleton generation failed)\n"
+
+    # Checkpoint: write skeleton to disk immediately.
+    write_project_context(repo_root, content)
+    logger.info(
+        "Phase 1 (skeleton) complete: %d chars", len(content),
+    )
+
+    # ── Phase 2: one file per round ─────────────────────────────────
+    try:
+        from lean_ai.indexer.tree import list_repo_tree
+        entries = list_repo_tree(repo_root)
+    except Exception:
+        entries = []
+
+    from .metadata import extract_metadata_cached
+    metadata = extract_metadata_cached(repo_root, entries=entries)
+
+    # Collect all source files ranked by fan-in (most-imported first).
+    # The skeleton already covered structural metadata; priority docs /
+    # entry points were visible in the index.  We process ALL ranked
+    # source files here so the document gains real implementation detail.
+    candidates = _collect_all_ranked_candidates(
+        repo_root,
+        entries=entries,
+        fan_in=metadata.fan_in,
+        exclude_paths=set(),  # process everything
+        max_file_chars=max_file,
+    )
+
+    total_files = len(candidates)
+    logger.info(
+        "Phase 2: %d source files to process one-by-one", total_files,
+    )
+
+    system_prompt_chars = len(_SINGLE_FILE_UPDATE_PROMPT)
+
+    for idx, (file_path, file_content) in enumerate(candidates):
+        file_num = idx + 1
+
+        # ── Context budget check ──
+        doc_chars = len(content)
+        total_input = system_prompt_chars + doc_chars + len(file_content)
+        use_headings_only = (
+            total_input > _ITERATIVE_INPUT_BUDGET_CHARS
+        )
+
+        mode_label = " (headings-only)" if use_headings_only else ""
+        await _emit_progress(
+            progress_callback,
+            phase="file_update",
+            message=(
+                f"Processing file {file_num} of {total_files}: "
+                f"{file_path}{mode_label}"
+            ),
+            current=idx,
+            total=total_files,
+            chars=doc_chars,
+            headings_only=use_headings_only,
+        )
         logger.info(
-            "Using multi-round context generation (context_window=%d < 65536)",
-            settings.ollama_context_window,
+            "File %d/%d%s: %s (%d chars)",
+            file_num, total_files, mode_label,
+            file_path, len(file_content),
         )
-        content = await _generate_project_context_multi_round(
-            repo_root, llm_client, caps, max_out,
-            context_window=settings.ollama_context_window,
-            thinking_callback=thinking_callback,
-        )
-    else:
-        logger.info(
-            "Using single-pass context generation (context_window=%d)",
-            settings.ollama_context_window,
-        )
-        content = await _generate_project_context_single_pass(
-            repo_root, llm_client, caps, max_out,
-            thinking_callback=thinking_callback,
-        )
+
+        try:
+            if use_headings_only:
+                # Headings-only mode: send section headings + file,
+                # LLM returns only new entries, merge programmatically.
+                headings = extract_section_headings(content)
+                user_msg = build_single_file_headings_prompt(
+                    headings, file_path, file_content,
+                )
+                msgs = [
+                    {
+                        "role": "system",
+                        "content": _PARALLEL_EXPANSION_PROMPT,
+                    },
+                    {"role": "user", "content": user_msg},
+                ]
+                additions = await llm_client.chat_raw(
+                    messages=msgs,
+                    max_tokens=max_out,
+                    thinking_callback=thinking_callback,
+                )
+                additions = _truncate_repetition(additions)
+                if additions.strip():
+                    content = _merge_additions_into_doc(
+                        content, [additions],
+                    )
+            else:
+                # Full-doc mode: send entire document + file,
+                # LLM returns complete updated document.
+                user_msg = build_single_file_update_prompt(
+                    content, file_path, file_content,
+                )
+                msgs = [
+                    {
+                        "role": "system",
+                        "content": _SINGLE_FILE_UPDATE_PROMPT,
+                    },
+                    {"role": "user", "content": user_msg},
+                ]
+                updated = await llm_client.chat_raw(
+                    messages=msgs,
+                    max_tokens=max_out,
+                    thinking_callback=thinking_callback,
+                )
+                updated = _truncate_repetition(updated)
+
+                # Validate: output must be >= 70% of current doc length.
+                if (
+                    updated.strip()
+                    and len(updated) >= len(content) * 0.7
+                ):
+                    content = updated
+                else:
+                    logger.warning(
+                        "File %d/%d: output too short (%d vs %d), "
+                        "keeping current document",
+                        file_num, total_files,
+                        len(updated), len(content),
+                    )
+        except Exception as exc:
+            logger.warning(
+                "File %d/%d (%s) failed (non-fatal): %s",
+                file_num, total_files, file_path, exc,
+            )
+
+        # Checkpoint: write after every file.
+        write_project_context(repo_root, content)
+
+    # ── Cleanup ─────────────────────────────────────────────────────
+    await _emit_progress(
+        progress_callback,
+        phase="cleanup",
+        message="Cleaning up...",
+        current=total_files,
+        total=total_files,
+        chars=len(content),
+    )
 
     content = _deduplicate_sections(content)
     content = _deduplicate_subsections(content)
 
-    # ── Additive expansion: process remaining source files ──
-    if settings.enable_multi_round_context:
-        try:
-            content = await _expand_project_context(
-                content, repo_root, llm_client, caps, max_out,
-                context_window=settings.ollama_context_window,
-                thinking_callback=thinking_callback,
-            )
-        except Exception as exc:
-            logger.warning("Additive expansion failed (non-fatal): %s", exc)
-
-    # ── Mechanical section reorganization (merge same headings, drop
-    #    exact-match lines) ──
     from lean_ai.context.dedup import reorganize_sections
 
-    content = reorganize_sections(content, log_prefix="Project context")
+    content = reorganize_sections(
+        content, log_prefix="Project context",
+    )
 
     logger.info("Project context generated: %d chars", len(content))
     return content

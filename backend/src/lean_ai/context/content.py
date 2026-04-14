@@ -406,6 +406,116 @@ def extract_section_headings(doc: str) -> list[str]:
     ]
 
 
+def build_skeleton_generation_prompt(
+    repo_root: str,
+    section_caps: dict[str, int] | None = None,
+) -> str:
+    """Build the user-message prompt for the skeleton generation call.
+
+    Assembles the file tree, class/function index, import graph, and API
+    endpoints — but NO source file contents.  The skeleton call produces
+    the initial structural overview that is later enriched file-by-file.
+    """
+    caps = section_caps or {
+        "index":              _MAX_INDEX_CHARS,
+        "import_graph":       _MAX_IMPORT_GRAPH_CHARS,
+        "max_file_chars":     _MAX_FILE_CHARS,
+        "max_doc_file_chars": _MAX_DOC_FILE_CHARS,
+        "max_sampled_files":  15,
+    }
+
+    try:
+        from lean_ai.indexer.tree import list_repo_tree
+        entries = list_repo_tree(repo_root)
+    except Exception:
+        entries = None
+
+    metadata = extract_metadata_cached(repo_root, entries=entries)
+
+    tree = _build_file_tree_summary(repo_root, entries=entries)
+    class_index = metadata.format_class_index(
+        max_chars=caps["index"],
+    )
+    import_graph = metadata.format_import_graph(
+        max_chars=caps["import_graph"],
+    )
+    api_endpoints = metadata.format_api_endpoints(
+        max_chars=caps.get("api_endpoints", 8000),
+    )
+
+    return (
+        "Analyze this repository and produce a structural overview "
+        "document. Source file details will be added in later passes.\n\n"
+        "=== FILE TREE ===\n"
+        f"{tree}\n\n"
+        "=== CLASS AND FUNCTION INDEX ===\n"
+        "These are the ACTUAL class and function definitions found in "
+        "the source code. Use ONLY these names in your document — "
+        "do not invent others.\n\n"
+        f"{class_index}\n\n"
+        "=== IMPORT GRAPH ===\n"
+        "These are the ACTUAL import relationships between modules. "
+        "Use this to describe how modules connect — do not guess "
+        "connections.\n\n"
+        f"{import_graph}\n\n"
+        "=== API ENDPOINTS ===\n"
+        "These are the ACTUAL REST and WebSocket endpoint routes "
+        "defined in the source code.\n\n"
+        f"{api_endpoints}\n\n"
+        "Now write the structural overview document. Remember: ONLY "
+        "reference class names, function names, and files that appear "
+        "above. Do NOT invent or generalize."
+    )
+
+
+def build_single_file_update_prompt(
+    existing_doc: str,
+    file_path: str,
+    file_content: str,
+) -> str:
+    """Build the user prompt for a single-file update round.
+
+    Sends the full existing document + one source file so the LLM can
+    see all current content and avoid duplicates.  The LLM returns the
+    complete updated document.
+    """
+    return (
+        "=== EXISTING DOCUMENT ===\n"
+        f"{existing_doc}\n\n"
+        f"=== SOURCE FILE: {file_path} ===\n"
+        f"```\n{file_content}\n```\n\n"
+        "Update the existing document by incorporating any new "
+        "information from this source file. Return the complete "
+        "updated document. ONLY reference names visible in the "
+        "source file provided."
+    )
+
+
+def build_single_file_headings_prompt(
+    section_headings: list[str],
+    file_path: str,
+    file_content: str,
+) -> str:
+    """Build a headings-only prompt for a single-file update round.
+
+    Used when the existing document is too large to fit in the context
+    budget alongside the source file.  Sends only the section headings
+    instead of the full document.  The LLM returns ONLY new entries
+    organized by heading (merged back programmatically).
+    """
+    headings_list = "\n".join(f"- {h}" for h in section_headings)
+    return (
+        "=== EXISTING DOCUMENT HEADINGS ===\n"
+        f"{headings_list}\n\n"
+        f"=== SOURCE FILE: {file_path} ===\n"
+        f"```\n{file_content}\n```\n\n"
+        "Extract new entries from this source file and place each "
+        "entry under the correct heading. Output ONLY the new entries, "
+        "organized by heading. Skip headings where the file adds "
+        "nothing new."
+    )
+
+
 def build_parallel_expansion_prompt(
     section_headings: list[str],
     file_batch: str,
