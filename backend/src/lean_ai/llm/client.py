@@ -656,7 +656,7 @@ class OllamaProvider(LLMProvider):
         if not embed_model:
             return None
         try:
-            info = await self._embed_client.show(name=embed_model)
+            info = await self._embed_client.show(model=embed_model)
         except Exception as exc:
             logger.debug("Could not query embedding model info: %s", exc)
             return None

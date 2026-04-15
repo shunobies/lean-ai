@@ -306,7 +306,7 @@ class LLMClient:
 
         # Quick existence check — show() returns model info without loading.
         try:
-            await self._ollama._embed_client.show(name=embed_model)
+            await self._ollama._embed_client.show(model=embed_model)
         except Exception as exc:
             return False, (
                 f"Embedding model '{embed_model}' not found in Ollama: {exc}"
