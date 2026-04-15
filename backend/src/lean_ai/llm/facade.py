@@ -292,7 +292,10 @@ class LLMClient:
         ``(False, reason)`` on failure.
 
         Uses a test embed call rather than model listing to avoid
-        SDK response format mismatches.
+        SDK response format mismatches.  The first call may trigger a
+        cold model load, so a generous 600 s timeout is used here (the
+        regular per-batch timeout of 120 s applies to subsequent calls
+        when the model is already warm).
         """
         if not settings.enable_embeddings:
             return False, "Embeddings disabled (LEAN_AI_ENABLE_EMBEDDINGS=false)"
@@ -302,7 +305,9 @@ class LLMClient:
         if not embed_model:
             return False, "No embedding model configured (LEAN_AI_EMBEDDING_MODEL)"
         try:
-            result = await self._ollama.embed(["test"], model=embed_model)
+            result = await self._ollama.embed(
+                ["test"], model=embed_model, timeout=600.0,
+            )
             if result:
                 return True, embed_model
             return False, f"Embedding model '{embed_model}' returned empty result"
