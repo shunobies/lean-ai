@@ -16,7 +16,7 @@ from lean_ai.indexer.indexer import (
     index_workspace as _sync_index_workspace,
 )
 from lean_ai.routers.context_helpers import ensure_gitignore_entries
-from lean_ai.routers.dependencies import llm_client, request_llm_client
+from lean_ai.routers.dependencies import llm_client, request_llm_client, worker_llm_client
 from lean_ai.routers.models import (
     GenerateProjectContextRequest,
     GenerateProjectContextResponse,
@@ -234,8 +234,12 @@ async def generate_project_context_endpoint(request: GenerateProjectContextReque
 
     try:
         from lean_ai.context.generation import generate_project_context, write_project_context
-        _client = request_llm_client or llm_client
-        content = await generate_project_context(request.repo_root, _client)
+        content = await generate_project_context(
+            request.repo_root,
+            llm_client,
+            worker_client=worker_llm_client,
+            request_client=request_llm_client,
+        )
         path = write_project_context(request.repo_root, content)
         return GenerateProjectContextResponse(path=path, chars=len(content))
     except ImportError as exc:
@@ -336,9 +340,11 @@ def _sse_generation_response(
                         write_project_context,
                     )
                     content = await generate_project_context(
-                        repo_root, _client,
+                        repo_root, llm_client,
                         thinking_callback=thinking_cb,
                         progress_callback=progress_cb,
+                        worker_client=worker_llm_client,
+                        request_client=request_llm_client,
                     )
                     path = write_project_context(repo_root, content)
                     await queue.put({

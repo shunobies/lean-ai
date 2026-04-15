@@ -113,6 +113,7 @@ Rules:
 _PARALLEL_EXPANSION_PROMPT = _ADDITIVE_EXPANSION_PROMPT  # kept for back-compat
 
 
+# Legacy prompt — kept for backward compatibility but unused by the 3-step pipeline.
 _SINGLE_FILE_UPDATE_PROMPT = """\
 You are updating an existing project context document.
 
@@ -178,6 +179,86 @@ Do not output any text before or after the markdown.\
 
 
 # ---------------------------------------------------------------------------
+# 3-Step pipeline prompts
+# ---------------------------------------------------------------------------
+
+_EXTRACTION_PROMPT = """\
+Extract all notable facts from the source files below.
+
+Organize findings under these section headings:
+- ## Architecture Overview
+- ## Module Map
+- ## Key Abstractions
+- ## API Surface
+- ## Integration Points
+- ## Data Flow
+- ## Conventions
+
+Rules:
+- Use EXACT names that appear in the source files. Do not invent or generalize.
+- Include the file path for every entry.
+- Extract everything potentially relevant — do not filter or deduplicate.
+- If a file has nothing notable, skip it entirely.
+- Output markdown only, no commentary or reasoning.
+
+What to extract per section:
+- Architecture Overview: entry points, frameworks, architectural patterns.
+- Module Map: module/file purpose, what each file is responsible for.
+- Key Abstractions: class names, important functions, methods, constants, \
+type aliases.
+- API Surface: routes, handlers, request/response models, CLI commands, \
+public interfaces.
+- Integration Points: external services, databases, queues, SDKs, env vars, \
+third-party calls.
+- Data Flow: producer/consumer relationships, data transformations.
+- Conventions: naming patterns, registry usage, inheritance, decorators, \
+folder conventions.
+
+Format:
+## <heading>
+- `<exact symbol or module>` — <concise fact> (`<file path>`)
+
+Do not output any heading with zero facts.
+Do not output any text before or after the markdown.\
+"""
+
+_DEDUPLICATION_PROMPT = """\
+Merge raw extractions into a project context document.
+
+You are given:
+1. SKELETON — the structural base document with metadata (file tree, class \
+index, import graph).
+2. RAW EXTRACTIONS — bullet points extracted from source files in batches.
+
+Your task: produce a single, clean project context document.
+
+Rules:
+- Remove exact duplicate entries (same file path + same fact).
+- Merge entries about the same symbol into a single, richer entry.
+- Place entries under the correct existing ## heading from the skeleton.
+- Do NOT invent new information — only use what is in the extractions.
+- Do NOT remove metadata entries from the skeleton (file tree, class index, \
+import graph, API endpoints).
+- Preserve the markdown heading order from the skeleton.
+- Return the complete merged document.\
+"""
+
+_CONDENSATION_PROMPT = """\
+Condense this project context document to essential architectural knowledge.
+
+Rules:
+- Keep: architecture patterns, module purposes, key abstractions, API \
+endpoints, integration points, data flow, conventions.
+- Remove: redundant entries, overly verbose descriptions, implementation \
+details not useful for understanding the system at an architectural level.
+- Preserve exact symbol names and file paths — do not rename anything.
+- Preserve the existing markdown structure and heading order.
+- Target document size: under {target_words} words.
+- Return the complete condensed document.\
+"""
+
+
+# ---------------------------------------------------------------------------
 # Fixed token overhead for the per-file update LLM calls
 # ---------------------------------------------------------------------------
 
@@ -191,11 +272,38 @@ _CONTEXT_GENERATION_CAP_TOKENS: int = 65536
 calculations.  Prevents oversized single-pass prompts on large-context models
 (e.g. 256k) by keeping generation input within a manageable size."""
 
-# 70% of the capped context window, used as the threshold for switching
-# to headings-only mode during iterative file-by-file generation.
+# Legacy: used by the old file-by-file loop (kept for backward compat).
 _ITERATIVE_INPUT_BUDGET_CHARS: int = int(
     int(_CONTEXT_GENERATION_CAP_TOKENS * 0.70) * 3.3
 )
+
+# ---------------------------------------------------------------------------
+# 3-Step pipeline budget constants
+# ---------------------------------------------------------------------------
+
+# Chars reserved for the extraction system prompt + output tokens per batch.
+_EXTRACTION_OVERHEAD_CHARS: int = int(len(_EXTRACTION_PROMPT) / 4.2 * 1.2 * 3.3)
+
+# Condensation target: cap at 6000 words, scale down for smaller windows.
+CONDENSATION_MAX_WORDS: int = 6000
+
+
+def _extraction_batch_budget(context_window: int, max_output_tokens: int) -> int:
+    """Max source-file chars that fit in a single extraction batch.
+
+    Leaves room for the system prompt and the LLM's output tokens.
+    """
+    effective = min(context_window, _CONTEXT_GENERATION_CAP_TOKENS)
+    input_tokens = max(0, effective - max_output_tokens) * 0.70
+    input_chars = int(input_tokens * 3.3)
+    return max(5000, input_chars - _EXTRACTION_OVERHEAD_CHARS)
+
+
+def _dedup_input_budget(context_window: int, max_output_tokens: int) -> int:
+    """Max combined (skeleton + extractions) chars for a dedup pass."""
+    effective = min(context_window, _CONTEXT_GENERATION_CAP_TOKENS)
+    input_tokens = max(0, effective - max_output_tokens) * 0.70
+    return max(10000, int(input_tokens * 3.3))
 
 
 def _scale_generation_caps(context_window: int, max_output_tokens: int) -> dict[str, int]:

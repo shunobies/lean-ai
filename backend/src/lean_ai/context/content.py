@@ -341,3 +341,81 @@ def build_single_file_headings_prompt(
     )
 
 
+# ---------------------------------------------------------------------------
+# 3-Step pipeline helpers
+# ---------------------------------------------------------------------------
+
+
+def batch_files_by_directory(
+    candidates: list[tuple[str, str]],
+    max_batch_chars: int,
+) -> list[list[tuple[str, str]]]:
+    """Group files into batches, preferring same-directory grouping.
+
+    Strategy:
+    1. Group candidates by parent directory.
+    2. Within each directory group, add files to the current batch
+       until *max_batch_chars* is reached.
+    3. If a single file exceeds *max_batch_chars*, it gets its own batch.
+    4. Within directory groups, fan-in order is preserved (caller sorts).
+    """
+    dir_groups: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for path, content in candidates:
+        parent = str(Path(path).parent).replace("\\", "/")
+        dir_groups[parent].append((path, content))
+
+    batches: list[list[tuple[str, str]]] = []
+    current_batch: list[tuple[str, str]] = []
+    current_chars = 0
+
+    for dir_name in sorted(dir_groups):
+        for path, content in dir_groups[dir_name]:
+            file_chars = len(content)
+            if current_chars + file_chars > max_batch_chars and current_batch:
+                batches.append(current_batch)
+                current_batch = []
+                current_chars = 0
+            current_batch.append((path, content))
+            current_chars += file_chars
+
+    if current_batch:
+        batches.append(current_batch)
+
+    return batches
+
+
+def build_extraction_user_prompt(
+    file_batch: list[tuple[str, str]],
+) -> str:
+    """Format source files for a Step 1 extraction batch."""
+    parts: list[str] = ["=== SOURCE FILES ==="]
+    for path, content in file_batch:
+        parts.append(f"--- {path} ---\n```\n{content}\n```")
+    return "\n\n".join(parts)
+
+
+def build_dedup_user_prompt(
+    skeleton: str,
+    raw_extractions: str,
+) -> str:
+    """Format skeleton + raw extractions for Step 2 deduplication."""
+    return (
+        "=== SKELETON ===\n"
+        f"{skeleton}\n\n"
+        "=== RAW EXTRACTIONS ===\n"
+        f"{raw_extractions}"
+    )
+
+
+def build_condensation_user_prompt(
+    document: str,
+    target_words: int,
+) -> str:
+    """Format document for Step 3 condensation."""
+    return (
+        f"Target: under {target_words} words.\n\n"
+        "=== DOCUMENT ===\n"
+        f"{document}"
+    )
+
+
