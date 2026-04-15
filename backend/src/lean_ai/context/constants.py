@@ -110,31 +110,7 @@ Rules:
 """
 
 
-_PARALLEL_EXPANSION_PROMPT = """\
-Analyze these source files and extract NEW information to add to an existing \
-project context document.
-
-You are given:
-1. SECTION HEADINGS — the existing ## headings in the document
-2. SOURCE FILES — source files not yet covered in the document
-
-Your task: identify new classes, functions, endpoints, data flows, conventions, \
-and relationships from the source files and output ONLY the new entries, \
-organized under the correct existing ## headings.
-
-Rules:
-- Output ONLY new entries — do not repeat or summarize existing content.
-- Each entry must go under one of the existing ## headings listed above.
-- Use the heading text EXACTLY as given (e.g., "## Module Map", "## Key Abstractions").
-- Skip any heading for which the source files add nothing new.
-- Use EXACT class names, function names, and file paths from the source files.
-- Do not invent or generalize names not visible in the provided data.
-- Keep entries concise: one line per class/function, a short paragraph per module.
-- If a file reveals a new module, place it under ## Module Map.
-- If a file reveals new classes/functions, place them under ## Key Abstractions.
-- If a file reveals new API endpoints, place them under ## API Surface.
-- If a file reveals new integration points, place them under ## Integration Points.\
-"""
+_PARALLEL_EXPANSION_PROMPT = _ADDITIVE_EXPANSION_PROMPT  # kept for back-compat
 
 
 _SKELETON_GENERATION_SYSTEM_PROMPT = """\
@@ -180,22 +156,66 @@ URL path, and handler function name.\
 
 
 _SINGLE_FILE_UPDATE_PROMPT = """\
-This is a single-file update round. You are given:
-1. EXISTING DOCUMENT — the project context document built so far
-2. SOURCE FILE — one source file not yet analyzed in the document
+You are updating an existing project context document.
 
-Your task: update the existing document by incorporating any new information \
-from this source file under the proper existing headings. Return the complete \
-updated document.
+Task:
+Extract ONLY net-new facts from ONE source file and map them to EXISTING \
+section headings.
 
-Rules:
-- Do NOT remove or rephrase existing content — only add or refine entries.
-- Place new findings under the correct existing ## headings.
-- Use EXACT class names, function names, and file paths from the source file.
-- Do not invent or generalize names not visible in the provided data.
-- Keep the same Markdown structure and heading order.
-- If the file adds nothing new to a section, leave that section unchanged.
-- Keep the total document under 6000 words.\
+Inputs:
+1. EXISTING_SECTION_HEADINGS
+2. EXISTING_CONTEXT_TEXT (may be omitted when document is large)
+3. SOURCE_FILE_PATH
+4. SOURCE_FILE_CONTENT
+
+Goal:
+Return only facts from SOURCE_FILE_CONTENT that are not already present \
+in EXISTING_CONTEXT_TEXT.
+
+Hard rules:
+- Do NOT think out loud.
+- Do NOT explain your reasoning.
+- Do NOT say things like "I checked", "it seems", "I will add", or "wait".
+- Do NOT repeat existing facts already present in EXISTING_CONTEXT_TEXT.
+- Do NOT invent names, roles, relationships, or behavior.
+- Use only names that appear exactly in SOURCE_FILE_CONTENT.
+- Every entry must include the exact file path.
+- If nothing new is found, output exactly: NO_NEW_INFO
+
+Allowed section targets:
+- ## Architecture Overview
+- ## Module Map
+- ## Key Abstractions
+- ## API Surface
+- ## Integration Points
+- ## Data Flow
+- ## Conventions
+
+Extraction rules:
+- ## Architecture Overview: new entry points, frameworks, or architectural \
+patterns not already documented.
+- ## Module Map: new module/file purpose only if not already covered.
+- ## Key Abstractions: exact class names, functions, methods, constants, \
+type aliases.
+- ## API Surface: exact routes, handlers, request/response models, CLI \
+commands, public interfaces.
+- ## Integration Points: external services, databases, queues, filesystems, \
+SDKs, env vars, third-party calls.
+- ## Data Flow: explicit producer/consumer relationships and transformations \
+visible in code.
+- ## Conventions: naming patterns, registry usage, inheritance patterns, \
+decorators, folder conventions clearly shown in code.
+
+Output format:
+Return markdown only.
+
+For each section with new facts:
+## <exact heading>
+- `<exact symbol or module>` — <concise fact grounded in source file> \
+(`<file path>`)
+
+Do not output any heading with zero new facts.
+Do not output any text before or after the markdown.\
 """
 
 

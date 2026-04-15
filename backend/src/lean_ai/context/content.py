@@ -194,24 +194,24 @@ def build_skeleton_generation_prompt(
 
 def build_single_file_update_prompt(
     existing_doc: str,
+    section_headings: list[str],
     file_path: str,
     file_content: str,
 ) -> str:
     """Build the user prompt for a single-file update round.
 
-    Sends the full existing document + one source file so the LLM can
-    see all current content and avoid duplicates.  The LLM returns the
-    complete updated document.
+    Sends section headings + full existing document + one source file.
+    The LLM returns ONLY net-new additions organized by heading
+    (merged back programmatically).
     """
+    headings_list = "\n".join(f"- {h}" for h in section_headings)
     return (
-        "=== EXISTING DOCUMENT ===\n"
+        "=== EXISTING SECTION HEADINGS ===\n"
+        f"{headings_list}\n\n"
+        "=== EXISTING CONTEXT TEXT ===\n"
         f"{existing_doc}\n\n"
         f"=== SOURCE FILE: {file_path} ===\n"
-        f"```\n{file_content}\n```\n\n"
-        "Update the existing document by incorporating any new "
-        "information from this source file. Return the complete "
-        "updated document. ONLY reference names visible in the "
-        "source file provided."
+        f"```\n{file_content}\n```"
     )
 
 
@@ -224,19 +224,15 @@ def build_single_file_headings_prompt(
 
     Used when the existing document is too large to fit in the context
     budget alongside the source file.  Sends only the section headings
-    instead of the full document.  The LLM returns ONLY new entries
+    (no document text).  The LLM returns ONLY net-new additions
     organized by heading (merged back programmatically).
     """
     headings_list = "\n".join(f"- {h}" for h in section_headings)
     return (
-        "=== EXISTING DOCUMENT HEADINGS ===\n"
+        "=== EXISTING SECTION HEADINGS ===\n"
         f"{headings_list}\n\n"
         f"=== SOURCE FILE: {file_path} ===\n"
-        f"```\n{file_content}\n```\n\n"
-        "Extract new entries from this source file and place each "
-        "entry under the correct heading. Output ONLY the new entries, "
-        "organized by heading. Skip headings where the file adds "
-        "nothing new."
+        f"```\n{file_content}\n```"
     )
 
 

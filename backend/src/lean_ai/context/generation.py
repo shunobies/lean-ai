@@ -18,7 +18,6 @@ from .constants import (
     _ADDITIVE_EXPANSION_PROMPT,
     _ITERATIVE_INPUT_BUDGET_CHARS,
     _MAX_FILE_CHARS,
-    _PARALLEL_EXPANSION_PROMPT,
     _SINGLE_FILE_UPDATE_PROMPT,
     _SKELETON_GENERATION_SYSTEM_PROMPT,
     _scale_generation_caps,
@@ -182,63 +181,37 @@ async def generate_project_context(
         )
 
         try:
+            headings = extract_section_headings(content)
+
             if use_headings_only:
-                # Headings-only mode: send section headings + file,
-                # LLM returns only new entries, merge programmatically.
-                headings = extract_section_headings(content)
+                # Headings-only: send headings + file (no document text).
                 user_msg = build_single_file_headings_prompt(
                     headings, file_path, file_content,
                 )
-                msgs = [
-                    {
-                        "role": "system",
-                        "content": _PARALLEL_EXPANSION_PROMPT,
-                    },
-                    {"role": "user", "content": user_msg},
-                ]
-                additions = await llm_client.chat_raw(
-                    messages=msgs,
-                    max_tokens=max_out,
-                    thinking_callback=thinking_callback,
-                )
-                additions = _truncate_repetition(additions)
-                if additions.strip():
-                    content = _merge_additions_into_doc(
-                        content, [additions],
-                    )
             else:
-                # Full-doc mode: send entire document + file,
-                # LLM returns complete updated document.
+                # Full mode: send headings + document text + file.
                 user_msg = build_single_file_update_prompt(
-                    content, file_path, file_content,
+                    content, headings, file_path, file_content,
                 )
-                msgs = [
-                    {
-                        "role": "system",
-                        "content": _SINGLE_FILE_UPDATE_PROMPT,
-                    },
-                    {"role": "user", "content": user_msg},
-                ]
-                updated = await llm_client.chat_raw(
-                    messages=msgs,
-                    max_tokens=max_out,
-                    thinking_callback=thinking_callback,
-                )
-                updated = _truncate_repetition(updated)
 
-                # Validate: output must be >= 70% of current doc length.
-                if (
-                    updated.strip()
-                    and len(updated) >= len(content) * 0.7
-                ):
-                    content = updated
-                else:
-                    logger.warning(
-                        "File %d/%d: output too short (%d vs %d), "
-                        "keeping current document",
-                        file_num, total_files,
-                        len(updated), len(content),
-                    )
+            msgs = [
+                {"role": "system", "content": _SINGLE_FILE_UPDATE_PROMPT},
+                {"role": "user", "content": user_msg},
+            ]
+            additions = await llm_client.chat_raw(
+                messages=msgs,
+                max_tokens=max_out,
+                thinking_callback=thinking_callback,
+            )
+            additions = _truncate_repetition(additions)
+
+            if (
+                additions.strip()
+                and "NO_NEW_INFO" not in additions
+            ):
+                content = _merge_additions_into_doc(
+                    content, [additions],
+                )
         except Exception as exc:
             logger.warning(
                 "File %d/%d (%s) failed (non-fatal): %s",
