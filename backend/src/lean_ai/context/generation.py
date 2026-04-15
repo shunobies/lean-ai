@@ -19,15 +19,14 @@ from .constants import (
     _ITERATIVE_INPUT_BUDGET_CHARS,
     _MAX_FILE_CHARS,
     _SINGLE_FILE_UPDATE_PROMPT,
-    _SKELETON_GENERATION_SYSTEM_PROMPT,
     _scale_generation_caps,
 )
 from .content import (
     _collect_all_ranked_candidates,
     build_additive_expansion_prompt,
+    build_deterministic_skeleton,
     build_single_file_headings_prompt,
     build_single_file_update_prompt,
-    build_skeleton_generation_prompt,
     extract_section_headings,
 )
 from .expansion import _merge_additions_into_doc
@@ -87,34 +86,17 @@ async def generate_project_context(
     caps = _scale_generation_caps(settings.ollama_context_window, max_out)
     max_file = caps.get("max_file_chars", _MAX_FILE_CHARS)
 
-    # ── Phase 1: skeleton from structural metadata ──────────────────
+    # ── Phase 1: deterministic skeleton (no LLM call) ────────────────
     await _emit_progress(
         progress_callback,
         phase="skeleton",
-        message="Generating structural skeleton...",
+        message="Building structural skeleton...",
         current=0,
         total=0,
         chars=0,
     )
 
-    skeleton_prompt = build_skeleton_generation_prompt(
-        repo_root, section_caps=caps,
-    )
-    messages = [
-        {"role": "system", "content": _SKELETON_GENERATION_SYSTEM_PROMPT},
-        {"role": "user", "content": skeleton_prompt},
-    ]
-
-    content = await llm_client.chat_raw(
-        messages=messages,
-        max_tokens=max_out,
-        thinking_callback=thinking_callback,
-    )
-    content = _truncate_repetition(content)
-
-    if not content.strip():
-        logger.warning("Skeleton generation produced empty output")
-        content = "# Project Context\n\n(skeleton generation failed)\n"
+    content = build_deterministic_skeleton(repo_root, section_caps=caps)
 
     # Checkpoint: write skeleton to disk immediately.
     write_project_context(repo_root, content)

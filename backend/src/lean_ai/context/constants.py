@@ -113,48 +113,6 @@ Rules:
 _PARALLEL_EXPANSION_PROMPT = _ADDITIVE_EXPANSION_PROMPT  # kept for back-compat
 
 
-_SKELETON_GENERATION_SYSTEM_PROMPT = """\
-Produce a structural overview document for this codebase using the provided \
-metadata (file tree, class/function index, import graph, API endpoints). \
-Use only names visible in the data — do not invent names or relationships. \
-Source file contents will be added in later passes; keep descriptions brief.
-
-If a section has no relevant data, write the heading then "No data extracted yet."
-
-Output the document in Markdown with these sections:
-
-# Project Context
-
-## Architecture Overview
-One paragraph: what this project does, its high-level architecture, entry \
-points, and frameworks visible in the data.
-
-## Module Map
-For each major directory in the file tree: its responsibility, key files, \
-and class/function names from the index.
-
-## Key Abstractions
-Classes and important functions from the CLASS AND FUNCTION INDEX. \
-For each: file path, likely responsibility, and interactions from the import graph.
-
-## Data Flow
-How data flows through the system based on the import graph. Use numbered \
-steps with actual names. Mark inferred connections with "(inferred)".
-
-## Conventions
-Naming patterns, project structure conventions, and configuration approach \
-observed in the file tree and index.
-
-## Integration Points
-How modules connect at the directory level based on the import graph. \
-Group by source directory → target directory.
-
-## API Surface
-REST and WebSocket endpoints from the API ENDPOINTS data: HTTP method, \
-URL path, and handler function name.\
-"""
-
-
 _SINGLE_FILE_UPDATE_PROMPT = """\
 You are updating an existing project context document.
 
@@ -220,21 +178,11 @@ Do not output any text before or after the markdown.\
 
 
 # ---------------------------------------------------------------------------
-# Fixed token overhead for the skeleton generation LLM call
+# Fixed token overhead for the per-file update LLM calls
 # ---------------------------------------------------------------------------
 
-_SKELETON_PROMPT_WRAPPER_CHARS: int = len(
-    "=== FILE TREE ===\n\n\n"
-    "=== CLASS AND FUNCTION INDEX ===\n\n\n"
-    "=== IMPORT GRAPH ===\n\n\n"
-    "=== API ENDPOINTS ===\n\n\n"
-    "Write the structural overview document using only the data above."
-)
-
 _GENERATION_FIXED_OVERHEAD_TOKENS: int = int(
-    (len(_SKELETON_GENERATION_SYSTEM_PROMPT) + _SKELETON_PROMPT_WRAPPER_CHARS)
-    / 4.2
-    * 1.2
+    len(_SINGLE_FILE_UPDATE_PROMPT) / 4.2 * 1.2
 )
 
 

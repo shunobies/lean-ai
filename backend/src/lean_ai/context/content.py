@@ -13,6 +13,8 @@ from .constants import (
     _MAX_FILE_CHARS,
     _MAX_IMPORT_GRAPH_CHARS,
     _MAX_INDEX_CHARS,
+    _get_entry_points,
+    _get_key_files,
     _get_source_exts,
 )
 from .metadata import _is_test_file, extract_metadata_cached
@@ -190,6 +192,160 @@ def build_skeleton_generation_prompt(
         f"{api_endpoints}\n\n"
         "Write the structural overview document using only the data above."
     )
+
+
+def build_deterministic_skeleton(
+    repo_root: str,
+    section_caps: dict[str, int] | None = None,
+) -> str:
+    """Build a project context skeleton deterministically — no LLM call.
+
+    Produces a Markdown document from tree-sitter metadata (class/function
+    index, import graph, file tree) with all structural data pre-populated.
+    Narrative sections (Architecture Overview, Data Flow, Conventions) are
+    left as placeholders for Phase 2 file-by-file enrichment.
+    """
+    caps = section_caps or {
+        "index": _MAX_INDEX_CHARS,
+        "import_graph": _MAX_IMPORT_GRAPH_CHARS,
+    }
+
+    try:
+        from lean_ai.indexer.tree import list_repo_tree
+        entries = list_repo_tree(repo_root)
+    except Exception:
+        entries = None
+
+    metadata = extract_metadata_cached(repo_root, entries=entries)
+
+    # ── Detect entry points and key files ──
+    entry_points = _get_entry_points()
+    key_file_names = set(_get_key_files())
+    found_entry_points: list[str] = []
+    found_key_files: list[str] = []
+    all_file_paths: set[str] = set()
+    if entries:
+        for entry in entries:
+            norm = entry.path.replace("\\", "/")
+            all_file_paths.add(norm)
+            name = Path(norm).name
+            if name in entry_points:
+                found_entry_points.append(norm)
+            if name in key_file_names:
+                found_key_files.append(norm)
+
+    sections: list[str] = ["# Project Context\n"]
+
+    # ── Architecture Overview (placeholder with entry points) ──
+    arch_lines = ["## Architecture Overview\n"]
+    if found_entry_points:
+        arch_lines.append(
+            "Entry points: "
+            + ", ".join(f"`{p}`" for p in sorted(found_entry_points))
+        )
+    if found_key_files:
+        arch_lines.append(
+            "Key files: "
+            + ", ".join(f"`{p}`" for p in sorted(found_key_files))
+        )
+    if not found_entry_points and not found_key_files:
+        arch_lines.append("No data extracted yet.")
+    sections.append("\n".join(arch_lines))
+
+    # ── Module Map (directories with files + defs) ──
+    module_lines = ["## Module Map\n"]
+    dir_files: dict[str, list[tuple[str, list[str]]]] = defaultdict(list)
+    for fpath in sorted(metadata.files):
+        parent = str(Path(fpath).parent).replace("\\", "/")
+        if parent == ".":
+            parent = "(root)"
+        defs = metadata.files[fpath].class_function_defs
+        dir_files[parent].append((Path(fpath).name, defs))
+
+    max_index = caps.get("index", _MAX_INDEX_CHARS)
+    total_chars = 0
+    for dir_name in sorted(dir_files):
+        dir_block = [f"### {dir_name}/"]
+        for filename, defs in dir_files[dir_name]:
+            if defs:
+                # Show up to 5 defs per file to keep it compact.
+                shown = defs[:5]
+                suffix = f", ... +{len(defs) - 5} more" if len(defs) > 5 else ""
+                dir_block.append(
+                    f"- `{filename}` — {', '.join(f'`{d}`' for d in shown)}{suffix}"
+                )
+            else:
+                dir_block.append(f"- `{filename}`")
+        block_text = "\n".join(dir_block)
+        total_chars += len(block_text)
+        if total_chars > max_index:
+            module_lines.append("... (truncated)")
+            break
+        module_lines.append(block_text)
+
+    if len(module_lines) == 1:
+        module_lines.append("No data extracted yet.")
+    sections.append("\n\n".join(module_lines))
+
+    # ── Key Abstractions (classes sorted by fan-in) ──
+    abs_lines = ["## Key Abstractions\n"]
+    class_entries: list[tuple[str, str, int]] = []
+    for fpath, fmeta in metadata.files.items():
+        fan = metadata.fan_in.get(fpath, 0)
+        for defn in fmeta.class_function_defs:
+            if defn.startswith("class "):
+                class_entries.append((defn, fpath, fan))
+    class_entries.sort(key=lambda x: (-x[2], x[0]))
+    for defn, fpath, fan in class_entries[:50]:
+        fan_note = f" — fan-in: {fan}" if fan > 0 else ""
+        abs_lines.append(f"- `{defn}` (`{fpath}`){fan_note}")
+    if len(abs_lines) == 1:
+        abs_lines.append("No data extracted yet.")
+    sections.append("\n".join(abs_lines))
+
+    # ── Data Flow (placeholder) ──
+    sections.append("## Data Flow\n\nNo data extracted yet.")
+
+    # ── Conventions (placeholder) ──
+    sections.append("## Conventions\n\nNo data extracted yet.")
+
+    # ── Integration Points (directory-level import summary) ──
+    int_lines = ["## Integration Points\n"]
+    dir_imports: dict[str, set[str]] = defaultdict(set)
+    max_graph = caps.get("import_graph", _MAX_IMPORT_GRAPH_CHARS)
+    for fpath, fmeta in metadata.files.items():
+        src_dir = str(Path(fpath).parent).replace("\\", "/")
+        for imp in fmeta.imports:
+            # Extract the top-level module from the import statement.
+            parts = imp.strip().split(".")
+            target = parts[0].strip()
+            if target and target != src_dir:
+                dir_imports[src_dir].add(target)
+
+    graph_chars = 0
+    for src_dir in sorted(dir_imports):
+        targets = sorted(dir_imports[src_dir])
+        if targets:
+            line = f"- `{src_dir}/` → {', '.join(f'`{t}`' for t in targets)}"
+            graph_chars += len(line)
+            if graph_chars > max_graph:
+                int_lines.append("... (truncated)")
+                break
+            int_lines.append(line)
+    if len(int_lines) == 1:
+        int_lines.append("No data extracted yet.")
+    sections.append("\n".join(int_lines))
+
+    # ── API Surface ──
+    api_text = metadata.format_api_endpoints(
+        max_chars=caps.get("api_endpoints", 8000),
+    )
+    if api_text and "(no API endpoints found)" not in api_text:
+        sections.append(f"## API Surface\n\n{api_text}")
+    else:
+        sections.append("## API Surface\n\nNo data extracted yet.")
+
+    return "\n\n".join(sections) + "\n"
 
 
 def build_single_file_update_prompt(
