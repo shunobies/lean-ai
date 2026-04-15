@@ -291,11 +291,10 @@ class LLMClient:
         Returns ``(True, model_name)`` on success,
         ``(False, reason)`` on failure.
 
-        Uses a test embed call rather than model listing to avoid
-        SDK response format mismatches.  The first call may trigger a
-        cold model load, so a generous 600 s timeout is used here (the
-        regular per-batch timeout of 120 s applies to subsequent calls
-        when the model is already warm).
+        First verifies the model exists via ``ollama show`` (instant,
+        no loading).  Then sends a single test embed call which may
+        trigger a cold model load into VRAM — this can take minutes
+        for large models but Ollama handles it naturally.
         """
         if not settings.enable_embeddings:
             return False, "Embeddings disabled (LEAN_AI_ENABLE_EMBEDDINGS=false)"
@@ -304,10 +303,19 @@ class LLMClient:
         embed_model = settings.embedding_model
         if not embed_model:
             return False, "No embedding model configured (LEAN_AI_EMBEDDING_MODEL)"
+
+        # Quick existence check — show() returns model info without loading.
         try:
-            result = await self._ollama.embed(
-                ["test"], model=embed_model, timeout=600.0,
+            await self._ollama._embed_client.show(name=embed_model)
+        except Exception as exc:
+            return False, (
+                f"Embedding model '{embed_model}' not found in Ollama: {exc}"
             )
+
+        # Warm-up call — triggers cold model load if needed.
+        try:
+            logger.info("Warming up embedding model '%s'…", embed_model)
+            result = await self._ollama.embed(["test"], model=embed_model)
             if result:
                 return True, embed_model
             return False, f"Embedding model '{embed_model}' returned empty result"

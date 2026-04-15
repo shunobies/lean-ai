@@ -578,37 +578,58 @@ class OllamaProvider(LLMProvider):
         self,
         texts: list[str],
         model: str | None = None,
-        timeout: float = 120.0,
         max_retries: int = 2,
     ) -> list[list[float]]:
         """Generate embeddings for a batch of texts.
 
-        Retries on transient errors with exponential backoff and enforces
-        a per-call timeout to prevent indefinite hangs.
+        Retries on *transient* errors (429 rate-limit, 500/502 server
+        errors, connection resets) with exponential backoff.  Permanent
+        errors (400 bad request, 404 model not found) are raised
+        immediately — retrying would not help.
+
+        No application-level timeout is applied:
+
+        - Ollama queues concurrent requests internally, so a busy model
+          is not a failure — the ``await`` naturally waits.
+        - If Ollama crashes, httpx raises ``ConnectionError`` immediately.
+        - Large batches can legitimately take minutes; a fixed timeout
+          would kill valid work.
         """
         import asyncio
 
+        from ollama import ResponseError
+
         embed_model = model or settings.embedding_model
+
+        # HTTP codes that are permanent — retrying won't help.
+        permanent_codes = {400, 404}
+
         for attempt in range(1, max_retries + 1):
             try:
-                response = await asyncio.wait_for(
-                    self._embed_client.embed(model=embed_model, input=texts),
-                    timeout=timeout,
+                response = await self._embed_client.embed(
+                    model=embed_model, input=texts,
                 )
                 return response.get("embeddings", [])
-            except asyncio.TimeoutError:
+            except ResponseError as exc:
+                if exc.status_code in permanent_codes:
+                    raise  # bad request / model not found — don't retry
+                # Retryable: 429 (rate limit), 500/502 (server error),
+                # -1 (inline streaming error like model crash or GPU OOM).
                 if attempt < max_retries:
                     logger.warning(
-                        "Embed call timed out (attempt %d/%d, %d texts), retrying…",
-                        attempt, max_retries, len(texts),
+                        "Embed call failed (status=%d, attempt %d/%d, "
+                        "%d texts): %s — retrying…",
+                        exc.status_code, attempt, max_retries,
+                        len(texts), exc.error,
                     )
                     await asyncio.sleep(2.0 * attempt)
                 else:
                     raise
-            except Exception:
+            except ConnectionError:
                 if attempt < max_retries:
                     logger.warning(
-                        "Embed call failed (attempt %d/%d, %d texts), retrying…",
+                        "Embed connection lost (attempt %d/%d, %d texts), "
+                        "retrying…",
                         attempt, max_retries, len(texts),
                     )
                     await asyncio.sleep(2.0 * attempt)
