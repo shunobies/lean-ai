@@ -119,20 +119,19 @@ async def _download_file(url: str, dest: str) -> None:
     logger.info("TTS: downloading %s -> %s", url, dest)
     async with httpx.AsyncClient(
         follow_redirects=True, timeout=300.0,
-    ) as client:
-        async with client.stream("GET", url) as response:
-            response.raise_for_status()
-            total = int(response.headers.get("content-length", 0))
-            downloaded = 0
-            with open(tmp, "wb") as f:
-                async for chunk in response.aiter_bytes(chunk_size=65536):
-                    f.write(chunk)
-                    downloaded += len(chunk)
-            if total and downloaded != total:
-                os.unlink(tmp)
-                raise RuntimeError(
-                    f"Incomplete download: {downloaded}/{total} bytes",
-                )
+    ) as client, client.stream("GET", url) as response:
+        response.raise_for_status()
+        total = int(response.headers.get("content-length", 0))
+        downloaded = 0
+        with open(tmp, "wb") as f:
+            async for chunk in response.aiter_bytes(chunk_size=65536):
+                f.write(chunk)
+                downloaded += len(chunk)
+        if total and downloaded != total:
+            os.unlink(tmp)
+            raise RuntimeError(
+                f"Incomplete download: {downloaded}/{total} bytes",
+            )
     os.rename(tmp, dest)
     logger.info(
         "TTS: downloaded %s (%d bytes)",

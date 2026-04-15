@@ -229,10 +229,11 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                 log_content: str,
                                 tool_name: str | None = None,
                                 tool_args: str | None = None,
+                                _db=db,
                             ) -> None:
                                 try:
                                     await log_conversation_entry(
-                                        db, session_id, role, log_content,
+                                        _db, session_id, role, log_content,
                                         tool_name=tool_name, tool_args=tool_args,
                                     )
                                 except Exception:
@@ -404,10 +405,11 @@ async def session_stream(websocket: WebSocket, session_id: str):
                             log_content: str,
                             tool_name: str | None = None,
                             tool_args: str | None = None,
+                            _db=db,
                         ) -> None:
                             try:
                                 await log_conversation_entry(
-                                    db, session_id, role, log_content,
+                                    _db, session_id, role, log_content,
                                     tool_name=tool_name, tool_args=tool_args,
                                 )
                             except Exception:

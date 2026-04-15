@@ -198,9 +198,10 @@ def build_step_user_message(
             + " " + (step.context or "")
             + " " + (step.file_path or "")
         )
-        for path, content in step_artifacts.items():
-            if path in searchable:
-                relevant[path] = content
+        relevant.update({
+            path: content for path, content in step_artifacts.items()
+            if path in searchable
+        })
 
         # Also include last 3 created files as fallback (catches
         # implicit dependencies like model ↔ migration)

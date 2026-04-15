@@ -113,6 +113,7 @@ async def retry_with_backoff(
                 label, attempt + 1, max_retries + 1, delay, exc,
             )
             await asyncio.sleep(delay)
+    return None  # unreachable — loop always returns or raises
 
 
 class LLMProvider(ABC):

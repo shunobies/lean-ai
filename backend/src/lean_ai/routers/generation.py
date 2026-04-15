@@ -238,15 +238,15 @@ async def generate_project_context_endpoint(request: GenerateProjectContextReque
         content = await generate_project_context(request.repo_root, _client)
         path = write_project_context(request.repo_root, content)
         return GenerateProjectContextResponse(path=path, chars=len(content))
-    except ImportError:
+    except ImportError as exc:
         raise HTTPException(
             status_code=501,
             detail="Context generation module not yet available",
-        )
+        ) from exc
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @generation_router.post("/generate-style-guide", response_model=GenerateStyleGuideResponse)
@@ -283,7 +283,7 @@ async def generate_style_guide_endpoint(request: GenerateStyleGuideRequest):
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------

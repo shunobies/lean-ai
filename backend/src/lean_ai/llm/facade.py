@@ -413,8 +413,11 @@ class LLMClient:
             _think_cb = on_thinking if stream_content and on_thinking else None
             _streamed_content: list[str] = []
 
-            async def _stream_wrapper(token: str) -> None:
-                _streamed_content.append(token)
+            async def _stream_wrapper(
+                token: str,
+                _buf: list[str] = _streamed_content,
+            ) -> None:
+                _buf.append(token)
                 if on_content:
                     await on_content(token)
 
@@ -569,7 +572,7 @@ class LLMClient:
                     "chat_with_tools: exiting — %s", action.exit_reason,
                 )
                 break
-            elif action.verdict == TurnVerdict.REFRESH:
+            if action.verdict == TurnVerdict.REFRESH:
                 refreshed = await self._maybe_refresh_context(
                     messages,
                     threshold=settings.refresh_threshold,

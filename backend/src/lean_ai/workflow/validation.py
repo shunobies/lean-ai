@@ -344,10 +344,10 @@ async def _run_validation_fix_loop(
             })
             return refreshed
 
-        def _build_validation_reminder() -> str:
+        def _build_validation_reminder(_ft=failure_text) -> str:
             parts = [
                 "REMINDER — Fix validation failures:",
-                failure_text[:500],
+                _ft[:500],
             ]
             return "\n".join(parts)
 

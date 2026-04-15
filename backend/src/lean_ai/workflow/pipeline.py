@@ -18,7 +18,7 @@ from lean_ai.llm.plan_schema import ExecutionPlan, plan_to_markdown
 from lean_ai.llm.planner import assess_clarity, create_plan
 from lean_ai.workflow.callbacks import build_workflow_callbacks
 from lean_ai.workflow.executor import execute_plan
-from lean_ai.workflow.fix_mode import _run_fix  # noqa: F401 — used by run_workflow
+from lean_ai.workflow.fix_mode import _run_fix
 from lean_ai.workflow.validation import _effective_post_commands
 from lean_ai.workflow.ws_dispatcher import WSMessageDispatcher
 from lean_ai.workflow.ws_handler import ws_send

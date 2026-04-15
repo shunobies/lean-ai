@@ -191,7 +191,7 @@ registry = PromptRegistry()
 
 # ── Default registration ──────────────────────────────────────────────
 
-def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but mechanical
+def _register_defaults(reg: PromptRegistry) -> None:
     """Register all built-in prompt defaults."""
 
     # ── Core Policy ───────────────────────────────────────────────────
@@ -235,7 +235,12 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
             "- No stubs, no TODOs, no placeholder implementations.\n"
             "- Do not add features, refactoring, or improvements beyond the task.\n"
             "- Minimal changes — only what is needed.\n"
-            "- Add a brief docstring to every new function or class you create."
+            "- Add a brief docstring to every new function or class you create.\n"
+            "- Never use mutable default arguments (lists, dicts, sets). "
+            "Use None and create inside the function.\n"
+            "- Always await async calls. Never return a bare coroutine.\n"
+            "- Never use bare except — always catch a specific exception type.\n"
+            "- Use context managers (with/async with) for files, connections, and locks."
         ),
     ))
 
@@ -487,7 +492,15 @@ def _register_defaults(reg: PromptRegistry) -> None:  # noqa: C901 — long but 
             "replicate the style\n"
             "- Include a 'reason' field explaining what behavior or requirement each "
             "test step verifies — the executor uses this to adapt when files differ "
-            "from expectations"
+            "from expectations\n\n"
+            "COMMON LLM CODE DEFECTS — design tests that catch these:\n"
+            "- Mutable default arguments (def f(items=[]) mutates across calls)\n"
+            "- Missing await on async calls (returns coroutine object instead of result)\n"
+            "- Bare except clauses that swallow errors silently\n"
+            "- Unused parameters left after refactoring\n"
+            "- Off-by-one errors in range/slice boundaries\n"
+            "- Resource leaks (files, connections opened but not closed/context-managed)\n"
+            "- Type confusion (str vs bytes, int vs str, None not handled)"
         ),
     ))
 

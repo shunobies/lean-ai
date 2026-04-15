@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 async def _run_git(args: list[str], cwd: str) -> ToolResult:
     """Run a git command and capture output."""
-    return await run_subprocess(["git"] + args, cwd, merge_stderr=False)
+    return await run_subprocess(["git", *args], cwd, merge_stderr=False)
 
 
 async def git_commit(

@@ -25,11 +25,11 @@ async def index_knowledge_endpoint(request: IndexKnowledgeRequest):
             index_knowledge,
             knowledge_index_dir,
         )
-    except ImportError:
+    except ImportError as exc:
         raise HTTPException(
             status_code=501,
             detail="Knowledge module not yet available",
-        )
+        ) from exc
 
     if request.force_reindex:
         idx_path = knowledge_index_dir(request.repo_root)

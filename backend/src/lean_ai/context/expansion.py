@@ -64,9 +64,7 @@ def _merge_additions_into_doc(base_doc: str, additions_list: list[str]) -> str:
         sections[-1] = (sections[-1][0], sections[-1][1], len(lines))
 
     # Build heading -> section end line mapping.
-    heading_end: dict[str, int] = {}
-    for heading, _start, end in sections:
-        heading_end[heading] = end
+    heading_end: dict[str, int] = {heading: end for heading, _start, end in sections}
 
     # Insert additions at the end of each matching section.
     # Process in reverse document order so line indices stay valid.

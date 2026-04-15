@@ -52,11 +52,11 @@ def _get_browser():
             from selenium import webdriver
             from selenium.webdriver.chrome.options import Options
             from selenium.webdriver.chrome.service import Service
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
                 "selenium is not installed. "
                 "Install with: pip install lean-ai[google]"
-            )
+            ) from exc
 
         options = Options()
         options.add_argument("--headless=new")

@@ -84,4 +84,21 @@ target-version = "py310"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W", "UP"]
+select = ["E", "F", "I", "N", "W", "UP", "B", "ARG", "SIM", "RUF", "PERF", "C4", "RET"]
+ignore = [
+    "ARG001",   # Unused function argument — callbacks, event handlers, protocol stubs
+    "ARG002",   # Unused method argument — ABC/interface implementations
+    "ARG004",   # Unused static method argument
+    "B905",     # zip() without strict= — lengths are guaranteed in most call sites
+    "PERF203",  # try-except in loop — sometimes necessary (e.g. schema migrations)
+    "PERF401",  # List comprehension vs for-loop append — often less readable
+    "RET504",   # Unnecessary assignment before return — sometimes clearer
+    "RET505",   # Unnecessary else after return — sometimes clearer with explicit else
+    "RUF002",   # Ambiguous unicode in docstring — intentional (en-dash, multiplication sign)
+    "RUF003",   # Ambiguous unicode in comment — intentional
+    "RUF059",   # Unused unpacked variable — common in tuple unpacking patterns
+    "SIM102",   # Nested if — sometimes more readable than combined condition
+    "SIM105",   # contextlib.suppress — try/except/pass is often clearer
+    "SIM108",   # Ternary operator — often less readable
+    "RUF006",   # Store asyncio.create_task reference — intentional fire-and-forget
+]

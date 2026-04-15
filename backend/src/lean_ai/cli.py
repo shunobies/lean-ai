@@ -164,9 +164,7 @@ def _needs_yaml_quoting(value: str) -> bool:
     if any(ch in value for ch in ":#{}[]|>&*!%@`"):
         return True
     # Looks like a boolean or null
-    if value.lower() in ("true", "false", "null", "yes", "no", "on", "off"):
-        return True
-    return False
+    return value.lower() in ("true", "false", "null", "yes", "no", "on", "off")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────

@@ -200,14 +200,14 @@ def create_role_client(
     # -- Ollama --
     if provider == "ollama" and cfg.ollama_model:
         try:
-            ollama_kw: dict = dict(
-                ollama_url=settings.ollama_url,
-                model=cfg.ollama_model,
-                max_tokens=cfg.ollama_max_tokens,
-                context_window=cfg.ollama_context_window or settings.ollama_context_window,
-                temperature=cfg.ollama_temperature,
-                enable_thinking=cfg.enable_thinking,
-            )
+            ollama_kw: dict = {
+                "ollama_url": settings.ollama_url,
+                "model": cfg.ollama_model,
+                "max_tokens": cfg.ollama_max_tokens,
+                "context_window": cfg.ollama_context_window or settings.ollama_context_window,
+                "temperature": cfg.ollama_temperature,
+                "enable_thinking": cfg.enable_thinking,
+            }
             if cfg.ollama_top_p is not None:
                 ollama_kw["top_p"] = cfg.ollama_top_p
             if cfg.ollama_top_k is not None:

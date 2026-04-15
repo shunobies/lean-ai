@@ -119,7 +119,7 @@ def _split_html_by_headings(root) -> list[tuple[str, str]]:
                 sections.extend(sub_sections)
         else:
             # Bare text nodes, spans, etc.
-            text = getattr(element, "get_text", lambda **_: str(element))(
+            text = getattr(element, "get_text", lambda _el=element, **_: str(_el))(
                 separator=" ", strip=True
             ) if hasattr(element, "get_text") else str(element).strip()
             if text:

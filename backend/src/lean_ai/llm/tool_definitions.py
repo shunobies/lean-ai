@@ -543,7 +543,7 @@ REQUEST_TEST_CHANGE_TOOL: dict = {
 
 def build_tdd_implementation_tools() -> list[dict]:
     """IMPLEMENTATION_TOOLS + request_test_change + wiki tools for TDD mode."""
-    return build_implementation_tools() + [REQUEST_TEST_CHANGE_TOOL]
+    return [*build_implementation_tools(), REQUEST_TEST_CHANGE_TOOL]
 
 
 def _maybe_wiki_tools() -> list[dict]:

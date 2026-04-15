@@ -200,19 +200,18 @@ _DEFINITION_NODE_TYPES = frozenset({
     "function_declaration", "class_declaration", "export_statement",
     "lexical_declaration", "variable_declaration",
     # Java/C#
-    "method_declaration", "class_declaration", "interface_declaration",
+    "method_declaration", "interface_declaration",
     "enum_declaration",
     # Go
-    "function_declaration", "method_declaration", "type_declaration",
+    "type_declaration",
     # Rust
     "function_item", "struct_item", "impl_item", "enum_item", "trait_item",
     "mod_item",
     # Ruby
     "method", "class", "module",
     # C/C++
-    "function_definition", "struct_specifier", "class_specifier",
+    "struct_specifier", "class_specifier",
     "declaration",
     # PHP
-    "function_definition", "class_declaration", "method_declaration",
     "trait_declaration",
 })
