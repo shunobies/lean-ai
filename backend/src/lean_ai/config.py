@@ -240,6 +240,7 @@ class Settings(BaseSettings):
     embedding_model: str = "qwen3-embedding:0.6b"
     enable_embeddings: bool = True
     embedding_ollama_url: str | None = None
+    embedding_batch_size: int = 0  # 0 = auto (50% of model context window). Positive = override
 
     # ── Vision model (always Ollama, on-demand) ──
     vision_model: str = ""  # e.g. "qwen3-vl:8b". Empty = vision disabled

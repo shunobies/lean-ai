@@ -104,6 +104,43 @@ class EmbeddingStore:
             logger.warning("Failed to load embeddings: %s", e)
         return result
 
+    def compact(self) -> int:
+        """Rewrite the binary file, removing orphaned vector data.
+
+        Returns the number of bytes reclaimed.  Safe to call even when
+        there are no orphans (returns 0 immediately).
+        """
+        with self._lock:
+            index = self._load_index()
+            if not index or not self._bin_path.exists():
+                return 0
+
+            old_size = self._bin_path.stat().st_size
+            tmp_path = self._bin_path.with_suffix(".bin.tmp")
+
+            try:
+                with open(self._bin_path, "rb") as src, open(tmp_path, "wb") as dst:
+                    for entry in index.values():
+                        src.seek(entry["offset"])
+                        data = src.read(entry["dim"] * 4)
+                        entry["offset"] = dst.tell()
+                        dst.write(data)
+
+                tmp_path.replace(self._bin_path)
+            except Exception:
+                # Clean up temp file on failure; index offsets may be stale
+                # but a subsequent generate_embeddings run will fix them.
+                if tmp_path.exists():
+                    tmp_path.unlink()
+                raise
+
+            new_size = self._bin_path.stat().st_size
+            saved = old_size - new_size
+            if saved > 0:
+                self.flush_index()
+                logger.info("Compacted embedding store, saved %d bytes", saved)
+            return saved
+
     def clear(self) -> None:
         """Remove all embedding data."""
         with self._lock:

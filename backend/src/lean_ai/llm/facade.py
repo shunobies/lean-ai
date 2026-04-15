@@ -234,6 +234,57 @@ class LLMClient:
             return []
         return await self._ollama.embed(texts, model)
 
+    async def compute_embedding_batch_size(
+        self,
+        chunks: list[tuple[str, str, str]],
+    ) -> int:
+        """Compute the optimal embedding batch size.
+
+        If ``LEAN_AI_EMBEDDING_BATCH_SIZE`` is set to a positive value, that
+        value is returned directly.  Otherwise, the embedding model's context
+        window is queried from Ollama and the batch size is calculated to fill
+        50% of it, based on the average chunk size in *chunks*.
+
+        Args:
+            chunks: list of ``(chunk_id, text, content_hash)`` tuples to embed.
+
+        Returns:
+            Batch size clamped to ``[16, 1024]``.
+        """
+        min_batch, max_batch, fallback = 16, 1024, 256
+
+        # Manual override.
+        if settings.embedding_batch_size > 0:
+            return max(min_batch, min(settings.embedding_batch_size, max_batch))
+
+        if not chunks:
+            return fallback
+
+        # Average chars across all pending chunks → estimate tokens.
+        avg_chars = sum(len(text) for _, text, _ in chunks) / len(chunks)
+        tokens_per_chunk = max(avg_chars / 4.0, 1.0)  # Conservative: ~4 chars/token
+
+        ctx_window: int | None = None
+        if self._ollama is not None:
+            ctx_window = await self._ollama.get_embedding_context_window()
+
+        if ctx_window is None or ctx_window <= 0:
+            logger.info(
+                "Embedding context window unknown — using fallback batch size %d",
+                fallback,
+            )
+            return fallback
+
+        batch_size = int((ctx_window * 0.5) / tokens_per_chunk)
+        batch_size = max(min_batch, min(batch_size, max_batch))
+
+        logger.info(
+            "Computed embedding batch size: %d "
+            "(context_window=%d, avg_tokens=%.0f)",
+            batch_size, ctx_window, tokens_per_chunk,
+        )
+        return batch_size
+
     async def check_embedding_model(self) -> tuple[bool, str]:
         """Check if the embedding model is available in Ollama.
 

@@ -199,13 +199,22 @@ def _incremental_index(
 async def generate_embeddings(
     repo_root: str,
     llm_client,
-    batch_size: int = 32,
+    batch_size: int = 0,
 ) -> int:
     """Generate embeddings for indexed chunks, skipping unchanged ones.
 
     Uses a content hash per chunk stored in the embedding index to avoid
     re-embedding chunks whose text has not changed since the last run.
+
+    A producer-consumer pipeline overlaps Ollama compute with disk I/O:
+    the producer sends batches to Ollama while the consumer writes
+    completed embeddings to the ``EmbeddingStore``.
+
+    Args:
+        batch_size: Chunks per Ollama embed call.  ``0`` (default) uses
+            adaptive sizing via ``llm_client.compute_embedding_batch_size``.
     """
+    import asyncio
     import hashlib
 
     idx_dir = _index_dir(repo_root)
@@ -233,6 +242,7 @@ async def generate_embeddings(
     orphaned = set(existing_index.keys()) - current_ids
     if orphaned:
         store.remove_chunks(orphaned)
+        store.compact()
         logger.info("Removed %d orphaned embeddings", len(orphaned))
 
     # Find chunks needing embedding (new or content changed).
@@ -254,21 +264,54 @@ async def generate_embeddings(
         )
         return 0
 
-    total = 0
-    for i in range(0, len(to_embed), batch_size):
-        batch = to_embed[i : i + batch_size]
-        batch_ids = [cid for cid, _, _ in batch]
-        batch_texts = [t for _, t, _ in batch]
-        batch_hashes = [h for _, _, h in batch]
+    # Resolve batch size: explicit > adaptive > fallback.
+    if batch_size <= 0:
+        batch_size = await llm_client.compute_embedding_batch_size(to_embed)
 
-        try:
-            embeddings = await llm_client.embed(batch_texts)
-            store.save_batch(batch_ids, embeddings, batch_hashes)
-            total += len(embeddings)
-        except Exception as e:
-            logger.warning(
-                "Embedding batch %d failed: %s", i // batch_size, e,
+    total_to_embed = len(to_embed)
+    logger.info(
+        "Generating embeddings for %d code chunks (batch_size=%d)",
+        total_to_embed, batch_size,
+    )
+
+    # Producer-consumer: overlap Ollama compute with disk I/O.
+    queue: asyncio.Queue = asyncio.Queue(maxsize=2)
+    total = 0
+
+    async def _producer():
+        for i in range(0, total_to_embed, batch_size):
+            batch = to_embed[i : i + batch_size]
+            batch_ids = [cid for cid, _, _ in batch]
+            batch_texts = [t for _, t, _ in batch]
+            batch_hashes = [h for _, _, h in batch]
+            try:
+                embeddings = await llm_client.embed(batch_texts)
+                await queue.put((batch_ids, embeddings, batch_hashes))
+            except Exception as e:
+                logger.warning(
+                    "Embedding batch %d failed: %s", i // batch_size, e,
+                )
+        await queue.put(None)  # sentinel
+
+    async def _consumer():
+        nonlocal total
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            batch_ids, embeddings, batch_hashes = item
+            await asyncio.to_thread(
+                store.save_batch, batch_ids, embeddings, batch_hashes,
             )
+            total += len(embeddings)
+            logger.info(
+                "Embedding progress: %d/%d code chunks (%.0f%%)",
+                total, total_to_embed, (total / total_to_embed) * 100,
+            )
+
+    producer_task = asyncio.create_task(_producer())
+    await _consumer()
+    await producer_task
 
     store.flush_index()
     logger.info(

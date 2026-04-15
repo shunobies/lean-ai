@@ -2,6 +2,16 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.8.9] - 2026-04-14
+
+### Changed
+- **Adaptive embedding batch size** — embedding generation now queries the model's context window via Ollama and dynamically calculates the optimal batch size (targeting 50% of context capacity). Replaces the fixed batch size of 32 with values typically in the 128-512 range, reducing HTTP round-trips by up to 8x. Override with `LEAN_AI_EMBEDDING_BATCH_SIZE`.
+- **Parallel embedding generation** — code and knowledge embeddings now run concurrently via `asyncio.gather()`, overlapping Python-side hashing and disk I/O between streams.
+- **Producer-consumer embedding pipeline** — embedding batches are now fetched from Ollama while previous results are written to disk concurrently, eliminating GPU idle time between batches.
+- **Embedding progress logging** — server logs now show real-time progress during embedding generation (e.g. "Embedding progress: 128/5000 code chunks (2.6%)").
+- **Embed call resilience** — embedding API calls now have a 120-second timeout and retry with exponential backoff (2 attempts) to prevent indefinite hangs on transient Ollama errors.
+- **Embedding store compaction** — orphaned vectors in the binary embedding file are now automatically cleaned up, preventing unbounded file growth over incremental updates.
+
 ## [0.7.9] - 2026-04-12
 
 ### Added

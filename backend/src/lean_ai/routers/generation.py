@@ -108,7 +108,7 @@ async def init_workspace(request: InitWorkspaceRequest):
             logger.warning("Knowledge indexing failed: %s", exc)
             knowledge_status = "failed"
 
-        # Embedding generation (code + knowledge) — awaited, not background
+        # Embedding generation (code + knowledge) — run in parallel via gather
         embedding_status = "skipped"
         embedding_code_count = 0
         embedding_knowledge_count = 0
@@ -121,29 +121,53 @@ async def init_workspace(request: InitWorkspaceRequest):
             logger.info("Embedding skipped: %s", embed_msg)
         else:
             try:
-                embedding_code_count = await _generate_embeddings(
-                    request.repo_root, llm_client,
-                )
-                logger.info(
-                    "Code embedding complete: %d chunks for %s",
-                    embedding_code_count, request.repo_root,
-                )
+                embed_tasks: list[asyncio.Task] = [
+                    asyncio.create_task(
+                        _generate_embeddings(request.repo_root, llm_client),
+                    ),
+                ]
 
                 _knowledge_chunks = knowledge_chunk_count or 0
                 if _knowledge_chunks > 0:
                     try:
                         from lean_ai.knowledge.indexer import generate_knowledge_embeddings
-                        embedding_knowledge_count = (
-                            await generate_knowledge_embeddings(
-                                request.repo_root, llm_client,
-                            )
+                        embed_tasks.append(
+                            asyncio.create_task(
+                                generate_knowledge_embeddings(
+                                    request.repo_root, llm_client,
+                                ),
+                            ),
                         )
+                    except ImportError:
+                        pass
+
+                results = await asyncio.gather(
+                    *embed_tasks, return_exceptions=True,
+                )
+
+                # Unpack results.
+                code_result = results[0]
+                if isinstance(code_result, Exception):
+                    logger.warning("Code embedding failed: %s", code_result)
+                else:
+                    embedding_code_count = code_result
+                    logger.info(
+                        "Code embedding complete: %d chunks for %s",
+                        embedding_code_count, request.repo_root,
+                    )
+
+                if len(results) > 1:
+                    know_result = results[1]
+                    if isinstance(know_result, Exception):
+                        logger.warning(
+                            "Knowledge embedding failed: %s", know_result,
+                        )
+                    else:
+                        embedding_knowledge_count = know_result
                         logger.info(
                             "Knowledge embedding complete: %d chunks for %s",
                             embedding_knowledge_count, request.repo_root,
                         )
-                    except Exception as exc:
-                        logger.warning("Knowledge embedding failed: %s", exc)
 
                 embedding_status = "success"
                 parts = []
