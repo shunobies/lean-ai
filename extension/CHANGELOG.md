@@ -2,6 +2,13 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.9.0] - 2026-04-14
+
+### Changed
+- **Deterministic project context skeleton** — Phase 1 of `project_context.md` generation no longer requires an LLM call. The skeleton is built entirely in Python from tree-sitter metadata (Module Map, Key Abstractions, Integration Points pre-populated with real file names, class/function defs, and import relationships). Phase 2 file-by-file enrichment then adds descriptions from actual source code.
+- **Robust embed error handling** — embedding API calls now classify errors properly: permanent errors (400, 404) fail immediately, transient errors (429, 500, 502, streaming errors, connection loss) retry with exponential backoff. Removed all hardcoded timeouts — Ollama queues requests naturally.
+- **Cold model load fix** — `check_embedding_model()` now uses Ollama's `show()` API for instant existence checks without loading the model into VRAM, then warms up with no timeout to handle slow cold loads gracefully.
+
 ## [0.8.9] - 2026-04-14
 
 ### Changed
