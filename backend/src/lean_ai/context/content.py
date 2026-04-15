@@ -9,7 +9,6 @@ from collections import defaultdict
 from pathlib import Path
 
 from .constants import (
-    _MAX_DOC_FILE_CHARS,
     _MAX_FILE_CHARS,
     _MAX_IMPORT_GRAPH_CHARS,
     _MAX_INDEX_CHARS,
@@ -142,56 +141,6 @@ def extract_section_headings(doc: str) -> list[str]:
         for line in doc.split("\n")
         if line.strip().startswith("## ")
     ]
-
-
-def build_skeleton_generation_prompt(
-    repo_root: str,
-    section_caps: dict[str, int] | None = None,
-) -> str:
-    """Build the user-message prompt for the skeleton generation call.
-
-    Assembles the file tree, class/function index, import graph, and API
-    endpoints — but NO source file contents.  The skeleton call produces
-    the initial structural overview that is later enriched file-by-file.
-    """
-    caps = section_caps or {
-        "index":              _MAX_INDEX_CHARS,
-        "import_graph":       _MAX_IMPORT_GRAPH_CHARS,
-        "max_file_chars":     _MAX_FILE_CHARS,
-        "max_doc_file_chars": _MAX_DOC_FILE_CHARS,
-        "max_sampled_files":  15,
-    }
-
-    try:
-        from lean_ai.indexer.tree import list_repo_tree
-        entries = list_repo_tree(repo_root)
-    except Exception:
-        entries = None
-
-    metadata = extract_metadata_cached(repo_root, entries=entries)
-
-    tree = _build_file_tree_summary(repo_root, entries=entries)
-    class_index = metadata.format_class_index(
-        max_chars=caps["index"],
-    )
-    import_graph = metadata.format_import_graph(
-        max_chars=caps["import_graph"],
-    )
-    api_endpoints = metadata.format_api_endpoints(
-        max_chars=caps.get("api_endpoints", 8000),
-    )
-
-    return (
-        "=== FILE TREE ===\n"
-        f"{tree}\n\n"
-        "=== CLASS AND FUNCTION INDEX ===\n"
-        f"{class_index}\n\n"
-        "=== IMPORT GRAPH ===\n"
-        f"{import_graph}\n\n"
-        "=== API ENDPOINTS ===\n"
-        f"{api_endpoints}\n\n"
-        "Write the structural overview document using only the data above."
-    )
 
 
 def build_deterministic_skeleton(
