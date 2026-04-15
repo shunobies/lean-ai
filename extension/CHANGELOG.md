@@ -2,6 +2,11 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.9.1] - 2026-04-14
+
+### Fixed
+- **Embedding model detection broken** — `show()` calls in `check_embedding_model()` and `get_embedding_context_window()` used wrong keyword argument (`name=` instead of `model=`), causing all embedding generation to be skipped with "unexpected keyword argument" error since v0.8.9.
+
 ## [0.9.0] - 2026-04-14
 
 ### Changed
