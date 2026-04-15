@@ -201,44 +201,82 @@ async def generate_embeddings(
     llm_client,
     batch_size: int = 32,
 ) -> int:
-    """Generate embeddings for all indexed chunks."""
+    """Generate embeddings for indexed chunks, skipping unchanged ones.
+
+    Uses a content hash per chunk stored in the embedding index to avoid
+    re-embedding chunks whose text has not changed since the last run.
+    """
+    import hashlib
+
     idx_dir = _index_dir(repo_root)
     if not exists_in(str(idx_dir)):
         return 0
 
     store = EmbeddingStore(str(idx_dir))
-    store.clear()
+    existing_index = store.get_index()
 
     ix = open_dir(str(idx_dir))
     reader = ix.reader()
 
-    chunk_ids: list[str] = []
-    texts: list[str] = []
-
+    all_chunks: list[tuple[str, str]] = []
     for doc_num in reader.all_doc_ids():
         stored = reader.stored_fields(doc_num)
-        chunk_ids.append(stored["chunk_id"])
-        texts.append(stored["content"])
+        all_chunks.append((stored["chunk_id"], stored["content"]))
 
     reader.close()
 
-    if not texts:
+    if not all_chunks:
+        return 0
+
+    # Drop orphaned embeddings (chunks deleted from Whoosh).
+    current_ids = {cid for cid, _ in all_chunks}
+    orphaned = set(existing_index.keys()) - current_ids
+    if orphaned:
+        store.remove_chunks(orphaned)
+        logger.info("Removed %d orphaned embeddings", len(orphaned))
+
+    # Find chunks needing embedding (new or content changed).
+    to_embed: list[tuple[str, str, str]] = []
+    for chunk_id, content in all_chunks:
+        content_hash = hashlib.sha256(
+            content.encode(),
+        ).hexdigest()[:16]
+        existing = existing_index.get(chunk_id)
+        if existing and existing.get("content_hash") == content_hash:
+            continue
+        to_embed.append((chunk_id, content, content_hash))
+
+    if not to_embed:
+        store.flush_index()
+        logger.info(
+            "Embeddings up to date — %d chunks unchanged",
+            len(all_chunks),
+        )
         return 0
 
     total = 0
-    for i in range(0, len(texts), batch_size):
-        batch_ids = chunk_ids[i : i + batch_size]
-        batch_texts = texts[i : i + batch_size]
+    for i in range(0, len(to_embed), batch_size):
+        batch = to_embed[i : i + batch_size]
+        batch_ids = [cid for cid, _, _ in batch]
+        batch_texts = [t for _, t, _ in batch]
+        batch_hashes = [h for _, _, h in batch]
 
         try:
             embeddings = await llm_client.embed(batch_texts)
-            store.save_batch(batch_ids, embeddings)
+            store.save_batch(batch_ids, embeddings, batch_hashes)
             total += len(embeddings)
         except Exception as e:
-            logger.warning("Embedding batch %d failed: %s", i // batch_size, e)
+            logger.warning(
+                "Embedding batch %d failed: %s", i // batch_size, e,
+            )
 
     store.flush_index()
-    logger.info("Generated %d embeddings", total)
+    logger.info(
+        "Generated %d embeddings (%d unchanged, %d orphaned removed)",
+        total,
+        len(all_chunks) - len(to_embed),
+        len(orphaned),
+    )
     return total
 
 

@@ -32,8 +32,22 @@ class EmbeddingStore:
         self._index = {}
         return self._index
 
+    def get_index(self) -> dict[str, dict]:
+        """Return the in-memory index for external diffing."""
+        return dict(self._load_index())
+
+    def remove_chunks(self, chunk_ids: set[str]) -> None:
+        """Drop entries from the index (binary data left as orphans)."""
+        with self._lock:
+            index = self._load_index()
+            for cid in chunk_ids:
+                index.pop(cid, None)
+
     def save_batch(
-        self, chunk_ids: list[str], embeddings: list[list[float]],
+        self,
+        chunk_ids: list[str],
+        embeddings: list[list[float]],
+        content_hashes: list[str] | None = None,
     ) -> None:
         """Append a batch of embeddings to storage."""
         if not chunk_ids or not embeddings:
@@ -43,10 +57,15 @@ class EmbeddingStore:
         with self._lock:
             index = self._load_index()
             with open(self._bin_path, "ab") as f:
-                for chunk_id, vec in zip(chunk_ids, embeddings):
+                for i, (chunk_id, vec) in enumerate(
+                    zip(chunk_ids, embeddings),
+                ):
                     offset = f.tell()
                     f.write(struct.pack(f"{dim}f", *vec))
-                    index[chunk_id] = {"offset": offset, "dim": dim}
+                    entry: dict = {"offset": offset, "dim": dim}
+                    if content_hashes:
+                        entry["content_hash"] = content_hashes[i]
+                    index[chunk_id] = entry
             self._index = index
 
     def flush_index(self) -> None:
