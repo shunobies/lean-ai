@@ -258,8 +258,8 @@ async def test_generate_project_context_worker_not_used_for_extraction(repo_root
 
 
 @pytest.mark.asyncio
-async def test_generate_project_context_request_client_used_for_extraction(repo_root):
-    """Request client should be preferred for extraction when available."""
+async def test_generate_project_context_always_uses_primary_for_extraction(repo_root):
+    """Primary model should always be used for extraction, even when request is available."""
     primary = AsyncMock()
     primary.chat_raw = AsyncMock(return_value="## Module Map\n- Primary (`src/main.py`)")
     request = AsyncMock()
@@ -270,8 +270,9 @@ async def test_generate_project_context_request_client_used_for_extraction(repo_
         request_client=request,
     )
 
-    # Request client should be used for extraction.
-    assert request.chat_raw.called
+    # Primary should be used for extraction, not request.
+    assert primary.chat_raw.called
+    assert not request.chat_raw.called
 
 
 @pytest.mark.asyncio

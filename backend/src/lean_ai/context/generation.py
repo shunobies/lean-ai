@@ -246,10 +246,11 @@ async def generate_project_context(
             return content
 
         # ── Model resolution ────────────────────────────────────────
-        # Extraction needs a capable model — prefer request (larger) over
-        # worker (tiny, meant for summarization).
-        extraction_client = request_client or llm_client
-        condense_client = llm_client  # always primary
+        # Always use the primary model for extraction — it's the coding
+        # model tuned for structured output.  Request/worker models are
+        # not reliable enough for this task.
+        extraction_client = llm_client
+        condense_client = llm_client
 
         # ── Phase 1: file-by-file extraction ────────────────────────
         context_window = settings.ollama_context_window

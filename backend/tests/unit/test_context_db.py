@@ -309,6 +309,10 @@ async def test_get_stats(db):
 @pytest.mark.asyncio
 async def test_wal_concurrent_writes(repo_root):
     """Multiple connections can write concurrently via WAL mode."""
+    # Create schema once before concurrent writers to avoid DDL contention.
+    init_db = await get_context_db(repo_root)
+    await init_db.close()
+
     async def write_entries(connection_id):
         db = await get_context_db(repo_root)
         try:
