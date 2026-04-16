@@ -54,6 +54,16 @@ def humanize_tool_call(name: str, args: dict) -> str:
         return "Getting session summary"
     if name == "search_workspace_memory":
         return f"Searching memory: {args.get('query', '...')}"
+    if name == "query_project_context":
+        parts = []
+        if args.get("section"):
+            parts.append(args["section"])
+        if args.get("file_path"):
+            parts.append(args["file_path"])
+        if args.get("keyword"):
+            parts.append(f"'{args['keyword']}'")
+        detail = ", ".join(parts) if parts else "all"
+        return f"Querying context: {detail}"
     # Fallback
     path = args.get("path", args.get("command", ""))
     return f"{name} {path}".strip()

@@ -651,6 +651,25 @@ def make_tool_executor(
             )
             return result.output if result.success else f"ERROR: {result.error}"
 
+        elif name == "query_project_context":
+            from lean_ai.context.context_db import get_context_db, query_entries
+            db = await get_context_db(repo_root)
+            try:
+                results = await query_entries(
+                    db,
+                    section=arguments.get("section"),
+                    file_path=arguments.get("file_path"),
+                    keyword=arguments.get("keyword"),
+                )
+                if not results:
+                    return "No matching context entries found."
+                lines = []
+                for r in results:
+                    lines.append(f"[{r['section']}] {r['content']}")
+                return "\n".join(lines)
+            finally:
+                await db.close()
+
         elif name == "task_complete":
             return "Task marked complete."
 

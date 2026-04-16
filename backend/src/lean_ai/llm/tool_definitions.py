@@ -488,10 +488,10 @@ WIKI_TOOLS: list[dict] = [
 
 
 def build_implementation_tools() -> list[dict]:
-    """IMPLEMENTATION_TOOLS + wiki tools when configured."""
+    """IMPLEMENTATION_TOOLS + context query + wiki tools when configured."""
     from lean_ai.config import settings
 
-    tools = list(IMPLEMENTATION_TOOLS)
+    tools = [*IMPLEMENTATION_TOOLS, QUERY_CONTEXT_TOOL]
     if settings.wiki_url:
         tools.extend(WIKI_TOOLS)
     return tools
@@ -553,6 +553,51 @@ def _maybe_wiki_tools() -> list[dict]:
     return list(WIKI_TOOLS) if settings.wiki_url else []
 
 
+# ── Project context query tool ──────────────────────────────────────────────
+
+QUERY_CONTEXT_TOOL: dict = {
+    "type": "function",
+    "function": {
+        "name": "query_project_context",
+        "description": (
+            "Query the project context database for information about "
+            "specific files, sections, or keywords. Use this to look up "
+            "what a file does, find all entries in a section (e.g. "
+            "'API Surface'), or search for a keyword across all context."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": (
+                        "Filter by file path (partial match). "
+                        "Example: 'routers/chat.py'"
+                    ),
+                },
+                "section": {
+                    "type": "string",
+                    "description": (
+                        "Filter by section name. One of: "
+                        "'Architecture Overview', 'Module Map', "
+                        "'Key Abstractions', 'API Surface', "
+                        "'Integration Points', 'Data Flow', 'Conventions'"
+                    ),
+                },
+                "keyword": {
+                    "type": "string",
+                    "description": (
+                        "Search for a keyword in entry content "
+                        "(case-insensitive substring match)"
+                    ),
+                },
+            },
+            "required": [],
+        },
+    },
+}
+
+
 # Read-only tools for planning phases
 PLANNING_TOOLS: list[dict] = [
     tool
@@ -564,13 +609,13 @@ PLANNING_TOOLS: list[dict] = [
 
 
 def build_planning_tools() -> list[dict]:
-    """PLANNING_TOOLS + search tools + wiki tools when configured."""
+    """PLANNING_TOOLS + search tools + context query + wiki tools when configured."""
     search_tools = [
         tool
         for tool in IMPLEMENTATION_TOOLS
         if tool["function"]["name"] in ("search_internet", "fetch_url")
     ]
-    return PLANNING_TOOLS + search_tools + _maybe_wiki_tools()
+    return PLANNING_TOOLS + search_tools + [QUERY_CONTEXT_TOOL] + _maybe_wiki_tools()
 
 
 def build_planning_tools_with_scratchpad() -> list[dict]:
@@ -712,8 +757,8 @@ CHAT_TOOLS: list[dict] = [
 ]
 
 def build_chat_tools() -> list[dict]:
-    """CHAT_TOOLS + wiki tools when configured."""
-    return CHAT_TOOLS + _maybe_wiki_tools()
+    """CHAT_TOOLS + context query + wiki tools when configured."""
+    return [*CHAT_TOOLS, QUERY_CONTEXT_TOOL, *_maybe_wiki_tools()]
 
 
 # Read-only + diagnostic tools for fix-mode investigation phase
