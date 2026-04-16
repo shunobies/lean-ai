@@ -245,10 +245,10 @@ async def generate_project_context(
             return content
 
         # ── Model resolution ────────────────────────────────────────
-        # Always use the primary model for extraction — it's the coding
-        # model tuned for structured output.  Request/worker models are
-        # not reliable enough for this task.
-        extraction_client = llm_client
+        # Use the request model (chatty, larger context) for extraction when
+        # available, falling back to the primary model.  Condensation always
+        # uses the primary model.
+        extraction_client = request_client or llm_client
         condense_client = llm_client
 
         # ── Phase 1: file-by-file extraction ────────────────────────
