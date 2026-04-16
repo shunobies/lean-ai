@@ -1,96 +1,55 @@
-"""Tests for the extraction output parser (extraction_parser.py)."""
+"""Tests for the extraction schema + deterministic skeleton parser."""
 
+import pytest
+from pydantic import ValidationError
 
 from lean_ai.context.extraction_parser import (
+    ContextExtractionEntry,
+    ContextExtractionResult,
     _extract_file_path,
     _looks_like_path,
     _normalize_heading,
-    parse_extraction_output,
     parse_skeleton_output,
 )
 
 # ---------------------------------------------------------------------------
-# parse_extraction_output
+# ContextExtractionResult schema
 # ---------------------------------------------------------------------------
 
-class TestParseExtractionOutput:
-    def test_basic(self):
-        text = """\
-## Architecture Overview
-- `main()` — application entry point (`src/main.py`)
+class TestContextExtractionSchema:
+    def test_valid_entry_roundtrip(self):
+        result = ContextExtractionResult.model_validate({
+            "entries": [
+                {
+                    "section": "Architecture Overview",
+                    "symbol": "main",
+                    "description": "Application entry point.",
+                    "file_path": "src/main.py",
+                },
+            ],
+        })
+        assert len(result.entries) == 1
+        assert result.entries[0].section == "Architecture Overview"
+        assert result.entries[0].symbol == "main"
 
-## Module Map
-- `utils.py` — helper functions (`src/utils.py`)
-"""
-        result = parse_extraction_output(text)
-        assert len(result) == 2
-        assert result[0] == (
-            "Architecture Overview",
-            "src/main.py",
-            "`main()` — application entry point (`src/main.py`)",
-        )
-        assert result[1][0] == "Module Map"
+    def test_empty_entries_list_is_legal(self):
+        result = ContextExtractionResult.model_validate({"entries": []})
+        assert result.entries == []
 
-    def test_with_file_path_in_parens(self):
-        text = "## Architecture Overview\n- Entry point (`src/app.py`)"
-        result = parse_extraction_output(text)
-        assert len(result) == 1
-        assert result[0][1] == "src/app.py"
+    def test_hallucinated_section_rejected(self):
+        with pytest.raises(ValidationError):
+            ContextExtractionResult.model_validate({
+                "entries": [
+                    {
+                        "section": "Made Up Section",
+                        "symbol": "x",
+                        "description": "y",
+                        "file_path": "z.py",
+                    },
+                ],
+            })
 
-    def test_backtick_path(self):
-        text = "## Module Map\n- `src/handlers/api.py` — API handler"
-        result = parse_extraction_output(text)
-        assert len(result) == 1
-        assert result[0][1] == "src/handlers/api.py"
-
-    def test_fallback_file_path(self):
-        text = "## Architecture Overview\n- Simple hello world app"
-        result = parse_extraction_output(text, fallback_file_path="src/main.py")
-        assert len(result) == 1
-        assert result[0][1] == "src/main.py"
-
-    def test_unknown_section_ignored(self):
-        text = """\
-## Architecture Overview
-- Fact 1 (`src/a.py`)
-
-## Some Random Heading
-- This should be ignored
-
-## Module Map
-- Fact 2 (`src/b.py`)
-"""
-        result = parse_extraction_output(text)
-        assert len(result) == 2
-        sections = {r[0] for r in result}
-        assert "Some Random Heading" not in sections
-
-    def test_heading_normalization(self):
-        text = "## Key Abstractions (Updated)\n- `Foo` class (`src/foo.py`)"
-        result = parse_extraction_output(text)
-        assert len(result) == 1
-        assert result[0][0] == "Key Abstractions"
-
-    def test_empty_input(self):
-        assert parse_extraction_output("") == []
-        assert parse_extraction_output("   ") == []
-
-    def test_none_input(self):
-        # Should handle None gracefully.
-        assert parse_extraction_output(None) == []
-
-    def test_non_bullet_lines_ignored(self):
-        text = """\
-## Architecture Overview
-This is a paragraph (not a bullet).
-- Actual bullet entry (`src/main.py`)
-Another paragraph.
-"""
-        result = parse_extraction_output(text)
-        assert len(result) == 1
-        assert "Actual bullet" in result[0][2]
-
-    def test_all_valid_sections(self):
+    def test_all_seven_sections_accepted(self):
         sections = [
             "Architecture Overview",
             "Module Map",
@@ -100,25 +59,14 @@ Another paragraph.
             "Data Flow",
             "Conventions",
         ]
-        lines = []
-        for s in sections:
-            lines.append(f"## {s}")
-            lines.append(f"- Fact for {s} (`src/{s.lower().replace(' ', '_')}.py`)")
-        text = "\n".join(lines)
-        result = parse_extraction_output(text)
-        assert len(result) == 7
-        result_sections = [r[0] for r in result]
-        assert result_sections == sections
-
-    def test_empty_bullet_ignored(self):
-        text = "## Architecture Overview\n- \n- Real entry (`src/a.py`)"
-        result = parse_extraction_output(text)
-        assert len(result) == 1
-
-    def test_no_heading_before_bullets(self):
-        text = "- Orphan bullet without heading"
-        result = parse_extraction_output(text)
-        assert len(result) == 0
+        for name in sections:
+            entry = ContextExtractionEntry(
+                section=name,
+                symbol="s",
+                description="d",
+                file_path="f.py",
+            )
+            assert entry.section == name
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +144,16 @@ Entry points: `main.py`, `app.py`
         assert "... (truncated)" not in contents
         assert "Real entry" in contents
 
+    def test_key_abstractions_extract_inline_path(self):
+        # Key Abstractions skeleton lines carry the path in parens.
+        text = """\
+## Key Abstractions
+- `class Foo` (`src/foo.py`) — fan-in: 3
+"""
+        result = parse_skeleton_output(text)
+        assert len(result) == 1
+        assert result[0][1] == "src/foo.py"
+
 
 # ---------------------------------------------------------------------------
 # _normalize_heading
@@ -214,7 +172,7 @@ class TestNormalizeHeading:
 
 
 # ---------------------------------------------------------------------------
-# _extract_file_path
+# _extract_file_path (used by skeleton parser only)
 # ---------------------------------------------------------------------------
 
 class TestExtractFilePath:

@@ -1,15 +1,19 @@
-"""Parse LLM extraction output into structured (section, file_path, content) tuples.
+"""Structured output schema for LLM per-file extraction + the deterministic
+skeleton parser.
 
-The extraction prompt produces markdown in this format::
+The LLM returns a ``ContextExtractionResult`` (Pydantic) via
+``chat_structured()``; Python converts entries into DB tuples directly —
+no regex or heuristic parsing of markdown.
 
-    ## <heading>
-    - `<symbol>` — <fact> (`<file_path>`)
-
-This parser handles variations: missing backticks, path in different
-positions, multi-line entries, etc.
+The deterministic Phase 0 skeleton still produces markdown (built from
+tree-sitter metadata in ``content.py``) and is parsed back into tuples by
+``parse_skeleton_output()`` here.
 """
 
 import logging
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -24,58 +28,47 @@ _VALID_SECTIONS = frozenset({
 })
 
 
-def parse_extraction_output(
-    text: str,
-    fallback_file_path: str = "",
-) -> list[tuple[str, str, str]]:
-    """Parse extraction markdown into ``(section, file_path, content)`` tuples.
+SectionName = Literal[
+    "Architecture Overview",
+    "Module Map",
+    "Key Abstractions",
+    "API Surface",
+    "Integration Points",
+    "Data Flow",
+    "Conventions",
+]
 
-    Args:
-        text: Raw LLM output (markdown with ``## `` headings and ``- ``
-            bullet entries).
-        fallback_file_path: File path to use when the LLM omits it from
-            the entry.  For single-file extraction this is the source
-            file being processed.
 
-    Returns:
-        List of ``(section_name, file_path, content_line)`` tuples.
-    """
-    if not text or not text.strip():
-        return []
+class ContextExtractionEntry(BaseModel):
+    """A single extracted fact about a source file."""
 
-    results: list[tuple[str, str, str]] = []
-    current_section = ""
+    section: SectionName = Field(
+        description="Which of the 7 sections this fact belongs to.",
+    )
+    symbol: str = Field(
+        description=(
+            "Exact symbol, module name, or identifier copied verbatim from "
+            "the source file."
+        ),
+    )
+    description: str = Field(
+        description="One concise sentence stating the fact.",
+    )
+    file_path: str = Field(
+        description="Relative path of the source file this fact came from.",
+    )
 
-    for line in text.split("\n"):
-        stripped = line.strip()
-        if not stripped:
-            continue
 
-        # Detect section headings.
-        if stripped.startswith("## "):
-            heading = stripped[3:].strip()
-            heading = _normalize_heading(heading)
-            if heading in _VALID_SECTIONS:
-                current_section = heading
-            else:
-                logger.debug("Unknown section heading: %r", heading)
-                current_section = ""
-            continue
+class ContextExtractionResult(BaseModel):
+    """LLM response schema for single-file context extraction."""
 
-        # Only process bullet points under a valid section.
-        if not current_section:
-            continue
-        if not stripped.startswith("- "):
-            continue
-
-        entry_text = stripped[2:].strip()
-        if not entry_text:
-            continue
-
-        file_path = _extract_file_path(entry_text) or fallback_file_path
-        results.append((current_section, file_path, entry_text))
-
-    return results
+    entries: list[ContextExtractionEntry] = Field(
+        default_factory=list,
+        description=(
+            "All notable facts extracted from the file. Empty list if the "
+            "file has nothing worth recording."
+        ),
+    )
 
 
 def parse_skeleton_output(
@@ -155,12 +148,12 @@ def _normalize_heading(heading: str) -> str:
 
 
 def _extract_file_path(entry: str) -> str:
-    """Extract a file path from an entry line.
+    """Extract a file path from a skeleton bullet line.
 
-    Looks for patterns like ``(`path/to/file.py`)``, ``(path/to/file.py)``,
-    or backtick-delimited paths.
+    Used only by ``parse_skeleton_output`` — the LLM extraction path
+    uses the structured schema and has no need for this heuristic.
     """
-    # Pattern: (`` `path/to/file.ext` ``) or ``(path/to/file.ext)``
+    # Pattern: trailing ``(path/to/file.ext)`` or ``(`path/to/file.ext`)``.
     last_open = entry.rfind("(")
     if last_open >= 0 and entry.endswith(")"):
         inner = entry[last_open + 1 : -1].strip().strip("`")

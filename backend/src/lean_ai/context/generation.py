@@ -41,7 +41,7 @@ from .context_db import (
     get_context_db,
     upsert_entries_batch,
 )
-from .extraction_parser import parse_extraction_output, parse_skeleton_output
+from .extraction_parser import ContextExtractionResult, parse_skeleton_output
 from .text_processing import (
     _deduplicate_sections,
     _deduplicate_subsections,
@@ -75,8 +75,15 @@ async def _extract_single_file(
     client: "LLMClient",
     max_tokens: int,
     thinking_callback: Callable[[str], Awaitable[None]] | None = None,
-) -> str:
-    """Extract facts from a single source file via LLM."""
+) -> list[tuple[str, str, str, str]]:
+    """Extract facts from a single source file via LLM.
+
+    Returns DB-ready ``(section, file_path, content, "llm")`` tuples.
+    Uses structured JSON output via ``chat_structured()`` — the response
+    is a ``ContextExtractionResult`` validated against a Pydantic schema,
+    which eliminates the heuristic markdown parsing the pipeline used
+    previously.
+    """
     user_msg = (
         f"=== SOURCE FILE: {file_path} ===\n"
         f"```\n{file_content}\n```"
@@ -85,12 +92,18 @@ async def _extract_single_file(
         {"role": "system", "content": _EXTRACTION_PROMPT},
         {"role": "user", "content": user_msg},
     ]
-    result = await client.chat_raw(
+    result = await client.chat_structured(
         messages=msgs,
+        schema=ContextExtractionResult,
         max_tokens=max_tokens,
         thinking_callback=thinking_callback,
     )
-    return _truncate_repetition(result)
+    tuples: list[tuple[str, str, str, str]] = []
+    for entry in result.entries:
+        entry_path = entry.file_path or file_path
+        content = f"`{entry.symbol}` — {entry.description} (`{entry_path}`)"
+        tuples.append((entry.section, entry_path, content, "llm"))
+    return tuples
 
 
 # ---------------------------------------------------------------------------
@@ -318,15 +331,12 @@ async def _phase1_sequential(
             total=total,
         )
         try:
-            raw = await _extract_single_file(
+            entries = await _extract_single_file(
                 file_path, file_content, client,
                 max_tokens, thinking_callback,
             )
-            if not raw or not raw.strip():
-                continue
-            parsed = parse_extraction_output(raw, fallback_file_path=file_path)
-            entries = [(s, fp, c, "llm") for s, fp, c in parsed]
-            await upsert_entries_batch(db, entries)
+            if entries:
+                await upsert_entries_batch(db, entries)
         except Exception as exc:
             logger.warning(
                 "Extraction %d/%d failed (non-fatal): %s — file: %s",
@@ -351,14 +361,12 @@ async def _phase1_parallel(
     async def _process_one(idx: int, file_path: str, file_content: str) -> None:
         nonlocal completed
         try:
-            raw = await _extract_single_file(
+            entries = await _extract_single_file(
                 file_path, file_content, client,
                 max_tokens, thinking_callback,
             )
-            if not raw or not raw.strip():
+            if not entries:
                 return
-            parsed = parse_extraction_output(raw, fallback_file_path=file_path)
-            entries = [(s, fp, c, "llm") for s, fp, c in parsed]
 
             # Each coroutine opens its own connection for WAL-safe writes.
             file_db = await get_context_db(repo_root)
@@ -453,15 +461,12 @@ async def update_project_context(
 
             # Re-extract.
             try:
-                raw = await _extract_single_file(
+                entries = await _extract_single_file(
                     rel_path, file_content, llm_client,
                     max_out, thinking_callback,
                 )
-                if not raw or not raw.strip():
-                    continue
-                parsed = parse_extraction_output(raw, fallback_file_path=rel_path)
-                entries = [(s, fp, c, "llm") for s, fp, c in parsed]
-                await upsert_entries_batch(db, entries)
+                if entries:
+                    await upsert_entries_batch(db, entries)
             except Exception as exc:
                 logger.warning(
                     "update_project_context: extraction failed for %s: %s",

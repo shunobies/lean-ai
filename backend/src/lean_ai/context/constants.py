@@ -183,23 +183,23 @@ Do not output any text before or after the markdown.\
 # ---------------------------------------------------------------------------
 
 _EXTRACTION_PROMPT = """\
-Extract all notable facts from the source files below.
+Extract all notable facts from the source file below and return them as a \
+structured JSON object matching the ContextExtractionResult schema.
 
-Organize findings under these section headings:
-- ## Architecture Overview
-- ## Module Map
-- ## Key Abstractions
-- ## API Surface
-- ## Integration Points
-- ## Data Flow
-- ## Conventions
+Each entry has four fields:
+- section: one of "Architecture Overview", "Module Map", "Key Abstractions", \
+"API Surface", "Integration Points", "Data Flow", or "Conventions".
+- symbol: the exact identifier copied verbatim from the source (class, \
+function, constant, route, env var, etc.).
+- description: one concise sentence stating the fact.
+- file_path: the relative path of the source file this fact came from.
 
 Rules:
-- Use EXACT names that appear in the source files. Do not invent or generalize.
-- Include the file path for every entry.
+- Use EXACT names that appear in the source file. Do not invent or generalize.
+- Populate file_path for every entry.
 - Extract everything potentially relevant — do not filter or deduplicate.
-- If a file has nothing notable, skip it entirely.
-- Output markdown only, no commentary or reasoning.
+- If the file has nothing notable, return {"entries": []}.
+- Return ONLY the JSON object — no commentary, no markdown code fences.
 
 What to extract per section:
 - Architecture Overview: entry points, frameworks, architectural patterns.
@@ -212,14 +212,7 @@ public interfaces.
 third-party calls.
 - Data Flow: producer/consumer relationships, data transformations.
 - Conventions: naming patterns, registry usage, inheritance, decorators, \
-folder conventions.
-
-Format:
-## <heading>
-- `<exact symbol or module>` — <concise fact> (`<file path>`)
-
-Do not output any heading with zero facts.
-Do not output any text before or after the markdown.\
+folder conventions.\
 """
 
 _DEDUPLICATION_PROMPT = """\
