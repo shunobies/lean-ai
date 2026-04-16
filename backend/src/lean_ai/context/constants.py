@@ -246,11 +246,17 @@ import graph, API endpoints).
 _CONDENSATION_PROMPT = """\
 Condense this project context document to essential architectural knowledge.
 
+Important: this document (`project_context.md`) is a summary only. The \
+complete per-file extractions remain stored in a SQLite context database \
+and are available for querying during planning. No information is lost by \
+aggressive condensation here — trim confidently.
+
 Rules:
 - Keep: architecture patterns, module purposes, key abstractions, API \
 endpoints, integration points, data flow, conventions.
-- Remove: redundant entries, overly verbose descriptions, implementation \
-details not useful for understanding the system at an architectural level.
+- Remove: redundant entries, overly verbose descriptions, low-signal bullets, \
+and implementation details not useful for understanding the system at an \
+architectural level.
 - Preserve exact symbol names and file paths — do not rename anything.
 - Preserve the existing markdown structure and heading order.
 - Target document size: under {target_words} words.

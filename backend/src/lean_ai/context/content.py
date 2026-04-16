@@ -413,7 +413,9 @@ def build_condensation_user_prompt(
 ) -> str:
     """Format document for Step 3 condensation."""
     return (
-        f"Target: under {target_words} words.\n\n"
+        f"Target: under {target_words} words.\n"
+        "Note: the full per-file extractions remain available in the context "
+        "DB; this file only needs the architectural summary.\n\n"
         "=== DOCUMENT ===\n"
         f"{document}"
     )

@@ -206,7 +206,6 @@ async def generate_project_context(
     )
 
     skeleton = build_deterministic_skeleton(repo_root, section_caps=caps)
-    write_project_context(repo_root, skeleton)
     logger.info("Phase 0 (skeleton) complete: %d chars", len(skeleton))
 
     db = await get_context_db(repo_root)

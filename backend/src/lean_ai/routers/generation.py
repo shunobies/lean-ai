@@ -233,15 +233,14 @@ async def generate_project_context_endpoint(request: GenerateProjectContextReque
         )
 
     try:
-        from lean_ai.context.generation import generate_project_context, write_project_context
+        from lean_ai.context.generation import generate_project_context
         content = await generate_project_context(
             request.repo_root,
             llm_client,
             worker_client=worker_llm_client,
             request_client=request_llm_client,
         )
-        path = write_project_context(request.repo_root, content)
-        return GenerateProjectContextResponse(path=path, chars=len(content))
+        return GenerateProjectContextResponse(path=str(ctx_path), chars=len(content))
     except ImportError as exc:
         raise HTTPException(
             status_code=501,
@@ -335,10 +334,7 @@ def _sse_generation_response(
                 _client = request_llm_client or llm_client
 
                 if kind == "project_context":
-                    from lean_ai.context.generation import (
-                        generate_project_context,
-                        write_project_context,
-                    )
+                    from lean_ai.context.generation import generate_project_context
                     content = await generate_project_context(
                         repo_root, llm_client,
                         thinking_callback=thinking_cb,
@@ -346,7 +342,7 @@ def _sse_generation_response(
                         worker_client=worker_llm_client,
                         request_client=request_llm_client,
                     )
-                    path = write_project_context(repo_root, content)
+                    path = str(Path(repo_root) / ".lean_ai" / "project_context.md")
                     await queue.put({
                         "type": "result", "path": path, "chars": len(content),
                     })
