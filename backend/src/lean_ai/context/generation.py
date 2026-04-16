@@ -246,7 +246,9 @@ async def generate_project_context(
             return content
 
         # ── Model resolution ────────────────────────────────────────
-        extraction_client = worker_client or request_client or llm_client
+        # Extraction needs a capable model — prefer request (larger) over
+        # worker (tiny, meant for summarization).
+        extraction_client = request_client or llm_client
         condense_client = llm_client  # always primary
 
         # ── Phase 1: file-by-file extraction ────────────────────────

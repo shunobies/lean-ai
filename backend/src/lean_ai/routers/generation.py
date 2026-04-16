@@ -372,7 +372,7 @@ def _sse_generation_response(
                     })
 
             except Exception as exc:
-                logger.warning("SSE generation (%s) failed: %s", kind, exc)
+                logger.exception("SSE generation (%s) failed: %s", kind, exc)
                 await queue.put({"type": "error", "message": str(exc)})
             finally:
                 await queue.put(None)  # sentinel
