@@ -242,7 +242,8 @@ class Settings(BaseSettings):
     enable_embeddings: bool = True
     embedding_ollama_url: str | None = None
     embedding_batch_size: int = 0  # 0 = auto (50% of model context window). Positive = override
-    embedding_context_window: int = 0  # 0 = auto-detect via Ollama show API. Positive = override (accepts shorthand)
+    # 0 = auto-detect via Ollama show API. Positive = override (accepts shorthand).
+    embedding_context_window: int = 0
 
     # ── Vision model (always Ollama, on-demand) ──
     vision_model: str = ""  # e.g. "qwen3-vl:8b". Empty = vision disabled
