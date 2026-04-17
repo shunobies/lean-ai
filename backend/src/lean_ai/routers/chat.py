@@ -234,6 +234,45 @@ def _make_chat_tool_executor(repo_root: str | None = None):
             finally:
                 await db.close()
 
+        elif name == "search_knowledge":
+            if not repo_root:
+                return "ERROR: search_knowledge requires an open workspace."
+            from lean_ai.knowledge.indexer import is_knowledge_available
+            from lean_ai.knowledge.indexer import search_knowledge as _search_knowledge
+
+            if not is_knowledge_available(repo_root):
+                return (
+                    "ERROR: No knowledge base index found. "
+                    "Place documents in .lean_ai/knowledge/ and run /init to index them."
+                )
+
+            query = arguments.get("query", "")
+            limit = arguments.get("limit", 10)
+
+            # Best-effort embedding for RRF re-ranking
+            query_embedding: list[float] | None = None
+            try:
+                embeddings = await llm_client.embed([query])
+                if embeddings:
+                    query_embedding = embeddings[0]
+            except Exception:
+                pass
+
+            chunks = await asyncio.to_thread(
+                _search_knowledge, repo_root, query, limit, query_embedding,
+            )
+            if not chunks:
+                return f"No knowledge base results for '{query}'."
+
+            parts = []
+            for chunk in chunks:
+                title = chunk.get("doc_title", "Unknown")
+                section = chunk.get("section", "")
+                content = chunk.get("content", "")
+                header = f"[{title} > {section}]" if section else f"[{title}]"
+                parts.append(f"{header}\n{content}")
+            return "\n\n---\n\n".join(parts)
+
         return f"Unknown tool: {name}"
 
     return _executor

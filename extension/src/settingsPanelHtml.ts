@@ -1163,6 +1163,10 @@ export function getSettingsPanelHtml(): string {
             <input type="number" id="numParallel" min="1" max="16" step="1" placeholder="1">
         </div>
     </div>
+    <div class="field">
+        <label>Knowledge base chunks <span class="hint">chunks injected into refiner context (cloud providers only)</span></label>
+        <input type="number" id="refinerKnowledgeChunks" min="1" max="50" step="1" placeholder="5">
+    </div>
     <div class="field-check">
         <input type="checkbox" id="enableEmbeddings">
         <div>
@@ -1752,6 +1756,7 @@ export function getSettingsPanelHtml(): string {
             refreshThreshold:      val('refreshThreshold'),
             numParallel:           val('numParallel'),
             enableRequiredCitations: val('enableRequiredCitations'),
+            refinerKnowledgeChunks: val('refinerKnowledgeChunks'),
             debugPlanning:         val('debugPlanning'),
             enableThinking:        val('enableThinking'),
         };
@@ -1967,6 +1972,7 @@ export function getSettingsPanelHtml(): string {
         setVal('refreshThreshold',      v.refreshThreshold);
         setVal('numParallel',           v.numParallel);
         setVal('enableRequiredCitations', v.enableRequiredCitations);
+        setVal('refinerKnowledgeChunks', v.refinerKnowledgeChunks);
         setVal('debugPlanning',         v.debugPlanning);
         setVal('enableThinking',        v.enableThinking);
 

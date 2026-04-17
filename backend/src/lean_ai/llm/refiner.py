@@ -305,7 +305,7 @@ class PromptRefiner:
         for chunk in chunks:
             title = chunk.get("doc_title", "Unknown")
             section = chunk.get("section", "")
-            content = chunk.get("content", "")[:500]
+            content = chunk.get("content", "")
             header = f"[{title} > {section}]" if section else f"[{title}]"
             parts.append(f"{header}\n{content}")
 

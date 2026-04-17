@@ -487,11 +487,42 @@ WIKI_TOOLS: list[dict] = [
 ]
 
 
+KNOWLEDGE_TOOLS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_knowledge",
+            "description": (
+                "Search the project knowledge base for information from indexed "
+                "documents (books, PDFs, EPUBs, manuals, guides). Returns relevant "
+                "chunks with document title, section, and content. Use this when you "
+                "need domain-specific knowledge, reference material, or project "
+                "documentation that may have been indexed."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max results to return (default 10).",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+]
+
+
 def build_implementation_tools() -> list[dict]:
-    """IMPLEMENTATION_TOOLS + context query + wiki tools when configured."""
+    """IMPLEMENTATION_TOOLS + context query + knowledge + wiki tools when configured."""
     from lean_ai.config import settings
 
-    tools = [*IMPLEMENTATION_TOOLS, QUERY_CONTEXT_TOOL]
+    tools = [*IMPLEMENTATION_TOOLS, QUERY_CONTEXT_TOOL, *KNOWLEDGE_TOOLS]
     if settings.wiki_url:
         tools.extend(WIKI_TOOLS)
     return tools
@@ -615,7 +646,10 @@ def build_planning_tools() -> list[dict]:
         for tool in IMPLEMENTATION_TOOLS
         if tool["function"]["name"] in ("search_internet", "fetch_url")
     ]
-    return PLANNING_TOOLS + search_tools + [QUERY_CONTEXT_TOOL] + _maybe_wiki_tools()
+    return (
+        PLANNING_TOOLS + search_tools + [QUERY_CONTEXT_TOOL]
+        + KNOWLEDGE_TOOLS + _maybe_wiki_tools()
+    )
 
 
 def build_planning_tools_with_scratchpad() -> list[dict]:
@@ -636,8 +670,8 @@ DESIGN_TOOLS: list[dict] = [
 
 
 def build_design_tools() -> list[dict]:
-    """Search + task_complete + wiki tools for Phase 3 design synthesis."""
-    return DESIGN_TOOLS + _maybe_wiki_tools()
+    """Search + task_complete + knowledge + wiki tools for Phase 3 design synthesis."""
+    return DESIGN_TOOLS + KNOWLEDGE_TOOLS + _maybe_wiki_tools()
 
 
 # Read-only tools for chat exploration (no task_complete — text exit)
@@ -757,8 +791,8 @@ CHAT_TOOLS: list[dict] = [
 ]
 
 def build_chat_tools() -> list[dict]:
-    """CHAT_TOOLS + context query + wiki tools when configured."""
-    return [*CHAT_TOOLS, QUERY_CONTEXT_TOOL, *_maybe_wiki_tools()]
+    """CHAT_TOOLS + context query + knowledge + wiki tools when configured."""
+    return [*CHAT_TOOLS, QUERY_CONTEXT_TOOL, *KNOWLEDGE_TOOLS, *_maybe_wiki_tools()]
 
 
 # Read-only + diagnostic tools for fix-mode investigation phase

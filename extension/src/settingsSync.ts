@@ -156,6 +156,7 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
 
     // Advanced / misc
     "lean-ai.enableRequiredCitations":   "LEAN_AI_ENABLE_REQUIRED_CITATIONS",
+    "lean-ai.refinerKnowledgeChunks":    "LEAN_AI_REFINER_KNOWLEDGE_CHUNKS",
     "lean-ai.numParallel":               "LEAN_AI_NUM_PARALLEL",
     "lean-ai.implementationMaxTurns":    "LEAN_AI_IMPLEMENTATION_MAX_TURNS",
     "lean-ai.refreshThreshold":          "LEAN_AI_REFRESH_THRESHOLD",

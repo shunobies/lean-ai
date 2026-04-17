@@ -300,6 +300,7 @@ export class SettingsPanel {
             postValidationMaxRetries: "lean-ai.postValidationMaxRetries",
             postValidationFixTurns:   "lean-ai.postValidationFixTurns",
             enableRequiredCitations:  "lean-ai.enableRequiredCitations",
+            refinerKnowledgeChunks:   "lean-ai.refinerKnowledgeChunks",
             implementationMaxTurns:   "lean-ai.implementationMaxTurns",
             refreshThreshold:         "lean-ai.refreshThreshold",
             numParallel:              "lean-ai.numParallel",
@@ -567,6 +568,7 @@ export class SettingsPanel {
 
             // Advanced
             enableRequiredCitations:   config.get("lean-ai.enableRequiredCitations", true),
+            refinerKnowledgeChunks:    config.get("lean-ai.refinerKnowledgeChunks", 5),
             implementationMaxTurns:    config.get("lean-ai.implementationMaxTurns", ""),
             refreshThreshold:          config.get("lean-ai.refreshThreshold", ""),
             numParallel:               config.get("lean-ai.numParallel", ""),

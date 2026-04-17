@@ -1,5 +1,6 @@
 """Tool executor factory for workflow execution."""
 
+import asyncio
 import logging
 import time
 from collections.abc import Callable
@@ -222,6 +223,7 @@ _REQUIRED_PARAMS: dict[str, list[str]] = {
     "fetch_url": ["url"],
     "search_wiki": ["query"],
     "fetch_wiki_page": ["title"],
+    "search_knowledge": ["query"],
 }
 
 # Parameters where empty string is valid
@@ -650,6 +652,44 @@ def make_tool_executor(
                 repo_root=repo_root,
             )
             return result.output if result.success else f"ERROR: {result.error}"
+
+        elif name == "search_knowledge":
+            from lean_ai.knowledge.indexer import is_knowledge_available
+            from lean_ai.knowledge.indexer import search_knowledge as _search_knowledge
+
+            if not is_knowledge_available(repo_root):
+                return (
+                    "ERROR: No knowledge base index found. "
+                    "Place documents in .lean_ai/knowledge/ and run /init to index them."
+                )
+
+            query = arguments.get("query", "")
+            limit = arguments.get("limit", 10)
+
+            # Best-effort embedding for RRF re-ranking
+            query_embedding: list[float] | None = None
+            if llm_client is not None:
+                try:
+                    embeddings = await llm_client.embed([query])
+                    if embeddings:
+                        query_embedding = embeddings[0]
+                except Exception:
+                    pass
+
+            chunks = await asyncio.to_thread(
+                _search_knowledge, repo_root, query, limit, query_embedding,
+            )
+            if not chunks:
+                return f"No knowledge base results for '{query}'."
+
+            parts = []
+            for chunk in chunks:
+                title = chunk.get("doc_title", "Unknown")
+                section = chunk.get("section", "")
+                content = chunk.get("content", "")
+                header = f"[{title} > {section}]" if section else f"[{title}]"
+                parts.append(f"{header}\n{content}")
+            return "\n\n---\n\n".join(parts)
 
         elif name == "query_project_context":
             from lean_ai.context.context_db import get_context_db, query_entries
