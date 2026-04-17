@@ -271,6 +271,18 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 
 **Post-validation auto-detection:** When `LEAN_AI_POST_*_COMMAND` variables are empty, the system falls back to commands auto-detected during `/init-workspace` (stored in `.lean_ai/commands.json`). Manual env vars always take priority. In fix mode, the LLM is instructed to write tests alongside code changes when a test command is available. In plan mode, test creation is handled by Phase 5 (verification step generation) which appends test file steps and a final `run_tests` step after all implementation steps. In TDD mode, Phase 5 produces test steps separately into `tdd_test_steps` (without `run_tests`) — these are executed first by the expert model, then the primary implements code with test files protected. **Validation fix loop:** when `_run_post_validation` detects failures, `_run_validation_fix_loop` retries up to `LEAN_AI_POST_VALIDATION_MAX_RETRIES` times. Each attempt uses a **hardcoded 30-turn budget** (independent of `LEAN_AI_IMPLEMENTATION_MAX_TURNS`), is **file-scoped** to the plan's `affected_files` list (the tool executor blocks edits to files outside the whitelist), and instructs the LLM to: (1) re-run the failing command to confirm the error, (2) read relevant files to find the root cause, (3) record diagnosis in scratchpad, (4) make the minimal fix, (5) re-run to verify. On the **final retry**, the expert model is used if configured. In TDD mode, the fix loop also enforces the test-file guard and provides the `request_test_change` dispute tool so the primary model can escalate flawed tests to the expert rather than editing them directly.
 
+## Current Model Layout (April 2026)
+
+| Role | Model |
+|---|---|
+| Primary | `qwen3-coder:30b-a3b-q8_0` |
+| Expert | `qwen3-coder-next:q8_0` |
+| Request | `gpt-oss:20b` |
+| Worker | `qwen2.5-coder:7b-instruct-q8_0` |
+| Inline | `qwen2.5-coder:7b-instruct-q8_0` |
+| Embedding | `qwen3-embedding:8b` |
+| Vision | `qwen3.5:4b-q8_0` |
+
 ## WebSocket Protocol
 
 Client → server: `user_message` (start workflow or mid-workflow interrupt), `cancel` (stop running workflow), `approve` (approve plan), `approve_tool` / `deny_tool` (shell command gate), `ping`, `resume`.
