@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING
 
 from .constants import (
     _CONDENSATION_PROMPT,
-    _CONTEXT_GENERATION_CAP_TOKENS,
     _EXTRACTION_PROMPT,
     _MAX_FILE_CHARS,
     CONDENSATION_MAX_WORDS,
@@ -122,8 +121,7 @@ async def _condense(
 
     Skipped entirely if the document is already under the target word count.
     """
-    effective = min(context_window, _CONTEXT_GENERATION_CAP_TOKENS)
-    target_words = min(CONDENSATION_MAX_WORDS, int(effective * 0.05))
+    target_words = min(CONDENSATION_MAX_WORDS, int(context_window * 0.05))
 
     current_words = len(document.split())
     if current_words <= target_words:
