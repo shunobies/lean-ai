@@ -8,7 +8,7 @@ paragraph-aware chunking within each section.
 import logging
 from pathlib import Path
 
-from lean_ai.knowledge.chunker import chunk_prose
+from lean_ai.knowledge.chunker import chunk_prose_configured
 from lean_ai.knowledge.readers.base import DocumentReader, KnowledgeChunk
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ class MarkdownReader(DocumentReader):
         chunk_index = 0
 
         for section_title, section_text in sections:
-            raw_chunks = chunk_prose(section_text)
+            raw_chunks = chunk_prose_configured(section_text)
             for chunk_text in raw_chunks:
                 chunks.append(KnowledgeChunk(
                     doc_path=rel_path,

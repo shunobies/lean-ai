@@ -663,8 +663,9 @@ def make_tool_executor(
                     "Place documents in .lean_ai/knowledge/ and run /init to index them."
                 )
 
+            from lean_ai.config import settings as _kb_settings
             query = arguments.get("query", "")
-            limit = arguments.get("limit", 10)
+            limit = arguments.get("limit", _kb_settings.kb_search_default_limit)
 
             # Best-effort embedding for RRF re-ranking
             query_embedding: list[float] | None = None
@@ -685,9 +686,23 @@ def make_tool_executor(
             parts = []
             for chunk in chunks:
                 title = chunk.get("doc_title", "Unknown")
-                section = chunk.get("section", "")
                 content = chunk.get("content", "")
-                header = f"[{title} > {section}]" if section else f"[{title}]"
+                # Merged passages (neighbor-expanded) carry a section range
+                # + chunk range; point hits carry a single section.
+                sections = chunk.get("sections")
+                start_idx = chunk.get("chunk_index_start")
+                end_idx = chunk.get("chunk_index_end")
+                if sections:
+                    if len(sections) == 1:
+                        section_label = sections[0]
+                    else:
+                        section_label = f"{sections[0]} … {sections[-1]}"
+                else:
+                    section_label = chunk.get("section", "")
+
+                header = f"[{title} > {section_label}]" if section_label else f"[{title}]"
+                if start_idx is not None and end_idx is not None and start_idx != end_idx:
+                    header = f"{header} (chunks {start_idx}-{end_idx})"
                 parts.append(f"{header}\n{content}")
             return "\n\n---\n\n".join(parts)
 

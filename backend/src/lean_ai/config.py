@@ -292,6 +292,9 @@ class Settings(BaseSettings):
     # ── Knowledge base ──
     knowledge_dir: str = ".lean_ai/knowledge"
     knowledge_index_dir: str = ".lean_ai_knowledge_index"
+    kb_chunk_chars: int = 1800  # Target characters per prose chunk (~450 tokens)
+    kb_neighbor_window: int = 2  # ± chunks to include around each hit (0 = disabled)
+    kb_search_default_limit: int = 5  # Default hits returned by search_knowledge
 
     # ── Local Refiner (cloud pre-processing) ──
     enable_refiner: bool = True           # Active only with cloud providers

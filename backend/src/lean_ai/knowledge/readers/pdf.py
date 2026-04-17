@@ -15,7 +15,7 @@ Each page becomes a section ("Page N").  Pages with no extractable text
 import logging
 from pathlib import Path
 
-from lean_ai.knowledge.chunker import chunk_prose
+from lean_ai.knowledge.chunker import chunk_prose_configured
 from lean_ai.knowledge.readers.base import DocumentReader, KnowledgeChunk
 
 logger = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ class PdfReader(DocumentReader):
                 continue
 
             section = f"Page {page_num}"
-            raw_chunks = chunk_prose(text)
+            raw_chunks = chunk_prose_configured(text)
             for chunk_text in raw_chunks:
                 if not chunk_text.strip():
                     continue

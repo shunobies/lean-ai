@@ -8,7 +8,7 @@ splitting on blank lines for paragraph-aware chunking.
 import logging
 from pathlib import Path
 
-from lean_ai.knowledge.chunker import chunk_prose
+from lean_ai.knowledge.chunker import chunk_prose_configured
 from lean_ai.knowledge.readers.base import DocumentReader, KnowledgeChunk
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ class TextReader(DocumentReader):
         fmt = "rst" if path.suffix.lower() == ".rst" else "txt"
 
         # Treat the whole file as a single section.
-        raw_chunks = chunk_prose(text)
+        raw_chunks = chunk_prose_configured(text)
         return [
             KnowledgeChunk(
                 doc_path=rel_path,

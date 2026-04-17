@@ -94,6 +94,24 @@ def chunk_prose(
     return chunks if chunks else [text[: target_chars * 2]]
 
 
+def chunk_prose_configured(text: str) -> list[str]:
+    """Split prose text using the workspace's configured target size.
+
+    Reads ``kb_chunk_chars`` from the settings singleton and derives an
+    overlap budget of ``kb_chunk_chars // 6`` so overlap scales with the
+    target size (e.g. 1800 → 300, 3600 → 600).
+
+    This is the entry point document readers should use.  Tests and ad-hoc
+    callers can still call :func:`chunk_prose` directly with explicit
+    parameters.
+    """
+    from lean_ai.config import settings
+
+    target = max(100, int(settings.kb_chunk_chars))
+    overlap = max(0, target // 6)
+    return chunk_prose(text, target_chars=target, overlap_chars=overlap)
+
+
 def _overlap_tail(paragraphs: list[str], overlap_chars: int) -> list[str]:
     """Return trailing paragraphs that fit within *overlap_chars*.
 

@@ -17,7 +17,7 @@ preserved in a readable form.
 import logging
 from pathlib import Path
 
-from lean_ai.knowledge.chunker import chunk_prose
+from lean_ai.knowledge.chunker import chunk_prose_configured
 from lean_ai.knowledge.readers.base import DocumentReader, KnowledgeChunk
 
 logger = logging.getLogger(__name__)
@@ -97,7 +97,7 @@ class DocxReader(DocumentReader):
 
         for section_heading, body_lines in sections:
             section_text = "\n\n".join(body_lines)
-            raw_chunks = chunk_prose(section_text)
+            raw_chunks = chunk_prose_configured(section_text)
             for chunk_text in raw_chunks:
                 if not chunk_text.strip():
                     continue

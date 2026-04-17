@@ -16,7 +16,7 @@ The chapter's first heading is used as the section title.
 import logging
 from pathlib import Path
 
-from lean_ai.knowledge.chunker import chunk_prose
+from lean_ai.knowledge.chunker import chunk_prose_configured
 from lean_ai.knowledge.readers.base import DocumentReader, KnowledgeChunk
 
 logger = logging.getLogger(__name__)
@@ -84,7 +84,7 @@ class EpubReader(DocumentReader):
             if not text.strip():
                 continue
 
-            raw_chunks = chunk_prose(text)
+            raw_chunks = chunk_prose_configured(text)
             for chunk_text in raw_chunks:
                 if not chunk_text.strip():
                     continue

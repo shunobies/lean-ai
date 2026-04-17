@@ -17,6 +17,7 @@ re-processes added or modified documents.  Deleted documents are removed
 from the Whoosh index automatically.
 """
 
+import json
 import logging
 import os
 import shutil
@@ -26,6 +27,7 @@ from pathlib import Path
 from whoosh.fields import ID, NUMERIC, TEXT, Schema
 from whoosh.index import create_in, exists_in, open_dir
 from whoosh.qparser import MultifieldParser
+from whoosh.query import And, NumericRange, Term
 
 from lean_ai.config import settings
 from lean_ai.indexer.manifest import (
@@ -56,6 +58,103 @@ KNOWLEDGE_SCHEMA = Schema(
 # Characters that have special meaning in Whoosh query syntax but are
 # unlikely to be intentional in natural-language questions.
 _WHOOSH_SPECIAL_CHARS = set('/:*?\\<>|"^~')
+
+# Schema version for the chunk-config sentinel.  Bump when the chunker's
+# semantics change in a way that requires a rebuild beyond size-only
+# differences (e.g. different paragraph-splitting rules).
+_CHUNK_CONFIG_SCHEMA_VERSION = 1
+_CHUNK_CONFIG_FILENAME = "chunk_config.json"
+
+
+def _chunk_config_path(idx_path: str) -> Path:
+    """Path to the sentinel file tracking chunk-generation settings."""
+    return Path(idx_path) / _CHUNK_CONFIG_FILENAME
+
+
+def _current_chunk_config() -> dict:
+    """Config fingerprint that, if changed, requires a full rebuild."""
+    return {
+        "kb_chunk_chars": int(settings.kb_chunk_chars),
+        "schema_version": _CHUNK_CONFIG_SCHEMA_VERSION,
+    }
+
+
+def _read_chunk_config(idx_path: str) -> dict | None:
+    """Return stored chunk config or ``None`` if missing/unreadable."""
+    path = _chunk_config_path(idx_path)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        logger.warning("Cannot read %s: %s", path, e)
+        return None
+
+
+def _write_chunk_config(idx_path: str) -> None:
+    """Persist the current chunk config alongside the index."""
+    path = _chunk_config_path(idx_path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(_current_chunk_config(), indent=2),
+            encoding="utf-8",
+        )
+    except OSError as e:
+        logger.warning("Cannot write %s: %s", path, e)
+
+
+def is_chunk_config_stale(repo_root: str) -> bool:
+    """Return ``True`` when the on-disk chunk config differs from current settings.
+
+    When no index or sentinel exists, returns ``False`` — a missing index
+    is not "stale", it simply hasn't been built yet.
+    """
+    idx_path = knowledge_index_dir(repo_root)
+    if not exists_in(idx_path):
+        return False
+    stored = _read_chunk_config(idx_path)
+    if stored is None:
+        # Legacy index with no sentinel — treat as stale so the new chunk
+        # size takes effect on next indexing run.
+        return True
+    return stored != _current_chunk_config()
+
+
+def requires_kb_rebuild(repo_root: str) -> dict:
+    """Diagnostic: return details when the KB index is stale vs current settings."""
+    idx_path = knowledge_index_dir(repo_root)
+    if not exists_in(idx_path):
+        return {"stale": False, "reason": "no_index"}
+    stored = _read_chunk_config(idx_path)
+    current = _current_chunk_config()
+    if stored is None:
+        return {
+            "stale": True,
+            "reason": "missing_sentinel",
+            "current": current,
+        }
+    if stored != current:
+        return {
+            "stale": True,
+            "reason": "config_changed",
+            "stored": stored,
+            "current": current,
+        }
+    return {"stale": False, "reason": "up_to_date"}
+
+
+def _reset_for_rebuild(idx_path: str, reason: str) -> None:
+    """Wipe the Whoosh index, embedding store, and manifest to force a full rebuild."""
+    logger.info(
+        "Knowledge index rebuild required (%s) — wiping %s",
+        reason, idx_path,
+    )
+    # Remove the whole index directory — the Whoosh files, the manifest
+    # (written by lean_ai.indexer.manifest), the embedding store, and the
+    # chunk-config sentinel all live inside it.
+    if os.path.isdir(idx_path):
+        shutil.rmtree(idx_path, ignore_errors=True)
 
 
 def knowledge_index_dir(repo_root: str) -> str:
@@ -146,6 +245,20 @@ def index_knowledge(repo_root: str) -> dict:
 
     idx_path = knowledge_index_dir(repo_root)
 
+    # If the chunk configuration has changed since the index was built,
+    # a full rebuild is required — incremental updates would leave old
+    # chunks at old sizes mixed with new ones at new sizes.
+    if exists_in(idx_path):
+        stale = _read_chunk_config(idx_path)
+        current = _current_chunk_config()
+        if stale is None:
+            _reset_for_rebuild(idx_path, "missing chunk config sentinel")
+        elif stale != current:
+            _reset_for_rebuild(
+                idx_path,
+                f"chunk config changed ({stale} → {current})",
+            )
+
     # Hash every file for incremental comparison.
     current_hashes: dict[str, str] = {}
     for rel_path, full_path in files:
@@ -234,6 +347,7 @@ def _full_knowledge_index(
         writer.cancel()
         raise
     save_manifest(Path(idx_path), manifest)
+    _write_chunk_config(idx_path)
 
     stats = {
         "status": "indexed",
@@ -361,6 +475,7 @@ def _incremental_knowledge_index(
         )
 
     save_manifest(Path(idx_path), new_manifest)
+    _write_chunk_config(idx_path)
 
     total_chunks = sum(r.chunk_count for r in new_manifest.files.values())
     stats = {
@@ -526,6 +641,7 @@ def search_knowledge(
     query: str,
     limit: int = 10,
     query_embedding: list[float] | None = None,
+    expand: bool = True,
 ) -> list[dict]:
     """Search the knowledge index with BM25F full-text search.
 
@@ -533,6 +649,12 @@ def search_knowledge(
     Returns matching chunks sorted by relevance score.  When
     *query_embedding* is provided and an embedding store exists,
     results are re-ranked using Reciprocal Rank Fusion (BM25 + semantic).
+
+    When ``expand`` is ``True`` and ``settings.kb_neighbor_window > 0``,
+    each hit is expanded with ``±kb_neighbor_window`` adjacent chunks
+    from the same document and contiguous ranges are merged into single
+    passage dicts.  Pass ``expand=False`` to get raw unmerged chunks
+    (useful for debugging).
 
     Returns an empty list when no knowledge index exists or the query
     produces no results.
@@ -592,7 +714,122 @@ def search_knowledge(
         except Exception as e:
             logger.debug("Knowledge RRF re-ranking skipped: %s", e)
 
+    # Small-to-big expansion: replace point hits with merged multi-chunk
+    # passages for richer LLM context.
+    window = max(0, int(settings.kb_neighbor_window))
+    if expand and window > 0 and results:
+        try:
+            return _expand_with_neighbors(idx_path, results, window)
+        except Exception as e:
+            logger.warning(
+                "Neighbor expansion failed for %r: %s — returning raw hits",
+                query, e,
+            )
+
     return results
+
+
+def _expand_with_neighbors(
+    idx_path: str,
+    hits: list[dict],
+    window: int,
+) -> list[dict]:
+    """Merge each hit with its ±window neighbors into contiguous passages.
+
+    Groups hits by ``doc_path``, merges overlapping ``[idx-W, idx+W]``
+    intervals per document, then fetches each merged range from Whoosh.
+    Each output dict represents one merged passage:
+
+    - ``doc_path``, ``doc_title``, ``format``
+    - ``chunk_index_start``, ``chunk_index_end`` — the merged range
+    - ``section`` — first non-empty section in the range (or ``""``)
+    - ``sections`` — ordered de-duplicated list of section titles
+    - ``content`` — chunks joined with ``\\n\\n`` in ascending order
+    - ``score`` — max score among constituent hit chunks
+    - ``hit_chunk_indices`` — which chunks in the range were original hits
+    """
+    # Group hit chunk_index + score per doc_path.
+    by_doc: dict[str, list[dict]] = {}
+    for h in hits:
+        by_doc.setdefault(h["doc_path"], []).append(h)
+
+    ix = open_dir(idx_path)
+    passages: list[dict] = []
+
+    try:
+        with ix.searcher() as searcher:
+            for doc_path, doc_hits in by_doc.items():
+                # Build intervals and merge overlaps.
+                intervals: list[tuple[int, int, float, set[int]]] = []
+                for h in doc_hits:
+                    idx = int(h["chunk_index"])
+                    lo = max(0, idx - window)
+                    hi = idx + window
+                    intervals.append((lo, hi, h.get("score", 0.0) or 0.0, {idx}))
+                intervals.sort(key=lambda t: t[0])
+
+                merged: list[list] = []
+                for lo, hi, score, hit_idx in intervals:
+                    if merged and lo <= merged[-1][1] + 1:
+                        # Overlapping or adjacent — extend previous.
+                        merged[-1][1] = max(merged[-1][1], hi)
+                        merged[-1][2] = max(merged[-1][2], score)
+                        merged[-1][3] |= hit_idx
+                    else:
+                        merged.append([lo, hi, score, set(hit_idx)])
+
+                # Fetch chunks for each merged range.
+                for lo, hi, score, hit_idx in merged:
+                    q = And([
+                        Term("doc_path", doc_path),
+                        NumericRange("chunk_index", lo, hi),
+                    ])
+                    range_hits = searcher.search(q, limit=None)
+                    fetched: list[dict] = []
+                    for rh in range_hits:
+                        fetched.append({
+                            "chunk_index": int(rh["chunk_index"]),
+                            "section": rh.get("section", "") or "",
+                            "content": rh.get("content", "") or "",
+                            "doc_title": rh.get("doc_title", "") or "",
+                            "format": rh.get("format", "") or "",
+                        })
+                    if not fetched:
+                        continue
+                    fetched.sort(key=lambda c: c["chunk_index"])
+
+                    start_idx = fetched[0]["chunk_index"]
+                    end_idx = fetched[-1]["chunk_index"]
+                    joined = "\n\n".join(c["content"] for c in fetched if c["content"])
+                    if not joined.strip():
+                        continue
+
+                    # Dedupe section titles in order (first occurrence wins).
+                    seen_sections: set[str] = set()
+                    sections_ordered: list[str] = []
+                    for c in fetched:
+                        sec = c["section"]
+                        if sec and sec not in seen_sections:
+                            seen_sections.add(sec)
+                            sections_ordered.append(sec)
+
+                    passages.append({
+                        "doc_path": doc_path,
+                        "doc_title": fetched[0]["doc_title"],
+                        "format": fetched[0]["format"],
+                        "section": sections_ordered[0] if sections_ordered else "",
+                        "sections": sections_ordered,
+                        "chunk_index_start": start_idx,
+                        "chunk_index_end": end_idx,
+                        "content": joined,
+                        "score": float(score),
+                        "hit_chunk_indices": sorted(hit_idx),
+                    })
+    finally:
+        ix.close()
+
+    passages.sort(key=lambda p: p["score"], reverse=True)
+    return passages
 
 
 def _safe_query(query: str) -> str:

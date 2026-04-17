@@ -1167,6 +1167,20 @@ export function getSettingsPanelHtml(): string {
         <label>Knowledge base chunks <span class="hint">chunks injected into refiner context (cloud providers only)</span></label>
         <input type="number" id="refinerKnowledgeChunks" min="1" max="50" step="1" placeholder="5">
     </div>
+    <div class="field-row">
+        <div class="field">
+            <label>KB chunk size (chars) <span class="hint">target chars per prose chunk (~4 chars/token); changing rebuilds index</span></label>
+            <input type="number" id="kbChunkChars" min="200" max="20000" step="100" placeholder="1800">
+        </div>
+        <div class="field">
+            <label>KB neighbor window <span class="hint">± chunks merged around each hit, 0 disables</span></label>
+            <input type="number" id="kbNeighborWindow" min="0" max="10" step="1" placeholder="2">
+        </div>
+    </div>
+    <div class="field">
+        <label>KB search default limit <span class="hint">hits returned when LLM doesn't specify a limit</span></label>
+        <input type="number" id="kbSearchDefaultLimit" min="1" max="25" step="1" placeholder="5">
+    </div>
     <div class="field-check">
         <input type="checkbox" id="enableEmbeddings">
         <div>
@@ -1757,6 +1771,9 @@ export function getSettingsPanelHtml(): string {
             numParallel:           val('numParallel'),
             enableRequiredCitations: val('enableRequiredCitations'),
             refinerKnowledgeChunks: val('refinerKnowledgeChunks'),
+            kbChunkChars:          val('kbChunkChars'),
+            kbNeighborWindow:      val('kbNeighborWindow'),
+            kbSearchDefaultLimit:  val('kbSearchDefaultLimit'),
             debugPlanning:         val('debugPlanning'),
             enableThinking:        val('enableThinking'),
         };
@@ -1973,6 +1990,9 @@ export function getSettingsPanelHtml(): string {
         setVal('numParallel',           v.numParallel);
         setVal('enableRequiredCitations', v.enableRequiredCitations);
         setVal('refinerKnowledgeChunks', v.refinerKnowledgeChunks);
+        setVal('kbChunkChars',          v.kbChunkChars);
+        setVal('kbNeighborWindow',      v.kbNeighborWindow);
+        setVal('kbSearchDefaultLimit',  v.kbSearchDefaultLimit);
         setVal('debugPlanning',         v.debugPlanning);
         setVal('enableThinking',        v.enableThinking);
 
