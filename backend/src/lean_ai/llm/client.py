@@ -650,6 +650,10 @@ class OllamaProvider(LLMProvider):
         if self._embedding_ctx_cache is not None:
             return self._embedding_ctx_cache
 
+        if settings.embedding_context_window > 0:
+            self._embedding_ctx_cache = settings.embedding_context_window
+            return self._embedding_ctx_cache
+
         import re
 
         embed_model = settings.embedding_model

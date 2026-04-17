@@ -44,6 +44,7 @@ _CONTEXT_WINDOW_FIELDS = frozenset({
     "gemini_context_window",
     "serve_context_window",
     "inline_context_window",
+    "embedding_context_window",
 })
 
 
@@ -241,6 +242,7 @@ class Settings(BaseSettings):
     enable_embeddings: bool = True
     embedding_ollama_url: str | None = None
     embedding_batch_size: int = 0  # 0 = auto (50% of model context window). Positive = override
+    embedding_context_window: int = 0  # 0 = auto-detect via Ollama show API. Positive = override (accepts shorthand)
 
     # ── Vision model (always Ollama, on-demand) ──
     vision_model: str = ""  # e.g. "qwen3-vl:8b". Empty = vision disabled
