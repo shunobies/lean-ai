@@ -47,7 +47,7 @@ anthropic = [
 ]
 knowledge = [
     "ebooklib>=0.18,<1.0",
-    "pypdf>=6.7.5,<7.0",
+    "pypdf>=6.10.2,<7.0",
     "python-docx>=1.1.0,<2.0",
 ]
 gemini = [
