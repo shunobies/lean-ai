@@ -503,6 +503,11 @@
           "default": true,
           "markdownDescription": "**Embeddings** — Enable embedding generation and RRF hybrid search in the workspace index. Disable if you don't want to run an embedding model. Default: `true`"
         },
+        "lean-ai.embeddingContextWindow": {
+          "type": "number",
+          "default": 0,
+          "markdownDescription": "**Embeddings** — Manual context window for the embedding model. `0` = auto-detect via Ollama's `show` API. Set a positive value (e.g. `8192`) when auto-detection is unreliable for your embedding model. Accepts shorthand (e.g. `8` = 8k). Default: `0`"
+        },
         "lean-ai.visionModel": {
           "type": "string",
           "default": "",

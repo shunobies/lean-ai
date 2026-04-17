@@ -1112,6 +1112,12 @@ export function getSettingsPanelHtml(): string {
             </div>
         </div>
         <div class="field">
+            <label>Embedding context window <span class="hint">tokens; 0 or empty = auto-detect via Ollama</span></label>
+            <input type="text" id="embeddingContextWindow" placeholder="auto">
+        </div>
+    </div>
+    <div class="field-row">
+        <div class="field">
             <label>Vision model <span class="hint">leave empty to disable image support</span></label>
             <div class="model-combobox" id="visionModelCombobox">
                 <input type="text" id="visionModel" placeholder="qwen3-vl:8b">
@@ -1119,12 +1125,12 @@ export function getSettingsPanelHtml(): string {
                 <div class="model-combobox-options"></div>
             </div>
         </div>
-    </div>
-    <div class="field-row">
         <div class="field">
             <label>Vision Ollama URL <span class="hint">leave empty to share primary URL</span></label>
             <input type="text" id="visionOllamaUrl" placeholder="">
         </div>
+    </div>
+    <div class="field-row">
         <div class="field">
             <label>Search provider</label>
             <input type="hidden" id="searchProvider" value="duckduckgo">
@@ -1761,6 +1767,7 @@ export function getSettingsPanelHtml(): string {
             inlineOllamaUrl:       val('inlineOllamaUrl'),
             embeddingModel:        val('embeddingModel'),
             enableEmbeddings:      val('enableEmbeddings'),
+            embeddingContextWindow: val('embeddingContextWindow'),
             visionModel:           val('visionModel'),
             visionOllamaUrl:       val('visionOllamaUrl'),
             searchProvider:        val('searchProvider'),
@@ -1980,6 +1987,7 @@ export function getSettingsPanelHtml(): string {
         setVal('inlineOllamaUrl',       v.inlineOllamaUrl);
         setVal('embeddingModel',        v.embeddingModel);
         setVal('enableEmbeddings',      v.enableEmbeddings);
+        setVal('embeddingContextWindow', v.embeddingContextWindow);
         setVal('visionModel',           v.visionModel);
         setVal('visionOllamaUrl',       v.visionOllamaUrl);
         setSearchProvider(v.searchProvider || 'duckduckgo');

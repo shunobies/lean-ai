@@ -110,6 +110,7 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.inlineOllamaUrl":           "LEAN_AI_INLINE_OLLAMA_URL",
     "lean-ai.embeddingModel":            "LEAN_AI_EMBEDDING_MODEL",
     "lean-ai.enableEmbeddings":          "LEAN_AI_ENABLE_EMBEDDINGS",
+    "lean-ai.embeddingContextWindow":    "LEAN_AI_EMBEDDING_CONTEXT_WINDOW",
 
     // Vision model
     "lean-ai.visionModel":              "LEAN_AI_VISION_MODEL",
@@ -217,6 +218,8 @@ const ZERO_MEANS_UNSET: ReadonlySet<string> = new Set([
     "lean-ai.serveContextWindow",
     "lean-ai.serveTemperature",
     "lean-ai.serveMaxTokens",
+    // Embedding model (0 = auto-detect via Ollama show API)
+    "lean-ai.embeddingContextWindow",
 ]);
 
 // ── Env building helpers ─────────────────────────────────────────────────────

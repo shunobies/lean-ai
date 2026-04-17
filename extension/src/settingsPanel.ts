@@ -276,6 +276,7 @@ export class SettingsPanel {
             inlineOllamaUrl:          "lean-ai.inlineOllamaUrl",
             embeddingModel:           "lean-ai.embeddingModel",
             enableEmbeddings:         "lean-ai.enableEmbeddings",
+            embeddingContextWindow:   "lean-ai.embeddingContextWindow",
             visionModel:              "lean-ai.visionModel",
             visionOllamaUrl:          "lean-ai.visionOllamaUrl",
             searchProvider:           "lean-ai.searchProvider",
@@ -332,6 +333,7 @@ export class SettingsPanel {
             "openaiContextWindow", "anthropicContextWindow",
             "geminiContextWindow", "geminiTemperature",
             "serveContextWindow", "serveTemperature", "serveMaxTokens",
+            "embeddingContextWindow",
             "searchDelay", "postValidationMaxRetries", "postValidationFixTurns",
             "implementationMaxTurns", "refreshThreshold", "numParallel", "ttsSpeed", "ttsCpuThreads",
             "ollamaTemperature", "ollamaTopP", "ollamaTopK", "ollamaRepeatPenalty",
@@ -351,6 +353,7 @@ export class SettingsPanel {
             "openaiContextWindow", "anthropicContextWindow",
             "geminiContextWindow",
             "serveContextWindow", "serveMaxTokens",
+            "embeddingContextWindow",
         ]);
 
         const booleanFields = new Set([
@@ -522,6 +525,7 @@ export class SettingsPanel {
             inlineOllamaUrl:           config.get("lean-ai.inlineOllamaUrl", ""),
             embeddingModel:            config.get("lean-ai.embeddingModel", ""),
             enableEmbeddings:          config.get("lean-ai.enableEmbeddings", true),
+            embeddingContextWindow:    config.get("lean-ai.embeddingContextWindow", ""),
 
             // Vision
             visionModel:               config.get("lean-ai.visionModel", ""),
