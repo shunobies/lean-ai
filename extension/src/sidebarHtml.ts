@@ -945,6 +945,39 @@ export function getWebviewHtml(chatFontSize: number): string {
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
     }
+
+    /* Pinned execution progress card — fixed 5-line window, auto-scrolls to running step */
+    .execution-progress-card {
+        border-bottom: 1px solid var(--vscode-panel-border);
+        background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+        padding: 8px 12px 10px;
+        flex-shrink: 0;
+    }
+    .execution-progress-card .progress-card-title {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-weight: 600;
+        font-size: 11px;
+        opacity: 0.75;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 6px;
+    }
+    .execution-progress-card .progress-card-counter {
+        font-weight: 400;
+        text-transform: none;
+        letter-spacing: 0;
+        opacity: 0.8;
+    }
+    .execution-progress-card .progress-card-list {
+        max-height: 110px; /* ~5 rows at ~22px each */
+        overflow-y: auto;
+        scroll-behavior: smooth;
+    }
+    .execution-progress-card .progress-card-list .checklist-step {
+        padding: 2px 0;
+    }
 </style>
 </head>
 <body>
@@ -972,6 +1005,14 @@ export function getWebviewHtml(chatFontSize: number): string {
 <div class="search-bar" id="searchBar" style="display:none;">
     <input type="text" id="searchInput" placeholder="Search past conversations..." />
     <button class="search-clear-btn" id="searchClearBtn" title="Close search">&times;</button>
+</div>
+
+<div class="execution-progress-card" id="executionProgressCard" style="display:none;">
+    <div class="progress-card-title">
+        <span>Execution Progress</span>
+        <span class="progress-card-counter" id="progressCardCounter"></span>
+    </div>
+    <div class="progress-card-list" id="progressCardList"></div>
 </div>
 
 <div class="messages-wrapper">
@@ -1055,7 +1096,12 @@ export function getWebviewHtml(chatFontSize: number): string {
     let problemsActive = false;
     let debugActive = false;
     let visionAvailable = false; // Set by health check response
-    let checklistEl = null; // Execution checklist DOM element
+    // Pinned execution progress card state
+    const progressCardEl = document.getElementById('executionProgressCard');
+    const progressCardList = document.getElementById('progressCardList');
+    const progressCardCounter = document.getElementById('progressCardCounter');
+    let progressCardTotal = 0;
+    let progressCardCompleted = 0;
 
     // --- Voice state ---
     const voiceControls = document.getElementById('voiceControls');
@@ -1927,9 +1973,6 @@ export function getWebviewHtml(chatFontSize: number): string {
                 if (msg.stage && !runtimeInterval) {
                     startRuntime();
                 }
-                if (!msg.stage) {
-                    checklistEl = null; // Allow new checklist for next workflow
-                }
                 break;
 
             case 'metricsUpdate':
@@ -1948,14 +1991,10 @@ export function getWebviewHtml(chatFontSize: number): string {
                 break;
 
             case 'executionChecklist': {
-                if (checklistEl) { checklistEl.remove(); }
-                checklistEl = document.createElement('div');
-                checklistEl.className = 'msg execution-checklist';
-                const titleDiv = document.createElement('div');
-                titleDiv.className = 'checklist-title';
-                titleDiv.textContent = 'Execution Progress';
-                checklistEl.appendChild(titleDiv);
                 const steps = msg.steps || [];
+                progressCardTotal = msg.total || steps.length;
+                progressCardCompleted = 0;
+                progressCardList.innerHTML = '';
                 for (let i = 0; i < steps.length; i++) {
                     const s = steps[i];
                     const stepDiv = document.createElement('div');
@@ -1973,30 +2012,34 @@ export function getWebviewHtml(chatFontSize: number): string {
                     textSpan.innerHTML = label;
                     stepDiv.appendChild(icon);
                     stepDiv.appendChild(textSpan);
-                    checklistEl.appendChild(stepDiv);
+                    progressCardList.appendChild(stepDiv);
                 }
-                messagesEl.appendChild(checklistEl);
-                scrollToBottom();
+                progressCardCounter.textContent = '0 / ' + progressCardTotal;
+                progressCardEl.style.display = 'block';
+                progressCardList.scrollTop = 0;
                 break;
             }
 
             case 'checkpointUpdate': {
-                if (!checklistEl) break;
                 const idx = msg.stepIndex;
                 const status = msg.status;
-                const stepEl = checklistEl.querySelector('[data-step-index="' + idx + '"]');
-                if (stepEl) {
-                    stepEl.classList.remove('pending', 'running', 'completed');
-                    stepEl.classList.add(status);
-                    const iconEl = stepEl.querySelector('.step-icon');
-                    if (status === 'running') {
-                        iconEl.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 1a6 6 0 1 1 0 12A6 6 0 0 1 8 2z" opacity="0.2"/><path d="M8 1a7 7 0 0 1 7 7h-1a6 6 0 0 0-6-6V1z"/></svg>';
-                    } else if (status === 'completed') {
-                        iconEl.innerHTML = '';
-                        iconEl.textContent = '\u2713';
+                const stepEl = progressCardList.querySelector('[data-step-index="' + idx + '"]');
+                if (!stepEl) break;
+                const wasCompleted = stepEl.classList.contains('completed');
+                stepEl.classList.remove('pending', 'running', 'completed');
+                stepEl.classList.add(status);
+                const iconEl = stepEl.querySelector('.step-icon');
+                if (status === 'running') {
+                    iconEl.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 1a6 6 0 1 1 0 12A6 6 0 0 1 8 2z" opacity="0.2"/><path d="M8 1a7 7 0 0 1 7 7h-1a6 6 0 0 0-6-6V1z"/></svg>';
+                    stepEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                } else if (status === 'completed') {
+                    iconEl.innerHTML = '';
+                    iconEl.textContent = '\u2713';
+                    if (!wasCompleted) {
+                        progressCardCompleted += 1;
+                        progressCardCounter.textContent = progressCardCompleted + ' / ' + progressCardTotal;
                     }
                 }
-                if (status === 'running') { scrollToBottom(); }
                 break;
             }
 
@@ -2212,7 +2255,6 @@ export function getWebviewHtml(chatFontSize: number): string {
                 if (sendTimeout) { clearTimeout(sendTimeout); sendTimeout = null; }
                 currentStreamDiv = null;
                 currentPlanningDiv = null;
-                checklistEl = null;
                 setStage(null);
                 resetMetrics();
                 thinkingEl.classList.remove('visible');
