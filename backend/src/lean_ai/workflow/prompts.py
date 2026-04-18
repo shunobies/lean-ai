@@ -89,6 +89,54 @@ def build_step_system_prompt(
     return prompt
 
 
+def build_tdd_test_writing_prompt(
+    context: str,
+    implementation_plan_md: str,
+    naming_conventions: str = "",
+    name_registry: str = "",
+) -> str:
+    """Build the system prompt for TDD Phase A — expert writes tests.
+
+    Phase A is invoked BEFORE any implementation code exists. The expert
+    model must design tests from the implementation plan (which is
+    embedded here so it has the full design context), use create_file to
+    write the test files, and not attempt to run tests (they would fail
+    — no implementation yet).
+
+    Tools listed in the prompt match the actual tool list passed via the
+    ``tools=`` parameter so the model does not hallucinate tool names.
+    """
+    prompt = build_step_system_prompt(context, naming_conventions, name_registry)
+    prompt += (
+        "\n\nTDD MODE — TEST WRITING PHASE:\n"
+        "You are writing TESTS BEFORE the implementation exists. The "
+        "implementation files referenced by these tests have NOT been "
+        "created yet — that is intentional. Design tests from the "
+        "IMPLEMENTATION PLAN below, not from existing source files.\n\n"
+        "RULES FOR THIS PHASE:\n"
+        "- Use create_file to write each new test file in full.\n"
+        "- Use read_file / grep_files / list_directory ONLY to look at "
+        "existing fixtures, conftest.py, or shared test utilities — "
+        "NOT to find implementation code (it does not exist yet).\n"
+        "- Do NOT call run_tests, run_lint, format_code, or run_command "
+        "in this phase. Tests will fail because the implementation is "
+        "missing — that is the point of TDD. The pipeline will run the "
+        "tests after implementation completes.\n"
+        "- Do NOT call edit_file unless extending an existing test file "
+        "(e.g. adding cases to a shared conftest).\n"
+        "- Each test must assert PUBLIC behavior described in the plan: "
+        "function signatures, return values, raised exceptions. Do NOT "
+        "test internal implementation details.\n"
+        "- Include a module-level docstring and a per-test-function "
+        "docstring explaining the contract being verified.\n\n"
+        "IMPLEMENTATION PLAN (the design these tests must verify):\n"
+        "```\n"
+        f"{implementation_plan_md}\n"
+        "```\n"
+    )
+    return prompt
+
+
 def build_tdd_step_system_prompt(
     context: str,
     naming_conventions: str = "",
@@ -96,19 +144,24 @@ def build_tdd_step_system_prompt(
 ) -> str:
     """Build the system prompt for TDD implementation steps (primary model).
 
-    Extends the standard step prompt with TDD constraints: the primary
-    model cannot modify test files and must use ``request_test_change``
-    to dispute flawed tests.
+    Extends the standard step prompt with TDD implementation constraints:
+    test files are read-only, and the implementation must adapt to the
+    tests rather than the reverse. Test disputes were already handled in
+    the review phase (Phase B); they are not available here, so the
+    prompt does not mention ``request_test_change``.
     """
     prompt = build_step_system_prompt(context, naming_conventions, name_registry)
     prompt += (
-        "\n\nTDD MODE:\n"
-        "- Tests are written. Implement code to make them pass.\n"
-        "- Test files are LOCKED — edits will be rejected.\n"
-        "- Dispute flawed tests with request_test_change (requires: "
-        "failing assertion, public contract violation, proposed fix).\n"
-        "- Rejected disputes are final for that reason — try a "
-        "different implementation.\n"
+        "\n\nTDD MODE — IMPLEMENTATION PHASE:\n"
+        "- Tests have already been written and reviewed. Implement code "
+        "to make them pass.\n"
+        "- Test files are LOCKED — any edit_file/create_file targeting a "
+        "test file will be rejected.\n"
+        "- If a test seems wrong, your only option is to find an "
+        "implementation that satisfies it. Disputes are not available in "
+        "this phase.\n"
+        "- Read the relevant test file(s) first with read_file to "
+        "understand the contract before writing implementation code.\n"
     )
     return prompt
 
@@ -133,11 +186,13 @@ def build_tdd_review_prompt(
         "- Imports and module paths correct per the plan?\n"
         "- Assertions test public contracts (not private internals)?\n"
         "- No impossible preconditions or contradictory assertions?\n\n"
-        "For each flawed test, call request_test_change with:\n"
-        "  - test_function: the function name\n"
-        "  - failing_assertion: which assert and why it fails\n"
-        "  - contract_violation: how it violates the public interface\n"
-        "  - proposed_fix: what the test should assert instead\n\n"
+        "ADDITIONAL TOOL AVAILABLE IN THIS PHASE:\n"
+        "  request_test_change(test_file, test_function, reason)\n"
+        "    test_file:     path to the test file containing the flawed test\n"
+        "    test_function: name of the specific test function being disputed\n"
+        "    reason:        specific, programmatic reason — the failing assertion, "
+        "the contract it violates, and what the test should assert instead, "
+        "all in this single string.\n\n"
         "If all tests look correct, call task_complete.\n\n"
         "Test files to review:\n"
     )

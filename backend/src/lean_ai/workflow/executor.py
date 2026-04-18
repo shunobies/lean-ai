@@ -33,6 +33,7 @@ from lean_ai.workflow.prompts import (
     build_step_user_message,
     build_tdd_review_prompt,
     build_tdd_step_system_prompt,
+    build_tdd_test_writing_prompt,
 )
 from lean_ai.workflow.tool_executor import make_tool_executor
 from lean_ai.workflow.validation import (
@@ -559,8 +560,9 @@ async def _run_tdd_execution(
         llm_client=expert_llm_client,
         dispatcher=dispatcher,
     )
-    test_system_prompt = build_step_system_prompt(
+    test_system_prompt = build_tdd_test_writing_prompt(
         load_execution_context(repo_root),
+        implementation_plan_md=plan_to_markdown(plan, include_context=False),
         naming_conventions=getattr(plan, "naming_conventions", ""),
         name_registry=getattr(plan, "name_registry", ""),
     )

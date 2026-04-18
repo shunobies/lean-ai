@@ -580,6 +580,63 @@ async def _run_phase5_verification(
             "executed after implementation by the pipeline.\n"
         )
 
+    # In TDD mode, the implementation does not exist yet — design tests
+    # from the PLAN, not from existing patterns. Each test step's
+    # `instruction` must be self-contained because Phase A executes it
+    # without access to other steps.
+    if tdd_mode:
+        source_section = (
+            "BEHAVIOR TO TEST (derived from the IMPLEMENTATION PLAN above):\n"
+            "Design tests that pin down the *intended* behavior of each new "
+            "or modified entity in the plan. The implementation does NOT "
+            "exist yet — do not look for existing source files. Tests "
+            "drive the implementation, not the reverse.\n"
+        )
+        run_tests_rule = ""
+        context_rule = (
+            "The `context` field must describe the EXPECTED BEHAVIOR for "
+            "this test file: the public function/class signatures the "
+            "tests will call, the expected inputs and outputs for each "
+            "test, and any contracts/invariants the implementation must "
+            "uphold. Do NOT describe existing code — there is none yet. "
+            "If you need to mirror an existing fixture or import style "
+            "(e.g. conftest.py path, common test base class), name it "
+            "explicitly and quote the import line — do not assume Phase A "
+            "will browse the repo for it.\n"
+        )
+        self_contained_rule = (
+            "SELF-CONTAINED INSTRUCTIONS — CRITICAL:\n"
+            "Phase A (the test-writing model) sees ONLY this step's "
+            "`instruction`, `file_path`, and `context` fields. It does "
+            "NOT see the implementation plan, other test steps, or "
+            "existing source files. Therefore:\n"
+            "- Never write 'see step N above', 'as in step N', or any "
+            "cross-reference.\n"
+            "- Never write '[TEST]' as a description placeholder — the "
+            "description must be a complete sentence stating what is "
+            "being tested.\n"
+            "- Inline every public signature, expected input/output, "
+            "and exception/error type the test asserts on.\n"
+            "- If a test depends on a fixture or import, write the full "
+            "import path (e.g. `from lean_ai.tools.store_issue import "
+            "store_issue`) inside the instruction.\n\n"
+        )
+    else:
+        source_section = (
+            f"FILE SUMMARY (existing test patterns):\n{file_summary}\n"
+        )
+        run_tests_rule = (
+            "- End with a single 'run_tests' step using "
+            f"the test command: {test_command}\n"
+        )
+        context_rule = (
+            "The `context` field must include the relevant existing test "
+            "file content (imports, fixtures, assertion style) so the "
+            "executor can replicate the pattern without reading "
+            "additional files.\n"
+        )
+        self_contained_rule = ""
+
     verification = await expert.chat_structured(
         messages=[
             {"role": "system", "content": PLAN_VERIFICATION_SYSTEM_PROMPT},
@@ -589,8 +646,7 @@ async def _run_phase5_verification(
                     f"TASK: {task}\n\n"
                     f"IMPLEMENTATION PLAN:\n{impl_plan_md}\n\n"
                     f"TEST COMMAND: {test_command}\n\n"
-                    f"FILE SUMMARY (existing test patterns):\n"
-                    f"{file_summary}\n\n"
+                    f"{source_section}\n"
                     "Review the implementation plan above and produce "
                     "ONLY the verification steps that should run AFTER "
                     "all implementation is complete.\n\n"
@@ -599,17 +655,11 @@ async def _run_phase5_verification(
                     "include a 'create_file' step for a test file.\n"
                     "- Only create tests for NEW functionality — do "
                     "not duplicate existing test coverage.\n"
-                    + (
-                        ""
-                        if tdd_mode
-                        else (
-                            "- End with a single 'run_tests' step using "
-                            f"the test command: {test_command}\n"
-                        )
-                    )
+                    + run_tests_rule
                     + f"- Start step numbering at {next_step}\n"
                     "- Follow the naming conventions from the plan\n\n"
-                    "TEST FILE STEP — REQUIRED CONTENT IN `instruction`:\n"
+                    + self_contained_rule
+                    + "TEST FILE STEP — REQUIRED CONTENT IN `instruction`:\n"
                     "List each test function by name with the specific "
                     "assertion it makes, e.g.:\n"
                     "  test_valid_input_returns_id: "
@@ -640,11 +690,8 @@ async def _run_phase5_verification(
                     "not 500; insufficient privilege → 403\n"
                     "    · resource size: inputs > configured limit "
                     "are bounded, not crashed\n\n"
-                    "The `context` field must include the relevant "
-                    "existing test file content (imports, fixtures, "
-                    "assertion style) so the executor can replicate "
-                    "the pattern without reading additional files.\n\n"
-                    "ASSERTION QUALITY:\n"
+                    + context_rule
+                    + "\nASSERTION QUALITY:\n"
                     "- Each assertion must test ONE specific behavior, "
                     "not a vague 'it works'\n"
                     "- Use exact expected values, not just truthiness "

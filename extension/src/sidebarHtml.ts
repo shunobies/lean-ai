@@ -949,9 +949,12 @@ export function getWebviewHtml(chatFontSize: number): string {
     /* Pinned execution progress card — fixed 5-line window, auto-scrolls to running step */
     .execution-progress-card {
         border-bottom: 1px solid var(--vscode-panel-border);
-        background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+        border-left: 3px solid var(--vscode-progressBar-background, #0078d4);
+        background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background, var(--vscode-editor-background)));
         padding: 8px 12px 10px;
         flex-shrink: 0;
+        position: relative;
+        z-index: 1;
     }
     .execution-progress-card .progress-card-title {
         display: flex;
