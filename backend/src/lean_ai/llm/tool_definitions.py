@@ -497,7 +497,10 @@ KNOWLEDGE_TOOLS: list[dict] = [
                 "documents (books, PDFs, EPUBs, manuals, guides). Returns relevant "
                 "chunks with document title, section, and content. Use this when you "
                 "need domain-specific knowledge, reference material, or project "
-                "documentation that may have been indexed."
+                "documentation that may have been indexed. Pass the optional "
+                "'document' parameter to restrict the search to a single document — "
+                "useful when prior results showed the right source and you want a "
+                "deeper dive without competing hits from other documents."
             ),
             "parameters": {
                 "type": "object",
@@ -510,8 +513,46 @@ KNOWLEDGE_TOOLS: list[dict] = [
                         "type": "integer",
                         "description": "Max results to return (default 10).",
                     },
+                    "document": {
+                        "type": "string",
+                        "description": (
+                            "Optional. Restrict results to one document. Pass either "
+                            "the exact 'doc_path' from list_knowledge_documents (most "
+                            "precise) or a substring of the document title (e.g. the "
+                            "title from a prior search result). Omit to search the "
+                            "whole knowledge base."
+                        ),
+                    },
                 },
                 "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_knowledge_documents",
+            "description": (
+                "List all documents currently in the knowledge base index. Returns "
+                "one entry per document with title, path, format, and chunk count. "
+                "Use this BEFORE search_knowledge when you want to know what sources "
+                "are available, or when you need to find the exact 'doc_path' to "
+                "pass as the 'document' filter on a follow-up search_knowledge call. "
+                "Pass the optional 'name_filter' to narrow the listing by a "
+                "case-insensitive substring of the title — important when the index "
+                "holds many documents."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name_filter": {
+                        "type": "string",
+                        "description": (
+                            "Optional case-insensitive substring of the document "
+                            "title. Omit to list all documents."
+                        ),
+                    },
+                },
             },
         },
     },

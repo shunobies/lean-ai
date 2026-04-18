@@ -666,6 +666,7 @@ def make_tool_executor(
             from lean_ai.config import settings as _kb_settings
             query = arguments.get("query", "")
             limit = arguments.get("limit", _kb_settings.kb_search_default_limit)
+            document = arguments.get("document") or None
 
             # Best-effort embedding for RRF re-ranking
             query_embedding: list[float] | None = None
@@ -678,10 +679,17 @@ def make_tool_executor(
                     pass
 
             chunks = await asyncio.to_thread(
-                _search_knowledge, repo_root, query, limit, query_embedding,
+                _search_knowledge,
+                repo_root,
+                query,
+                limit,
+                query_embedding,
+                True,  # expand
+                document,
             )
             if not chunks:
-                return f"No knowledge base results for '{query}'."
+                scope = f" in '{document}'" if document else ""
+                return f"No knowledge base results for '{query}'{scope}."
 
             parts = []
             for chunk in chunks:
@@ -705,6 +713,36 @@ def make_tool_executor(
                     header = f"{header} (chunks {start_idx}-{end_idx})"
                 parts.append(f"{header}\n{content}")
             return "\n\n---\n\n".join(parts)
+
+        elif name == "list_knowledge_documents":
+            from lean_ai.knowledge.indexer import is_knowledge_available
+            from lean_ai.knowledge.indexer import list_documents as _list_documents
+
+            if not is_knowledge_available(repo_root):
+                return (
+                    "ERROR: No knowledge base index found. "
+                    "Place documents in .lean_ai/knowledge/ and run /init to index them."
+                )
+
+            name_filter = arguments.get("name_filter", "") or ""
+            docs = await asyncio.to_thread(_list_documents, repo_root, name_filter)
+            if not docs:
+                if name_filter:
+                    return (
+                        f"No knowledge documents matching '{name_filter}'. "
+                        "Call list_knowledge_documents with no name_filter to see "
+                        "the full list."
+                    )
+                return "No documents in the knowledge base index."
+
+            lines = [f"{len(docs)} document(s) in the knowledge base:"]
+            for d in docs:
+                lines.append(
+                    f"  - {d['doc_title']}  "
+                    f"[format={d['format']}, chunks={d['chunk_count']}, "
+                    f"path={d['doc_path']}]"
+                )
+            return "\n".join(lines)
 
         elif name == "query_project_context":
             from lean_ai.context.context_db import get_context_db, query_entries

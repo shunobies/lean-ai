@@ -9,6 +9,7 @@ from lean_ai.knowledge.indexer import (
     KNOWLEDGE_SCHEMA,
     _expand_with_neighbors,
     is_chunk_config_stale,
+    list_documents,
     requires_kb_rebuild,
     search_knowledge,
 )
@@ -218,6 +219,139 @@ class TestNeighborExpansion:
         assert passages[0]["chunk_index_start"] == 2
         assert passages[0]["chunk_index_end"] == 6
         assert passages[0]["score"] == pytest.approx(1.5)
+
+
+class TestListDocuments:
+    def test_lists_each_indexed_document_once(self, kb_index):
+        repo_root, _ = kb_index
+        docs = list_documents(repo_root)
+        assert len(docs) == 2
+        by_path = {d["doc_path"]: d for d in docs}
+        assert by_path["book.epub"]["doc_title"] == "My Book"
+        assert by_path["book.epub"]["format"] == "epub"
+        assert by_path["book.epub"]["chunk_count"] == 10
+        assert by_path["manual.pdf"]["doc_title"] == "Manual"
+        assert by_path["manual.pdf"]["format"] == "pdf"
+        assert by_path["manual.pdf"]["chunk_count"] == 5
+
+    def test_sorted_by_title(self, kb_index):
+        repo_root, _ = kb_index
+        titles = [d["doc_title"] for d in list_documents(repo_root)]
+        assert titles == sorted(titles, key=str.lower)
+
+    def test_name_filter_substring_case_insensitive(self, kb_index):
+        repo_root, _ = kb_index
+        docs = list_documents(repo_root, name_filter="MAN")
+        assert [d["doc_path"] for d in docs] == ["manual.pdf"]
+
+    def test_name_filter_no_match_returns_empty(self, kb_index):
+        repo_root, _ = kb_index
+        assert list_documents(repo_root, name_filter="nonexistent") == []
+
+    def test_no_index_returns_empty(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "lean_ai.config.settings.knowledge_index_dir",
+            "missing_index",
+            raising=False,
+        )
+        assert list_documents(str(tmp_path)) == []
+
+
+class TestDocumentFilteredSearch:
+    """Search restricted to a single document via the ``document`` parameter."""
+
+    def test_filter_by_exact_doc_path(self, kb_index, monkeypatch):
+        """Only chunks from the specified doc_path are returned."""
+        repo_root, idx_path = kb_index
+        # Plant the same keyword in both documents.
+        ix = __import__("whoosh.index", fromlist=["open_dir"]).open_dir(idx_path)
+        writer = ix.writer()
+        writer.delete_by_term("chunk_id", "book.epub:7")
+        writer.add_document(
+            chunk_id="book.epub:7",
+            doc_path="book.epub",
+            doc_title="My Book",
+            section="Chapter 3",
+            content="BookChunk7 shared_filter_token",
+            format="epub",
+            chunk_index=7,
+        )
+        writer.delete_by_term("chunk_id", "manual.pdf:1")
+        writer.add_document(
+            chunk_id="manual.pdf:1",
+            doc_path="manual.pdf",
+            doc_title="Manual",
+            section="Page 2",
+            content="ManualChunk1 shared_filter_token",
+            format="pdf",
+            chunk_index=1,
+        )
+        writer.commit()
+
+        monkeypatch.setattr(
+            "lean_ai.config.settings.kb_neighbor_window", 0, raising=False,
+        )
+
+        # Without filter — both docs hit.
+        unfiltered = search_knowledge(repo_root, "shared_filter_token", limit=5)
+        assert {r["doc_path"] for r in unfiltered} == {"book.epub", "manual.pdf"}
+
+        # With doc_path filter — only the manual.
+        filtered = search_knowledge(
+            repo_root, "shared_filter_token", limit=5, document="manual.pdf",
+        )
+        assert filtered
+        assert {r["doc_path"] for r in filtered} == {"manual.pdf"}
+
+    def test_filter_by_doc_title_substring(self, kb_index, monkeypatch):
+        """A title fragment from prior results restricts the search."""
+        repo_root, idx_path = kb_index
+        ix = __import__("whoosh.index", fromlist=["open_dir"]).open_dir(idx_path)
+        writer = ix.writer()
+        writer.delete_by_term("chunk_id", "book.epub:1")
+        writer.add_document(
+            chunk_id="book.epub:1",
+            doc_path="book.epub",
+            doc_title="My Book",
+            section="Chapter 1",
+            content="BookChunk1 title_filter_token",
+            format="epub",
+            chunk_index=1,
+        )
+        writer.delete_by_term("chunk_id", "manual.pdf:0")
+        writer.add_document(
+            chunk_id="manual.pdf:0",
+            doc_path="manual.pdf",
+            doc_title="Manual",
+            section="Page 1",
+            content="ManualChunk0 title_filter_token",
+            format="pdf",
+            chunk_index=0,
+        )
+        writer.commit()
+
+        monkeypatch.setattr(
+            "lean_ai.config.settings.kb_neighbor_window", 0, raising=False,
+        )
+
+        # Title substring — "Book" matches "My Book".
+        filtered = search_knowledge(
+            repo_root, "title_filter_token", limit=5, document="Book",
+        )
+        assert filtered
+        assert {r["doc_path"] for r in filtered} == {"book.epub"}
+
+    def test_filter_no_match_returns_empty(self, kb_index, monkeypatch):
+        """Filter that matches no document yields empty results, not all hits."""
+        repo_root, _ = kb_index
+        monkeypatch.setattr(
+            "lean_ai.config.settings.kb_neighbor_window", 0, raising=False,
+        )
+        # 'keyword_alpha' would normally hit; restrict to a doc that doesn't exist.
+        results = search_knowledge(
+            repo_root, "keyword_alpha", limit=5, document="nonexistent.pdf",
+        )
+        assert results == []
 
 
 class TestChunkConfigSentinel:

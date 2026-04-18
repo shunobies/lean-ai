@@ -642,6 +642,7 @@ def search_knowledge(
     limit: int = 10,
     query_embedding: list[float] | None = None,
     expand: bool = True,
+    document: str | None = None,
 ) -> list[dict]:
     """Search the knowledge index with BM25F full-text search.
 
@@ -649,6 +650,12 @@ def search_knowledge(
     Returns matching chunks sorted by relevance score.  When
     *query_embedding* is provided and an embedding store exists,
     results are re-ranked using Reciprocal Rank Fusion (BM25 + semantic).
+
+    When ``document`` is provided, results are restricted to a single
+    document. The value is matched against ``doc_path`` first (exact
+    match — for paths copied from ``list_documents()``), then against
+    ``doc_title`` (substring) as a fallback so the LLM can pass a
+    human-readable title from prior search results.
 
     When ``expand`` is ``True`` and ``settings.kb_neighbor_window > 0``,
     each hit is expanded with ``±kb_neighbor_window`` adjacent chunks
@@ -686,10 +693,23 @@ def search_knowledge(
         logger.debug("Failed to parse knowledge query %r: %s", query, e)
         return []
 
+    # Build optional document filter: doc_path exact OR doc_title substring.
+    # When the caller asked for a specific document but nothing matched,
+    # short-circuit to empty results instead of falling back to unfiltered
+    # search — that would silently return hits from other documents.
+    doc_filter = None
+    if document:
+        doc_filter = _build_document_filter(ix, document)
+        if doc_filter is None:
+            return []
+
     results: list[dict] = []
     try:
         with ix.searcher() as searcher:
-            hits = searcher.search(parsed, limit=limit)
+            if doc_filter is not None:
+                hits = searcher.search(parsed, limit=limit, filter=doc_filter)
+            else:
+                hits = searcher.search(parsed, limit=limit)
             for hit in hits:
                 results.append({
                     "chunk_id": hit["chunk_id"],
@@ -830,6 +850,101 @@ def _expand_with_neighbors(
 
     passages.sort(key=lambda p: p["score"], reverse=True)
     return passages
+
+
+def _build_document_filter(ix, document: str):
+    """Return a Whoosh query restricting hits to a single document.
+
+    The value is matched in this priority order:
+
+    1. Exact ``doc_path`` match — for paths copied verbatim from
+       :func:`list_documents`.
+    2. Exact ``doc_title`` match (any chunk's title equals the value).
+    3. ``doc_title`` substring match — parsed via the title field's
+       analyzer so the LLM can pass a fragment of a remembered title.
+
+    Returns ``None`` when the value yields no matchable filter (which
+    will be treated by the caller as "no filter" and return all results).
+    """
+    from whoosh.qparser import QueryParser
+
+    value = document.strip()
+    if not value:
+        return None
+
+    # 1. Exact doc_path match
+    with ix.searcher() as searcher:
+        path_hits = searcher.search(Term("doc_path", value), limit=1)
+        if path_hits:
+            return Term("doc_path", value)
+
+        # 2. Exact doc_title — collect matching paths so we can OR them.
+        title_parser = QueryParser("doc_title", schema=ix.schema)
+        try:
+            title_q = title_parser.parse(f'"{_safe_query(value)}"')
+        except Exception:
+            title_q = None
+        if title_q is not None:
+            title_hits = searcher.search(title_q, limit=None)
+            paths = sorted({h["doc_path"] for h in title_hits})
+            if paths:
+                if len(paths) == 1:
+                    return Term("doc_path", paths[0])
+                from whoosh.query import Or
+                return Or([Term("doc_path", p) for p in paths])
+
+    return None
+
+
+def list_documents(
+    repo_root: str,
+    name_filter: str = "",
+) -> list[dict]:
+    """Return one entry per indexed knowledge document.
+
+    Each entry has ``doc_title``, ``doc_path``, ``format``, and
+    ``chunk_count``.  Sorted alphabetically by title.
+
+    *name_filter* is a case-insensitive substring matched against
+    ``doc_title``; pass an empty string for the full list.
+
+    Returns an empty list when no knowledge index exists.
+    """
+    idx_path = knowledge_index_dir(repo_root)
+    if not exists_in(idx_path):
+        return []
+
+    try:
+        ix = open_dir(idx_path)
+    except Exception as e:
+        logger.warning("Cannot open knowledge index at %s: %s", idx_path, e)
+        return []
+
+    by_doc: dict[str, dict] = {}
+    needle = name_filter.strip().lower()
+    try:
+        with ix.searcher() as searcher:
+            for stored in searcher.documents():
+                doc_path = stored.get("doc_path", "") or ""
+                if not doc_path:
+                    continue
+                entry = by_doc.get(doc_path)
+                if entry is None:
+                    title = stored.get("doc_title", "") or ""
+                    if needle and needle not in title.lower():
+                        continue
+                    entry = {
+                        "doc_title": title,
+                        "doc_path": doc_path,
+                        "format": stored.get("format", "") or "",
+                        "chunk_count": 0,
+                    }
+                    by_doc[doc_path] = entry
+                entry["chunk_count"] += 1
+    finally:
+        ix.close()
+
+    return sorted(by_doc.values(), key=lambda d: (d["doc_title"].lower(), d["doc_path"]))
 
 
 def _safe_query(query: str) -> str:
