@@ -325,14 +325,21 @@ async def _generate_embeddings_inner(
     to_embed, orphaned, all_count = await asyncio.to_thread(_sync_diff)
 
     if orphaned:
+        # Drop orphans from the in-memory index and persist the JSON
+        # sidecar. We deliberately do NOT compact the binary store —
+        # compaction rewrites the entire .embeddings.bin (tens of MB)
+        # to reclaim a few KB per orphan, and on slow disks this has
+        # wedged /init. Orphan bytes become unreachable dead space in
+        # the bin file and are cleaned up wholesale on /init --force
+        # (which wipes and rebuilds the store from scratch).
         logger.info(
-            "[code embed] removing %d orphaned entries from index…",
+            "[code embed] dropping %d orphaned entries from index "
+            "(bin file left intact; run /init --force to reclaim bytes)",
             len(orphaned),
         )
         await asyncio.to_thread(store.remove_chunks, orphaned)
-        logger.info("[code embed] orphan index entries removed, compacting…")
-        await asyncio.to_thread(store.compact)
-        logger.info("[code embed] compact complete")
+        await asyncio.to_thread(store.flush_index)
+        logger.info("[code embed] orphan cleanup complete")
     stats.orphaned_removed = len(orphaned)
     stats.unchanged = all_count - len(to_embed)
 

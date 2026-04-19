@@ -109,6 +109,15 @@ class EmbeddingStore:
 
         Returns the number of bytes reclaimed.  Safe to call even when
         there are no orphans (returns 0 immediately).
+
+        NOTE: Not called in the normal ``/init`` flow anymore — the
+        rewrite is O(total-entries × vector-bytes) and wedged /init on
+        slow disks for days. ``remove_chunks`` + ``flush_index`` is
+        enough for correctness (orphan metadata is dropped from the
+        JSON sidecar), and the stranded binary bytes get reclaimed
+        wholesale on ``/init --force`` (which clears the store). This
+        method is retained for an explicit maintenance endpoint or
+        future manual-cleanup tooling.
         """
         import time
 

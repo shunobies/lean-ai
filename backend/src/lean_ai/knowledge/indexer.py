@@ -625,16 +625,18 @@ async def _generate_knowledge_embeddings_inner(
     to_embed, orphaned, all_count = await asyncio.to_thread(_sync_diff)
 
     if orphaned:
+        # Drop orphans from the index only; skip compaction — see code
+        # indexer for rationale. TL;DR: rewriting 100+ MB to reclaim a
+        # few KB per orphan is not worth the hang risk. /init --force
+        # wipes and rebuilds the store from scratch for true cleanup.
         logger.info(
-            "[knowledge embed] removing %d orphaned entries from index…",
+            "[knowledge embed] dropping %d orphaned entries from index "
+            "(bin file left intact; run /init --force to reclaim bytes)",
             len(orphaned),
         )
         await asyncio.to_thread(store.remove_chunks, orphaned)
-        logger.info(
-            "[knowledge embed] orphan index entries removed, compacting…",
-        )
-        await asyncio.to_thread(store.compact)
-        logger.info("[knowledge embed] compact complete")
+        await asyncio.to_thread(store.flush_index)
+        logger.info("[knowledge embed] orphan cleanup complete")
     stats.orphaned_removed = len(orphaned)
     stats.unchanged = all_count - len(to_embed)
 
