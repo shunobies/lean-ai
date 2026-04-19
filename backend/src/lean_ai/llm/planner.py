@@ -24,7 +24,9 @@ from fastapi import WebSocket
 from lean_ai.config import settings
 from lean_ai.llm.plan_schema import (
     IMPLEMENTATION_STEP_TOOLS,
+    DesignAndRisks,
     ExecutionPlan,
+    MissingFile,
     VerificationPlan,
     plan_to_markdown,
 )
@@ -35,7 +37,6 @@ from lean_ai.llm.planner_exploration import (
 from lean_ai.llm.planner_helpers import (
     PLAN_OUTPUT_PERCENT,
     _compact_file_summary,
-    _extract_missing_files,
     _retrieve_session_memories,
     _revise_plan,
     _save_debug_phase,
@@ -53,8 +54,6 @@ from lean_ai.llm.prompts import (
     PLAN_VERIFICATION_SYSTEM_PROMPT,
 )
 from lean_ai.llm.tool_definitions import build_design_tools, build_planning_tools
-from lean_ai.tools import scratchpad
-from lean_ai.tools.journal import read_journal
 
 if TYPE_CHECKING:
     from lean_ai.llm.facade import LLMClient
@@ -294,45 +293,23 @@ async def create_plan(
     logger.info("Planning Phase 3: Design + risk synthesis")
     t0 = time.monotonic()
 
+    phase3_project_context_block = (
+        f"PROJECT CONTEXT:\n{project_context}\n\n"
+        if project_context else ""
+    )
+    phase3_user_content = registry.format(
+        "planning.design_user",
+        task=task,
+        scope=scope,
+        project_context=phase3_project_context_block,
+        file_summary=file_summary,
+    )
     phase3_messages = [
         {"role": "system", "content": PLAN_DESIGN_SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": registry.format(
-                "planning.design_user",
-                task=task,
-                scope=scope,
-                project_context=(
-                    f"PROJECT CONTEXT:\n{project_context}\n\n"
-                    if project_context else ""
-                ),
-                file_summary=file_summary,
-            ),
-        },
+        {"role": "user", "content": phase3_user_content},
     ]
 
-    # Inject Phase 2 exploration notes (scratchpad/journal) into expert context
-    if session_id:
-        exploration_journal = read_journal(repo_root, session_id)
-        if exploration_journal:
-            phase3_messages.append({
-                "role": "user",
-                "content": (
-                    "EXPLORATION NOTES (from codebase analysis):\n"
-                    + exploration_journal
-                ),
-            })
-        exploration_pad = scratchpad.read_scratchpad(repo_root, session_id)
-        if exploration_pad:
-            phase3_messages.append({
-                "role": "user",
-                "content": (
-                    "EXPLORATION SCRATCHPAD (current state):\n"
-                    + exploration_pad
-                ),
-            })
-
-    # Search-only tool executor for Phase 3 design synthesis
+    # Search-only tool executor for Phase 3 Pass 1 verification.
     async def _search_only_executor(name: str, arguments: dict) -> str:
         """Execute search tools for Phase 3 design verification."""
         if name == "search_internet":
@@ -360,43 +337,62 @@ async def create_plan(
             return "Design synthesis marked complete."
         return f"Unknown tool: {name}"
 
-    # Use chat_with_tools so the expert can search the internet to verify
-    # external frameworks, APIs, and patterns during design.
-    # text_only_exit_count=1 preserves single-shot behavior when no search
-    # is needed — the model exits immediately on the first text response.
-    _phase3_tool_calls, design_and_risks = await expert.chat_with_tools(
-        messages=phase3_messages,
-        tools=build_design_tools(),
-        tool_executor_fn=_search_only_executor,
-        max_turns=15,
-        max_tokens=expert_max_tokens,
-        text_only_exit_count=1,
-        on_tool_call=on_tool_call,
-        on_tool_result=on_tool_result,
-        on_content=on_content,
-        on_thinking=on_thinking,
-        on_metrics=on_metrics,
+    # Pass 1: expert reasons through design + verifies external patterns.
+    # text_only_exit_count=1 preserves single-shot behaviour when the
+    # FileSummary's VERIFIED REFERENCES already cover every external
+    # surface — the model exits on its first text response.
+    _phase3_tool_calls, phase3_exploration_prose = (
+        await expert.chat_with_tools(
+            messages=phase3_messages,
+            tools=build_design_tools(),
+            tool_executor_fn=_search_only_executor,
+            max_turns=15,
+            max_tokens=expert_max_tokens,
+            text_only_exit_count=1,
+            on_tool_call=on_tool_call,
+            on_tool_result=on_tool_result,
+            on_content=on_content,
+            on_thinking=on_thinking,
+            on_metrics=on_metrics,
+        )
     )
     if on_content:
-        await _send_content_done(ws, design_and_risks)
+        await _send_content_done(ws, phase3_exploration_prose)
+
+    # Pass 2: coerce exploration prose + FileSummary into DesignAndRisks.
+    design_and_risks_obj = await _synthesize_design_and_risks(
+        task=task,
+        scope=scope,
+        project_context_block=phase3_project_context_block,
+        file_summary=file_summary,
+        exploration_prose=phase3_exploration_prose,
+        expert=expert,
+        expert_max_tokens=expert_max_tokens,
+        on_thinking=on_thinking,
+    )
+    design_and_risks = _format_design_and_risks(design_and_risks_obj)
+    missing_files = _format_missing_files(design_and_risks_obj.missing_files)
 
     phase_timings["phase_3_design_and_risks"] = time.monotonic() - t0
     _save_debug_phase(
         repo_root, session_id, "phase_3_design_and_risks",
         design_and_risks, phase_timings["phase_3_design_and_risks"],
     )
+    logger.info(
+        "Phase 3 synthesis: naming=%d designs=%d missing=%d "
+        "deps=%d risks=%d citations=%d in %.1fs",
+        len(design_and_risks_obj.naming_conventions),
+        len(design_and_risks_obj.change_designs),
+        len(design_and_risks_obj.missing_files),
+        len(design_and_risks_obj.dependency_order),
+        len(design_and_risks_obj.critical_risks),
+        len(design_and_risks_obj.citations),
+        phase_timings["phase_3_design_and_risks"],
+    )
     await _send_stage_done(
         ws, "Design and risk synthesis complete",
         model=expert.model_name, phase=3,
     )
-
-    # Extract missing files from gap analysis for injection into Phase 4
-    missing_files = await _extract_missing_files(design_and_risks, expert)
-    if missing_files:
-        logger.info(
-            "Extracted %d chars of missing files from Phase 3",
-            len(missing_files),
-        )
 
     # ── Phase 4: Structured Plan Assembly ──
     await _send_stage(
@@ -800,3 +796,152 @@ async def _run_phase5_verification(
     )
 
     return elapsed
+
+
+# ── Phase 3 synthesis + rendering ───────────────────────────────────────────
+
+
+async def _synthesize_design_and_risks(
+    *,
+    task: str,
+    scope: str,
+    project_context_block: str,
+    file_summary: str,
+    exploration_prose: str,
+    expert: "LLMClient",
+    expert_max_tokens: int,
+    on_thinking: "Callable | None" = None,
+) -> DesignAndRisks:
+    """Coerce Phase 3's exploration prose + inputs into a DesignAndRisks.
+
+    On structured-output failure, returns a minimal DesignAndRisks with the
+    exploration prose stashed in ``notes`` so the pipeline keeps moving.
+    """
+    synthesis_system = registry.get("planning.design_synthesis_system")
+    user_parts = [
+        f"TASK: {task}",
+        f"SCOPE:\n{scope}",
+    ]
+    if project_context_block:
+        user_parts.append(project_context_block.rstrip())
+    user_parts.append(f"FILE SUMMARY:\n{file_summary}")
+    if exploration_prose.strip():
+        user_parts.append(
+            f"PASS 1 EXPLORATION PROSE:\n{exploration_prose}"
+        )
+    user_parts.append(
+        "Produce a DesignAndRisks object from the inputs above. "
+        "Populate every field per the system-prompt rubric. Empty lists "
+        "are acceptable when an input contains nothing relevant."
+    )
+
+    try:
+        return await expert.chat_structured(
+            messages=[
+                {"role": "system", "content": synthesis_system},
+                {"role": "user", "content": "\n\n".join(user_parts)},
+            ],
+            schema=DesignAndRisks,
+            max_tokens=expert_max_tokens,
+            thinking_callback=on_thinking,
+        )
+    except Exception:
+        logger.warning(
+            "Phase 3 synthesis failed — returning minimal DesignAndRisks "
+            "with exploration prose in notes",
+            exc_info=True,
+        )
+        return DesignAndRisks(notes=exploration_prose.strip())
+
+
+def _format_design_and_risks(dar: DesignAndRisks) -> str:
+    """Render a DesignAndRisks object to the markdown shape Phase 4 consumes
+    as ``{design_and_risks}``. Empty sections are omitted.
+    """
+    lines: list[str] = []
+
+    if dar.naming_conventions:
+        lines.append("## Naming Conventions")
+        lines.append("")
+        lines.append("| category | pattern | source_file |")
+        lines.append("|---|---|---|")
+        for nc in dar.naming_conventions:
+            lines.append(
+                f"| {nc.category} | {nc.pattern} | {nc.source_file} |"
+            )
+        lines.append("")
+
+    if dar.change_designs:
+        lines.append("## Change Designs")
+        lines.append("")
+        for cd in dar.change_designs:
+            lines.append(f"### {cd.file_path}")
+            lines.append("")
+            lines.append(cd.decisions.strip())
+            lines.append("")
+
+    if dar.missing_files:
+        lines.append("## Missing Files")
+        lines.append("")
+        for i, m in enumerate(dar.missing_files, 1):
+            blocking = " [BLOCKING]" if m.blocking else ""
+            lines.append(f"{i}. {m.file_path} — {m.purpose}{blocking}")
+        lines.append("")
+
+    if dar.dependency_order:
+        lines.append("## Dependency Order")
+        lines.append("")
+        for d in dar.dependency_order:
+            lines.append(
+                f"- {d.file_path} depends on {d.depends_on} — {d.reason}"
+            )
+        lines.append("")
+
+    if dar.critical_risks:
+        lines.append("## Critical Risks")
+        lines.append("")
+        for r in dar.critical_risks:
+            lines.append(
+                f"- **[{r.severity}]** {r.risk} — {r.mitigation}"
+            )
+        lines.append("")
+
+    if dar.citations:
+        lines.append("## Citations")
+        lines.append("")
+        seen_urls: set[str] = set()
+        for c in dar.citations:
+            if c.docs_url in seen_urls:
+                continue
+            seen_urls.add(c.docs_url)
+            entry = f"- {c.dependency} — {c.docs_url}"
+            if c.version:
+                entry += f" — version: {c.version}"
+            if c.confirmed_patterns:
+                entry += f" — {c.confirmed_patterns}"
+            lines.append(entry)
+        lines.append("")
+
+    if dar.notes.strip():
+        lines.append("## Notes")
+        lines.append("")
+        lines.append(dar.notes.strip())
+        lines.append("")
+
+    if not lines:
+        return "(no design output)\n"
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _format_missing_files(missing: list[MissingFile]) -> str:
+    """Render the missing-files list as the numbered bullet string Phase 4
+    consumes as ``{missing_files}``. Empty string when no entries — matches
+    the prior behaviour of ``_extract_missing_files``.
+    """
+    if not missing:
+        return ""
+    rows: list[str] = []
+    for i, m in enumerate(missing, 1):
+        blocking = " [BLOCKING]" if m.blocking else ""
+        rows.append(f"{i}. {m.file_path} — {m.purpose}{blocking}")
+    return "\n".join(rows)

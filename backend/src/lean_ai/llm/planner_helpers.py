@@ -189,39 +189,6 @@ async def _send_content_done(
     ws_send_nowait(ws, "assistant_content", {"content": text, "done": True})
 
 
-async def _extract_missing_files(
-    risks: str,
-    llm_client: "LLMClient",
-) -> str:
-    """Extract the missing file list from the gap analysis output.
-
-    Returns a short bullet list of files that the gap analysis identified
-    as required but missing from the plan, or empty string if none.
-    """
-    result = await llm_client.chat_raw(
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    "From the risk assessment below, extract ONLY the "
-                    "files identified as MISSING — files that are REQUIRED "
-                    "for the app to work at runtime but are NOT yet in the "
-                    "change design.\n\n"
-                    "Output a simple numbered list:\n"
-                    "1. file/path — what it is and why it is needed\n\n"
-                    "If no missing files were identified, output: NONE\n\n"
-                    f"RISK ASSESSMENT:\n{risks}"
-                ),
-            },
-        ],
-        max_tokens=1024,
-    )
-    stripped = result.strip()
-    if stripped.upper() == "NONE" or len(stripped) < 10:
-        return ""
-    return stripped
-
-
 async def _compact_file_summary(
     file_summary: str,
     llm_client: "LLMClient",

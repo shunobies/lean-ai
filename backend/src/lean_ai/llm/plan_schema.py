@@ -90,6 +90,86 @@ class FileSummary(BaseModel):
     """Free-form catch-all for cross-file references, tricky invariants, or
     anything the structured fields do not capture."""
 
+
+# ── Phase 3 design + risk schemas ───────────────────────────────────────────
+#
+# DesignAndRisks is produced by a chat_structured synthesis pass at the end
+# of Phase 3. Its fields replace the prior free-form 3-section text output
+# and eliminate the secondary _extract_missing_files LLM call (missing_files
+# becomes a direct field on the object).
+
+NamingCategory = Literal[
+    "variables", "functions", "classes", "files",
+    "routes", "db_table", "db_column", "imports",
+]
+RiskSeverity = Literal["low", "medium", "high"]
+
+
+class NamingConvention(BaseModel):
+    """One naming pattern observed in the existing codebase."""
+
+    category: NamingCategory
+    pattern: str
+    """The convention itself — e.g. 'snake_case' or 'UPPER_SNAKE_CASE'."""
+
+    source_file: str
+    """Repo-relative path of a file exemplifying the pattern, or the literal
+    string 'standard framework conventions' when no codebase example applies."""
+
+
+class ChangeDesign(BaseModel):
+    """Design decisions for ONE non-obvious file."""
+
+    file_path: str
+    decisions: str
+    """3-8 lines of prose on non-obvious choices: complex DB schemas,
+    non-trivial method signatures, multi-component wiring, pattern
+    deviations. Skip for straightforward files (simple CRUD, basic
+    models, standard config)."""
+
+
+class MissingFile(BaseModel):
+    """A file that is required at runtime but absent from the plan."""
+
+    file_path: str
+    purpose: str
+    blocking: bool = False
+
+
+class DependencyOrder(BaseModel):
+    """An ordering constraint between plan files."""
+
+    file_path: str
+    depends_on: str
+    reason: str
+
+
+class CriticalRisk(BaseModel):
+    """A scope-level risk the plan must consciously account for."""
+
+    risk: str
+    severity: RiskSeverity
+    mitigation: str
+
+
+class DesignAndRisks(BaseModel):
+    """Validated Phase 3 output — produced by the synthesis pass."""
+
+    naming_conventions: list[NamingConvention] = []
+    change_designs: list[ChangeDesign] = []
+    missing_files: list[MissingFile] = []
+    dependency_order: list[DependencyOrder] = []
+    critical_risks: list[CriticalRisk] = []
+    citations: list[VerifiedReference] = []
+    """External dependencies the expert verified during Phase 3. Rendered
+    alongside Phase 2's VERIFIED REFERENCES at the Phase 4 boundary (dedupe
+    by docs_url)."""
+
+    notes: str = ""
+    """Free-form catch-all for architectural invariants or edge cases that
+    do not fit the structured fields."""
+
+
 # Tools valid in implementation plan steps (Phase 4 output).
 # Includes read_file (executor reads before editing), run_tests, run_lint,
 # format_code — only truly non-plan tools (list_directory, directory_tree,
