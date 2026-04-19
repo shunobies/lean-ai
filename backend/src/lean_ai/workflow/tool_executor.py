@@ -256,6 +256,37 @@ def _validate_required_params(name: str, arguments: dict) -> str | None:
     return None
 
 
+_KB_FOOTER_MAX_DOCS = 20
+
+
+def _format_kb_doc_listing(docs: list[dict], query: str) -> str:
+    """Render a hint listing available KB documents + an example call.
+
+    Used when the LLM calls ``search_knowledge`` without a ``document``
+    filter so it can narrow follow-up searches without needing a
+    separate ``list_knowledge_documents`` round-trip.
+    """
+    shown = docs[:_KB_FOOTER_MAX_DOCS]
+    lines = [
+        f"Knowledge base has {len(docs)} document(s). "
+        "Pass `document` to restrict a follow-up search to one source:"
+    ]
+    for d in shown:
+        lines.append(f"  - {d['doc_title']}  [path={d['doc_path']}]")
+    if len(docs) > _KB_FOOTER_MAX_DOCS:
+        lines.append(
+            f"  ... {len(docs) - _KB_FOOTER_MAX_DOCS} more — "
+            "call list_knowledge_documents to see all."
+        )
+    example_path = shown[0]["doc_path"] if shown else "path/from/list_knowledge_documents"
+    example_query = query.strip() or "your query"
+    lines.append(
+        f'Example: search_knowledge(query="{example_query}", '
+        f'document="{example_path}")'
+    )
+    return "\n".join(lines)
+
+
 def make_tool_executor(
     repo_root: str,
     ws: WebSocket,
@@ -655,6 +686,7 @@ def make_tool_executor(
 
         elif name == "search_knowledge":
             from lean_ai.knowledge.indexer import is_knowledge_available
+            from lean_ai.knowledge.indexer import list_documents as _list_documents
             from lean_ai.knowledge.indexer import search_knowledge as _search_knowledge
 
             if not is_knowledge_available(repo_root):
@@ -687,9 +719,23 @@ def make_tool_executor(
                 True,  # expand
                 document,
             )
+
+            # Unfiltered searches get a listing footer so the LLM can
+            # narrow follow-up calls without a separate discovery round.
+            # Skipped when the KB has 0-1 documents (nothing to narrow to)
+            # or when the caller already scoped the search.
+            doc_listing = ""
+            if document is None:
+                all_docs = await asyncio.to_thread(_list_documents, repo_root, "")
+                if len(all_docs) > 1:
+                    doc_listing = _format_kb_doc_listing(all_docs, query)
+
             if not chunks:
                 scope = f" in '{document}'" if document else ""
-                return f"No knowledge base results for '{query}'{scope}."
+                base = f"No knowledge base results for '{query}'{scope}."
+                if doc_listing:
+                    return f"{base}\n\n{doc_listing}"
+                return base
 
             parts = []
             for chunk in chunks:
@@ -712,7 +758,10 @@ def make_tool_executor(
                 if start_idx is not None and end_idx is not None and start_idx != end_idx:
                     header = f"{header} (chunks {start_idx}-{end_idx})"
                 parts.append(f"{header}\n{content}")
-            return "\n\n---\n\n".join(parts)
+            body = "\n\n---\n\n".join(parts)
+            if doc_listing:
+                return f"{body}\n\n---\n\n{doc_listing}"
+            return body
 
         elif name == "list_knowledge_documents":
             from lean_ai.knowledge.indexer import is_knowledge_available
