@@ -14,7 +14,7 @@ Adding a new reader
 import logging
 from pathlib import Path
 
-from lean_ai.knowledge.readers.base import DocumentReader, KnowledgeChunk
+from lean_ai.reference.readers.base import DocumentReader, ReferenceChunk
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +25,9 @@ _readers: list[DocumentReader] = []
 def _try_register() -> None:
     """Register readers, skipping those with missing optional deps."""
     # Always available (no optional deps beyond beautifulsoup4).
-    from lean_ai.knowledge.readers.html import HtmlReader
-    from lean_ai.knowledge.readers.markdown import MarkdownReader
-    from lean_ai.knowledge.readers.text import TextReader
+    from lean_ai.reference.readers.html import HtmlReader
+    from lean_ai.reference.readers.markdown import MarkdownReader
+    from lean_ai.reference.readers.text import TextReader
 
     _readers.extend([MarkdownReader(), HtmlReader(), TextReader()])
 
@@ -35,12 +35,12 @@ def _try_register() -> None:
     try:
         import ebooklib  # noqa: F401
 
-        from lean_ai.knowledge.readers.epub import EpubReader
+        from lean_ai.reference.readers.epub import EpubReader
         _readers.append(EpubReader())
-        logger.debug("Knowledge: EPUB reader registered (ebooklib available)")
+        logger.debug("Reference: EPUB reader registered (ebooklib available)")
     except ImportError:
         logger.debug(
-            "Knowledge: EPUB reader not registered — install ebooklib: "
+            "Reference: EPUB reader not registered — install ebooklib: "
             "pip install ebooklib"
         )
 
@@ -48,12 +48,12 @@ def _try_register() -> None:
     try:
         import pypdf  # noqa: F401
 
-        from lean_ai.knowledge.readers.pdf import PdfReader
+        from lean_ai.reference.readers.pdf import PdfReader
         _readers.append(PdfReader())
-        logger.debug("Knowledge: PDF reader registered (pypdf available)")
+        logger.debug("Reference: PDF reader registered (pypdf available)")
     except ImportError:
         logger.debug(
-            "Knowledge: PDF reader not registered — install pypdf: "
+            "Reference: PDF reader not registered — install pypdf: "
             "pip install pypdf"
         )
 
@@ -61,12 +61,12 @@ def _try_register() -> None:
     try:
         import docx  # noqa: F401
 
-        from lean_ai.knowledge.readers.docx import DocxReader
+        from lean_ai.reference.readers.docx import DocxReader
         _readers.append(DocxReader())
-        logger.debug("Knowledge: DOCX reader registered (python-docx available)")
+        logger.debug("Reference: DOCX reader registered (python-docx available)")
     except ImportError:
         logger.debug(
-            "Knowledge: DOCX reader not registered — install python-docx: "
+            "Reference: DOCX reader not registered — install python-docx: "
             "pip install python-docx"
         )
 
@@ -90,7 +90,7 @@ def supported_extensions() -> list[str]:
     return sorted(exts)
 
 
-def read_document(path: Path, rel_path: str) -> list[KnowledgeChunk]:
+def read_document(path: Path, rel_path: str) -> list[ReferenceChunk]:
     """Read a document using the appropriate registered reader.
 
     Returns an empty list when no reader handles *path*'s extension or

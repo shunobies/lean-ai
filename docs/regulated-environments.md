@@ -37,7 +37,7 @@ This is not a stripped-down local autocomplete. Lean AI with Lean AI Serve provi
 - Autonomous code generation, editing, and testing
 - Post-execution validation (auto-runs lint, format, test)
 - Git-native branch workflow — every change is isolated and reversible
-- Knowledge base for indexing internal documentation (PDF, EPUB, Word, Markdown)
+- Reference library for indexing internal documentation (PDF, EPUB, Word, Markdown)
 - Three-model pipeline: request model for scoping, primary model for coding, expert model for reasoning
 - Internet search is optional and can be disabled entirely or routed through a self-hosted SearXNG instance
 
@@ -84,7 +84,7 @@ The `tool_logs` table provides a complete audit trail that compliance teams can 
 | Model choice | Vendor-locked | Any model that runs on vLLM |
 | Audit trail | Vendor-dependent | Full local SQLite log |
 | Air-gap support | Not possible | Fully supported |
-| Internal docs integration | Limited | Knowledge base (PDF, EPUB, Word, MD) indexed locally |
+| Internal docs integration | Limited | Reference library (PDF, EPUB, Word, MD) indexed locally |
 | Cost model | Per-token API pricing | Fixed infrastructure cost |
 
 After GPU hardware acquisition, the marginal cost per query is electricity and compute time. No per-token billing, no usage caps, no vendor pricing changes.
@@ -167,10 +167,10 @@ See the Lean AI Serve documentation for installation and vLLM configuration. Key
 cd backend && pip install -e ".[dev,openai]"
 ```
 
-The `openai` extra is required because Lean AI Serve uses the OpenAI SDK under the hood. Add `knowledge` for internal document indexing:
+The `openai` extra is required because Lean AI Serve uses the OpenAI SDK under the hood. Add `reference` for internal document indexing:
 
 ```bash
-cd backend && pip install -e ".[dev,openai,knowledge]"
+cd backend && pip install -e ".[dev,openai,reference]"
 ```
 
 ### Step 3: Configure the Provider
@@ -305,7 +305,7 @@ Firewall rules:
 
 The default search provider (DuckDuckGo) requires internet access. For restricted environments:
 
-1. **Disable search entirely** — Leave the search provider unconfigured. The agent works without internet search using only local codebase context and the knowledge base.
+1. **Disable search entirely** — Leave the search provider unconfigured. The agent works without internet search using only local codebase context and the reference library.
 2. **Self-hosted SearXNG** — Deploy a SearXNG instance on your internal network:
 
 ```yaml
@@ -345,24 +345,24 @@ When using any non-local provider (including Lean AI Serve on a remote server), 
 | `auth.internal.company.com` | `<INTERNAL_URL>` |
 | `admin@company.com` | `<REDACTED_EMAIL>` |
 
-When Lean AI Serve is on the same internal network, the refiner is typically unnecessary but can be enabled via `enable_refiner: true`. See [Knowledge Base & Refiner](knowledge-base.md#local-refiner) for details.
+When Lean AI Serve is on the same internal network, the refiner is typically unnecessary but can be enabled via `enable_refiner: true`. See [Reference Library & Refiner](reference-library.md#local-refiner) for details.
 
-## Knowledge Base for Internal Documentation
+## Reference Library for Internal Documentation
 
 Regulated organizations often have internal architecture docs, API specs, and coding standards that the AI should reference but must never send externally. Lean AI indexes these documents locally in a Whoosh search index.
 
 Supported formats: Markdown, PDF, EPUB, Word, HTML, plain text.
 
 ```bash
-pip install -e ".[dev,openai,knowledge]"
-mkdir -p .lean_ai/knowledge
-cp internal-api-spec.pdf .lean_ai/knowledge/
+pip install -e ".[dev,openai,reference]"
+mkdir -p .lean_ai/reference
+cp internal-api-spec.pdf .lean_ai/reference/
 # Then run /init in the extension
 ```
 
-During planning and chat, the knowledge index is queried and relevant chunks are injected into the LLM prompt alongside codebase context. All indexing and retrieval is local — documents never leave the workstation. SHA-256 manifests track changes for incremental re-indexing.
+During planning and chat, the reference index is queried and relevant chunks are injected into the LLM prompt alongside codebase context. All indexing and retrieval is local — documents never leave the workstation. SHA-256 manifests track changes for incremental re-indexing.
 
-See [Knowledge Base & Refiner](knowledge-base.md) for full documentation.
+See [Reference Library & Refiner](reference-library.md) for full documentation.
 
 ## Air-Gapped Deployment Checklist
 
@@ -443,5 +443,5 @@ See [Configuration Reference](configuration.md) for all environment variables an
 
 - [Configuration Reference](configuration.md) — All environment variables and settings
 - [Architecture](architecture.md) — System design and workflow modes
-- [Knowledge Base & Refiner](knowledge-base.md) — Internal document indexing and privacy stripping
+- [Reference Library & Refiner](reference-library.md) — Internal document indexing and privacy stripping
 - [Extension Guide](extension.md) — VSCode extension setup and features

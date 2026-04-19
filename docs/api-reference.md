@@ -107,7 +107,7 @@ The chat endpoint automatically:
 - Searches the workspace index for relevant code
 - Searches the web for current information
 - Fetches any URLs included in the message
-- Runs the [local refiner](knowledge-base.md#local-refiner) when using cloud providers
+- Runs the [local refiner](reference-library.md#local-refiner) when using cloud providers
 
 ### Inline Predictions
 
@@ -139,7 +139,7 @@ Copilot-style inline completions. Always uses Ollama.
 
 #### `POST /api/init-workspace`
 
-Index the workspace, generate project context, and trigger background embedding generation and knowledge indexing.
+Index the workspace, generate project context, and trigger background embedding generation and reference library indexing.
 
 **Request:**
 ```json
@@ -178,11 +178,11 @@ Generate `.lean_ai/framework_guide.md` by detecting frameworks and generating be
 
 Generate `.lean_ai/context/style_guide.md` from CSS and template files.
 
-### Knowledge Base
+### Reference Library
 
-#### `POST /api/index-knowledge`
+#### `POST /api/index-reference`
 
-Index documents in the knowledge directory for domain document retrieval.
+Index documents in the reference library directory for domain document retrieval.
 
 **Request:**
 ```json
@@ -518,7 +518,7 @@ backend's `runtime_state` registry. Current tags:
 - `embeddings.code` — code-index embedding generation in progress.
   Covers any cold-load wait for the embedding model in Ollama when the
   first batch of a fresh run is sent; can take minutes for large models.
-- `embeddings.knowledge` — knowledge-base embedding generation in progress.
+- `embeddings.reference` — reference library embedding generation in progress.
 
 `check_embedding_model` only performs an `ollama show` existence check
 (instant, no load); it does not pre-warm the model. The first real

@@ -137,15 +137,15 @@ if (
         )
         refiner = PromptRefiner(
             ollama_provider=_refiner_provider,
-            enable_knowledge=settings.refiner_enable_knowledge,
+            enable_reference=settings.refiner_enable_reference,
             enable_privacy=settings.refiner_enable_privacy,
-            knowledge_chunks=settings.refiner_knowledge_chunks,
+            reference_chunks=settings.refiner_reference_chunks,
             timeout=settings.refiner_timeout,
         )
         logger.info(
-            "Local refiner enabled (model=%s, knowledge=%s, privacy=%s)",
+            "Local refiner enabled (model=%s, reference=%s, privacy=%s)",
             settings.effective_refiner_model,
-            settings.refiner_enable_knowledge,
+            settings.refiner_enable_reference,
             settings.refiner_enable_privacy,
         )
     except Exception:

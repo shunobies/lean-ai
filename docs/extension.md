@@ -42,7 +42,7 @@ The chat panel is the primary interface. It provides a conversational LLM experi
 - The workspace index is searched for relevant code snippets
 - Web search runs in parallel for current information
 - URLs in your message are fetched and included as context
-- The [local refiner](knowledge-base.md#local-refiner) enriches prompts when using cloud providers
+- The [local refiner](reference-library.md#local-refiner) enriches prompts when using cloud providers
 
 ### Inline Predictions
 
@@ -151,7 +151,7 @@ Type these in the chat panel:
 
 | Command | What it does |
 |---|---|
-| `/init` | Index workspace, generate project context, and index knowledge base |
+| `/init` | Index workspace, generate project context, and index reference library |
 | `/agent <task>` | Send a task to the full planning pipeline |
 | `/fix <task>` | Skip planning — the agent explores and fixes directly |
 | `/approve` | Merge the current session's branch |

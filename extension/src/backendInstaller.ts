@@ -1,7 +1,7 @@
 /**
  * Managed backend installation — creates a venv in globalStorageUri,
  * pip-installs the bundled Python backend, verifies core imports, and
- * offers optional extras (openai, anthropic, knowledge).
+ * offers optional extras (openai, anthropic, reference).
  *
  * Manual mode: when the user explicitly sets `lean-ai.backendDir` or
  * `lean-ai.pythonPath` (non-default), all auto-install logic is skipped.
@@ -469,8 +469,8 @@ async function promptOptionalExtras(context: vscode.ExtensionContext): Promise<v
             picked: false,
         },
         {
-            label: "knowledge",
-            description: "Document indexing (EPUB, PDF, Word)",
+            label: "reference",
+            description: "Reference library document indexing (EPUB, PDF, Word)",
             picked: false,
         },
         {

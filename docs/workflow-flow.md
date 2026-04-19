@@ -50,7 +50,7 @@ User Input
 │    • Workspace search results                                    │
 │    • Recent session activity (last 3 sessions, 800 char cap)     │
 │    • Image descriptions (vision model)                           │
-│    • Refiner-enhanced messages (knowledge injection)             │
+│    • Refiner-enhanced messages (reference library injection)     │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -107,7 +107,7 @@ User Input
 │                                                                  │
 │  Tools: restricted read-only subset (via chat_with_tools)        │
 │    grep_files, read_file, list_directory,                        │
-│    query_project_context, search_knowledge, task_complete        │
+│    query_project_context, search_reference, task_complete        │
 │  Budget: LEAN_AI_PLAN_PHASE1_MAX_TURNS (default 5)               │
 │  text_only_exit_count=1 — single text response exits loop        │
 │                                                                  │
@@ -161,7 +161,7 @@ User Input
 │  │                                                              │  │
 │  │  Tools: Phase-2-specific filter of                          │  │
 │  │    build_planning_tools_with_scratchpad()                   │  │
-│  │    • DROPPED: search_knowledge, list_knowledge_documents   │  │
+│  │    • DROPPED: search_reference, list_reference_documents   │  │
 │  │      (noise for file identification)                         │  │
 │  │    • ADDED:   record_file_observation                        │  │
 │  │    • KEPT:    read_file, grep_files, list_directory,        │  │
@@ -212,8 +212,8 @@ User Input
 │                                                                  │
 │  PASS 1 — chat_with_tools exploration/verification:              │
 │    Tools: build_design_tools()                                   │
-│      search_internet, fetch_url, search_knowledge,               │
-│      list_knowledge_documents, search_wiki*, fetch_wiki*,        │
+│      search_internet, fetch_url, search_reference,               │
+│      list_reference_documents, search_wiki*, fetch_wiki*,        │
 │      task_complete                                                │
 │    max_turns=15, text_only_exit_count=1                          │
 │                                                                  │

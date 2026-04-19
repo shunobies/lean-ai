@@ -580,7 +580,7 @@ async def _run_serial_exploration(
     phase2_tools = [
         t for t in build_planning_tools_with_scratchpad()
         if t["function"]["name"] not in (
-            "search_knowledge", "list_knowledge_documents",
+            "search_reference", "list_reference_documents",
         )
     ]
     phase2_tools.append(RECORD_FILE_OBSERVATION_TOOL)

@@ -13,9 +13,9 @@ Run it fully local with [Ollama](https://ollama.com), or connect to OpenAI and A
 - **Plan first, then execute** — a 6-phase planning pipeline reads your codebase, traces data flow across files, and produces a structured plan before touching any code. You approve (or revise) before anything changes. Thinking and content tokens stream in real-time during every planning phase so you can follow the agent's reasoning as it works.
 - **Multi-provider flexibility** — Ollama for free local inference, OpenAI for GPT-4o, Anthropic for Claude. Switch from the dropdown without restarting. Use cheap local models for small fixes, cloud models for hard problems.
 - **Dual-model pipeline** — run a fast local model for codebase exploration and code execution, then automatically hand off to a cloud model (Claude, GPT-4o) for reasoning-heavy planning phases and complex fix attempts. Save cloud tokens for the decisions that matter.
-- **Local Refiner** — when using cloud providers, a local Ollama model pre-processes your prompts: enriches them with private knowledge base context, strips sensitive data, and structures vague requests into detailed specs. Your proprietary docs never leave your machine. [Learn more](docs/knowledge-base.md)
+- **Local Refiner** — when using cloud providers, a local Ollama model pre-processes your prompts: enriches them with private reference library context, strips sensitive data, and structures vague requests into detailed specs. Your proprietary docs never leave your machine. [Learn more](docs/reference-library.md)
 - **Zero prompt engineering** — chat mode helps you refine ideas into detailed tasks. Project context and framework guides teach the LLM your codebase conventions automatically.
-- **Knowledge base** — drop your internal docs (PDF, EPUB, Word, Markdown) into `.lean_ai/knowledge/` and the agent uses them for better plans without leaking content to cloud APIs.
+- **Reference library** — drop your internal docs (PDF, EPUB, Word, Markdown) into `.lean_ai/reference/` and the agent uses them for better plans without leaking content to cloud APIs.
 - **Built-in code quality** — after every execution, Lean AI runs your project's linter and tests automatically. Failures are fed back to the LLM for self-correction. Lint, test, and format commands are auto-detected from your project files — zero configuration needed. When a test command is available, the agent writes tests alongside code changes.
 - **Git-native workflow** — every task runs on its own branch. Approve to merge, reject to discard. Your main branch stays clean.
 - **19 scaffold recipes** — bootstrap new projects (FastAPI, Next.js, Laravel, Rails, and more) with a single command.
@@ -55,7 +55,7 @@ cd backend
 pip install -e ".[dev]"
 ```
 
-Need cloud providers or knowledge base support? See [optional extras](docs/configuration.md#installation-extras).
+Need cloud providers or reference library support? See [optional extras](docs/configuration.md#installation-extras).
 
 Start the server manually:
 
@@ -179,7 +179,7 @@ See the [full configuration reference](docs/configuration.md) for all options.
 |---|---|
 | [Configuration](docs/configuration.md) | All environment variables, extension settings, and model setup |
 | [Architecture](docs/architecture.md) | Planning pipeline, workflow modes, tools, and internals |
-| [Knowledge Base & Refiner](docs/knowledge-base.md) | Private docs, RAG enrichment, and cloud privacy |
+| [Reference Library & Refiner](docs/reference-library.md) | Private docs, RAG enrichment, and cloud privacy |
 | [API Reference](docs/api-reference.md) | REST endpoints and WebSocket protocol |
 | [Extension Guide](docs/extension.md) | VSCode/VSCodium setup, commands, and settings |
 | [JetBrains Plugin](jetbrains-plugin/README.md) | IntelliJ, PyCharm, WebStorm, CLion, and all JetBrains IDEs |

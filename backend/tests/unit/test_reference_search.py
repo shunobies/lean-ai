@@ -1,23 +1,23 @@
-"""Tests for neighbor expansion in knowledge-base search."""
+"""Tests for neighbor expansion in reference library search."""
 
 import os
 
 import pytest
 from whoosh.index import create_in
 
-from lean_ai.knowledge.indexer import (
-    KNOWLEDGE_SCHEMA,
+from lean_ai.reference.indexer import (
+    REFERENCE_SCHEMA,
     _expand_with_neighbors,
     is_chunk_config_stale,
     list_documents,
-    requires_kb_rebuild,
-    search_knowledge,
+    requires_reference_rebuild,
+    search_reference,
 )
 
 
 @pytest.fixture
-def kb_index(tmp_path, monkeypatch):
-    """Build a tiny Whoosh knowledge index at a temp path.
+def reference_index(tmp_path, monkeypatch):
+    """Build a tiny Whoosh reference index at a temp path.
 
     Two documents:
       - ``book.epub`` with 10 chunks (chunk_index 0–9), each tagged with
@@ -26,16 +26,16 @@ def kb_index(tmp_path, monkeypatch):
       - ``manual.pdf`` with 5 chunks (chunk_index 0–4).
     """
     repo_root = tmp_path
-    idx_dirname = "kb_index_test"
+    idx_dirname = "reference_index_test"
     monkeypatch.setattr(
-        "lean_ai.config.settings.knowledge_index_dir",
+        "lean_ai.config.settings.reference_index_dir",
         idx_dirname,
         raising=False,
     )
     idx_path = os.path.join(str(repo_root), idx_dirname)
     os.makedirs(idx_path, exist_ok=True)
 
-    ix = create_in(idx_path, KNOWLEDGE_SCHEMA)
+    ix = create_in(idx_path, REFERENCE_SCHEMA)
     writer = ix.writer()
 
     for i in range(10):
@@ -65,23 +65,23 @@ def kb_index(tmp_path, monkeypatch):
 
 
 class TestNeighborExpansion:
-    def test_window_zero_returns_point_hits(self, kb_index, monkeypatch):
-        repo_root, _ = kb_index
+    def test_window_zero_returns_point_hits(self, reference_index, monkeypatch):
+        repo_root, _ = reference_index
         monkeypatch.setattr(
-            "lean_ai.config.settings.kb_neighbor_window", 0, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window", 0, raising=False,
         )
-        results = search_knowledge(repo_root, "keyword_alpha", limit=5)
+        results = search_reference(repo_root, "keyword_alpha", limit=5)
         assert results
         # No expansion: result should look like a raw hit dict, not a passage.
         assert "chunk_index" in results[0]
         assert "chunk_index_start" not in results[0]
 
-    def test_single_hit_expands_to_2w_plus_1(self, kb_index, monkeypatch):
-        repo_root, _ = kb_index
+    def test_single_hit_expands_to_2w_plus_1(self, reference_index, monkeypatch):
+        repo_root, _ = reference_index
         monkeypatch.setattr(
-            "lean_ai.config.settings.kb_neighbor_window", 2, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window", 2, raising=False,
         )
-        results = search_knowledge(repo_root, "keyword_alpha", limit=5)
+        results = search_reference(repo_root, "keyword_alpha", limit=5)
         assert len(results) == 1
         passage = results[0]
         assert passage["doc_path"] == "book.epub"
@@ -91,9 +91,9 @@ class TestNeighborExpansion:
         for i in range(2, 7):
             assert f"BookChunk{i}" in passage["content"]
 
-    def test_start_index_clamped_at_zero(self, kb_index, monkeypatch):
+    def test_start_index_clamped_at_zero(self, reference_index, monkeypatch):
         """A hit at chunk 0 must not produce a negative start index."""
-        repo_root, idx_path = kb_index
+        repo_root, idx_path = reference_index
         # Manually add a hit at index 0 with a unique keyword
         ix = __import__("whoosh.index", fromlist=["open_dir"]).open_dir(idx_path)
         writer = ix.writer()
@@ -110,16 +110,16 @@ class TestNeighborExpansion:
         writer.commit()
 
         monkeypatch.setattr(
-            "lean_ai.config.settings.kb_neighbor_window", 3, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window", 3, raising=False,
         )
-        results = search_knowledge(repo_root, "unique_edge_marker", limit=5)
+        results = search_reference(repo_root, "unique_edge_marker", limit=5)
         assert len(results) == 1
         assert results[0]["chunk_index_start"] == 0
         assert results[0]["chunk_index_end"] == 3
 
-    def test_contiguous_hits_merged(self, kb_index, monkeypatch):
+    def test_contiguous_hits_merged(self, reference_index, monkeypatch):
         """Two hits close enough that their windows overlap merge to one passage."""
-        repo_root, idx_path = kb_index
+        repo_root, idx_path = reference_index
         # Mark chunks 3 and 5 with the same query token so both rank.
         ix = __import__("whoosh.index", fromlist=["open_dir"]).open_dir(idx_path)
         writer = ix.writer()
@@ -137,9 +137,9 @@ class TestNeighborExpansion:
         writer.commit()
 
         monkeypatch.setattr(
-            "lean_ai.config.settings.kb_neighbor_window", 2, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window", 2, raising=False,
         )
-        results = search_knowledge(repo_root, "joint_merge_keyword", limit=5)
+        results = search_reference(repo_root, "joint_merge_keyword", limit=5)
         # Windows [1..5] and [3..7] overlap → single merged passage 1..7.
         assert len(results) == 1
         passage = results[0]
@@ -149,8 +149,8 @@ class TestNeighborExpansion:
         assert 3 in passage["hit_chunk_indices"]
         assert 5 in passage["hit_chunk_indices"]
 
-    def test_separate_docs_produce_separate_passages(self, kb_index, monkeypatch):
-        repo_root, idx_path = kb_index
+    def test_separate_docs_produce_separate_passages(self, reference_index, monkeypatch):
+        repo_root, idx_path = reference_index
         # Plant the same keyword in one book chunk and one manual chunk.
         ix = __import__("whoosh.index", fromlist=["open_dir"]).open_dir(idx_path)
         writer = ix.writer()
@@ -177,30 +177,30 @@ class TestNeighborExpansion:
         writer.commit()
 
         monkeypatch.setattr(
-            "lean_ai.config.settings.kb_neighbor_window", 1, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window", 1, raising=False,
         )
-        results = search_knowledge(repo_root, "cross_doc_token", limit=5)
+        results = search_reference(repo_root, "cross_doc_token", limit=5)
         assert len(results) == 2
         doc_paths = {r["doc_path"] for r in results}
         assert doc_paths == {"book.epub", "manual.pdf"}
 
-    def test_expand_false_bypasses_merging(self, kb_index, monkeypatch):
-        repo_root, _ = kb_index
+    def test_expand_false_bypasses_merging(self, reference_index, monkeypatch):
+        repo_root, _ = reference_index
         monkeypatch.setattr(
-            "lean_ai.config.settings.kb_neighbor_window", 2, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window", 2, raising=False,
         )
-        results = search_knowledge(
+        results = search_reference(
             repo_root, "keyword_alpha", limit=5, expand=False,
         )
         assert results
         assert "chunk_index" in results[0]
         assert "chunk_index_start" not in results[0]
 
-    def test_expand_helper_direct(self, kb_index, monkeypatch):
+    def test_expand_helper_direct(self, reference_index, monkeypatch):
         """Direct unit check of the merge algorithm bypassing search."""
-        _, idx_path = kb_index
+        _, idx_path = reference_index
         monkeypatch.setattr(
-            "lean_ai.config.settings.kb_neighbor_window", 2, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window", 2, raising=False,
         )
         fake_hits = [
             {
@@ -222,8 +222,8 @@ class TestNeighborExpansion:
 
 
 class TestListDocuments:
-    def test_lists_each_indexed_document_once(self, kb_index):
-        repo_root, _ = kb_index
+    def test_lists_each_indexed_document_once(self, reference_index):
+        repo_root, _ = reference_index
         docs = list_documents(repo_root)
         assert len(docs) == 2
         by_path = {d["doc_path"]: d for d in docs}
@@ -234,23 +234,23 @@ class TestListDocuments:
         assert by_path["manual.pdf"]["format"] == "pdf"
         assert by_path["manual.pdf"]["chunk_count"] == 5
 
-    def test_sorted_by_title(self, kb_index):
-        repo_root, _ = kb_index
+    def test_sorted_by_title(self, reference_index):
+        repo_root, _ = reference_index
         titles = [d["doc_title"] for d in list_documents(repo_root)]
         assert titles == sorted(titles, key=str.lower)
 
-    def test_name_filter_substring_case_insensitive(self, kb_index):
-        repo_root, _ = kb_index
+    def test_name_filter_substring_case_insensitive(self, reference_index):
+        repo_root, _ = reference_index
         docs = list_documents(repo_root, name_filter="MAN")
         assert [d["doc_path"] for d in docs] == ["manual.pdf"]
 
-    def test_name_filter_no_match_returns_empty(self, kb_index):
-        repo_root, _ = kb_index
+    def test_name_filter_no_match_returns_empty(self, reference_index):
+        repo_root, _ = reference_index
         assert list_documents(repo_root, name_filter="nonexistent") == []
 
     def test_no_index_returns_empty(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
-            "lean_ai.config.settings.knowledge_index_dir",
+            "lean_ai.config.settings.reference_index_dir",
             "missing_index",
             raising=False,
         )
@@ -260,9 +260,9 @@ class TestListDocuments:
 class TestDocumentFilteredSearch:
     """Search restricted to a single document via the ``document`` parameter."""
 
-    def test_filter_by_exact_doc_path(self, kb_index, monkeypatch):
+    def test_filter_by_exact_doc_path(self, reference_index, monkeypatch):
         """Only chunks from the specified doc_path are returned."""
-        repo_root, idx_path = kb_index
+        repo_root, idx_path = reference_index
         # Plant the same keyword in both documents.
         ix = __import__("whoosh.index", fromlist=["open_dir"]).open_dir(idx_path)
         writer = ix.writer()
@@ -289,23 +289,23 @@ class TestDocumentFilteredSearch:
         writer.commit()
 
         monkeypatch.setattr(
-            "lean_ai.config.settings.kb_neighbor_window", 0, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window", 0, raising=False,
         )
 
         # Without filter — both docs hit.
-        unfiltered = search_knowledge(repo_root, "shared_filter_token", limit=5)
+        unfiltered = search_reference(repo_root, "shared_filter_token", limit=5)
         assert {r["doc_path"] for r in unfiltered} == {"book.epub", "manual.pdf"}
 
         # With doc_path filter — only the manual.
-        filtered = search_knowledge(
+        filtered = search_reference(
             repo_root, "shared_filter_token", limit=5, document="manual.pdf",
         )
         assert filtered
         assert {r["doc_path"] for r in filtered} == {"manual.pdf"}
 
-    def test_filter_by_doc_title_substring(self, kb_index, monkeypatch):
+    def test_filter_by_doc_title_substring(self, reference_index, monkeypatch):
         """A title fragment from prior results restricts the search."""
-        repo_root, idx_path = kb_index
+        repo_root, idx_path = reference_index
         ix = __import__("whoosh.index", fromlist=["open_dir"]).open_dir(idx_path)
         writer = ix.writer()
         writer.delete_by_term("chunk_id", "book.epub:1")
@@ -331,24 +331,24 @@ class TestDocumentFilteredSearch:
         writer.commit()
 
         monkeypatch.setattr(
-            "lean_ai.config.settings.kb_neighbor_window", 0, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window", 0, raising=False,
         )
 
         # Title substring — "Book" matches "My Book".
-        filtered = search_knowledge(
+        filtered = search_reference(
             repo_root, "title_filter_token", limit=5, document="Book",
         )
         assert filtered
         assert {r["doc_path"] for r in filtered} == {"book.epub"}
 
-    def test_filter_no_match_returns_empty(self, kb_index, monkeypatch):
+    def test_filter_no_match_returns_empty(self, reference_index, monkeypatch):
         """Filter that matches no document yields empty results, not all hits."""
-        repo_root, _ = kb_index
+        repo_root, _ = reference_index
         monkeypatch.setattr(
-            "lean_ai.config.settings.kb_neighbor_window", 0, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window", 0, raising=False,
         )
         # 'keyword_alpha' would normally hit; restrict to a doc that doesn't exist.
-        results = search_knowledge(
+        results = search_reference(
             repo_root, "keyword_alpha", limit=5, document="nonexistent.pdf",
         )
         assert results == []
@@ -357,43 +357,43 @@ class TestDocumentFilteredSearch:
 class TestChunkConfigSentinel:
     def test_no_index_is_not_stale(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
-            "lean_ai.config.settings.knowledge_index_dir",
+            "lean_ai.config.settings.reference_index_dir",
             "nope_index",
             raising=False,
         )
         assert is_chunk_config_stale(str(tmp_path)) is False
-        assert requires_kb_rebuild(str(tmp_path))["stale"] is False
+        assert requires_reference_rebuild(str(tmp_path))["stale"] is False
 
-    def test_legacy_index_without_sentinel_is_stale(self, kb_index, monkeypatch):
+    def test_legacy_index_without_sentinel_is_stale(self, reference_index, monkeypatch):
         """An index built before this feature existed has no sentinel — treat as stale."""
-        repo_root, idx_path = kb_index
+        repo_root, idx_path = reference_index
         sentinel = os.path.join(idx_path, "chunk_config.json")
         if os.path.exists(sentinel):
             os.remove(sentinel)
         assert is_chunk_config_stale(repo_root) is True
-        info = requires_kb_rebuild(repo_root)
+        info = requires_reference_rebuild(repo_root)
         assert info["stale"] is True
         assert info["reason"] == "missing_sentinel"
 
-    def test_mismatched_sentinel_is_stale(self, kb_index, monkeypatch, tmp_path):
-        repo_root, idx_path = kb_index
+    def test_mismatched_sentinel_is_stale(self, reference_index, monkeypatch, tmp_path):
+        repo_root, idx_path = reference_index
         sentinel = os.path.join(idx_path, "chunk_config.json")
         with open(sentinel, "w") as f:
-            f.write('{"kb_chunk_chars": 9999, "schema_version": 1}')
+            f.write('{"reference_chunk_chars": 9999, "schema_version": 1}')
 
         monkeypatch.setattr(
-            "lean_ai.config.settings.kb_chunk_chars", 1800, raising=False,
+            "lean_ai.config.settings.reference_chunk_chars", 1800, raising=False,
         )
         assert is_chunk_config_stale(repo_root) is True
-        assert requires_kb_rebuild(repo_root)["reason"] == "config_changed"
+        assert requires_reference_rebuild(repo_root)["reason"] == "config_changed"
 
-    def test_matching_sentinel_is_fresh(self, kb_index, monkeypatch):
-        repo_root, idx_path = kb_index
+    def test_matching_sentinel_is_fresh(self, reference_index, monkeypatch):
+        repo_root, idx_path = reference_index
         sentinel = os.path.join(idx_path, "chunk_config.json")
         monkeypatch.setattr(
-            "lean_ai.config.settings.kb_chunk_chars", 1800, raising=False,
+            "lean_ai.config.settings.reference_chunk_chars", 1800, raising=False,
         )
         with open(sentinel, "w") as f:
-            f.write('{"kb_chunk_chars": 1800, "schema_version": 1}')
+            f.write('{"reference_chunk_chars": 1800, "schema_version": 1}')
         assert is_chunk_config_stale(repo_root) is False
-        assert requires_kb_rebuild(repo_root)["stale"] is False
+        assert requires_reference_rebuild(repo_root)["stale"] is False

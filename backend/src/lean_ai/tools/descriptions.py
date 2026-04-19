@@ -32,8 +32,10 @@ def humanize_tool_call(name: str, args: dict) -> str:
         return f"Searching: {args.get('query', '...')}"
     if name == "fetch_url":
         return f"Fetching {args.get('url', '...')}"
-    if name == "search_knowledge":
-        return f"Searching knowledge base: {args.get('query', '...')}"
+    if name == "search_reference":
+        return f"Searching reference library: {args.get('query', '...')}"
+    if name == "list_reference_documents":
+        return "Listing reference library documents"
     if name == "search_wiki":
         return f"Wiki search: {args.get('query', '...')}"
     if name == "fetch_wiki_page":

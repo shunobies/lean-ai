@@ -1,7 +1,7 @@
 """Whoosh-based full-text search index for global notes.
 
-Index lives at ~/.lean_ai/notes/notes_index/. Follows the knowledge
-base indexer pattern but simplified — notes are individually indexed
+Index lives at ~/.lean_ai/notes/notes_index/. Follows the reference
+library indexer pattern but simplified — notes are individually indexed
 on create/update/delete rather than batch-processed.
 """
 

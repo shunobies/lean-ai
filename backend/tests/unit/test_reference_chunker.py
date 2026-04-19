@@ -1,6 +1,6 @@
-"""Tests for the prose chunker used by the knowledge base readers."""
+"""Tests for the prose chunker used by the reference library readers."""
 
-from lean_ai.knowledge.chunker import chunk_prose, chunk_prose_configured
+from lean_ai.reference.chunker import chunk_prose, chunk_prose_configured
 
 
 def _make_paragraphs(n: int, chars: int) -> str:
@@ -63,10 +63,10 @@ class TestChunkProseConfigured:
 
         text = _make_paragraphs(30, 400)
 
-        monkeypatch.setattr(settings, "kb_chunk_chars", 600, raising=False)
+        monkeypatch.setattr(settings, "reference_chunk_chars", 600, raising=False)
         small = chunk_prose_configured(text)
 
-        monkeypatch.setattr(settings, "kb_chunk_chars", 2400, raising=False)
+        monkeypatch.setattr(settings, "reference_chunk_chars", 2400, raising=False)
         big = chunk_prose_configured(text)
 
         assert len(small) > len(big)
@@ -75,7 +75,7 @@ class TestChunkProseConfigured:
         """Values below 100 are clamped so we don't produce one-word chunks."""
         from lean_ai.config import settings
 
-        monkeypatch.setattr(settings, "kb_chunk_chars", 10, raising=False)
+        monkeypatch.setattr(settings, "reference_chunk_chars", 10, raising=False)
         chunks = chunk_prose_configured(_make_paragraphs(5, 300))
         # Floor of 100 chars means chunks are real paragraphs, not tokens.
         assert all(len(c) >= 50 for c in chunks)

@@ -296,21 +296,21 @@ class Settings(BaseSettings):
     enable_multi_round_context: bool = True
     enable_required_citations: bool = True  # Mandate documentation citations for external APIs
 
-    # ── Knowledge base ──
-    knowledge_dir: str = ".lean_ai/knowledge"
-    knowledge_index_dir: str = ".lean_ai_knowledge_index"
-    kb_chunk_chars: int = 1800  # Target characters per prose chunk (~450 tokens)
-    kb_neighbor_window: int = 2  # ± chunks to include around each hit (0 = disabled)
-    kb_search_default_limit: int = 5  # Default hits returned by search_knowledge
+    # ── Reference library ──
+    reference_dir: str = ".lean_ai/reference"
+    reference_index_dir: str = ".lean_ai_reference_index"
+    reference_chunk_chars: int = 1800  # Target characters per prose chunk (~450 tokens)
+    reference_neighbor_window: int = 2  # ± chunks to include around each hit (0 = disabled)
+    reference_search_default_limit: int = 5  # Default hits returned by search_reference
 
     # ── Local Refiner (cloud pre-processing) ──
     enable_refiner: bool = True           # Active only with cloud providers
     refiner_ollama_url: str | None = None  # Falls back to ollama_url
     refiner_model: str | None = None       # Falls back to ollama_model
     refiner_timeout: float = 30.0          # Max seconds for refinement pipeline
-    refiner_enable_knowledge: bool = True  # Inject knowledge base context
+    refiner_enable_reference: bool = True  # Inject reference library context
     refiner_enable_privacy: bool = True    # Strip sensitive data
-    refiner_knowledge_chunks: int = 5      # Max knowledge chunks to inject
+    refiner_reference_chunks: int = 5      # Max reference chunks to inject
 
     # ── Implementation ──
     implementation_max_tokens: int | None = None  # Derived: 25% of active context window

@@ -74,31 +74,31 @@ export async function handleInitCommand(
         });
     }
 
-    // ── Knowledge index status ──
-    const ks = indexResult.knowledge_status;
-    if (ks && ks !== "no_knowledge_dir" && ks !== "empty") {
+    // ── Reference library index status ──
+    const ks = indexResult.reference_status;
+    if (ks && ks !== "no_reference_dir" && ks !== "empty") {
         if (ks === "failed") {
             anyFailure = true;
             ctx.postMessage({
                 type: "reply",
-                text: "Knowledge indexing failed.",
+                text: "Reference library indexing failed.",
                 cls: "msg-system",
             });
         } else if (ks === "unsupported_files") {
-            const exts = (indexResult.knowledge_skipped_extensions ?? []).join(", ");
+            const exts = (indexResult.reference_skipped_extensions ?? []).join(", ");
             ctx.postMessage({
                 type: "reply",
-                text: `Knowledge: found files but no reader for ${exts}. Install deps: pip install 'lean-ai[knowledge]'`,
+                text: `Reference library: found files but no reader for ${exts}. Install deps: pip install 'lean-ai[reference]'`,
                 cls: "msg-system",
             });
         } else {
-            const docCount = indexResult.knowledge_doc_count ?? 0;
-            const chunkCount = indexResult.knowledge_chunk_count ?? 0;
+            const docCount = indexResult.reference_doc_count ?? 0;
+            const chunkCount = indexResult.reference_chunk_count ?? 0;
             if (docCount > 0) {
                 const kMode = ks === "already_indexed" ? "already up to date" : "complete";
                 ctx.postMessage({
                     type: "reply",
-                    text: `Knowledge index ${kMode}: ${docCount} docs, ${chunkCount} chunks.`,
+                    text: `Reference library ${kMode}: ${docCount} docs, ${chunkCount} chunks.`,
                     cls: "msg-system",
                 });
             }
@@ -112,9 +112,9 @@ export async function handleInitCommand(
     // collapsed-to-success message could not.
     const es = indexResult.embedding_status;
     const codeCnt = indexResult.embedding_code_count ?? 0;
-    const knowledgeCnt = indexResult.embedding_knowledge_count ?? 0;
+    const referenceCnt = indexResult.embedding_reference_count ?? 0;
     const codeUnchanged = indexResult.embedding_code_unchanged ?? 0;
-    const knowledgeUnchanged = indexResult.embedding_knowledge_unchanged ?? 0;
+    const referenceUnchanged = indexResult.embedding_reference_unchanged ?? 0;
     const failedBatches = indexResult.embedding_failed_batches ?? 0;
     const totalBatches = indexResult.embedding_total_batches ?? 0;
     const detail = indexResult.embedding_message ?? "";
@@ -122,7 +122,7 @@ export async function handleInitCommand(
     if (es === "success") {
         const parts: string[] = [];
         if (codeCnt > 0) { parts.push(`${codeCnt} code chunks (${codeUnchanged} unchanged)`); }
-        if (knowledgeCnt > 0) { parts.push(`${knowledgeCnt} knowledge chunks (${knowledgeUnchanged} unchanged)`); }
+        if (referenceCnt > 0) { parts.push(`${referenceCnt} reference chunks (${referenceUnchanged} unchanged)`); }
         ctx.postMessage({
             type: "reply",
             text: `Embeddings generated: ${parts.join(" + ")}.`,
@@ -131,7 +131,7 @@ export async function handleInitCommand(
     } else if (es === "up_to_date") {
         const parts: string[] = [];
         if (codeUnchanged > 0) { parts.push(`${codeUnchanged} code chunks`); }
-        if (knowledgeUnchanged > 0) { parts.push(`${knowledgeUnchanged} knowledge chunks`); }
+        if (referenceUnchanged > 0) { parts.push(`${referenceUnchanged} reference chunks`); }
         const body = parts.length
             ? `${parts.join(" + ")} already up to date — no embed calls needed.`
             : "No chunks to embed.";

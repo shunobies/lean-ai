@@ -223,7 +223,7 @@ _REQUIRED_PARAMS: dict[str, list[str]] = {
     "fetch_url": ["url"],
     "search_wiki": ["query"],
     "fetch_wiki_page": ["title"],
-    "search_knowledge": ["query"],
+    "search_reference": ["query"],
 }
 
 # Parameters where empty string is valid
@@ -256,32 +256,32 @@ def _validate_required_params(name: str, arguments: dict) -> str | None:
     return None
 
 
-_KB_FOOTER_MAX_DOCS = 20
+_REFERENCE_FOOTER_MAX_DOCS = 20
 
 
-def _format_kb_doc_listing(docs: list[dict], query: str) -> str:
-    """Render a hint listing available KB documents + an example call.
+def _format_reference_doc_listing(docs: list[dict], query: str) -> str:
+    """Render a hint listing available reference documents + an example call.
 
-    Used when the LLM calls ``search_knowledge`` without a ``document``
+    Used when the LLM calls ``search_reference`` without a ``document``
     filter so it can narrow follow-up searches without needing a
-    separate ``list_knowledge_documents`` round-trip.
+    separate ``list_reference_documents`` round-trip.
     """
-    shown = docs[:_KB_FOOTER_MAX_DOCS]
+    shown = docs[:_REFERENCE_FOOTER_MAX_DOCS]
     lines = [
-        f"Knowledge base has {len(docs)} document(s). "
+        f"Reference library has {len(docs)} document(s). "
         "Pass `document` to restrict a follow-up search to one source:"
     ]
     for d in shown:
         lines.append(f"  - {d['doc_title']}  [path={d['doc_path']}]")
-    if len(docs) > _KB_FOOTER_MAX_DOCS:
+    if len(docs) > _REFERENCE_FOOTER_MAX_DOCS:
         lines.append(
-            f"  ... {len(docs) - _KB_FOOTER_MAX_DOCS} more — "
-            "call list_knowledge_documents to see all."
+            f"  ... {len(docs) - _REFERENCE_FOOTER_MAX_DOCS} more — "
+            "call list_reference_documents to see all."
         )
-    example_path = shown[0]["doc_path"] if shown else "path/from/list_knowledge_documents"
+    example_path = shown[0]["doc_path"] if shown else "path/from/list_reference_documents"
     example_query = query.strip() or "your query"
     lines.append(
-        f'Example: search_knowledge(query="{example_query}", '
+        f'Example: search_reference(query="{example_query}", '
         f'document="{example_path}")'
     )
     return "\n".join(lines)
@@ -684,20 +684,20 @@ def make_tool_executor(
             )
             return result.output if result.success else f"ERROR: {result.error}"
 
-        elif name == "search_knowledge":
-            from lean_ai.knowledge.indexer import is_knowledge_available
-            from lean_ai.knowledge.indexer import list_documents as _list_documents
-            from lean_ai.knowledge.indexer import search_knowledge as _search_knowledge
+        elif name == "search_reference":
+            from lean_ai.reference.indexer import is_reference_available
+            from lean_ai.reference.indexer import list_documents as _list_documents
+            from lean_ai.reference.indexer import search_reference as _search_reference
 
-            if not is_knowledge_available(repo_root):
+            if not is_reference_available(repo_root):
                 return (
-                    "ERROR: No knowledge base index found. "
-                    "Place documents in .lean_ai/knowledge/ and run /init to index them."
+                    "ERROR: No reference library index found. "
+                    "Place documents in .lean_ai/reference/ and run /init to index them."
                 )
 
-            from lean_ai.config import settings as _kb_settings
+            from lean_ai.config import settings as _ref_settings
             query = arguments.get("query", "")
-            limit = arguments.get("limit", _kb_settings.kb_search_default_limit)
+            limit = arguments.get("limit", _ref_settings.reference_search_default_limit)
             document = arguments.get("document") or None
 
             # Best-effort embedding for RRF re-ranking
@@ -711,7 +711,7 @@ def make_tool_executor(
                     pass
 
             chunks = await asyncio.to_thread(
-                _search_knowledge,
+                _search_reference,
                 repo_root,
                 query,
                 limit,
@@ -722,17 +722,17 @@ def make_tool_executor(
 
             # Unfiltered searches get a listing footer so the LLM can
             # narrow follow-up calls without a separate discovery round.
-            # Skipped when the KB has 0-1 documents (nothing to narrow to)
+            # Skipped when the library has 0-1 documents (nothing to narrow to)
             # or when the caller already scoped the search.
             doc_listing = ""
             if document is None:
                 all_docs = await asyncio.to_thread(_list_documents, repo_root, "")
                 if len(all_docs) > 1:
-                    doc_listing = _format_kb_doc_listing(all_docs, query)
+                    doc_listing = _format_reference_doc_listing(all_docs, query)
 
             if not chunks:
                 scope = f" in '{document}'" if document else ""
-                base = f"No knowledge base results for '{query}'{scope}."
+                base = f"No reference library results for '{query}'{scope}."
                 if doc_listing:
                     return f"{base}\n\n{doc_listing}"
                 return base
@@ -763,14 +763,14 @@ def make_tool_executor(
                 return f"{body}\n\n---\n\n{doc_listing}"
             return body
 
-        elif name == "list_knowledge_documents":
-            from lean_ai.knowledge.indexer import is_knowledge_available
-            from lean_ai.knowledge.indexer import list_documents as _list_documents
+        elif name == "list_reference_documents":
+            from lean_ai.reference.indexer import is_reference_available
+            from lean_ai.reference.indexer import list_documents as _list_documents
 
-            if not is_knowledge_available(repo_root):
+            if not is_reference_available(repo_root):
                 return (
-                    "ERROR: No knowledge base index found. "
-                    "Place documents in .lean_ai/knowledge/ and run /init to index them."
+                    "ERROR: No reference library index found. "
+                    "Place documents in .lean_ai/reference/ and run /init to index them."
                 )
 
             name_filter = arguments.get("name_filter", "") or ""
@@ -778,13 +778,13 @@ def make_tool_executor(
             if not docs:
                 if name_filter:
                     return (
-                        f"No knowledge documents matching '{name_filter}'. "
-                        "Call list_knowledge_documents with no name_filter to see "
+                        f"No reference documents matching '{name_filter}'. "
+                        "Call list_reference_documents with no name_filter to see "
                         "the full list."
                     )
-                return "No documents in the knowledge base index."
+                return "No documents in the reference library index."
 
-            lines = [f"{len(docs)} document(s) in the knowledge base:"]
+            lines = [f"{len(docs)} document(s) in the reference library:"]
             for d in docs:
                 lines.append(
                     f"  - {d['doc_title']}  "

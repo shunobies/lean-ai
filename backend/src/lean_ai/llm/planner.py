@@ -179,7 +179,7 @@ async def create_plan(
         t for t in build_planning_tools()
         if t["function"]["name"] in (
             "grep_files", "read_file", "list_directory",
-            "query_project_context", "search_knowledge", "task_complete",
+            "query_project_context", "search_reference", "task_complete",
         )
     ]
 

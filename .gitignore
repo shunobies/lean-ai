@@ -19,7 +19,8 @@ venv/
 # lean_ai workspace artifacts
 .lean_ai/
 .lean_ai_index/
-.lean_ai_knowledge_index/
+.lean_ai_reference_index/
+.lean_ai_knowledge_index/  # legacy — kept for users mid-migration
 
 # Environment & config
 .env

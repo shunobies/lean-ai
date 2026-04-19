@@ -157,10 +157,10 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
 
     // Advanced / misc
     "lean-ai.enableRequiredCitations":   "LEAN_AI_ENABLE_REQUIRED_CITATIONS",
-    "lean-ai.refinerKnowledgeChunks":    "LEAN_AI_REFINER_KNOWLEDGE_CHUNKS",
-    "lean-ai.kbChunkChars":              "LEAN_AI_KB_CHUNK_CHARS",
-    "lean-ai.kbNeighborWindow":          "LEAN_AI_KB_NEIGHBOR_WINDOW",
-    "lean-ai.kbSearchDefaultLimit":      "LEAN_AI_KB_SEARCH_DEFAULT_LIMIT",
+    "lean-ai.refinerReferenceChunks":    "LEAN_AI_REFINER_REFERENCE_CHUNKS",
+    "lean-ai.referenceChunkChars":       "LEAN_AI_REFERENCE_CHUNK_CHARS",
+    "lean-ai.referenceNeighborWindow":   "LEAN_AI_REFERENCE_NEIGHBOR_WINDOW",
+    "lean-ai.referenceSearchDefaultLimit": "LEAN_AI_REFERENCE_SEARCH_DEFAULT_LIMIT",
     "lean-ai.numParallel":               "LEAN_AI_NUM_PARALLEL",
     "lean-ai.implementationMaxTurns":    "LEAN_AI_IMPLEMENTATION_MAX_TURNS",
     "lean-ai.refreshThreshold":          "LEAN_AI_REFRESH_THRESHOLD",

@@ -1,4 +1,4 @@
-"""Prose-aware text chunker for knowledge documents.
+"""Prose-aware text chunker for reference documents.
 
 Unlike the code chunker (which aligns splits on function/class boundaries),
 the prose chunker splits on *paragraph boundaries* (blank lines), accumulating
@@ -97,9 +97,9 @@ def chunk_prose(
 def chunk_prose_configured(text: str) -> list[str]:
     """Split prose text using the workspace's configured target size.
 
-    Reads ``kb_chunk_chars`` from the settings singleton and derives an
-    overlap budget of ``kb_chunk_chars // 6`` so overlap scales with the
-    target size (e.g. 1800 → 300, 3600 → 600).
+    Reads ``reference_chunk_chars`` from the settings singleton and
+    derives an overlap budget of ``reference_chunk_chars // 6`` so overlap
+    scales with the target size (e.g. 1800 → 300, 3600 → 600).
 
     This is the entry point document readers should use.  Tests and ad-hoc
     callers can still call :func:`chunk_prose` directly with explicit
@@ -107,7 +107,7 @@ def chunk_prose_configured(text: str) -> list[str]:
     """
     from lean_ai.config import settings
 
-    target = max(100, int(settings.kb_chunk_chars))
+    target = max(100, int(settings.reference_chunk_chars))
     overlap = max(0, target // 6)
     return chunk_prose(text, target_chars=target, overlap_chars=overlap)
 

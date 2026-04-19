@@ -61,7 +61,7 @@ The planner (`llm/planner.py`) uses decomposed LLM calls to produce high-quality
 
 Each phase uses structured JSON output from the LLM. The planner has read-only tools (`read_file`, `list_directory`, `directory_tree`, `grep_files`) for codebase exploration during phases 1-2.
 
-When using cloud providers, the [Local Refiner](knowledge-base.md#local-refiner) can enrich tasks with knowledge base context and strip sensitive data before planning begins.
+When using cloud providers, the [Local Refiner](reference-library.md#local-refiner) can enrich tasks with reference library context and strip sensitive data before planning begins.
 
 ## Tools
 

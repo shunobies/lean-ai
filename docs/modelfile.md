@@ -76,7 +76,7 @@ PARAMETER num_ctx 131072
 
 ### Refiner Model
 
-Create a dedicated model for the [local refiner](knowledge-base.md#local-refiner):
+Create a dedicated model for the [local refiner](reference-library.md#local-refiner):
 
 ```dockerfile
 FROM qwen3-coder:8b

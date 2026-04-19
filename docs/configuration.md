@@ -79,14 +79,14 @@ pip install -e ".[dev,openai]"        # OpenAI (GPT-4o, etc.) or Lean AI Serve
 pip install -e ".[dev,anthropic]"     # Anthropic (Claude, etc.)
 pip install -e ".[dev,gemini]"        # Google Gemini (Gemini 2.5 Flash/Pro, etc.)
 
-# Knowledge base document support (EPUB, PDF, Word)
-pip install -e ".[dev,knowledge]"
+# Reference library document support (EPUB, PDF, Word)
+pip install -e ".[dev,reference]"
 
 # Google search provider (requires Chrome installed)
 pip install -e ".[dev,google]"
 
 # Everything
-pip install -e ".[dev,openai,anthropic,gemini,knowledge,google]"
+pip install -e ".[dev,openai,anthropic,gemini,reference,google]"
 ```
 
 ## LLM Provider
@@ -110,7 +110,7 @@ Switch providers at any time by changing this value and restarting the server (o
 | `LEAN_AI_OLLAMA_CONTEXT_WINDOW` | `128` (131072) | Context window size — [shorthand](#context-window-shorthand) accepted |
 | `LEAN_AI_OLLAMA_MAX_TOKENS` | *25% of context window* | Max output tokens per response |
 
-Ollama is always required, even when using cloud providers — it handles inline predictions, embeddings, and the [local refiner](knowledge-base.md#local-refiner).
+Ollama is always required, even when using cloud providers — it handles inline predictions, embeddings, and the [local refiner](reference-library.md#local-refiner).
 
 ## Expert Model
 
@@ -356,14 +356,14 @@ SearXNG is a self-hosted meta-search engine with no rate limits. Set `LEAN_AI_SE
 | `LEAN_AI_ENABLE_MULTI_ROUND_CONTEXT` | `true` | Use multi-round LLM calls for richer context |
 | `LEAN_AI_ENABLE_FRAMEWORK_GUIDE` | `true` | Generate `.lean_ai/framework_guide.md` for detected frameworks |
 
-## Knowledge Base
+## Reference Library
 
 | Variable | Default | Description |
 |---|---|---|
-| `LEAN_AI_KNOWLEDGE_DIR` | `.lean_ai/knowledge` | Directory for domain documents |
-| `LEAN_AI_KNOWLEDGE_INDEX_DIR` | `.lean_ai_knowledge_index` | Whoosh index directory for knowledge |
+| `LEAN_AI_REFERENCE_DIR` | `.lean_ai/reference` | Directory for domain documents |
+| `LEAN_AI_REFERENCE_INDEX_DIR` | `.lean_ai_reference_index` | Whoosh index directory for reference library |
 
-See [Knowledge Base & Refiner](knowledge-base.md) for details on document formats and RAG enrichment.
+See [Reference Library & Refiner](reference-library.md) for details on document formats and RAG enrichment.
 
 ## Local Refiner
 
@@ -373,11 +373,11 @@ See [Knowledge Base & Refiner](knowledge-base.md) for details on document format
 | `LEAN_AI_REFINER_OLLAMA_URL` | *(falls back to OLLAMA_URL)* | Ollama instance for the refiner |
 | `LEAN_AI_REFINER_MODEL` | *(falls back to OLLAMA_MODEL)* | Model for refinement |
 | `LEAN_AI_REFINER_TIMEOUT` | `30.0` | Max seconds for the refinement pipeline |
-| `LEAN_AI_REFINER_ENABLE_KNOWLEDGE` | `true` | Inject knowledge base context during refinement |
+| `LEAN_AI_REFINER_ENABLE_REFERENCE` | `true` | Inject reference library context during refinement |
 | `LEAN_AI_REFINER_ENABLE_PRIVACY` | `true` | Strip sensitive data before cloud transmission |
-| `LEAN_AI_REFINER_KNOWLEDGE_CHUNKS` | `5` | Max knowledge chunks to inject |
+| `LEAN_AI_REFINER_REFERENCE_CHUNKS` | `5` | Max reference chunks to inject |
 
-The refiner only activates when using cloud providers (OpenAI, Anthropic, or Lean AI Serve). See [Knowledge Base & Refiner](knowledge-base.md#local-refiner) for how it works.
+The refiner only activates when using cloud providers (OpenAI, Anthropic, or Lean AI Serve). See [Reference Library & Refiner](reference-library.md#local-refiner) for how it works.
 
 ## Implementation
 
@@ -393,7 +393,7 @@ The refiner only activates when using cloud providers (OpenAI, Anthropic, or Lea
 
 | Variable | Default | Description |
 |---|---|---|
-| `LEAN_AI_PLAN_PHASE1_MAX_TURNS` | `5` | Max tool-calling turns for Phase 1 (scope analysis). Phase 1 uses `chat_with_tools` with a restricted read-only tool set (`grep_files`, `read_file`, `list_directory`, `query_project_context`, `search_knowledge`, `task_complete`). `text_only_exit_count=1` means crystal-clear tasks can exit with zero tool calls — the ceiling is only hit when the model genuinely needs to verify assumptions. Set to `0` to disable tool use and fall back to a single-turn scope call. |
+| `LEAN_AI_PLAN_PHASE1_MAX_TURNS` | `5` | Max tool-calling turns for Phase 1 (scope analysis). Phase 1 uses `chat_with_tools` with a restricted read-only tool set (`grep_files`, `read_file`, `list_directory`, `query_project_context`, `search_reference`, `task_complete`). `text_only_exit_count=1` means crystal-clear tasks can exit with zero tool calls — the ceiling is only hit when the model genuinely needs to verify assumptions. Set to `0` to disable tool use and fall back to a single-turn scope call. |
 
 ## Tool Execution
 

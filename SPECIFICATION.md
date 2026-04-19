@@ -23,7 +23,7 @@
 15. [Indexer System](#15-indexer-system)
 16. [Context Generation](#16-context-generation)
 17. [Language Registry](#17-language-registry)
-18. [Knowledge Base](#18-knowledge-base)
+18. [Reference Library](#18-reference-library)
 19. [Scaffolding System](#19-scaffolding-system)
 20. [Voice System](#20-voice-system)
 21. [Prompt Library](#21-prompt-library)
@@ -87,8 +87,8 @@ Core design tenets:
 │  └─────────┘    └─────────────┘    └───────────────┘           │
 │                                                                  │
 │  ┌───────────┐ ┌───────────┐ ┌──────────┐ ┌──────────────────┐ │
-│  │  Indexer  │ │  Context  │ │Knowledge │ │     Voice        │ │
-│  │(Whoosh+  │ │Generation │ │  Base    │ │(STT/TTS/WakeWord)│ │
+│  │  Indexer  │ │  Context  │ │Reference │ │     Voice        │ │
+│  │(Whoosh+  │ │Generation │ │  Library │ │(STT/TTS/WakeWord)│ │
 │  │Embedding)│ │           │ │          │ │                  │ │
 │  └───────────┘ └───────────┘ └──────────┘ └──────────────────┘ │
 │                                                                  │
@@ -123,9 +123,9 @@ Core design tenets:
 | YAML parsing | ruamel.yaml | >=0.18.0,<0.19 |
 | Gitignore patterns | pathspec | >=0.12.0,<2.0 |
 | WebSocket client | websockets | >=13.0,<17.0 |
-| Knowledge: EPUB | ebooklib (optional) | >=0.18,<1.0 |
-| Knowledge: PDF | pypdf (optional) | >=6.7.5,<7.0 |
-| Knowledge: Word | python-docx (optional) | >=1.1.0,<2.0 |
+| Reference: EPUB | ebooklib (optional) | >=0.18,<1.0 |
+| Reference: PDF | pypdf (optional) | >=6.7.5,<7.0 |
+| Reference: Word | python-docx (optional) | >=1.1.0,<2.0 |
 | Testing | pytest + pytest-asyncio | >=8.0.0,<10.0 |
 | Linting | ruff | >=0.8.0,<1.0 |
 | Build system | hatchling | latest |
@@ -133,7 +133,7 @@ Core design tenets:
 **Optional dependency groups** (installed via `pip install -e ".[group]"`):
 - `openai` — OpenAI provider support
 - `anthropic` — Anthropic provider support
-- `knowledge` — EPUB, PDF, Word document support
+- `reference` — EPUB, PDF, Word document support
 - `google` — Selenium-based Google/Bing search with automatic fallback
 - `voice` — STT, TTS, wake word detection (requires portaudio system library)
 - `dev` — pytest, ruff
@@ -159,7 +159,7 @@ lean_ai/
 │   │   │   ├── info.py                  # /health, /models, /predict
 │   │   │   ├── voice.py                 # STT, TTS, wake word REST + SSE endpoints
 │   │   │   ├── scaffold_endpoints.py    # Scaffold list and creation
-│   │   │   ├── knowledge_endpoints.py   # Knowledge indexing
+│   │   │   ├── reference_endpoints.py   # Reference library indexing
 │   │   │   ├── models.py               # All Pydantic request/response models
 │   │   │   ├── dependencies.py          # Provider factory, singleton LLM client creation
 │   │   │   └── context_helpers.py       # Context loading, file tree, search, URL extraction
@@ -226,8 +226,8 @@ lean_ai/
 │   │   │   ├── extractor.py           # Generic tree-sitter AST extraction engine
 │   │   │   └── *.yaml                 # Per-language definitions (python.yaml, etc.)
 │   │   │
-│   │   ├── knowledge/                    # Domain document indexing
-│   │   │   ├── indexer.py             # Separate Whoosh index for knowledge docs
+│   │   ├── reference/                   # Domain document indexing
+│   │   │   ├── indexer.py             # Separate Whoosh index for reference docs
 │   │   │   ├── chunker.py            # Prose-aware paragraph chunking
 │   │   │   └── readers/              # Format-specific document readers
 │   │   │       ├── base.py           # DocumentReader ABC
@@ -467,12 +467,12 @@ class Settings(BaseSettings):
 | `enable_multi_round_context` | bool | `True` | Use multi-round expansion strategy |
 | `enable_framework_guide` | bool | `True` | Generate `.lean_ai/framework_guide.md` |
 
-#### Knowledge Base
+#### Reference Library
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `knowledge_dir` | str | `".lean_ai/knowledge"` | Knowledge documents directory |
-| `knowledge_index_dir` | str | `".lean_ai_knowledge_index"` | Whoosh knowledge index directory |
+| `reference_dir` | str | `".lean_ai/reference"` | Reference library documents directory |
+| `reference_index_dir` | str | `".lean_ai_reference_index"` | Whoosh reference library index directory |
 
 #### Local Refiner (Cloud Pre-Processing)
 
@@ -482,9 +482,9 @@ class Settings(BaseSettings):
 | `refiner_ollama_url` | str \| None | None | Falls back to `ollama_url` |
 | `refiner_model` | str \| None | None | Falls back to `ollama_model` |
 | `refiner_timeout` | float | `30.0` | Max seconds for refinement pipeline |
-| `refiner_enable_knowledge` | bool | `True` | Inject knowledge base context during refinement |
+| `refiner_enable_reference` | bool | `True` | Inject reference library context during refinement |
 | `refiner_enable_privacy` | bool | `True` | Strip sensitive data before cloud transmission |
-| `refiner_knowledge_chunks` | int | `5` | Max knowledge chunks to inject |
+| `refiner_reference_chunks` | int | `5` | Max reference chunks to inject |
 
 #### Implementation Control
 
@@ -1109,7 +1109,7 @@ else: expert_llm_client = None
 
 Active only when primary provider is OpenAI or Anthropic. Uses a local Ollama model to:
 
-1. **Knowledge injection:** Query knowledge base, inject relevant context into prompts
+1. **Reference injection:** Query reference library, inject relevant context into prompts
 2. **Privacy redaction:** Strip API keys, tokens, hostnames, emails, DB connections before cloud transmission
 3. **Message refinement:** Add structure and technical specificity to user messages
 
@@ -1170,7 +1170,7 @@ async def assess_clarity(task: str, llm_client: LLMClient, context: str = "") ->
 
 - **Model:** Request (or primary fallback)
 - **Method:** `chat_with_tools()` with a restricted read-only tool subset
-- **Tools available:** `grep_files`, `read_file`, `list_directory`, `query_project_context`, `search_knowledge`, `task_complete`
+- **Tools available:** `grep_files`, `read_file`, `list_directory`, `query_project_context`, `search_reference`, `task_complete`
 - **Budget:** `LEAN_AI_PLAN_PHASE1_MAX_TURNS` (default 5), `text_only_exit_count=1`
 - **Input:** Task + codebase context + session memories (budget-gated at 2% of context window)
 - **Output:** 8-section scope document:
@@ -1189,7 +1189,7 @@ async def assess_clarity(task: str, llm_client: LLMClient, context: str = "") ->
 
 - **Model:** Request (or primary fallback)
 - **Method:** `chat_with_tools()` followed by a `chat_structured` synthesis pass
-- **Tools available (Phase-2-specific filter):** `read_file`, `grep_files`, `list_directory`, `directory_tree`, `query_project_context`, `search_internet`, `fetch_url`, `search_wiki*`, `fetch_wiki*`, `update_scratchpad`, `add_journal_entry`, `record_file_observation`, `task_complete`. KB tools (`search_knowledge`, `list_knowledge_documents`) are **dropped** from this phase — noise for file identification.
+- **Tools available (Phase-2-specific filter):** `read_file`, `grep_files`, `list_directory`, `directory_tree`, `query_project_context`, `search_internet`, `fetch_url`, `search_wiki*`, `fetch_wiki*`, `update_scratchpad`, `add_journal_entry`, `record_file_observation`, `task_complete`. Reference library tools (`search_reference`, `list_reference_documents`) are **dropped** from this phase — noise for file identification.
 - **Input:** Task + scope + codebase context
 - **Checklist opener:** Phase 2's user prompt starts with a strict ASSUMPTIONS checklist that walks every verification hint from Phase 1's scope before general exploration.
 - **Deterministic capture:** The model calls `record_file_observation(file_path, role, reason, relevant_sections, key_snippets)` for every relevant file. Observations are upserted by `file_path` into `.lean_ai/observations/{session_id}.json`. No reliance on prose transcription.
@@ -1764,9 +1764,9 @@ class ScaffoldResponse:    scaffold_name: str; project_dir: str; files_created: 
 class ScaffoldInfo:        name: str; display_name: str; description: str; language: str; framework?: str; aliases: list[str]; setup_type: str
 class ScaffoldListResponse: scaffolds: list[ScaffoldInfo]
 
-# Knowledge
-class IndexKnowledgeRequest:   repo_root: str; force_reindex: bool = False
-class IndexKnowledgeResponse:  status: str; doc_count: int = 0; chunk_count: int = 0
+# Reference Library
+class IndexReferenceRequest:   repo_root: str; force_reindex: bool = False
+class IndexReferenceResponse:  status: str; doc_count: int = 0; chunk_count: int = 0
 
 # Models
 class ModelInfo:      provider: str; model: str; display_name: str; is_default: bool
@@ -1823,7 +1823,7 @@ class VoiceStatusResponse:   stt_available: bool = False; tts_available: bool = 
 | Voice | GET | `/voice/status` | — | VoiceStatusResponse |
 | Scaffold | GET | `/scaffold/list` | — | ScaffoldListResponse |
 | Scaffold | POST | `/scaffold` | ScaffoldRequest | ScaffoldResponse |
-| Knowledge | POST | `/index-knowledge` | IndexKnowledgeRequest | IndexKnowledgeResponse |
+| Reference | POST | `/index-reference` | IndexReferenceRequest | IndexReferenceResponse |
 
 ### 13.4 WebSocket Workflow Handler Logic
 
@@ -1831,7 +1831,7 @@ The workflow WebSocket handler (`routers/workflow.py`) on receiving `user_messag
 
 1. **Git setup:** Stash uncommitted changes → checkout default branch → create `lean-ai/{session_id}` branch
 2. **Vision processing:** If attachments contain images, call vision model to describe them
-3. **Task refinement:** If refiner configured, run local Ollama refinement (privacy + knowledge)
+3. **Task refinement:** If refiner configured, run local Ollama refinement (privacy + reference library)
 4. **Start dispatcher:** `WSMessageDispatcher` for cancel/interrupt routing
 5. **Run workflow:** `run_workflow(task, mode, ...)` with context + LLM clients
 6. **Auto-commit:** After completion, `git add + commit` all changes
@@ -1849,7 +1849,7 @@ The `/chat` endpoint gathers context in parallel via `asyncio.gather`:
 4. Code search results (8 snippets via Whoosh)
 5. Web search results (if applicable, keywords extracted from message)
 6. URL content (first 3 URLs in message)
-7. Knowledge base results (via refiner)
+7. Reference library results (via refiner)
 8. Image descriptions (via vision model)
 9. Message refinement (via refiner)
 
@@ -2240,7 +2240,7 @@ Checks language registry test patterns first. Fallback conventions:
 
 ---
 
-## 18. Knowledge Base
+## 18. Reference Library
 
 ### 18.1 Document Readers
 
@@ -2272,10 +2272,10 @@ def chunk_prose(text: str, target_chars: int = 800, overlap_chars: int = 150) ->
 3. Emit chunk, carry trailing paragraphs fitting within `overlap_chars` to next chunk
 4. Hard-split oversized paragraphs (> 2 × target) on line boundaries
 
-### 18.3 Knowledge Indexer
+### 18.3 Reference Library Indexer
 
 ```python
-KNOWLEDGE_SCHEMA = Schema(
+REFERENCE_SCHEMA = Schema(
     chunk_id=ID(stored=True, unique=True),
     doc_path=ID(stored=True),
     doc_title=TEXT(stored=True),
@@ -2285,13 +2285,13 @@ KNOWLEDGE_SCHEMA = Schema(
     chunk_index=NUMERIC(stored=True),
 )
 
-def index_knowledge(repo_root: str) -> dict  # Synchronous
-def search_knowledge(repo_root: str, query: str, limit: int = 10) -> list[dict]
-def is_knowledge_available(repo_root: str) -> bool
+def index_reference(repo_root: str) -> dict  # Synchronous
+def search_reference(repo_root: str, query: str, limit: int = 10) -> list[dict]
+def is_reference_available(repo_root: str) -> bool
 ```
 
-**Index location:** `{repo_root}/{settings.knowledge_index_dir}` (default `.lean_ai_knowledge_index`)
-**Documents location:** `{repo_root}/{settings.knowledge_dir}` (default `.lean_ai/knowledge`)
+**Index location:** `{repo_root}/{settings.reference_index_dir}` (default `.lean_ai_reference_index`)
+**Documents location:** `{repo_root}/{settings.reference_dir}` (default `.lean_ai/reference`)
 
 **Supported formats:** `.epub`, `.pdf`, `.docx`, `.md`, `.html`, `.rst`, `.txt`
 
@@ -2406,7 +2406,7 @@ All prompts use capability-first framing (never "You are a..."):
 | `REQUEST_SYSTEM_PROMPT` | Open-ended tasks | Must call tools, research with search, no test requirement |
 | `CLARIFICATION_SYSTEM_PROMPT` | Clarity assessment | Respond "CLEAR" or JSON array of 3-5 questions |
 | `CHAT_SYSTEM_PROMPT` | Chat/discussion | Voice-first (no markdown/lists), build "Suggested Agent Prompt" |
-| `REFINER_CHAT_PROMPT` | Chat refinement | Preserve intent, add structure, incorporate knowledge naturally |
+| `REFINER_CHAT_PROMPT` | Chat refinement | Preserve intent, add structure, incorporate reference library naturally |
 | `REFINER_TASK_PROMPT` | Task refinement | Add technical specificity, don't expand scope |
 | `PRIVACY_STRIP_PROMPT` | Sensitivity strip | Redact keys/tokens/hosts/emails/DB strings, keep code structure |
 | `DISPUTE_EVALUATION_PROMPT` | TDD dispute | Read test, evaluate reason, ACCEPTED or REJECTED |
@@ -2559,7 +2559,7 @@ Sidebar Webview (postMessage)
 
 - **Recoverable:** Tool failures, validation failures → retry or continue
 - **Non-recoverable:** WebSocket disconnect, fatal LLM errors → send error + close
-- **Graceful degradation:** Voice unavailable, refiner fails, knowledge base missing → log warning, continue without feature
+- **Graceful degradation:** Voice unavailable, refiner fails, reference library missing → log warning, continue without feature
 - **WorkflowCancelledError:** Clean cancellation path from user cancel button
 
 ### 23.3 Concurrency Model
@@ -2569,7 +2569,7 @@ Sidebar Webview (postMessage)
   - Lint + test reporting passes (both read-only)
   - Context + framework guide generation
   - Expansion batches in multi-round context generation
-  - Chat context gathering (file tree, search, web, knowledge)
+  - Chat context gathering (file tree, search, web, reference library)
   - Image descriptions (multiple attachments)
 - **Sequential patterns:**
   - Auto-fix passes (format, lint_fix) — both modify files
@@ -2612,9 +2612,9 @@ Sidebar Webview (postMessage)
 | `.lean_ai/tool_output/` | Long tool output files (auto-cleaned after 1hr) |
 | `.lean_ai/fetched/` | Fetched URL content (paginated) |
 | `.lean_ai/plan_debug/{session_id}/` | Debug output for planning phases |
-| `.lean_ai/knowledge/` | Knowledge base documents |
+| `.lean_ai/reference/` | Reference library documents |
 | `.lean_ai_index/` | Whoosh BM25F search index |
-| `.lean_ai_knowledge_index/` | Whoosh knowledge document index |
+| `.lean_ai_reference_index/` | Whoosh reference library document index |
 | `.embeddings.bin` | Binary embedding vectors |
 | `.embeddings_index.json` | Embedding index sidecar |
 | `_manifest.json` | SHA-256 file hash manifest (in index dirs) |
@@ -2632,8 +2632,8 @@ Sidebar Webview (postMessage)
 | `_MAX_AGE_SECONDS` | 3600 | tool_executor.py | Tool output file cleanup age |
 | `_MAX_READ_BYTES` | 2MB | file_ops.py | File read size limit |
 | `_ARTIFACT_PER_FILE_LIMIT` | 8000 | prompts.py | Max chars per file in step artifacts |
-| `_TARGET_CHARS` | 800 | knowledge/chunker.py | Target knowledge chunk size |
-| `_OVERLAP_CHARS` | 150 | knowledge/chunker.py | Knowledge chunk overlap |
+| `_TARGET_CHARS` | 800 | reference/chunker.py | Target reference library chunk size |
+| `_OVERLAP_CHARS` | 150 | reference/chunker.py | Reference library chunk overlap |
 
 ### 24.3 WebSocket Message Quick Reference
 

@@ -52,7 +52,7 @@ async def test_refine_chat_message_basic():
     )
     refiner = PromptRefiner(
         ollama_provider=provider,
-        enable_knowledge=False,
+        enable_reference=False,
         enable_privacy=False,
     )
     result = await refiner.refine_chat_message("add auth")
@@ -74,7 +74,7 @@ async def test_refine_task_basic():
     )
     refiner = PromptRefiner(
         ollama_provider=provider,
-        enable_knowledge=False,
+        enable_reference=False,
         enable_privacy=False,
     )
     result = await refiner.refine_task("add auth", repo_root="/tmp")
@@ -82,20 +82,20 @@ async def test_refine_task_basic():
     assert "OAuth2" in result.refined
 
 
-# ── Knowledge base integration ──────────────────────────────────
+# ── Reference library integration ──────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_refine_chat_message_with_knowledge():
-    """When knowledge base returns results, they appear in the prompt."""
+async def test_refine_chat_message_with_reference():
+    """When reference library returns results, they appear in the prompt."""
     provider = FakeOllamaProvider(
         response="Add JWT auth using the internal OAuth2 gateway",
     )
     refiner = PromptRefiner(
         ollama_provider=provider,
-        enable_knowledge=True,
+        enable_reference=True,
         enable_privacy=False,
-        knowledge_chunks=3,
+        reference_chunks=3,
     )
 
     mock_chunks = [
@@ -108,11 +108,11 @@ async def test_refine_chat_message_with_knowledge():
 
     with (
         patch(
-            "lean_ai.knowledge.indexer.is_knowledge_available",
+            "lean_ai.reference.indexer.is_reference_available",
             return_value=True,
         ),
         patch(
-            "lean_ai.knowledge.indexer.search_knowledge",
+            "lean_ai.reference.indexer.search_reference",
             return_value=mock_chunks,
         ),
     ):
@@ -121,25 +121,25 @@ async def test_refine_chat_message_with_knowledge():
         )
 
     assert result.was_refined
-    assert result.knowledge_context  # non-empty
-    assert "Auth Guide" in result.knowledge_context
-    # Verify the knowledge section was included in the LLM prompt
+    assert result.reference_context  # non-empty
+    assert "Auth Guide" in result.reference_context
+    # Verify the reference section was included in the LLM prompt
     prompt_sent = provider.last_messages[0]["content"]
-    assert "DOMAIN KNOWLEDGE" in prompt_sent
+    assert "REFERENCE MATERIAL" in prompt_sent
 
 
 @pytest.mark.asyncio
-async def test_refine_chat_message_no_knowledge():
-    """When knowledge base is unavailable, refinement still works."""
+async def test_refine_chat_message_no_reference():
+    """When reference library is unavailable, refinement still works."""
     provider = FakeOllamaProvider(response="Add authentication to the API")
     refiner = PromptRefiner(
         ollama_provider=provider,
-        enable_knowledge=True,
+        enable_reference=True,
         enable_privacy=False,
     )
 
     with patch(
-        "lean_ai.knowledge.indexer.is_knowledge_available",
+        "lean_ai.reference.indexer.is_reference_available",
         return_value=False,
     ):
         result = await refiner.refine_chat_message(
@@ -147,10 +147,10 @@ async def test_refine_chat_message_no_knowledge():
         )
 
     assert result.was_refined
-    assert result.knowledge_context == ""
-    # Verify no DOMAIN KNOWLEDGE section in prompt
+    assert result.reference_context == ""
+    # Verify no REFERENCE MATERIAL section in prompt
     prompt_sent = provider.last_messages[0]["content"]
-    assert "DOMAIN KNOWLEDGE" not in prompt_sent
+    assert "REFERENCE MATERIAL" not in prompt_sent
 
 
 # ── Privacy stripping ───────────────────────────────────────────
@@ -218,7 +218,7 @@ async def test_refiner_length_guard():
     provider = FakeOllamaProvider(response="Short")
     refiner = PromptRefiner(
         ollama_provider=provider,
-        enable_knowledge=False,
+        enable_reference=False,
         enable_privacy=False,
     )
     result = await refiner.refine_chat_message(long_original)
@@ -257,7 +257,7 @@ async def test_refiner_timeout_returns_original():
 
     refiner = PromptRefiner(
         ollama_provider=provider,
-        enable_knowledge=False,
+        enable_reference=False,
         enable_privacy=False,
         timeout=0.1,
     )
@@ -279,7 +279,7 @@ async def test_refiner_exception_returns_original():
 
     refiner = PromptRefiner(
         ollama_provider=provider,
-        enable_knowledge=False,
+        enable_reference=False,
         enable_privacy=False,
     )
     result = await refiner.refine_chat_message("hello")

@@ -19,7 +19,7 @@ class FileEntry:
 SKIP_DIRS = frozenset({
     ".git", "__pycache__", "node_modules", ".venv", "venv",
     ".tox", ".mypy_cache", ".pytest_cache", ".ruff_cache",
-    ".lean_ai_index", ".lean_ai_knowledge_index", ".lean_ai",
+    ".lean_ai_index", ".lean_ai_reference_index", ".lean_ai",
     "dist", "build", ".next", ".nuxt", "target",
     ".idea", ".vscode",
     # Framework cache / generated / vendor directories

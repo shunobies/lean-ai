@@ -289,7 +289,7 @@ def build_chat_system_prompt(
     project_context: str | None = None,
     fetched_pages: list[dict] | None = None,
     web_search_results: str | None = None,
-    knowledge_context: str | None = None,
+    reference_context: str | None = None,
     user_name: str | None = None,
     recent_sessions: str | None = None,
     max_context_chars: int = 30000,
@@ -411,8 +411,8 @@ def build_chat_system_prompt(
     if file_tree and budget > 0:
         _try_append("=== PROJECT FILES ===", "\n".join(file_tree))
 
-    # Priority 8: Domain knowledge (drop if over budget)
-    if knowledge_context and budget > 0:
-        _try_append("=== DOMAIN KNOWLEDGE ===", knowledge_context)
+    # Priority 8: Reference material (drop if over budget)
+    if reference_context and budget > 0:
+        _try_append("=== REFERENCE MATERIAL ===", reference_context)
 
     return "\n".join(parts)

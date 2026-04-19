@@ -24,18 +24,18 @@ class InitWorkspaceResponse(BaseModel):
     index_chunk_count: int | None = None
     commands_detected: dict[str, str] | None = None
     num_parallel: int = 1
-    knowledge_status: str | None = None
-    knowledge_doc_count: int | None = None
-    knowledge_chunk_count: int | None = None
-    knowledge_skipped_extensions: list[str] | None = None
+    reference_status: str | None = None
+    reference_doc_count: int | None = None
+    reference_chunk_count: int | None = None
+    reference_skipped_extensions: list[str] | None = None
     # embedding_status now includes ``up_to_date`` and ``partial`` in
     # addition to ``skipped`` / ``success`` / ``failed`` so the extension
     # can tell the difference between "nothing to do" and "silently broken".
     embedding_status: str = "skipped"
     embedding_code_count: int = 0
-    embedding_knowledge_count: int = 0
+    embedding_reference_count: int = 0
     embedding_code_unchanged: int = 0
-    embedding_knowledge_unchanged: int = 0
+    embedding_reference_unchanged: int = 0
     embedding_failed_batches: int = 0
     embedding_total_batches: int = 0
     embedding_message: str = ""
@@ -81,12 +81,12 @@ class ScaffoldListResponse(BaseModel):
     scaffolds: list[ScaffoldInfo]
 
 
-class IndexKnowledgeRequest(BaseModel):
+class IndexReferenceRequest(BaseModel):
     repo_root: str
     force_reindex: bool = False
 
 
-class IndexKnowledgeResponse(BaseModel):
+class IndexReferenceResponse(BaseModel):
     status: str
     doc_count: int = 0
     chunk_count: int = 0

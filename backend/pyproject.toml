@@ -45,7 +45,7 @@ openai = [
 anthropic = [
     "anthropic>=0.30.0,<1.0",
 ]
-knowledge = [
+reference = [
     "ebooklib>=0.18,<1.0",
     "pypdf>=6.10.2,<7.0",
     "python-docx>=1.1.0,<2.0",

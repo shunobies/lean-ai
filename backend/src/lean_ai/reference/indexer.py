@@ -1,18 +1,18 @@
-"""Whoosh-based knowledge document index.
+"""Whoosh-based reference document index.
 
-Manages a separate Whoosh index for knowledge documents (EPUBs, PDFs,
-Word docs, plain text, HTML, Markdown) stored in the knowledge directory
-(default: ``.lean_ai/knowledge/``).
+Manages a separate Whoosh index for reference documents (EPUBs, PDFs,
+Word docs, plain text, HTML, Markdown) stored in the reference directory
+(default: ``.lean_ai/reference/``).
 
-The knowledge index lives in its own directory (default:
-``.lean_ai_knowledge_index/``) so it is completely independent of the
+The reference index lives in its own directory (default:
+``.lean_ai_reference_index/``) so it is completely independent of the
 code index.  Both indexes are queried when assembling plan context.
 
 Incremental updates
 ~~~~~~~~~~~~~~~~~~~
 The same SHA-256 manifest pattern used by the code indexer is reused
-here.  On each run ``index_knowledge()`` hashes every file in the
-knowledge directory, compares against the saved manifest, and only
+here.  On each run ``index_reference()`` hashes every file in the
+reference directory, compares against the saved manifest, and only
 re-processes added or modified documents.  Deleted documents are removed
 from the Whoosh index automatically.
 """
@@ -45,13 +45,56 @@ from lean_ai.indexer.manifest import (
 
 logger = logging.getLogger(__name__)
 
-# Whoosh schema for knowledge chunks.
+
+_LEGACY_DOC_DIR = ".lean_ai/knowledge"
+_LEGACY_INDEX_DIR = ".lean_ai_knowledge_index"
+_migrated_repos: set[str] = set()
+
+
+def migrate_legacy_paths(repo_root: str) -> None:
+    """One-shot rename of pre-rename on-disk artifacts.
+
+    The rename from "knowledge" to "reference" changed the workspace
+    paths users put documents in and where the Whoosh index lives.
+    When a workspace has the old paths but not the new ones, move them
+    in place so users don't have to re-stage documents or rebuild the
+    index manually. Idempotent per repo_root — cached after first call.
+    """
+    if repo_root in _migrated_repos:
+        return
+    _migrated_repos.add(repo_root)
+
+    moves = [
+        (_LEGACY_DOC_DIR, settings.reference_dir),
+        (_LEGACY_INDEX_DIR, settings.reference_index_dir),
+    ]
+    for legacy_rel, current_rel in moves:
+        legacy = Path(repo_root) / legacy_rel
+        current = Path(repo_root) / current_rel
+        if not legacy.exists():
+            continue
+        if current.exists():
+            logger.info(
+                "Legacy path %s found but %s already exists — leaving legacy "
+                "in place; delete it manually to silence this notice",
+                legacy, current,
+            )
+            continue
+        try:
+            current.parent.mkdir(parents=True, exist_ok=True)
+            legacy.rename(current)
+            logger.info("Migrated %s → %s", legacy, current)
+        except OSError as e:
+            logger.warning("Cannot migrate %s → %s: %s", legacy, current, e)
+
+
+# Whoosh schema for reference chunks.
 # ``doc_title`` and ``section`` are included in full-text search so that
 # queries like "chapter 3 configuration" or "ACME product spec" surface
 # the right sections without requiring exact content match.
-KNOWLEDGE_SCHEMA = Schema(
+REFERENCE_SCHEMA = Schema(
     chunk_id=ID(stored=True, unique=True),      # "rel_path:chunk_index"
-    doc_path=ID(stored=True),                    # relative path in knowledge dir
+    doc_path=ID(stored=True),                    # relative path in reference dir
     doc_title=TEXT(stored=True),                 # document title
     section=TEXT(stored=True),                   # chapter / heading / "Page N"
     content=TEXT(stored=True),                   # plain-text content
@@ -78,7 +121,7 @@ def _chunk_config_path(idx_path: str) -> Path:
 def _current_chunk_config() -> dict:
     """Config fingerprint that, if changed, requires a full rebuild."""
     return {
-        "kb_chunk_chars": int(settings.kb_chunk_chars),
+        "reference_chunk_chars": int(settings.reference_chunk_chars),
         "schema_version": _CHUNK_CONFIG_SCHEMA_VERSION,
     }
 
@@ -114,7 +157,7 @@ def is_chunk_config_stale(repo_root: str) -> bool:
     When no index or sentinel exists, returns ``False`` — a missing index
     is not "stale", it simply hasn't been built yet.
     """
-    idx_path = knowledge_index_dir(repo_root)
+    idx_path = reference_index_dir(repo_root)
     if not exists_in(idx_path):
         return False
     stored = _read_chunk_config(idx_path)
@@ -125,9 +168,9 @@ def is_chunk_config_stale(repo_root: str) -> bool:
     return stored != _current_chunk_config()
 
 
-def requires_kb_rebuild(repo_root: str) -> dict:
+def requires_reference_rebuild(repo_root: str) -> dict:
     """Diagnostic: return details when the KB index is stale vs current settings."""
-    idx_path = knowledge_index_dir(repo_root)
+    idx_path = reference_index_dir(repo_root)
     if not exists_in(idx_path):
         return {"stale": False, "reason": "no_index"}
     stored = _read_chunk_config(idx_path)
@@ -151,7 +194,7 @@ def requires_kb_rebuild(repo_root: str) -> dict:
 def _reset_for_rebuild(idx_path: str, reason: str) -> None:
     """Wipe the Whoosh index, embedding store, and manifest to force a full rebuild."""
     logger.info(
-        "Knowledge index rebuild required (%s) — wiping %s",
+        "Reference index rebuild required (%s) — wiping %s",
         reason, idx_path,
     )
     # Remove the whole index directory — the Whoosh files, the manifest
@@ -161,47 +204,48 @@ def _reset_for_rebuild(idx_path: str, reason: str) -> None:
         shutil.rmtree(idx_path, ignore_errors=True)
 
 
-def knowledge_index_dir(repo_root: str) -> str:
-    """Absolute path to the knowledge Whoosh index for *repo_root*."""
-    return os.path.join(repo_root, settings.knowledge_index_dir)
+def reference_index_dir(repo_root: str) -> str:
+    """Absolute path to the reference Whoosh index for *repo_root*."""
+    return os.path.join(repo_root, settings.reference_index_dir)
 
 
-def knowledge_dir_path(repo_root: str) -> Path:
-    """Absolute path to the knowledge documents directory for *repo_root*."""
-    return Path(repo_root) / settings.knowledge_dir
+def reference_dir_path(repo_root: str) -> Path:
+    """Absolute path to the reference documents directory for *repo_root*."""
+    return Path(repo_root) / settings.reference_dir
 
 
-def is_knowledge_available(repo_root: str) -> bool:
-    """Return ``True`` when a non-empty knowledge index exists."""
-    idx_dir = knowledge_index_dir(repo_root)
+def is_reference_available(repo_root: str) -> bool:
+    """Return ``True`` when a non-empty reference index exists."""
+    migrate_legacy_paths(repo_root)
+    idx_dir = reference_index_dir(repo_root)
     return exists_in(idx_dir)
 
 
-def _list_knowledge_files(knowledge_dir: Path) -> list[tuple[str, Path]]:
-    """Recursively list all readable knowledge files.
+def _list_reference_files(reference_dir: Path) -> list[tuple[str, Path]]:
+    """Recursively list all readable reference files.
 
     Returns a list of ``(rel_path, full_path)`` tuples where *rel_path*
-    is relative to *knowledge_dir*.  Only files with extensions supported
+    is relative to *reference_dir*.  Only files with extensions supported
     by the reader registry are included.
     """
-    from lean_ai.knowledge.readers.registry import supported_extensions
+    from lean_ai.reference.readers.registry import supported_extensions
 
     exts = set(supported_extensions())
     results: list[tuple[str, Path]] = []
 
-    for full_path in sorted(knowledge_dir.rglob("*")):
+    for full_path in sorted(reference_dir.rglob("*")):
         if not full_path.is_file():
             continue
         if full_path.suffix.lower() not in exts:
             continue
-        rel = full_path.relative_to(knowledge_dir)
+        rel = full_path.relative_to(reference_dir)
         results.append((str(rel).replace("\\", "/"), full_path))
 
     return results
 
 
-def index_knowledge(repo_root: str) -> dict:
-    """Index all knowledge documents in the knowledge directory.
+def index_reference(repo_root: str) -> dict:
+    """Index all reference documents in the reference directory.
 
     Decides between a full re-index and an incremental update based on
     whether a valid manifest and Whoosh index already exist.
@@ -214,27 +258,28 @@ def index_knowledge(repo_root: str) -> dict:
         ``added``, ``modified``, ``deleted``, ``unchanged``,
         ``indexed_at``.
     """
-    kdir = knowledge_dir_path(repo_root)
+    migrate_legacy_paths(repo_root)
+    kdir = reference_dir_path(repo_root)
 
     if not kdir.is_dir():
-        logger.info("Knowledge dir not found at %s — skipping", kdir)
-        return {"status": "no_knowledge_dir", "doc_count": 0, "chunk_count": 0}
+        logger.info("Reference dir not found at %s — skipping", kdir)
+        return {"status": "no_reference_dir", "doc_count": 0, "chunk_count": 0}
 
-    files = _list_knowledge_files(kdir)
+    files = _list_reference_files(kdir)
     if not files:
         # Check if files exist but aren't supported (missing optional deps).
         all_files = [p for p in kdir.rglob("*") if p.is_file()]
         if all_files:
-            from lean_ai.knowledge.readers.registry import supported_extensions
+            from lean_ai.reference.readers.registry import supported_extensions
             exts = set(supported_extensions())
             unsupported = sorted({
                 p.suffix.lower() for p in all_files
                 if p.suffix.lower() and p.suffix.lower() not in exts
             })
             logger.warning(
-                "Knowledge dir %s has %d file(s) but none match supported "
+                "Reference dir %s has %d file(s) but none match supported "
                 "extensions %s. Found extensions: %s. "
-                "Install optional deps: pip install 'lean-ai[knowledge]'",
+                "Install optional deps: pip install 'lean-ai[reference]'",
                 kdir, len(all_files), sorted(exts), unsupported,
             )
             return {
@@ -244,10 +289,10 @@ def index_knowledge(repo_root: str) -> dict:
                 "total_files_found": len(all_files),
                 "skipped_extensions": unsupported,
             }
-        logger.info("Knowledge dir %s is empty — skipping", kdir)
+        logger.info("Reference dir %s is empty — skipping", kdir)
         return {"status": "empty", "doc_count": 0, "chunk_count": 0}
 
-    idx_path = knowledge_index_dir(repo_root)
+    idx_path = reference_index_dir(repo_root)
 
     # If the chunk configuration has changed since the index was built,
     # a full rebuild is required — incremental updates would leave old
@@ -269,12 +314,12 @@ def index_knowledge(repo_root: str) -> dict:
         try:
             current_hashes[rel_path] = hash_file_content(full_path)
         except (OSError, PermissionError) as e:
-            logger.warning("Cannot hash knowledge file %s: %s", rel_path, e)
+            logger.warning("Cannot hash reference file %s: %s", rel_path, e)
 
     old_manifest = load_manifest(Path(idx_path))
 
     if old_manifest is not None and exists_in(idx_path):
-        return _incremental_knowledge_index(
+        return _incremental_reference_index(
             kdir=kdir,
             idx_path=idx_path,
             files=files,
@@ -282,7 +327,7 @@ def index_knowledge(repo_root: str) -> dict:
             old_manifest=old_manifest,
         )
 
-    return _full_knowledge_index(
+    return _full_reference_index(
         kdir=kdir,
         idx_path=idx_path,
         files=files,
@@ -291,12 +336,12 @@ def index_knowledge(repo_root: str) -> dict:
 
 
 def _read_and_chunk(kdir: Path, rel_path: str, full_path: Path) -> list:
-    """Read a document and return its KnowledgeChunks (or empty list)."""
-    from lean_ai.knowledge.readers.registry import read_document
+    """Read a document and return its ReferenceChunks (or empty list)."""
+    from lean_ai.reference.readers.registry import read_document
     return read_document(full_path, rel_path)
 
 
-def _full_knowledge_index(
+def _full_reference_index(
     *,
     kdir: Path,
     idx_path: str,
@@ -308,7 +353,7 @@ def _full_knowledge_index(
         shutil.rmtree(idx_path)
     os.makedirs(idx_path, exist_ok=True)
 
-    ix = create_in(idx_path, KNOWLEDGE_SCHEMA)
+    ix = create_in(idx_path, REFERENCE_SCHEMA)
     writer = ix.writer()
 
     manifest = Manifest(
@@ -323,7 +368,7 @@ def _full_knowledge_index(
             try:
                 chunks = _read_and_chunk(kdir, rel_path, full_path)
             except Exception:
-                logger.warning("Skipping unreadable knowledge doc: %s", rel_path, exc_info=True)
+                logger.warning("Skipping unreadable reference doc: %s", rel_path, exc_info=True)
                 skipped += 1
                 continue
 
@@ -344,7 +389,7 @@ def _full_knowledge_index(
                 sha256=current_hashes.get(rel_path, ""),
                 chunk_count=len(chunks),
             )
-            logger.debug("Indexed knowledge doc %s → %d chunks", rel_path, len(chunks))
+            logger.debug("Indexed reference doc %s → %d chunks", rel_path, len(chunks))
 
         writer.commit()
     except Exception:
@@ -365,13 +410,13 @@ def _full_knowledge_index(
         "indexed_at": datetime.now(timezone.utc).isoformat(),
     }
     logger.info(
-        "Knowledge full index: %d docs (%d chunks) in %s",
+        "Reference full index: %d docs (%d chunks) in %s",
         len(files), total_chunks, kdir,
     )
     return stats
 
 
-def _incremental_knowledge_index(
+def _incremental_reference_index(
     *,
     kdir: Path,
     idx_path: str,
@@ -385,7 +430,7 @@ def _incremental_knowledge_index(
 
     if not diff.added and not diff.modified and not diff.deleted:
         total_chunks = sum(r.chunk_count for r in old_manifest.files.values())
-        logger.info("Knowledge index: no changes detected in %s", kdir)
+        logger.info("Reference index: no changes detected in %s", kdir)
         return {
             "status": "already_indexed",
             "mode": "incremental",
@@ -419,7 +464,7 @@ def _incremental_knowledge_index(
             try:
                 chunks = _read_and_chunk(kdir, rel_path, full_path)
             except Exception:
-                logger.warning("Skipping unreadable knowledge doc: %s", rel_path, exc_info=True)
+                logger.warning("Skipping unreadable reference doc: %s", rel_path, exc_info=True)
                 continue
 
             for chunk in chunks:
@@ -440,7 +485,7 @@ def _incremental_knowledge_index(
             try:
                 chunks = _read_and_chunk(kdir, rel_path, full_path)
             except Exception:
-                logger.warning("Skipping unreadable knowledge doc: %s", rel_path, exc_info=True)
+                logger.warning("Skipping unreadable reference doc: %s", rel_path, exc_info=True)
                 continue
 
             for chunk in chunks:
@@ -494,7 +539,7 @@ def _incremental_knowledge_index(
         "indexed_at": datetime.now(timezone.utc).isoformat(),
     }
     logger.info(
-        "Knowledge incremental index: +%d ~%d -%d =%d in %s",
+        "Reference incremental index: +%d ~%d -%d =%d in %s",
         len(diff.added), len(diff.modified),
         len(diff.deleted), len(diff.unchanged),
         kdir,
@@ -502,19 +547,19 @@ def _incremental_knowledge_index(
     return stats
 
 
-async def generate_knowledge_embeddings(
+async def generate_reference_embeddings(
     repo_root: str,
     llm_client,
     batch_size: int = 0,
 ) -> "EmbeddingRunStats":
-    """Generate embeddings for knowledge chunks, skipping unchanged ones.
+    """Generate embeddings for reference chunks, skipping unchanged ones.
 
     Uses a content hash per chunk stored in the embedding index to avoid
     re-embedding chunks whose text has not changed since the last run.
 
     A producer-consumer pipeline overlaps Ollama compute with disk I/O.
 
-    Registers ``embeddings.knowledge`` on the runtime-state busy set
+    Registers ``embeddings.reference`` on the runtime-state busy set
     while running so extension-side health monitors treat slow
     ``/api/health`` responses during this call as expected rather than
     as a dead backend.
@@ -527,13 +572,13 @@ async def generate_knowledge_embeddings(
     """
     from lean_ai.runtime_state import busy
 
-    with busy("embeddings.knowledge"):
-        return await _generate_knowledge_embeddings_inner(
+    with busy("embeddings.reference"):
+        return await _generate_reference_embeddings_inner(
             repo_root, llm_client, batch_size,
         )
 
 
-async def _generate_knowledge_embeddings_inner(
+async def _generate_reference_embeddings_inner(
     repo_root: str,
     llm_client,
     batch_size: int,
@@ -547,12 +592,12 @@ async def _generate_knowledge_embeddings_inner(
 
     stats = EmbeddingRunStats()
 
-    logger.info("[knowledge embed] ENTER for %s", repo_root)
+    logger.info("[reference embed] ENTER for %s", repo_root)
 
-    idx_path = knowledge_index_dir(repo_root)
+    idx_path = reference_index_dir(repo_root)
     if not exists_in(idx_path):
         logger.info(
-            "[knowledge embed] no knowledge index at %s — nothing to embed",
+            "[reference embed] no reference index at %s — nothing to embed",
             idx_path,
         )
         return stats
@@ -560,7 +605,7 @@ async def _generate_knowledge_embeddings_inner(
     def _sync_setup():
         """Whoosh iteration + existing-index load — off the event loop.
 
-        For a 5k+-chunk knowledge index these sync reads add up to
+        For a 5k+-chunk reference index these sync reads add up to
         seconds of blocked event-loop time; running them in a thread
         keeps ``/api/health`` responsive.
         """
@@ -569,7 +614,7 @@ async def _generate_knowledge_embeddings_inner(
         existing = store.get_index()
         t1 = time.perf_counter()
         logger.info(
-            "[knowledge embed] loaded existing-index (%d entries) in %.2fs",
+            "[reference embed] loaded existing-index (%d entries) in %.2fs",
             len(existing), t1 - t0,
         )
 
@@ -590,7 +635,7 @@ async def _generate_knowledge_embeddings_inner(
             reader.close()
         t2 = time.perf_counter()
         logger.info(
-            "[knowledge embed] read %d Whoosh chunks in %.2fs",
+            "[reference embed] read %d Whoosh chunks in %.2fs",
             len(chunks), t2 - t1,
         )
         return chunks, existing, store
@@ -598,7 +643,7 @@ async def _generate_knowledge_embeddings_inner(
     all_chunks, existing_index, store = await asyncio.to_thread(_sync_setup)
 
     if not all_chunks:
-        logger.info("[knowledge embed] knowledge index is empty")
+        logger.info("[reference embed] reference index is empty")
         return stats
 
     def _sync_diff() -> tuple[list[tuple[str, str, str]], set[str], int]:
@@ -616,7 +661,7 @@ async def _generate_knowledge_embeddings_inner(
             to_embed_local.append((chunk_id, text, content_hash))
         t1 = time.perf_counter()
         logger.info(
-            "[knowledge embed] hashed+diffed %d chunks in %.2fs "
+            "[reference embed] hashed+diffed %d chunks in %.2fs "
             "(%d need embedding, %d orphans)",
             len(all_chunks), t1 - t0, len(to_embed_local), len(orphans),
         )
@@ -630,20 +675,20 @@ async def _generate_knowledge_embeddings_inner(
         # few KB per orphan is not worth the hang risk. /init --force
         # wipes and rebuilds the store from scratch for true cleanup.
         logger.info(
-            "[knowledge embed] dropping %d orphaned entries from index "
+            "[reference embed] dropping %d orphaned entries from index "
             "(bin file left intact; run /init --force to reclaim bytes)",
             len(orphaned),
         )
         await asyncio.to_thread(store.remove_chunks, orphaned)
         await asyncio.to_thread(store.flush_index)
-        logger.info("[knowledge embed] orphan cleanup complete")
+        logger.info("[reference embed] orphan cleanup complete")
     stats.orphaned_removed = len(orphaned)
     stats.unchanged = all_count - len(to_embed)
 
     if not to_embed:
         await asyncio.to_thread(store.flush_index)
         logger.info(
-            "[knowledge embed] up to date — %d unchanged, %d orphans removed "
+            "[reference embed] up to date — %d unchanged, %d orphans removed "
             "(no embed calls made)",
             stats.unchanged, stats.orphaned_removed,
         )
@@ -651,13 +696,13 @@ async def _generate_knowledge_embeddings_inner(
 
     # Resolve batch size: explicit > adaptive > fallback.
     if batch_size <= 0:
-        logger.info("[knowledge embed] computing adaptive batch size")
+        logger.info("[reference embed] computing adaptive batch size")
         batch_size = await llm_client.compute_embedding_batch_size(to_embed)
 
     total_to_embed = len(to_embed)
     stats.total_batches = (total_to_embed + batch_size - 1) // batch_size
     logger.info(
-        "[knowledge embed] calling Ollama: %d chunks, batch_size=%d, "
+        "[reference embed] calling Ollama: %d chunks, batch_size=%d, "
         "%d unchanged, %d orphans removed",
         total_to_embed, batch_size, stats.unchanged, stats.orphaned_removed,
     )
@@ -679,14 +724,14 @@ async def _generate_knowledge_embeddings_inner(
             batch_num = i // batch_size
             t0 = time.perf_counter()
             logger.info(
-                "[knowledge embed] batch %d/%d → Ollama (%d texts)",
+                "[reference embed] batch %d/%d → Ollama (%d texts)",
                 batch_num + 1, stats.total_batches, len(batch_texts),
             )
             try:
                 embeddings = await llm_client.embed(batch_texts)
                 t1 = time.perf_counter()
                 logger.info(
-                    "[knowledge embed] batch %d returned in %.1fs",
+                    "[reference embed] batch %d returned in %.1fs",
                     batch_num + 1, t1 - t0,
                 )
                 await queue.put((batch_ids, embeddings, batch_hashes))
@@ -694,7 +739,7 @@ async def _generate_knowledge_embeddings_inner(
                 stats.failed_batches += 1
                 t1 = time.perf_counter()
                 logger.warning(
-                    "[knowledge embed] batch %d FAILED after %.1fs: %s",
+                    "[reference embed] batch %d FAILED after %.1fs: %s",
                     batch_num + 1, t1 - t0, e,
                 )
         await queue.put(None)  # sentinel
@@ -711,7 +756,7 @@ async def _generate_knowledge_embeddings_inner(
             )
             total += len(embeddings)
             logger.info(
-                "Embedding progress: %d/%d knowledge chunks (%.0f%%)",
+                "Embedding progress: %d/%d reference chunks (%.0f%%)",
                 total, total_to_embed, (total / total_to_embed) * 100,
             )
 
@@ -722,7 +767,7 @@ async def _generate_knowledge_embeddings_inner(
     store.flush_index()
     stats.embedded = total
     logger.info(
-        "Generated %d knowledge embeddings "
+        "Generated %d reference embeddings "
         "(%d unchanged, %d orphaned removed, %d/%d batches failed)",
         stats.embedded, stats.unchanged, stats.orphaned_removed,
         stats.failed_batches, stats.total_batches,
@@ -730,7 +775,7 @@ async def _generate_knowledge_embeddings_inner(
     return stats
 
 
-def search_knowledge(
+def search_reference(
     repo_root: str,
     query: str,
     limit: int = 10,
@@ -738,7 +783,7 @@ def search_knowledge(
     expand: bool = True,
     document: str | None = None,
 ) -> list[dict]:
-    """Search the knowledge index with BM25F full-text search.
+    """Search the reference index with BM25F full-text search.
 
     Searches across ``content``, ``doc_title``, and ``section`` fields.
     Returns matching chunks sorted by relevance score.  When
@@ -751,23 +796,23 @@ def search_knowledge(
     ``doc_title`` (substring) as a fallback so the LLM can pass a
     human-readable title from prior search results.
 
-    When ``expand`` is ``True`` and ``settings.kb_neighbor_window > 0``,
-    each hit is expanded with ``±kb_neighbor_window`` adjacent chunks
+    When ``expand`` is ``True`` and ``settings.reference_neighbor_window > 0``,
+    each hit is expanded with ``±reference_neighbor_window`` adjacent chunks
     from the same document and contiguous ranges are merged into single
     passage dicts.  Pass ``expand=False`` to get raw unmerged chunks
     (useful for debugging).
 
-    Returns an empty list when no knowledge index exists or the query
+    Returns an empty list when no reference index exists or the query
     produces no results.
     """
-    idx_path = knowledge_index_dir(repo_root)
+    idx_path = reference_index_dir(repo_root)
     if not exists_in(idx_path):
         return []
 
     try:
         ix = open_dir(idx_path)
     except Exception as e:
-        logger.warning("Cannot open knowledge index at %s: %s", idx_path, e)
+        logger.warning("Cannot open reference index at %s: %s", idx_path, e)
         return []
 
     parser = MultifieldParser(
@@ -784,7 +829,7 @@ def search_knowledge(
     try:
         parsed = parser.parse(safe_query)
     except Exception as e:
-        logger.debug("Failed to parse knowledge query %r: %s", query, e)
+        logger.debug("Failed to parse reference query %r: %s", query, e)
         return []
 
     # Build optional document filter: doc_path exact OR doc_title substring.
@@ -816,7 +861,7 @@ def search_knowledge(
                     "score": hit.score,
                 })
     except Exception as e:
-        logger.warning("Knowledge search failed for %r: %s", query, e)
+        logger.warning("Reference search failed for %r: %s", query, e)
 
     # RRF re-ranking when embeddings are available.
     if query_embedding and results:
@@ -826,11 +871,11 @@ def search_knowledge(
             if store.get_all_embeddings():
                 results = semantic_rerank(results, query_embedding, store)
         except Exception as e:
-            logger.debug("Knowledge RRF re-ranking skipped: %s", e)
+            logger.debug("Reference RRF re-ranking skipped: %s", e)
 
     # Small-to-big expansion: replace point hits with merged multi-chunk
     # passages for richer LLM context.
-    window = max(0, int(settings.kb_neighbor_window))
+    window = max(0, int(settings.reference_neighbor_window))
     if expand and window > 0 and results:
         try:
             return _expand_with_neighbors(idx_path, results, window)
@@ -994,7 +1039,7 @@ def list_documents(
     repo_root: str,
     name_filter: str = "",
 ) -> list[dict]:
-    """Return one entry per indexed knowledge document.
+    """Return one entry per indexed reference document.
 
     Each entry has ``doc_title``, ``doc_path``, ``format``, and
     ``chunk_count``.  Sorted alphabetically by title.
@@ -1002,16 +1047,16 @@ def list_documents(
     *name_filter* is a case-insensitive substring matched against
     ``doc_title``; pass an empty string for the full list.
 
-    Returns an empty list when no knowledge index exists.
+    Returns an empty list when no reference index exists.
     """
-    idx_path = knowledge_index_dir(repo_root)
+    idx_path = reference_index_dir(repo_root)
     if not exists_in(idx_path):
         return []
 
     try:
         ix = open_dir(idx_path)
     except Exception as e:
-        logger.warning("Cannot open knowledge index at %s: %s", idx_path, e)
+        logger.warning("Cannot open reference index at %s: %s", idx_path, e)
         return []
 
     by_doc: dict[str, dict] = {}

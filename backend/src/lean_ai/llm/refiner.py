@@ -1,7 +1,7 @@
 """Local LLM prompt refiner for cloud-bound requests.
 
 Uses a local Ollama instance to:
-1. Enrich prompts with knowledge base context (RAG) without leaking raw content
+1. Enrich prompts with reference library context (RAG) without leaking raw content
 2. Strip/generalize sensitive data before cloud transmission
 3. Restructure vague requests into well-formed prompts
 
@@ -33,7 +33,7 @@ class RefinerResult:
 
     original: str
     refined: str
-    knowledge_context: str = ""
+    reference_context: str = ""
     privacy_redactions: list[str] = field(default_factory=list)
     was_refined: bool = False
     duration_ms: float = 0.0
@@ -43,7 +43,7 @@ class RefinerResult:
 class PromptRefiner:
     """Local LLM pre-processor for cloud-bound prompts.
 
-    Uses a local Ollama instance to enrich prompts with knowledge base
+    Uses a local Ollama instance to enrich prompts with reference library
     context and strip sensitive data before cloud transmission.  This class
     is a no-op when ``ollama_provider`` is None (e.g. Ollama unreachable).
     """
@@ -52,15 +52,15 @@ class PromptRefiner:
         self,
         ollama_provider: "OllamaProvider | None",
         *,
-        enable_knowledge: bool = True,
+        enable_reference: bool = True,
         enable_privacy: bool = True,
-        knowledge_chunks: int = 5,
+        reference_chunks: int = 5,
         timeout: float = 30.0,
     ) -> None:
         self._ollama = ollama_provider
-        self._enable_knowledge = enable_knowledge
+        self._enable_reference = enable_reference
         self._enable_privacy = enable_privacy
-        self._knowledge_chunks = knowledge_chunks
+        self._reference_chunks = reference_chunks
         self._timeout = timeout
 
     @property
@@ -191,29 +191,29 @@ class PromptRefiner:
         prompt_template: str,
         text_placeholder: str,
     ) -> RefinerResult:
-        """Core refinement pipeline: knowledge query -> refine -> privacy strip."""
+        """Core refinement pipeline: reference query -> refine -> privacy strip."""
         assert self._ollama is not None
         start = time.monotonic()
 
-        # Step 1: Query knowledge base for context
-        knowledge_context = ""
-        if self._enable_knowledge and repo_root:
-            knowledge_context = await self._query_knowledge(
+        # Step 1: Query reference library for context
+        reference_context = ""
+        if self._enable_reference and repo_root:
+            reference_context = await self._query_reference(
                 query=text,
                 repo_root=repo_root,
-                limit=self._knowledge_chunks,
+                limit=self._reference_chunks,
             ) or ""
 
         # Step 2: Build and execute refinement prompt
-        knowledge_section = ""
-        if knowledge_context:
-            knowledge_section = (
-                "DOMAIN KNOWLEDGE (extract insights, do NOT copy verbatim):\n"
-                f"{knowledge_context}\n\n"
+        reference_section = ""
+        if reference_context:
+            reference_section = (
+                "REFERENCE MATERIAL (extract insights, do NOT copy verbatim):\n"
+                f"{reference_context}\n\n"
             )
 
         prompt = prompt_template.format(
-            knowledge_section=knowledge_section,
+            reference_section=reference_section,
             **{text_placeholder: text},
         )
 
@@ -234,7 +234,7 @@ class PromptRefiner:
             return RefinerResult(
                 original=text,
                 refined=text,
-                knowledge_context=knowledge_context,
+                reference_context=reference_context,
                 duration_ms=(time.monotonic() - start) * 1000,
             )
 
@@ -245,10 +245,10 @@ class PromptRefiner:
 
         duration = (time.monotonic() - start) * 1000
         logger.info(
-            "Refined prompt: %d -> %d chars, knowledge=%s, redactions=%d (%.0fms)",
+            "Refined prompt: %d -> %d chars, reference=%s, redactions=%d (%.0fms)",
             len(text),
             len(refined),
-            bool(knowledge_context),
+            bool(reference_context),
             len(privacy_redactions),
             duration,
         )
@@ -256,28 +256,28 @@ class PromptRefiner:
         return RefinerResult(
             original=text,
             refined=refined,
-            knowledge_context=knowledge_context,
+            reference_context=reference_context,
             privacy_redactions=privacy_redactions,
             was_refined=refined != text,
             duration_ms=duration,
         )
 
-    async def _query_knowledge(
+    async def _query_reference(
         self,
         query: str,
         repo_root: str,
         limit: int = 5,
     ) -> str | None:
-        """Query the knowledge base and format results for injection."""
+        """Query the reference library and format results for injection."""
         try:
-            from lean_ai.knowledge.indexer import (
-                is_knowledge_available,
-                search_knowledge,
+            from lean_ai.reference.indexer import (
+                is_reference_available,
+                search_reference,
             )
         except ImportError:
             return None
 
-        if not is_knowledge_available(repo_root):
+        if not is_reference_available(repo_root):
             return None
 
         # Generate query embedding for RRF re-ranking (best-effort).
@@ -292,10 +292,10 @@ class PromptRefiner:
 
         try:
             chunks = await asyncio.to_thread(
-                search_knowledge, repo_root, query, limit, query_embedding,
+                search_reference, repo_root, query, limit, query_embedding,
             )
         except Exception as e:
-            logger.debug("Knowledge query failed: %s", e)
+            logger.debug("Reference query failed: %s", e)
             return None
 
         if not chunks:

@@ -33,16 +33,16 @@ export interface IndexWorkspaceResponse {
     index_file_count?: number;
     index_chunk_count?: number;
     num_parallel?: number;
-    knowledge_status?: string;
-    knowledge_doc_count?: number;
-    knowledge_chunk_count?: number;
-    knowledge_skipped_extensions?: string[];
+    reference_status?: string;
+    reference_doc_count?: number;
+    reference_chunk_count?: number;
+    reference_skipped_extensions?: string[];
     // embedding_status: "skipped" | "success" | "up_to_date" | "partial" | "failed"
     embedding_status?: string;
     embedding_code_count?: number;
-    embedding_knowledge_count?: number;
+    embedding_reference_count?: number;
     embedding_code_unchanged?: number;
-    embedding_knowledge_unchanged?: number;
+    embedding_reference_unchanged?: number;
     embedding_failed_batches?: number;
     embedding_total_batches?: number;
     embedding_message?: string;

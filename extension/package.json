@@ -707,33 +707,33 @@
           "default": true,
           "markdownDescription": "**Advanced** — Mandate documentation verification and citation for external framework/library/API usage during planning and execution. Default: `true`"
         },
-        "lean-ai.refinerKnowledgeChunks": {
+        "lean-ai.refinerReferenceChunks": {
           "type": "number",
           "default": 5,
           "minimum": 1,
           "maximum": 50,
-          "markdownDescription": "**Advanced** — Number of knowledge base chunks injected into the refiner context when using a cloud LLM provider. Higher values provide more domain knowledge but use more prompt space. Default: `5`"
+          "markdownDescription": "**Advanced** — Number of reference library chunks injected into the refiner context when using a cloud LLM provider. Higher values provide more domain material but use more prompt space. Default: `5`"
         },
-        "lean-ai.kbChunkChars": {
+        "lean-ai.referenceChunkChars": {
           "type": "number",
           "default": 1800,
           "minimum": 200,
           "maximum": 20000,
-          "markdownDescription": "**Advanced** — Target characters per prose chunk in the knowledge base (~4 chars = 1 token). Larger values give the LLM more coherent passages but reduce retrieval precision. Changing this triggers a full knowledge-index rebuild on the next `/index-knowledge`. Default: `1800` (~450 tokens)"
+          "markdownDescription": "**Advanced** — Target characters per prose chunk in the reference library (~4 chars = 1 token). Larger values give the LLM more coherent passages but reduce retrieval precision. Changing this triggers a full reference-index rebuild on the next `/index-reference`. Default: `1800` (~450 tokens)"
         },
-        "lean-ai.kbNeighborWindow": {
+        "lean-ai.referenceNeighborWindow": {
           "type": "number",
           "default": 2,
           "minimum": 0,
           "maximum": 10,
-          "markdownDescription": "**Advanced** — Number of adjacent chunks included on each side of a `search_knowledge` hit. Contiguous hits are merged into one passage. `0` disables expansion. Default: `2`"
+          "markdownDescription": "**Advanced** — Number of adjacent chunks included on each side of a `search_reference` hit. Contiguous hits are merged into one passage. `0` disables expansion. Default: `2`"
         },
-        "lean-ai.kbSearchDefaultLimit": {
+        "lean-ai.referenceSearchDefaultLimit": {
           "type": "number",
           "default": 5,
           "minimum": 1,
           "maximum": 25,
-          "markdownDescription": "**Advanced** — Default number of hits returned by `search_knowledge` when the LLM does not specify a limit. Each hit may be a multi-chunk passage when neighbor expansion is enabled. Default: `5`"
+          "markdownDescription": "**Advanced** — Default number of hits returned by `search_reference` when the LLM does not specify a limit. Each hit may be a multi-chunk passage when neighbor expansion is enabled. Default: `5`"
         },
         "lean-ai.implementationMaxTurns": {
           "type": "number",

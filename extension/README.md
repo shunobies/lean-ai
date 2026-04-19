@@ -14,7 +14,7 @@ Run it fully local with [Ollama](https://ollama.com), or connect to OpenAI and A
 - **Multi-provider** — Ollama (free, local), OpenAI, and Anthropic. Switch from the settings panel without restarting.
 - **Dual-model pipeline** — use a fast local model for exploration and implementation, hand off to a cloud model for reasoning-heavy planning phases.
 - **Built-in code quality** — auto-runs your linter and tests after every change, with LLM self-correction on failure.
-- **Knowledge base** — drop internal docs (PDF, EPUB, Word, Markdown) into `.lean_ai/knowledge/` for context-aware plans.
+- **Reference library** — drop internal docs (PDF, EPUB, Word, Markdown) into `.lean_ai/reference/` for context-aware plans.
 - **MediaWiki integration** — connect to an internal wiki so the agent can search and read company documentation while working on tasks. Supports authenticated and public wikis.
 - **Integrations** — two-way sync with Jira and ServiceNow for session summaries and task linking.
 - **Git-native** — every task runs on its own branch. Approve to merge, reject to discard.

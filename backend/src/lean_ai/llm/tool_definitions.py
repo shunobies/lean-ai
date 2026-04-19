@@ -487,16 +487,16 @@ WIKI_TOOLS: list[dict] = [
 ]
 
 
-KNOWLEDGE_TOOLS: list[dict] = [
+REFERENCE_TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
-            "name": "search_knowledge",
+            "name": "search_reference",
             "description": (
-                "Search the project knowledge base for information from indexed "
+                "Search the project reference library for information from indexed "
                 "documents (books, PDFs, EPUBs, manuals, guides). Returns relevant "
                 "chunks with document title, section, and content. Use this when you "
-                "need domain-specific knowledge, reference material, or project "
+                "need domain-specific reference material, standards, or project "
                 "documentation that may have been indexed. Pass the optional "
                 "'document' parameter to restrict the search to a single document — "
                 "useful when prior results showed the right source and you want a "
@@ -517,10 +517,10 @@ KNOWLEDGE_TOOLS: list[dict] = [
                         "type": "string",
                         "description": (
                             "Optional. Restrict results to one document. Pass either "
-                            "the exact 'doc_path' from list_knowledge_documents (most "
+                            "the exact 'doc_path' from list_reference_documents (most "
                             "precise) or a substring of the document title (e.g. the "
                             "title from a prior search result). Omit to search the "
-                            "whole knowledge base."
+                            "whole reference library."
                         ),
                     },
                 },
@@ -531,13 +531,13 @@ KNOWLEDGE_TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
-            "name": "list_knowledge_documents",
+            "name": "list_reference_documents",
             "description": (
-                "List all documents currently in the knowledge base index. Returns "
+                "List all documents currently in the reference library index. Returns "
                 "one entry per document with title, path, format, and chunk count. "
-                "Use this BEFORE search_knowledge when you want to know what sources "
+                "Use this BEFORE search_reference when you want to know what sources "
                 "are available, or when you need to find the exact 'doc_path' to "
-                "pass as the 'document' filter on a follow-up search_knowledge call. "
+                "pass as the 'document' filter on a follow-up search_reference call. "
                 "Pass the optional 'name_filter' to narrow the listing by a "
                 "case-insensitive substring of the title — important when the index "
                 "holds many documents."
@@ -560,10 +560,10 @@ KNOWLEDGE_TOOLS: list[dict] = [
 
 
 def build_implementation_tools() -> list[dict]:
-    """IMPLEMENTATION_TOOLS + context query + knowledge + wiki tools when configured."""
+    """IMPLEMENTATION_TOOLS + context query + reference + wiki tools when configured."""
     from lean_ai.config import settings
 
-    tools = [*IMPLEMENTATION_TOOLS, QUERY_CONTEXT_TOOL, *KNOWLEDGE_TOOLS]
+    tools = [*IMPLEMENTATION_TOOLS, QUERY_CONTEXT_TOOL, *REFERENCE_TOOLS]
     if settings.wiki_url:
         tools.extend(WIKI_TOOLS)
     return tools
@@ -758,7 +758,7 @@ def build_planning_tools() -> list[dict]:
     ]
     return (
         PLANNING_TOOLS + search_tools + [QUERY_CONTEXT_TOOL]
-        + KNOWLEDGE_TOOLS + _maybe_wiki_tools()
+        + REFERENCE_TOOLS + _maybe_wiki_tools()
     )
 
 
@@ -780,8 +780,8 @@ DESIGN_TOOLS: list[dict] = [
 
 
 def build_design_tools() -> list[dict]:
-    """Search + task_complete + knowledge + wiki tools for Phase 3 design synthesis."""
-    return DESIGN_TOOLS + KNOWLEDGE_TOOLS + _maybe_wiki_tools()
+    """Search + task_complete + reference + wiki tools for Phase 3 design synthesis."""
+    return DESIGN_TOOLS + REFERENCE_TOOLS + _maybe_wiki_tools()
 
 
 # Read-only tools for chat exploration (no task_complete — text exit)
@@ -901,8 +901,8 @@ CHAT_TOOLS: list[dict] = [
 ]
 
 def build_chat_tools() -> list[dict]:
-    """CHAT_TOOLS + context query + knowledge + wiki tools when configured."""
-    return [*CHAT_TOOLS, QUERY_CONTEXT_TOOL, *KNOWLEDGE_TOOLS, *_maybe_wiki_tools()]
+    """CHAT_TOOLS + context query + reference + wiki tools when configured."""
+    return [*CHAT_TOOLS, QUERY_CONTEXT_TOOL, *REFERENCE_TOOLS, *_maybe_wiki_tools()]
 
 
 # Read-only + diagnostic tools for fix-mode investigation phase

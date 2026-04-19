@@ -62,7 +62,7 @@ Click a card to expand it and see:
 
 ### Template Variables
 
-Some prompts contain template variables like `{task}`, `{context}`, or `{knowledge_section}`. These appear as chips below the textarea:
+Some prompts contain template variables like `{task}`, `{context}`, or `{reference_section}`. These appear as chips below the textarea:
 
 - **Normal chips** — the variable is present in your text
 - **Red chips** — the variable is missing. Saving will fail if a required variable is removed

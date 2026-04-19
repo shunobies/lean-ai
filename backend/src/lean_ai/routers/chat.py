@@ -234,16 +234,16 @@ def _make_chat_tool_executor(repo_root: str | None = None):
             finally:
                 await db.close()
 
-        elif name == "search_knowledge":
+        elif name == "search_reference":
             if not repo_root:
-                return "ERROR: search_knowledge requires an open workspace."
-            from lean_ai.knowledge.indexer import is_knowledge_available
-            from lean_ai.knowledge.indexer import search_knowledge as _search_knowledge
+                return "ERROR: search_reference requires an open workspace."
+            from lean_ai.reference.indexer import is_reference_available
+            from lean_ai.reference.indexer import search_reference as _search_reference
 
-            if not is_knowledge_available(repo_root):
+            if not is_reference_available(repo_root):
                 return (
-                    "ERROR: No knowledge base index found. "
-                    "Place documents in .lean_ai/knowledge/ and run /init to index them."
+                    "ERROR: No reference library index found. "
+                    "Place documents in .lean_ai/reference/ and run /init to index them."
                 )
 
             query = arguments.get("query", "")
@@ -259,10 +259,10 @@ def _make_chat_tool_executor(repo_root: str | None = None):
                 pass
 
             chunks = await asyncio.to_thread(
-                _search_knowledge, repo_root, query, limit, query_embedding,
+                _search_reference, repo_root, query, limit, query_embedding,
             )
             if not chunks:
-                return f"No knowledge base results for '{query}'."
+                return f"No reference library results for '{query}'."
 
             parts = []
             for chunk in chunks:
@@ -407,11 +407,11 @@ async def _build_chat_messages(
 
     # Use refined message if available, otherwise original
     user_message = request.message
-    knowledge_ctx: str | None = None
+    reference_ctx: str | None = None
     if refiner_result and refiner_result.was_refined:
         user_message = refiner_result.refined
-    if refiner_result and refiner_result.knowledge_context:
-        knowledge_ctx = refiner_result.knowledge_context
+    if refiner_result and refiner_result.reference_context:
+        reference_ctx = refiner_result.reference_context
 
     system_prompt = build_chat_system_prompt(
         workspace=workspace,
@@ -420,7 +420,7 @@ async def _build_chat_messages(
         search_results=search_results,
         project_context=project_context,
         fetched_pages=fetched_pages or None,
-        knowledge_context=knowledge_ctx,
+        reference_context=reference_ctx,
         user_name=request.user_name,
         recent_sessions=recent_activity or None,
         max_turns=_CHAT_MAX_TURNS,

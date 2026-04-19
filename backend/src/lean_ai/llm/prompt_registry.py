@@ -349,18 +349,18 @@ def _register_defaults(reg: PromptRegistry) -> None:
             "- read_file — confirm the content of a specifically cited file\n"
             "- list_directory — orient around a directory the task mentions\n"
             "- query_project_context — targeted lookup in the project context database\n"
-            "- search_knowledge — domain knowledge base lookup for project-specific "
+            "- search_reference — domain reference library lookup for project-specific "
             "conventions or terminology\n"
             "- task_complete — call when scope is complete; exits early before the "
             "budget is exhausted\n\n"
             "## Tool Budget\n\n"
             "Hard cap: up to {PHASE1_MAX_TURNS} tool calls per scope analysis. This is "
-            "a ceiling, not a quota. Prefer query_project_context and search_knowledge "
+            "a ceiling, not a quota. Prefer query_project_context and search_reference "
             "first — they are targeted and cheap. Use grep_files and read_file only to "
             "disambiguate scope, not to explore exhaustively (that is Phase 2's job).\n\n"
             "## Trust the References You Were Given\n\n"
             "If the task description or its Suggested Agent Prompt cites specific "
-            "files with line numbers, snippets, knowledge-base documents, or URLs, "
+            "files with line numbers, snippets, reference library documents, or URLs, "
             "trust them — do NOT re-verify. Tools are for resolving ambiguity about "
             "things you were NOT told, not for double-checking known facts.\n\n"
             "## Early Exit Is Encouraged\n\n"
@@ -460,8 +460,8 @@ def _register_defaults(reg: PromptRegistry) -> None:
             "- search_internet — verify external API patterns, framework "
             "versions, library conventions\n"
             "- fetch_url — read specific documentation pages\n"
-            "- search_knowledge / list_knowledge_documents — domain knowledge "
-            "base (when configured)\n"
+            "- search_reference / list_reference_documents — reference library "
+            "lookup (when configured)\n"
             "- search_wiki / fetch_wiki_page — MediaWiki lookup (when "
             "configured)\n"
             "- task_complete — exit when verification is complete\n\n"
@@ -1484,7 +1484,7 @@ def _register_defaults(reg: PromptRegistry) -> None:
             "  Navigation:  list_directory, directory_tree, grep_files\n"
             "  Shell:       run_command, run_tests, run_lint, format_code\n"
             "  Memory:      update_scratchpad, add_journal_entry\n"
-            "  Knowledge:   search_knowledge, query_project_context\n"
+            "  Reference:   search_reference, query_project_context\n"
             "  Web:         search_internet, fetch_url\n"
             "  Wiki:        search_wiki, fetch_wiki_page (only when wiki is configured)\n"
             "  Completion:  task_complete\n"
@@ -1704,7 +1704,7 @@ def _register_defaults(reg: PromptRegistry) -> None:
             "concerns, error handling, and test coverage worth probing.\n\n"
             "### Round 1 — Explore & Clarify\n\n"
             "1. Use up to {CHAT_MAX_TURNS} tool calls to explore the request. Read the "
-            "files involved, grep for patterns, look up docs or knowledge base entries, "
+            "files involved, grep for patterns, look up docs or reference library entries, "
             "check recent sessions for related work.\n"
             "2. Do NOT produce a `## Suggested Agent Prompt` block yet.\n"
             "3. End your reply with EXACTLY 3 to 5 numbered clarifying questions. Each "
@@ -1745,7 +1745,7 @@ def _register_defaults(reg: PromptRegistry) -> None:
             "anti-patterns, verification criteria, completeness mandate>\n\n"
             "### References\n"
             "- code: path/to/file.py:42-88 — why the planner needs this (one line)\n"
-            "- knowledge: \"Doc Title\" > Section (path: docs/foo.pdf) — relevant context\n"
+            "- reference: \"Doc Title\" > Section (path: docs/foo.pdf) — relevant context\n"
             "- web: https://example.com/docs — what this URL confirms\n"
             "- wiki: \"Page Title\" — what this page establishes\n"
             "```\n\n"
@@ -1753,7 +1753,7 @@ def _register_defaults(reg: PromptRegistry) -> None:
             "receives the citations as part of the prompt payload. List ONLY what the "
             "planner will actually need to reopen — a curated shortlist, not a full log of "
             "everything you searched. One line per entry: include file:line for code, doc "
-            "title + path for knowledge, full URL for web, page title for wiki.\n\n"
+            "title + path for reference, full URL for web, page title for wiki.\n\n"
             "## Rules\n\n"
             "- Do NOT produce a Suggested Agent Prompt for general questions, debugging, "
             "code explanations, or architecture discussions. Only produce one when the "
@@ -1766,7 +1766,7 @@ def _register_defaults(reg: PromptRegistry) -> None:
             "Agent Prompt block is the only exception.\n\n"
             "## Codebase Exploration Tools\n\n"
             "You have read-only tools available: read_file, grep_files, list_directory, "
-            "directory_tree, search_knowledge, list_knowledge_documents, search_internet, "
+            "directory_tree, search_reference, list_reference_documents, search_internet, "
             "fetch_url, query_project_context, list_recent_sessions, get_session_summary, "
             "search_workspace_memory, search_wiki, fetch_wiki_page. Wiki tools are only "
             "present when the workspace has a MediaWiki URL configured.\n\n"
@@ -1785,15 +1785,15 @@ def _register_defaults(reg: PromptRegistry) -> None:
             "Refines a user request into a structured"
             " prompt for the coding assistant."
         ),
-        template_vars=["knowledge_section", "user_message"],
+        template_vars=["reference_section", "user_message"],
         default_text=(
             "Refine the following user request into a well-structured prompt for a coding "
             "assistant.\n\n"
             "RULES:\n"
             "1. Preserve the user's intent exactly — do not add features they did not ask for\n"
             "2. Add structure: break vague requests into clear, numbered points\n"
-            "3. If domain knowledge context is provided, incorporate relevant terminology "
-            "and patterns — do NOT include raw content from domain documents\n"
+            "3. If reference material is provided, incorporate relevant terminology "
+            "and patterns — do NOT include raw content from reference documents\n"
             "4. If the request is already well-structured and specific, return it unchanged\n\n"
             "OUTPUT FORMAT (use these exact section headers):\n\n"
             "ORIGINAL REQUEST:\n"
@@ -1804,7 +1804,7 @@ def _register_defaults(reg: PromptRegistry) -> None:
             '<list of inferred decisions, or "None">\n\n'
             "OPEN QUESTIONS:\n"
             '<list of unresolved ambiguities, or "None">\n\n'
-            "{knowledge_section}"
+            "{reference_section}"
             "USER REQUEST:\n"
             "{user_message}"
         ),
@@ -1815,14 +1815,14 @@ def _register_defaults(reg: PromptRegistry) -> None:
         category="Chat & Refinement",
         name="Task Refiner Prompt",
         description="Enhances a task description for the coding agent's planning pipeline.",
-        template_vars=["knowledge_section", "task"],
+        template_vars=["reference_section", "task"],
         default_text=(
             "Enhance the following task description for a coding agent that will create "
             "an implementation plan and execute it.\n\n"
             "RULES:\n"
             "1. Preserve the original task intent exactly\n"
             "2. Add technical specificity where the original is vague\n"
-            "3. If domain knowledge is provided, extract relevant constraints and patterns\n"
+            "3. If reference material is provided, extract relevant constraints and patterns\n"
             "4. Structure as numbered requirements with clear targets where possible\n"
             "5. Identify implicit requirements (error handling, validation, test coverage)\n"
             "6. Do NOT expand scope beyond what the user intended\n\n"
@@ -1835,7 +1835,7 @@ def _register_defaults(reg: PromptRegistry) -> None:
             '<list of inferred decisions, or "None">\n\n'
             "OPEN QUESTIONS:\n"
             '<list of unresolved ambiguities, or "None">\n\n'
-            "{knowledge_section}"
+            "{reference_section}"
             "TASK:\n"
             "{task}"
         ),

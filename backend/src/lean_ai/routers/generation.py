@@ -66,7 +66,7 @@ def _format_embedding_summary(code_stats, know_stats) -> tuple[str, str]:
         return f"{s.unchanged} {label} already up to date"
 
     parts = [p for p in (_fmt("code chunks", code_stats),
-                         _fmt("knowledge chunks", know_stats)) if p]
+                         _fmt("reference chunks", know_stats)) if p]
 
     code_failed = code_stats is not None and code_stats.failed_batches > 0
     know_failed = know_stats is not None and know_stats.failed_batches > 0
@@ -96,14 +96,14 @@ async def init_workspace(request: InitWorkspaceRequest):
     """Index the workspace and prepare for agent workflows.
 
     Builds the Whoosh search index, generates embeddings, and triggers
-    knowledge base indexing.  Embedding generation is awaited (not
+    reference library indexing.  Embedding generation is awaited (not
     fire-and-forget) so the caller sees the actual result.
     """
     _gitignore_entries = [
         ".lean_ai/",
         ".lean_ai/scratchpads/",
         f"{settings.index_dir}/",
-        f"{settings.knowledge_index_dir}/",
+        f"{settings.reference_index_dir}/",
     ]
     added = ensure_gitignore_entries(request.repo_root, _gitignore_entries)
     if added:
@@ -149,31 +149,31 @@ async def init_workspace(request: InitWorkspaceRequest):
             write_commands_json(request.repo_root, detected_commands)
             logger.info("Auto-detected commands: %s", detected_commands)
 
-        # Knowledge indexing (awaited — fast I/O, results needed for response)
-        knowledge_status: str | None = None
-        knowledge_doc_count: int | None = None
-        knowledge_chunk_count: int | None = None
-        knowledge_skipped_extensions: list[str] | None = None
+        # Reference indexing (awaited — fast I/O, results needed for response)
+        reference_status: str | None = None
+        reference_doc_count: int | None = None
+        reference_chunk_count: int | None = None
+        reference_skipped_extensions: list[str] | None = None
         try:
-            from lean_ai.knowledge.indexer import index_knowledge
-            kstats = await asyncio.to_thread(index_knowledge, request.repo_root)
-            knowledge_status = kstats.get("status")
-            knowledge_doc_count = kstats.get("doc_count", 0)
-            knowledge_chunk_count = kstats.get("chunk_count", 0)
-            knowledge_skipped_extensions = kstats.get("skipped_extensions")
-            logger.info("Knowledge indexing complete: %s", kstats)
+            from lean_ai.reference.indexer import index_reference
+            kstats = await asyncio.to_thread(index_reference, request.repo_root)
+            reference_status = kstats.get("status")
+            reference_doc_count = kstats.get("doc_count", 0)
+            reference_chunk_count = kstats.get("chunk_count", 0)
+            reference_skipped_extensions = kstats.get("skipped_extensions")
+            logger.info("Reference indexing complete: %s", kstats)
         except ImportError:
-            logger.debug("Knowledge module not available")
+            logger.debug("Reference module not available")
         except Exception as exc:
-            logger.warning("Knowledge indexing failed: %s", exc)
-            knowledge_status = "failed"
+            logger.warning("Reference indexing failed: %s", exc)
+            reference_status = "failed"
 
-        # Embedding generation (code + knowledge) — run in parallel via gather
+        # Embedding generation (code + reference) — run in parallel via gather
         embedding_status = "skipped"
         embedding_code_count = 0
-        embedding_knowledge_count = 0
+        embedding_reference_count = 0
         embedding_code_unchanged = 0
-        embedding_knowledge_unchanged = 0
+        embedding_reference_unchanged = 0
         embedding_failed_batches = 0
         embedding_total_batches = 0
         embedding_message = ""
@@ -191,13 +191,13 @@ async def init_workspace(request: InitWorkspaceRequest):
                     ),
                 ]
 
-                _knowledge_chunks = knowledge_chunk_count or 0
-                if _knowledge_chunks > 0:
+                _reference_chunks = reference_chunk_count or 0
+                if _reference_chunks > 0:
                     try:
-                        from lean_ai.knowledge.indexer import generate_knowledge_embeddings
+                        from lean_ai.reference.indexer import generate_reference_embeddings
                         embed_tasks.append(
                             asyncio.create_task(
-                                generate_knowledge_embeddings(
+                                generate_reference_embeddings(
                                     request.repo_root, llm_client,
                                 ),
                             ),
@@ -234,16 +234,16 @@ async def init_workspace(request: InitWorkspaceRequest):
                     know_result = results[1]
                     if isinstance(know_result, Exception):
                         logger.warning(
-                            "Knowledge embedding failed: %s", know_result,
+                            "Reference embedding failed: %s", know_result,
                         )
                     else:
                         know_stats = know_result
-                        embedding_knowledge_count = know_stats.embedded
-                        embedding_knowledge_unchanged = know_stats.unchanged
+                        embedding_reference_count = know_stats.embedded
+                        embedding_reference_unchanged = know_stats.unchanged
                         embedding_failed_batches += know_stats.failed_batches
                         embedding_total_batches += know_stats.total_batches
                         logger.info(
-                            "Knowledge embedding complete: +%d embedded, "
+                            "Reference embedding complete: +%d embedded, "
                             "%d unchanged, %d orphaned removed, "
                             "%d/%d batches failed",
                             know_stats.embedded, know_stats.unchanged,
@@ -268,15 +268,15 @@ async def init_workspace(request: InitWorkspaceRequest):
         logger.warning("Init workspace indexing failed: %s", e)
         index_status = "failed"
         detected_commands = {}
-        knowledge_status = None
-        knowledge_doc_count = None
-        knowledge_chunk_count = None
-        knowledge_skipped_extensions = None
+        reference_status = None
+        reference_doc_count = None
+        reference_chunk_count = None
+        reference_skipped_extensions = None
         embedding_status = "failed"
         embedding_code_count = 0
-        embedding_knowledge_count = 0
+        embedding_reference_count = 0
         embedding_code_unchanged = 0
-        embedding_knowledge_unchanged = 0
+        embedding_reference_unchanged = 0
         embedding_failed_batches = 0
         embedding_total_batches = 0
         embedding_message = str(e)
@@ -290,15 +290,15 @@ async def init_workspace(request: InitWorkspaceRequest):
             else None
         ),
         num_parallel=settings.num_parallel,
-        knowledge_status=knowledge_status,
-        knowledge_doc_count=knowledge_doc_count,
-        knowledge_chunk_count=knowledge_chunk_count,
-        knowledge_skipped_extensions=knowledge_skipped_extensions,
+        reference_status=reference_status,
+        reference_doc_count=reference_doc_count,
+        reference_chunk_count=reference_chunk_count,
+        reference_skipped_extensions=reference_skipped_extensions,
         embedding_status=embedding_status,
         embedding_code_count=embedding_code_count,
-        embedding_knowledge_count=embedding_knowledge_count,
+        embedding_reference_count=embedding_reference_count,
         embedding_code_unchanged=embedding_code_unchanged,
-        embedding_knowledge_unchanged=embedding_knowledge_unchanged,
+        embedding_reference_unchanged=embedding_reference_unchanged,
         embedding_failed_batches=embedding_failed_batches,
         embedding_total_batches=embedding_total_batches,
         embedding_message=embedding_message,

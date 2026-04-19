@@ -274,8 +274,8 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                             "privacy_redactions": len(
                                                 refiner_result.privacy_redactions
                                             ),
-                                            "knowledge_injected": bool(
-                                                refiner_result.knowledge_context
+                                            "reference_injected": bool(
+                                                refiner_result.reference_context
                                             ),
                                         })
                                     else:
