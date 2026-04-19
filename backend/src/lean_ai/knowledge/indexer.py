@@ -540,86 +540,118 @@ async def _generate_knowledge_embeddings_inner(
 ) -> "EmbeddingRunStats":
     import asyncio
     import hashlib
+    import time
 
     from lean_ai.indexer.embeddings import EmbeddingStore
     from lean_ai.indexer.indexer import EmbeddingRunStats
 
     stats = EmbeddingRunStats()
 
+    logger.info("[knowledge embed] ENTER for %s", repo_root)
+
     idx_path = knowledge_index_dir(repo_root)
     if not exists_in(idx_path):
         logger.info(
-            "generate_knowledge_embeddings: no knowledge index at %s — "
-            "nothing to embed", idx_path,
+            "[knowledge embed] no knowledge index at %s — nothing to embed",
+            idx_path,
         )
         return stats
 
-    store = EmbeddingStore(idx_path)
-    existing_index = store.get_index()
+    def _sync_setup():
+        """Whoosh iteration + existing-index load — off the event loop.
 
-    ix = open_dir(idx_path)
-    reader = ix.reader()
+        For a 5k+-chunk knowledge index these sync reads add up to
+        seconds of blocked event-loop time; running them in a thread
+        keeps ``/api/health`` responsive.
+        """
+        t0 = time.perf_counter()
+        store = EmbeddingStore(idx_path)
+        existing = store.get_index()
+        t1 = time.perf_counter()
+        logger.info(
+            "[knowledge embed] loaded existing-index (%d entries) in %.2fs",
+            len(existing), t1 - t0,
+        )
 
-    all_chunks: list[tuple[str, str]] = []
-    for doc_num in reader.all_doc_ids():
-        stored = reader.stored_fields(doc_num)
-        chunk_id = stored["chunk_id"]
-        # Richer embedding text: title + section give context to the chunk.
-        title = stored.get("doc_title", "")
-        section = stored.get("section", "")
-        content = stored.get("content", "")
-        header = f"{title} — {section}" if section else title
-        text = f"{header}\n{content}" if header else content
-        all_chunks.append((chunk_id, text))
+        ix = open_dir(idx_path)
+        reader = ix.reader()
+        chunks: list[tuple[str, str]] = []
+        try:
+            for doc_num in reader.all_doc_ids():
+                s = reader.stored_fields(doc_num)
+                chunk_id = s["chunk_id"]
+                title = s.get("doc_title", "")
+                section = s.get("section", "")
+                content = s.get("content", "")
+                header = f"{title} — {section}" if section else title
+                text = f"{header}\n{content}" if header else content
+                chunks.append((chunk_id, text))
+        finally:
+            reader.close()
+        t2 = time.perf_counter()
+        logger.info(
+            "[knowledge embed] read %d Whoosh chunks in %.2fs",
+            len(chunks), t2 - t1,
+        )
+        return chunks, existing, store
 
-    reader.close()
+    all_chunks, existing_index, store = await asyncio.to_thread(_sync_setup)
 
     if not all_chunks:
-        logger.info("generate_knowledge_embeddings: knowledge index is empty")
+        logger.info("[knowledge embed] knowledge index is empty")
         return stats
 
-    # Drop orphaned embeddings (chunks deleted from Whoosh).
-    current_ids = {cid for cid, _ in all_chunks}
-    orphaned = set(existing_index.keys()) - current_ids
-    if orphaned:
-        store.remove_chunks(orphaned)
-        store.compact()
+    def _sync_diff() -> tuple[list[tuple[str, str, str]], set[str], int]:
+        """Hash + diff — off the event loop for large indexes."""
+        t0 = time.perf_counter()
+        current_ids = {cid for cid, _ in all_chunks}
+        orphans = set(existing_index.keys()) - current_ids
+
+        to_embed_local: list[tuple[str, str, str]] = []
+        for chunk_id, text in all_chunks:
+            content_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
+            existing = existing_index.get(chunk_id)
+            if existing and existing.get("content_hash") == content_hash:
+                continue
+            to_embed_local.append((chunk_id, text, content_hash))
+        t1 = time.perf_counter()
         logger.info(
-            "Removed %d orphaned knowledge embeddings", len(orphaned),
+            "[knowledge embed] hashed+diffed %d chunks in %.2fs "
+            "(%d need embedding, %d orphans)",
+            len(all_chunks), t1 - t0, len(to_embed_local), len(orphans),
+        )
+        return to_embed_local, orphans, len(all_chunks)
+
+    to_embed, orphaned, all_count = await asyncio.to_thread(_sync_diff)
+
+    if orphaned:
+        await asyncio.to_thread(store.remove_chunks, orphaned)
+        await asyncio.to_thread(store.compact)
+        logger.info(
+            "[knowledge embed] removed %d orphaned embeddings", len(orphaned),
         )
     stats.orphaned_removed = len(orphaned)
-
-    # Find chunks needing embedding (new or content changed).
-    to_embed: list[tuple[str, str, str]] = []
-    for chunk_id, text in all_chunks:
-        content_hash = hashlib.sha256(
-            text.encode(),
-        ).hexdigest()[:16]
-        existing = existing_index.get(chunk_id)
-        if existing and existing.get("content_hash") == content_hash:
-            continue
-        to_embed.append((chunk_id, text, content_hash))
-
-    stats.unchanged = len(all_chunks) - len(to_embed)
+    stats.unchanged = all_count - len(to_embed)
 
     if not to_embed:
-        store.flush_index()
+        await asyncio.to_thread(store.flush_index)
         logger.info(
-            "Knowledge embeddings up to date — %d chunks unchanged, "
-            "%d orphaned removed (no embed calls made)",
+            "[knowledge embed] up to date — %d unchanged, %d orphans removed "
+            "(no embed calls made)",
             stats.unchanged, stats.orphaned_removed,
         )
         return stats
 
     # Resolve batch size: explicit > adaptive > fallback.
     if batch_size <= 0:
+        logger.info("[knowledge embed] computing adaptive batch size")
         batch_size = await llm_client.compute_embedding_batch_size(to_embed)
 
     total_to_embed = len(to_embed)
     stats.total_batches = (total_to_embed + batch_size - 1) // batch_size
     logger.info(
-        "Generating embeddings for %d knowledge chunks (batch_size=%d, "
-        "%d unchanged, %d orphaned removed)",
+        "[knowledge embed] calling Ollama: %d chunks, batch_size=%d, "
+        "%d unchanged, %d orphans removed",
         total_to_embed, batch_size, stats.unchanged, stats.orphaned_removed,
     )
 
@@ -637,14 +669,26 @@ async def _generate_knowledge_embeddings_inner(
             batch_ids = [cid for cid, _, _ in batch]
             batch_texts = [t for _, t, _ in batch]
             batch_hashes = [h for _, _, h in batch]
+            batch_num = i // batch_size
+            t0 = time.perf_counter()
+            logger.info(
+                "[knowledge embed] batch %d/%d → Ollama (%d texts)",
+                batch_num + 1, stats.total_batches, len(batch_texts),
+            )
             try:
                 embeddings = await llm_client.embed(batch_texts)
+                t1 = time.perf_counter()
+                logger.info(
+                    "[knowledge embed] batch %d returned in %.1fs",
+                    batch_num + 1, t1 - t0,
+                )
                 await queue.put((batch_ids, embeddings, batch_hashes))
             except Exception as e:
                 stats.failed_batches += 1
+                t1 = time.perf_counter()
                 logger.warning(
-                    "Knowledge embedding batch %d failed: %s",
-                    i // batch_size, e,
+                    "[knowledge embed] batch %d FAILED after %.1fs: %s",
+                    batch_num + 1, t1 - t0, e,
                 )
         await queue.put(None)  # sentinel
 

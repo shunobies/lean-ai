@@ -642,53 +642,20 @@ class OllamaProvider(LLMProvider):
     _embedding_ctx_cache: int | None = None
 
     async def get_embedding_context_window(self) -> int | None:
-        """Query Ollama for the embedding model's context window size.
+        """Return the embedding model's context window size from config.
 
-        Caches the result for the lifetime of this provider instance.
-        Returns ``None`` if the info cannot be retrieved.
+        Reads ``settings.embedding_context_window`` only — no Ollama
+        round-trip. The prior ``ollama show`` auto-detect path was
+        removed because it provided no value at runtime (the default
+        8192 is sufficient for batch sizing) and repeatedly wedged
+        ``/init`` when Ollama was slow. Users with larger embedding
+        models can raise ``LEAN_AI_EMBEDDING_CONTEXT_WINDOW``.
         """
         if self._embedding_ctx_cache is not None:
             return self._embedding_ctx_cache
-
         if settings.embedding_context_window > 0:
             self._embedding_ctx_cache = settings.embedding_context_window
             return self._embedding_ctx_cache
-
-        import re
-
-        embed_model = settings.embedding_model
-        if not embed_model:
-            return None
-        try:
-            info = await asyncio.wait_for(
-                self._embed_client.show(model=embed_model),
-                timeout=5.0,
-            )
-        except TimeoutError:
-            logger.warning(
-                "Embedding model 'show' timed out after 5s — "
-                "falling back to default batch size. "
-                "Set LEAN_AI_EMBEDDING_CONTEXT_WINDOW to bypass auto-detect.",
-            )
-            return None
-        except Exception as exc:
-            logger.debug("Could not query embedding model info: %s", exc)
-            return None
-
-        # Try model_info dict first (key pattern: "{arch}.context_length").
-        model_info = info.get("model_info") or {}
-        for key, value in model_info.items():
-            if key.endswith(".context_length") and isinstance(value, (int, float)):
-                self._embedding_ctx_cache = int(value)
-                return self._embedding_ctx_cache
-
-        # Fallback: parse PARAMETER num_ctx from modelfile string.
-        modelfile = info.get("modelfile") or ""
-        match = re.search(r"PARAMETER\s+num_ctx\s+(\d+)", modelfile)
-        if match:
-            self._embedding_ctx_cache = int(match.group(1))
-            return self._embedding_ctx_cache
-
         return None
 
 

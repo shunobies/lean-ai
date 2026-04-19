@@ -291,27 +291,19 @@ class LLMClient:
         return batch_size
 
     async def check_embedding_model(self) -> tuple[bool, str]:
-        """Check if the embedding model is available in Ollama.
+        """Pure config check for the embedding pipeline.
 
-        Returns ``(True, model_name)`` on success,
-        ``(False, reason)`` on failure.
-
-        Only verifies the model exists via ``ollama show`` (instant,
-        no loading). Does NOT send a test embed call — that would
-        trigger a cold load of the model into VRAM even when the
-        subsequent ``generate_embeddings`` call has nothing to embed
-        (up-to-date workspace), wasting the load. The first real
-        embed call inside ``generate_embeddings`` triggers the cold
-        load naturally, but only when there is actual work to do —
-        and that call is already tagged ``embeddings.code`` on the
-        runtime-state busy set so extension health monitors know the
-        backend is legitimately occupied.
-
-        If the model is registered but broken (rare — e.g. corrupted
-        GGUF), ``show()`` still succeeds and the failure surfaces on
-        the first real embed call inside ``generate_embeddings``,
-        where ``asyncio.gather(return_exceptions=True)`` catches it
-        and the init flow reports ``embedding_status="failed"``.
+        Returns ``(True, model_name)`` when embeddings are configured
+        and an Ollama provider is available; ``(False, reason)``
+        otherwise. Does NOT call Ollama — the prior ``ollama show``
+        round-trip was pure overhead: it didn't load the model (only
+        a real ``embed`` call does that), barely verified the model
+        (just "registered in Ollama"), and added a hang/timeout risk
+        that repeatedly wedged ``/init``. Any real failure (missing
+        model, connection error, broken GGUF) surfaces naturally from
+        the first ``embed`` call inside ``generate_embeddings``, where
+        ``asyncio.gather(return_exceptions=True)`` catches it and
+        ``embedding_status`` becomes ``failed`` with a real error.
         """
         if not settings.enable_embeddings:
             return False, "Embeddings disabled (LEAN_AI_ENABLE_EMBEDDINGS=false)"
@@ -320,25 +312,6 @@ class LLMClient:
         embed_model = settings.embedding_model
         if not embed_model:
             return False, "No embedding model configured (LEAN_AI_EMBEDDING_MODEL)"
-
-        # Existence check — show() returns model info without loading.
-        # Wrapped in a 5s timeout so a slow/unresponsive Ollama can't wedge
-        # the init pipeline. On timeout we treat the model as unavailable
-        # and skip embedding (matches the not-found branch).
-        try:
-            await asyncio.wait_for(
-                self._ollama._embed_client.show(model=embed_model),
-                timeout=5.0,
-            )
-        except TimeoutError:
-            return False, (
-                f"Embedding model '{embed_model}' check timed out "
-                "after 5s — is Ollama responsive?"
-            )
-        except Exception as exc:
-            return False, (
-                f"Embedding model '{embed_model}' not found in Ollama: {exc}"
-            )
         return True, embed_model
 
     # ── Multi-turn tool calling orchestration loop ──
