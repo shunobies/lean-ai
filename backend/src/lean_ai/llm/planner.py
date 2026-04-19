@@ -568,6 +568,8 @@ async def create_plan(
             plan=plan,
             task=task,
             file_summary=file_summary,
+            file_summary_obj=file_summary_obj,
+            design_and_risks_obj=design_and_risks_obj,
             test_command=test_command,
             expert=expert,
             plan_assembly_max_tokens=plan_assembly_max_tokens,
@@ -609,6 +611,8 @@ async def _run_phase5_verification(
     plan: ExecutionPlan,
     task: str,
     file_summary: str,
+    file_summary_obj: FileSummary | None,
+    design_and_risks_obj: DesignAndRisks,
     test_command: str,
     expert: "LLMClient",
     plan_assembly_max_tokens: int,
@@ -619,8 +623,15 @@ async def _run_phase5_verification(
 ) -> float:
     """Run Phase 5: Verification step generation.
 
-    Appends test creation + test execution steps to the plan (normal mode)
-    or stores them separately in plan.tdd_test_steps (TDD mode).
+    Appends test creation + test execution steps to the plan (normal
+    mode) or stores them separately in ``plan.tdd_test_steps`` (TDD
+    mode). Receives the structured Phase 2 ``FileSummary`` and Phase 3
+    ``DesignAndRisks`` so the user prompt can target specific files
+    for coverage and cite critical_risks as security cases.
+
+    Test-path convention warnings are appended to
+    ``plan.plan_validation_warnings`` so the approval UI (the Phase 4
+    surfacing mechanism) carries them through to the user.
 
     Returns elapsed time in seconds.
     """
@@ -639,171 +650,36 @@ async def _run_phase5_verification(
     impl_plan_md = plan_to_markdown(plan, include_context=False)
     next_step = len(plan.steps) + 1
 
-    # TDD-specific guidance for comprehensive, well-documented tests
-    tdd_guidance = ""
-    if tdd_mode:
-        tdd_guidance = (
-            "\n\nTDD MODE — These tests will be written and executed "
-            "BEFORE any implementation code exists. Write tests that:\n"
-            "- Test PUBLIC interfaces and contracts, not internal "
-            "implementation details\n"
-            "- Import from the paths that WILL exist after "
-            "implementation (based on the plan)\n"
-            "- Use clear, descriptive assertion messages so failures "
-            "guide the implementor toward the correct solution\n"
-            "- Do NOT depend on implementation order — each test "
-            "file must be independently valid\n"
-            "- Mock external dependencies (DB, HTTP, filesystem) at "
-            "the boundary\n\n"
-            "DOCUMENTATION REQUIREMENTS (mandatory for TDD):\n"
-            "- Module-level docstring explaining what feature/module "
-            "is under test\n"
-            "- Per-test-function docstring with: what behavior is "
-            "tested, expected input/output, why this case matters\n"
-            "- Descriptive assertion messages in assert statements "
-            "so failures immediately tell the implementor what went "
-            "wrong\n"
-            "- Comments on non-obvious setup/mocking explaining "
-            "what boundary is being mocked and why\n\n"
-            "Do NOT include a run_tests step — tests will be "
-            "executed after implementation by the pipeline.\n"
-        )
+    verification_targets = _build_verification_targets(
+        file_summary_obj, design_and_risks_obj,
+    )
+    security_concerns = _build_security_concerns(design_and_risks_obj)
 
-    # In TDD mode, the implementation does not exist yet — design tests
-    # from the PLAN, not from existing patterns. Each test step's
-    # `instruction` must be self-contained because Phase A executes it
-    # without access to other steps.
     if tdd_mode:
-        source_section = (
-            "BEHAVIOR TO TEST (derived from the IMPLEMENTATION PLAN above):\n"
-            "Design tests that pin down the *intended* behavior of each new "
-            "or modified entity in the plan. The implementation does NOT "
-            "exist yet — do not look for existing source files. Tests "
-            "drive the implementation, not the reverse.\n"
-        )
-        run_tests_rule = ""
-        context_rule = (
-            "The `context` field must describe the EXPECTED BEHAVIOR for "
-            "this test file: the public function/class signatures the "
-            "tests will call, the expected inputs and outputs for each "
-            "test, and any contracts/invariants the implementation must "
-            "uphold. Do NOT describe existing code — there is none yet. "
-            "If you need to mirror an existing fixture or import style "
-            "(e.g. conftest.py path, common test base class), name it "
-            "explicitly and quote the import line — do not assume Phase A "
-            "will browse the repo for it.\n"
-        )
-        self_contained_rule = (
-            "SELF-CONTAINED INSTRUCTIONS — CRITICAL:\n"
-            "Phase A (the test-writing model) sees ONLY this step's "
-            "`instruction`, `file_path`, and `context` fields. It does "
-            "NOT see the implementation plan, other test steps, or "
-            "existing source files. Therefore:\n"
-            "- Never write 'see step N above', 'as in step N', or any "
-            "cross-reference.\n"
-            "- Never write '[TEST]' as a description placeholder — the "
-            "description must be a complete sentence stating what is "
-            "being tested.\n"
-            "- Inline every public signature, expected input/output, "
-            "and exception/error type the test asserts on.\n"
-            "- If a test depends on a fixture or import, write the full "
-            "import path (e.g. `from lean_ai.tools.store_issue import "
-            "store_issue`) inside the instruction.\n\n"
+        user_content = registry.format(
+            "planning.verification_user_tdd",
+            task=task,
+            impl_plan_md=impl_plan_md,
+            verification_targets=verification_targets,
+            security_concerns=security_concerns,
+            next_step=str(next_step),
         )
     else:
-        source_section = (
-            f"FILE SUMMARY (existing test patterns):\n{file_summary}\n"
+        user_content = registry.format(
+            "planning.verification_user_normal",
+            task=task,
+            test_command=test_command,
+            impl_plan_md=impl_plan_md,
+            file_summary=file_summary,
+            verification_targets=verification_targets,
+            security_concerns=security_concerns,
+            next_step=str(next_step),
         )
-        run_tests_rule = (
-            "- End with a single 'run_tests' step using "
-            f"the test command: {test_command}\n"
-        )
-        context_rule = (
-            "The `context` field must include the relevant existing test "
-            "file content (imports, fixtures, assertion style) so the "
-            "executor can replicate the pattern without reading "
-            "additional files.\n"
-        )
-        self_contained_rule = ""
 
     verification = await expert.chat_structured(
         messages=[
             {"role": "system", "content": PLAN_VERIFICATION_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    f"TASK: {task}\n\n"
-                    f"IMPLEMENTATION PLAN:\n{impl_plan_md}\n\n"
-                    f"TEST COMMAND: {test_command}\n\n"
-                    f"{source_section}\n"
-                    "Review the implementation plan above and produce "
-                    "ONLY the verification steps that should run AFTER "
-                    "all implementation is complete.\n\n"
-                    "RULES:\n"
-                    "- For each new module or significant feature, "
-                    "include a 'create_file' step for a test file.\n"
-                    "- Only create tests for NEW functionality — do "
-                    "not duplicate existing test coverage.\n"
-                    + run_tests_rule
-                    + f"- Start step numbering at {next_step}\n"
-                    "- Follow the naming conventions from the plan\n\n"
-                    + self_contained_rule
-                    + "TEST FILE STEP — REQUIRED CONTENT IN `instruction`:\n"
-                    "List each test function by name with the specific "
-                    "assertion it makes, e.g.:\n"
-                    "  test_valid_input_returns_id: "
-                    "assert result['id'] is not None\n"
-                    "  test_empty_name_raises: "
-                    "pytest.raises(ValueError, match='required')\n"
-                    "  test_duplicate_rejected: "
-                    "second call raises IntegrityError\n\n"
-                    "Cover ALL applicable categories:\n"
-                    "  HAPPY PATH   — primary use case, expected "
-                    "inputs → correct outputs\n"
-                    "  EDGE CASES   — None, empty str/list/dict, zero, "
-                    "boundary values, unicode, strings > 10 000 chars\n"
-                    "  ERROR PATHS  — each invalid input raises the "
-                    "correct exception type; assert the message text, "
-                    "not just the type\n"
-                    "  INTEGRATION  — mock external I/O (DB, HTTP, "
-                    "filesystem) and verify the component's contract "
-                    "with its direct callers\n"
-                    "  SECURITY     — required when the code handles:\n"
-                    "    · file paths   : '../../../etc/passwd' is "
-                    "rejected or sandboxed\n"
-                    "    · shell input  : ';rm -rf /' and '$(id)' do "
-                    "not execute\n"
-                    "    · user strings written to DB/files: "
-                    "injection payloads\n"
-                    "    · auth/authz   : unauthenticated → 401/403, "
-                    "not 500; insufficient privilege → 403\n"
-                    "    · resource size: inputs > configured limit "
-                    "are bounded, not crashed\n\n"
-                    + context_rule
-                    + "\nASSERTION QUALITY:\n"
-                    "- Each assertion must test ONE specific behavior, "
-                    "not a vague 'it works'\n"
-                    "- Use exact expected values, not just truthiness "
-                    "(assert result == 42, not assert result)\n"
-                    "- For exceptions: assert BOTH the type AND the "
-                    "message substring "
-                    "(pytest.raises(ValueError, match='cannot be negative'))\n"
-                    "- For collections: assert length AND specific "
-                    "element values\n"
-                    "- For async code: verify that coroutines are "
-                    "properly awaited (not returned as coroutine objects)\n\n"
-                    "ANTI-PATTERNS TO AVOID IN TEST STEPS:\n"
-                    "- Do NOT create test functions that only assert True "
-                    "or assert something is not None\n"
-                    "- Do NOT mock the unit under test — only mock its "
-                    "external dependencies\n"
-                    "- Do NOT write tests that pass regardless of "
-                    "implementation (tautological tests)\n"
-                    "- Do NOT create tests that depend on execution order "
-                    "within the file"
-                    + tdd_guidance
-                ),
-            },
+            {"role": "user", "content": user_content},
         ],
         schema=VerificationPlan,
         max_tokens=plan_assembly_max_tokens,
@@ -812,6 +688,9 @@ async def _run_phase5_verification(
 
     if tdd_mode:
         # TDD: keep test steps separate for expert-first execution.
+        # The TDD user prompt asks explicitly for no run_tests step;
+        # keep the filter as defensive safety in case the model
+        # ignores that instruction.
         test_steps_only = [
             s for s in verification.steps if s.tool != "run_tests"
         ]
@@ -819,17 +698,17 @@ async def _run_phase5_verification(
             step.step_number = i
         plan.tdd_test_steps = test_steps_only
 
-        # Re-number implementation steps starting after test steps
+        # Re-number implementation steps starting after test steps.
         offset = len(test_steps_only)
         for i, step in enumerate(plan.steps, offset + 1):
             step.step_number = i
     else:
-        # Normal mode: append to plan as before
+        # Normal mode: append to plan as before.
         for i, step in enumerate(verification.steps, next_step):
             step.step_number = i
         plan.steps.extend(verification.steps)
 
-    # Update affected_files with any new test files
+    # Update affected_files with any new test files.
     all_verification_steps = (
         plan.tdd_test_steps if tdd_mode else verification.steps
     )
@@ -837,6 +716,14 @@ async def _run_phase5_verification(
     for step in all_verification_steps:
         if step.file_path and step.file_path not in existing:
             plan.affected_files.append(step.file_path)
+
+    # Test-path convention check — append warnings to the plan so the
+    # approval UI surfacing (from Phase 4) picks them up.
+    path_warnings = _check_test_path_conventions(
+        verification, file_summary_obj,
+    )
+    if path_warnings:
+        plan.plan_validation_warnings.extend(path_warnings)
 
     elapsed = time.monotonic() - t0
     _save_debug_phase(
@@ -1123,4 +1010,102 @@ def _run_plan_validations(
         )
     for w in warnings:
         logger.warning("Phase 4 plan validation — %s", w)
+    return warnings
+
+
+# ── Phase 5 helpers ─────────────────────────────────────────────────────────
+#
+# Inputs derived from structured Phase 2/3 outputs, so Phase 5's prompt can
+# target test generation precisely. All three helpers operate on structured
+# Pydantic objects; no regex or LLM-prose parsing.
+
+
+def _build_verification_targets(
+    file_summary: FileSummary | None,
+    dar: DesignAndRisks,
+) -> str:
+    """Markdown bullet list of files that need test coverage.
+
+    Sources: ``dar.change_designs`` (non-obvious files Phase 3 designed)
+    plus ``file_summary.files_to_create`` (new files Phase 2 identified).
+    Deduplicates by path, preserves input order. Returns empty string
+    when neither source has entries so the prompt can omit the section
+    gracefully.
+    """
+    paths: list[str] = []
+    seen: set[str] = set()
+    for cd in dar.change_designs:
+        if cd.file_path and cd.file_path not in seen:
+            paths.append(cd.file_path)
+            seen.add(cd.file_path)
+    if file_summary is not None:
+        for obs in file_summary.files_to_create:
+            if obs.file_path and obs.file_path not in seen:
+                paths.append(obs.file_path)
+                seen.add(obs.file_path)
+    if not paths:
+        return ""
+    return "\n".join(f"- {p}" for p in paths)
+
+
+def _build_security_concerns(dar: DesignAndRisks) -> str:
+    """Markdown bullet list of Phase 3 critical risks for Phase 5 to
+    cover with tests.
+
+    Returns empty string when ``critical_risks`` is empty so the prompt
+    can omit the section gracefully.
+    """
+    if not dar.critical_risks:
+        return ""
+    return "\n".join(
+        f"- **[{r.severity}]** {r.risk} — mitigation: {r.mitigation}"
+        for r in dar.critical_risks
+    )
+
+
+_TEST_PATH_TOKENS: tuple[str, ...] = ("test", "spec")
+"""Common test-file naming tokens across languages: ``test`` (Python,
+Go, Rust, Java, Ruby minitest, JS *.test.js) and ``spec`` (Ruby RSpec,
+JS/TS *.spec.ts, Elixir). Case-insensitive ``in`` check against the
+file path — captures ``tests/``, ``spec/``, ``__tests__/``,
+``*_test.go``, ``*.spec.ts``, ``TestFoo.java``, etc."""
+
+
+def _check_test_path_conventions(
+    verification: VerificationPlan,
+    file_summary: FileSummary | None,
+) -> list[str]:
+    """Flag Phase 5 ``create_file`` steps with paths that violate test
+    conventions.
+
+    A path passes if it contains any common test token (``test`` or
+    ``spec``, case-insensitive) OR starts with any directory prefix
+    learned from ``file_summary.files_read_for_context`` for files
+    that themselves contain a test token — so repos with unusual test
+    dirs can be accepted when Phase 2 read one of their files as a
+    pattern reference. Pure string-contains and prefix checks over
+    structured fields; no regex on LLM prose.
+    """
+    warnings: list[str] = []
+    learned_prefixes: set[str] = set()
+    if file_summary is not None:
+        for obs in file_summary.files_read_for_context:
+            p = (obs.file_path or "").lower()
+            if "/" not in p:
+                continue
+            if any(tok in p for tok in _TEST_PATH_TOKENS):
+                learned_prefixes.add(p.rsplit("/", 1)[0])
+    for step in verification.steps:
+        if step.tool != "create_file" or not step.file_path:
+            continue
+        low = step.file_path.lower()
+        if any(tok in low for tok in _TEST_PATH_TOKENS):
+            continue
+        if any(low.startswith(pfx) for pfx in learned_prefixes):
+            continue
+        warnings.append(
+            f"test step path outside test convention: {step.file_path}"
+        )
+    for w in warnings:
+        logger.warning("Phase 5 plan validation — %s", w)
     return warnings
