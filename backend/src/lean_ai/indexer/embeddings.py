@@ -110,13 +110,26 @@ class EmbeddingStore:
         Returns the number of bytes reclaimed.  Safe to call even when
         there are no orphans (returns 0 immediately).
         """
+        import time
+
+        t0 = time.perf_counter()
+        logger.info("[embed store] compact: waiting for lock on %s", self._bin_path)
         with self._lock:
+            t_lock = time.perf_counter()
+            logger.info(
+                "[embed store] compact: lock acquired in %.2fs", t_lock - t0,
+            )
             index = self._load_index()
             if not index or not self._bin_path.exists():
+                logger.info("[embed store] compact: nothing to do (empty)")
                 return 0
 
             old_size = self._bin_path.stat().st_size
             tmp_path = self._bin_path.with_suffix(".bin.tmp")
+            logger.info(
+                "[embed store] compact: rewriting %d entries (%d bytes) "
+                "→ %s", len(index), old_size, tmp_path,
+            )
 
             try:
                 with open(self._bin_path, "rb") as src, open(tmp_path, "wb") as dst:
@@ -136,9 +149,18 @@ class EmbeddingStore:
 
             new_size = self._bin_path.stat().st_size
             saved = old_size - new_size
+            t_done = time.perf_counter()
             if saved > 0:
                 self.flush_index()
-                logger.info("Compacted embedding store, saved %d bytes", saved)
+                logger.info(
+                    "[embed store] compact: done in %.2fs, saved %d bytes",
+                    t_done - t_lock, saved,
+                )
+            else:
+                logger.info(
+                    "[embed store] compact: done in %.2fs, no bytes reclaimed",
+                    t_done - t_lock,
+                )
             return saved
 
     def clear(self) -> None:

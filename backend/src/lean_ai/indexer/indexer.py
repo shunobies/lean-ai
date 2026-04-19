@@ -325,11 +325,14 @@ async def _generate_embeddings_inner(
     to_embed, orphaned, all_count = await asyncio.to_thread(_sync_diff)
 
     if orphaned:
-        await asyncio.to_thread(store.remove_chunks, orphaned)
-        await asyncio.to_thread(store.compact)
         logger.info(
-            "[code embed] removed %d orphaned embeddings", len(orphaned),
+            "[code embed] removing %d orphaned entries from index…",
+            len(orphaned),
         )
+        await asyncio.to_thread(store.remove_chunks, orphaned)
+        logger.info("[code embed] orphan index entries removed, compacting…")
+        await asyncio.to_thread(store.compact)
+        logger.info("[code embed] compact complete")
     stats.orphaned_removed = len(orphaned)
     stats.unchanged = all_count - len(to_embed)
 
