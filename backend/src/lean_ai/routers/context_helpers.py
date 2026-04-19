@@ -7,7 +7,7 @@ from pathlib import Path
 from lean_ai.config import settings
 from lean_ai.indexer.indexer import search_index
 from lean_ai.indexer.tree import list_repo_tree
-from lean_ai.llm.prompts import CHAT_SYSTEM_PROMPT
+from lean_ai.llm.prompt_registry import registry
 from lean_ai.routers.models import WorkspaceContext
 
 logger = logging.getLogger(__name__)
@@ -293,6 +293,7 @@ def build_chat_system_prompt(
     user_name: str | None = None,
     recent_sessions: str | None = None,
     max_context_chars: int = 30000,
+    max_turns: int = 20,
 ) -> str:
     """Build the chat system prompt with budget-gated context injection.
 
@@ -302,7 +303,7 @@ def build_chat_system_prompt(
     models (e.g. 20B request model).
     """
     parts = [
-        CHAT_SYSTEM_PROMPT,
+        registry.format("chat.system", CHAT_MAX_TURNS=str(max_turns)),
     ]
 
     if user_name:

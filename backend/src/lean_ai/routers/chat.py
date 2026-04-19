@@ -423,6 +423,7 @@ async def _build_chat_messages(
         knowledge_context=knowledge_ctx,
         user_name=request.user_name,
         recent_sessions=recent_activity or None,
+        max_turns=_CHAT_MAX_TURNS,
     )
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
