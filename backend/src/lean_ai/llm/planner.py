@@ -44,6 +44,7 @@ from lean_ai.llm.planner_helpers import (
     _send_content_done,
     _send_stage,
     _send_stage_done,
+    _synthesize_scope,
 )
 from lean_ai.llm.planner_helpers import (
     assess_clarity as assess_clarity,
@@ -189,7 +190,7 @@ async def create_plan(
         explorer, repo_root, session_id, ws, dispatcher, small_ctx,
     )
 
-    _phase1_tool_calls, scope = await explorer.chat_with_tools(
+    _phase1_tool_calls, scope_prose = await explorer.chat_with_tools(
         messages=[
             {"role": "system", "content": phase1_system},
             {"role": "user", "content": phase1_user_content},
@@ -206,7 +207,25 @@ async def create_plan(
         on_metrics=on_metrics,
     )
     if on_content:
-        await _send_content_done(ws, scope)
+        await _send_content_done(ws, scope_prose)
+
+    # Coerce the exploration prose into a validated ScopeDocument so Phase 2
+    # never receives clarifying questions or a half-populated shape as its
+    # scope input. Retries once on validation failure; falls back to raw
+    # prose if both attempts fail so the pipeline does not crash.
+    scope_obj, scope = await _synthesize_scope(
+        task=task,
+        context=context,
+        exploration_prose=scope_prose,
+        explorer=explorer,
+        phase_max_tokens=phase_max_tokens,
+        on_thinking=on_thinking,
+    )
+    if scope_obj is None:
+        logger.warning(
+            "Phase 1 scope synthesis fell back to raw prose — downstream "
+            "phases will see the exploration output verbatim",
+        )
 
     phase_timings["phase_1_scope"] = time.monotonic() - t0
     _save_debug_phase(

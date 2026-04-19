@@ -13,6 +13,58 @@ from pydantic import BaseModel, field_validator, model_validator
 logger = logging.getLogger(__name__)
 
 
+# ── Phase 1 scope schema ────────────────────────────────────────────────────
+#
+# ScopeDocument is the validated output of Phase 1 — produced by a final
+# chat_structured synthesis pass that coerces the exploration-loop prose into
+# the 8 required sections. Schema enforcement prevents the model from
+# shortcutting to "ask clarifying questions" or skipping sections; every field
+# is required. Rendered to markdown by format_scope_document so Phase 2/3/4
+# keep their historical ``{scope}`` contract unchanged.
+
+
+class ScopeAssumption(BaseModel):
+    """One assumption the scope records with a falsifiable verification hint."""
+
+    assumption: str
+    """Short statement of what is being assumed."""
+
+    verify_hint: str
+    """Concrete hint Phase 2 can act on to confirm or falsify it (e.g.
+    'grep celery in pyproject.toml', 'read app/models/user.py')."""
+
+
+class ScopeDocument(BaseModel):
+    """Validated Phase 1 output — the 8 required scope sections."""
+
+    problem: str
+    """3-6 sentences restating the task and WHY it matters."""
+
+    deliverables: list[str] = []
+    """Observable outcomes (Users can X / Endpoint Y returns Z)."""
+
+    in_scope: list[str] = []
+    """Concrete, greppable entities being created or modified — file paths,
+    class names, function names, routes, tables, env vars."""
+
+    out_of_scope: list[str] = []
+    """Tempting-adjacent areas explicitly excluded."""
+
+    downstream_consumers: list[str] = []
+    """Categories of files that reference modified entities — controllers,
+    tests, configs, migrations, etc."""
+
+    assumptions: list[ScopeAssumption] = []
+    """Every assumption paired with a falsifiable verification hint."""
+
+    success_criteria: list[str] = []
+    """3-6 falsifiable conditions Phase 5 can target for verification."""
+
+    risks: list[str] = []
+    """Scope-level risks — misunderstandings about the problem itself.
+    Distinct from implementation risks (Phase 3 captures those)."""
+
+
 # ── Phase 2 exploration schemas ─────────────────────────────────────────────
 #
 # FileObservation is written incrementally by the request model via the

@@ -1058,6 +1058,59 @@ def _register_defaults(reg: PromptRegistry) -> None:
     ))
 
     reg.register(PromptEntry(
+        key="planning.scope_synthesis_system",
+        category="Planning",
+        name="Phase 1: Scope Synthesis (System)",
+        description=(
+            "System prompt for the Phase 1 post-loop synthesis pass that "
+            "coerces the exploration prose into a validated ScopeDocument. "
+            "Uses chat_structured."
+        ),
+        default_text=(
+            "Use your knowledge of programming and software architecture to "
+            "consolidate Phase 1 scope analysis into a structured "
+            "ScopeDocument.\n\n"
+            "Inputs you will receive:\n"
+            "- The original task description.\n"
+            "- A slice of the project context (architecture, conventions).\n"
+            "- The scope analysis prose the exploration loop produced.\n\n"
+            "Your job:\n"
+            "1. Fill every field of the ScopeDocument schema. The schema is "
+            "the contract — downstream phases parse it to drive Phase 2 "
+            "exploration, Phase 3 design, and Phase 5 verification.\n"
+            "2. Never substitute clarifying questions for a populated field. "
+            "If a field's content is genuinely unknown, write your best "
+            "guess and add a matching entry to `assumptions` whose "
+            "verify_hint tells Phase 2 how to falsify the guess.\n"
+            "3. `problem` is 3-6 sentences restating the task and WHY it "
+            "matters.\n"
+            "4. `deliverables` are observable outcomes (\"Users can X\", "
+            "\"Endpoint Y returns Z with schema S\"), NOT file changes.\n"
+            "5. `in_scope` lists concrete greppable entities (file paths, "
+            "class/function/route/table/env var names) — 3-8 bullets.\n"
+            "6. `out_of_scope` names tempting-adjacent areas explicitly "
+            "excluded. Omit padding like \"not related to X\" when X was "
+            "never plausibly in scope.\n"
+            "7. `downstream_consumers` lists CATEGORIES of files that "
+            "reference the modified entities (controllers, views, tests, "
+            "configs, migrations, fixtures) — categories give Phase 2 a "
+            "grep strategy.\n"
+            "8. `assumptions` — every entry MUST be falsifiable in the "
+            "codebase; pair each with a concrete verify_hint.\n"
+            "9. `success_criteria` — 3-6 falsifiable conditions Phase 5 "
+            "will target when generating verification steps.\n"
+            "10. `risks` — scope-level misunderstandings about the problem "
+            "itself, distinct from Phase 3's implementation risks.\n\n"
+            "Do NOT invent file paths, APIs, or infrastructure not cited in "
+            "the inputs. When uncertain, prefer an assumption with a "
+            "verify_hint over a confident fabrication.\n\n"
+            "Output strictly conforms to the ScopeDocument schema. Asking "
+            "clarifying questions instead of populating the schema is a "
+            "contract violation."
+        ),
+    ))
+
+    reg.register(PromptEntry(
         key="planning.exploration_synthesis_system",
         category="Planning",
         name="Phase 2: Exploration Synthesis (System)",

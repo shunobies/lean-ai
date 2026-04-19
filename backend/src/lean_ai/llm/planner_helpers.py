@@ -17,7 +17,9 @@ from lean_ai.config import settings
 from lean_ai.llm.plan_schema import (
     IMPLEMENTATION_STEP_TOOLS,
     ExecutionPlan,
+    ScopeDocument,
 )
+from lean_ai.llm.prompt_registry import registry
 from lean_ai.llm.prompts import (
     CLARIFICATION_SYSTEM_PROMPT,
     PLAN_ASSEMBLY_SYSTEM_PROMPT,
@@ -250,6 +252,142 @@ async def _compact_file_summary(
 
     # Fallback: hard truncate
     return file_summary[:budget] + "\n... (truncated to fit context budget)"
+
+
+def format_scope_document(scope: ScopeDocument) -> str:
+    """Render a ``ScopeDocument`` to the 8-section markdown shape that the
+    downstream Phase 2 / 3 / 4 prompts already consume as ``{scope}``.
+
+    Section names and ordering match ``planning.scope_user`` so prompt
+    consumers do not need to change. Empty sections still emit the heading
+    with a placeholder bullet so downstream parsers see the shape.
+    """
+    lines: list[str] = []
+
+    def _render_bullets(header: str, items: list[str]) -> None:
+        lines.append(f"{header}:")
+        if items:
+            for item in items:
+                lines.append(f"- {item}")
+        else:
+            lines.append("- (none identified)")
+        lines.append("")
+
+    lines.append("PROBLEM / PURPOSE:")
+    lines.append(scope.problem.strip() or "(not specified)")
+    lines.append("")
+
+    _render_bullets("DELIVERABLES", scope.deliverables)
+    _render_bullets("IN SCOPE", scope.in_scope)
+    _render_bullets("OUT OF SCOPE", scope.out_of_scope)
+    _render_bullets("DOWNSTREAM CONSUMERS", scope.downstream_consumers)
+
+    lines.append("ASSUMPTIONS (with verification hints):")
+    if scope.assumptions:
+        for a in scope.assumptions:
+            lines.append(
+                f"- Assumption: {a.assumption} — verify: {a.verify_hint}"
+            )
+    else:
+        lines.append("- (none identified)")
+    lines.append("")
+
+    _render_bullets("SUCCESS CRITERIA", scope.success_criteria)
+    _render_bullets("RISKS", scope.risks)
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+async def _synthesize_scope(
+    *,
+    task: str,
+    context: str,
+    exploration_prose: str,
+    explorer: "LLMClient",
+    phase_max_tokens: int,
+    on_thinking: "Callable | None" = None,
+) -> tuple[ScopeDocument | None, str]:
+    """Coerce the Phase 1 exploration prose into a validated ScopeDocument.
+
+    Runs a single ``chat_structured`` pass against
+    ``planning.scope_synthesis_system``. On validation failure, retries once
+    with a corrective nudge that explicitly forbids clarifying questions as
+    output. If both attempts fail, falls back to the raw exploration prose
+    so the pipeline keeps moving — downstream phases will see the original
+    text but at least the run does not crash.
+    """
+    synthesis_system = registry.get("planning.scope_synthesis_system")
+
+    # Trim the project context slice so the synthesis prompt stays bounded —
+    # the exploration loop already consumed the full context.
+    context_slice = context[:8000] if context else ""
+
+    base_payload_parts = [
+        f"TASK: {task}",
+    ]
+    if context_slice:
+        base_payload_parts.append(f"PROJECT CONTEXT:\n{context_slice}")
+    if exploration_prose.strip():
+        base_payload_parts.append(
+            f"SCOPE ANALYSIS PROSE (from the exploration loop):\n"
+            f"{exploration_prose}"
+        )
+    base_payload_parts.append(
+        "Produce the ScopeDocument. Populate every field per the schema "
+        "and the system prompt. Never return clarifying questions — if a "
+        "field is unknown, write a best-guess and add a matching "
+        "assumption with a verify_hint."
+    )
+    base_payload = "\n\n".join(base_payload_parts)
+
+    async def _attempt(payload: str) -> ScopeDocument:
+        return await explorer.chat_structured(
+            messages=[
+                {"role": "system", "content": synthesis_system},
+                {"role": "user", "content": payload},
+            ],
+            schema=ScopeDocument,
+            max_tokens=phase_max_tokens,
+            thinking_callback=on_thinking,
+        )
+
+    try:
+        scope = await _attempt(base_payload)
+    except Exception:
+        logger.warning(
+            "Phase 1 scope synthesis attempt 1 failed — retrying with "
+            "corrective nudge",
+            exc_info=True,
+        )
+        retry_payload = (
+            base_payload
+            + "\n\nCORRECTION: your previous attempt did not conform to "
+            "the ScopeDocument schema. Do NOT ask clarifying questions. "
+            "Populate every field — when a detail is genuinely unknown, "
+            "write the most reasonable interpretation and add an "
+            "assumption whose verify_hint tells Phase 2 how to confirm or "
+            "falsify it."
+        )
+        try:
+            scope = await _attempt(retry_payload)
+        except Exception:
+            logger.warning(
+                "Phase 1 scope synthesis retry failed — falling back to "
+                "raw exploration prose",
+                exc_info=True,
+            )
+            return None, exploration_prose
+
+    logger.info(
+        "Phase 1 synthesis: deliverables=%d in_scope=%d assumptions=%d "
+        "success_criteria=%d risks=%d",
+        len(scope.deliverables),
+        len(scope.in_scope),
+        len(scope.assumptions),
+        len(scope.success_criteria),
+        len(scope.risks),
+    )
+    return scope, format_scope_document(scope)
 
 
 async def assess_clarity(
