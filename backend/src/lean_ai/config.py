@@ -315,6 +315,9 @@ class Settings(BaseSettings):
     loop_detection_threshold: int = 3  # Consecutive identical tool calls before warning (0 = off)
     refresh_threshold: float = 0.7  # Refresh context at this % of context window
 
+    # ── Planning Phase 1 ──
+    plan_phase1_max_turns: int = 5  # Max tool-calling turns for scope analysis (0 = no tools)
+
     # ── Parallel LLM requests ──
     num_parallel: int = 1  # Max concurrent LLM calls (match OLLAMA_NUM_PARALLEL)
 

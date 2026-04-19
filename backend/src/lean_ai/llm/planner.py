@@ -28,7 +28,10 @@ from lean_ai.llm.plan_schema import (
     VerificationPlan,
     plan_to_markdown,
 )
-from lean_ai.llm.planner_exploration import run_phase2_exploration
+from lean_ai.llm.planner_exploration import (
+    _make_read_only_executor,
+    run_phase2_exploration,
+)
 from lean_ai.llm.planner_helpers import (
     PLAN_OUTPUT_PERCENT,
     _compact_file_summary,
@@ -47,10 +50,9 @@ from lean_ai.llm.prompt_registry import registry
 from lean_ai.llm.prompts import (
     PLAN_ASSEMBLY_SYSTEM_PROMPT,
     PLAN_DESIGN_SYSTEM_PROMPT,
-    PLAN_SCOPE_SYSTEM_PROMPT,
     PLAN_VERIFICATION_SYSTEM_PROMPT,
 )
-from lean_ai.llm.tool_definitions import build_design_tools
+from lean_ai.llm.tool_definitions import build_design_tools, build_planning_tools
 from lean_ai.tools import scratchpad
 from lean_ai.tools.journal import read_journal
 
@@ -155,24 +157,53 @@ async def create_plan(
         model=explorer.model_name, phase=1,
     )
     logger.info(
-        "Planning Phase 1: Scope analysis (model=%s)", explorer.model_name,
+        "Planning Phase 1: Scope analysis (model=%s, tool_budget=%d)",
+        explorer.model_name, settings.plan_phase1_max_turns,
     )
     t0 = time.monotonic()
 
+    phase1_turns_str = str(settings.plan_phase1_max_turns)
+    phase1_system = registry.format(
+        "planning.scope_system", PHASE1_MAX_TURNS=phase1_turns_str,
+    )
     phase1_user_content = registry.format(
-        "planning.scope_user", task=task, context=context,
+        "planning.scope_user",
+        task=task, context=context,
+        PHASE1_MAX_TURNS=phase1_turns_str,
     )
     if memory_context:
         phase1_user_content += memory_context
 
-    scope = await explorer.chat_raw(
+    # Restricted tool subset for Phase 1 — verify assumptions, don't explore.
+    phase1_tools = [
+        t for t in build_planning_tools()
+        if t["function"]["name"] in (
+            "grep_files", "read_file", "list_directory",
+            "query_project_context", "search_knowledge", "task_complete",
+        )
+    ]
+
+    # Reuse the same read-only executor Phase 2 uses.
+    small_ctx = settings._active_context_window <= 32768
+    phase1_executor = _make_read_only_executor(
+        explorer, repo_root, session_id, ws, dispatcher, small_ctx,
+    )
+
+    _phase1_tool_calls, scope = await explorer.chat_with_tools(
         messages=[
-            {"role": "system", "content": PLAN_SCOPE_SYSTEM_PROMPT},
+            {"role": "system", "content": phase1_system},
             {"role": "user", "content": phase1_user_content},
         ],
+        tools=phase1_tools,
+        tool_executor_fn=phase1_executor,
+        max_turns=settings.plan_phase1_max_turns,
         max_tokens=phase_max_tokens,
-        stream_callback=on_content,
-        thinking_callback=on_thinking,
+        text_only_exit_count=1,  # any text-only turn exits
+        on_tool_call=on_tool_call,
+        on_tool_result=on_tool_result,
+        on_content=on_content,
+        on_thinking=on_thinking,
+        on_metrics=on_metrics,
     )
     if on_content:
         await _send_content_done(ws, scope)
@@ -181,6 +212,10 @@ async def create_plan(
     _save_debug_phase(
         repo_root, session_id, "phase_1_scope",
         scope, phase_timings["phase_1_scope"],
+    )
+    logger.info(
+        "Phase 1 used %d tool calls in %.1fs",
+        len(_phase1_tool_calls), phase_timings["phase_1_scope"],
     )
     await _send_stage_done(
         ws, "Scope analysis complete",
