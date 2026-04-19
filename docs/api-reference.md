@@ -515,10 +515,17 @@ Health check for extension-side monitors.
 The `busy` field is a list of active long-running task tags from the
 backend's `runtime_state` registry. Current tags:
 
-- `ollama.warmup` — cold load of the embedding model into VRAM (set by
-  `LLMClient.check_embedding_model`); can take minutes for large models.
 - `embeddings.code` — code-index embedding generation in progress.
+  Covers any cold-load wait for the embedding model in Ollama when the
+  first batch of a fresh run is sent; can take minutes for large models.
 - `embeddings.knowledge` — knowledge-base embedding generation in progress.
+
+`check_embedding_model` only performs an `ollama show` existence check
+(instant, no load); it does not pre-warm the model. The first real
+embed call inside `generate_embeddings` triggers any cold load — but
+only when there is actual work to do. On an already-indexed workspace
+with no changes, `generate_embeddings` returns 0 without contacting
+Ollama, so the model is never loaded unnecessarily.
 
 The extension's health monitor reads this to distinguish "backend is
 slow because it's busy with real work" from "backend is crashed".

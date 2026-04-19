@@ -296,10 +296,22 @@ class LLMClient:
         Returns ``(True, model_name)`` on success,
         ``(False, reason)`` on failure.
 
-        First verifies the model exists via ``ollama show`` (instant,
-        no loading).  Then sends a single test embed call which may
-        trigger a cold model load into VRAM — this can take minutes
-        for large models but Ollama handles it naturally.
+        Only verifies the model exists via ``ollama show`` (instant,
+        no loading). Does NOT send a test embed call — that would
+        trigger a cold load of the model into VRAM even when the
+        subsequent ``generate_embeddings`` call has nothing to embed
+        (up-to-date workspace), wasting the load. The first real
+        embed call inside ``generate_embeddings`` triggers the cold
+        load naturally, but only when there is actual work to do —
+        and that call is already tagged ``embeddings.code`` on the
+        runtime-state busy set so extension health monitors know the
+        backend is legitimately occupied.
+
+        If the model is registered but broken (rare — e.g. corrupted
+        GGUF), ``show()`` still succeeds and the failure surfaces on
+        the first real embed call inside ``generate_embeddings``,
+        where ``asyncio.gather(return_exceptions=True)`` catches it
+        and the init flow reports ``embedding_status="failed"``.
         """
         if not settings.enable_embeddings:
             return False, "Embeddings disabled (LEAN_AI_ENABLE_EMBEDDINGS=false)"
@@ -309,31 +321,14 @@ class LLMClient:
         if not embed_model:
             return False, "No embedding model configured (LEAN_AI_EMBEDDING_MODEL)"
 
-        # Quick existence check — show() returns model info without loading.
+        # Existence check — show() returns model info without loading.
         try:
             await self._ollama._embed_client.show(model=embed_model)
         except Exception as exc:
             return False, (
                 f"Embedding model '{embed_model}' not found in Ollama: {exc}"
             )
-
-        # Warm-up call — triggers cold model load if needed.
-        # Tag the call with ``ollama.warmup`` in the runtime_state
-        # registry so ``/api/health`` reports what the backend is
-        # waiting on. Large embedding models can take minutes to load
-        # from cold disk; the tag lets extension-side tooling and
-        # humans distinguish "alive but warming" from "dead".
-        from lean_ai.runtime_state import busy
-
-        try:
-            logger.info("Warming up embedding model '%s'…", embed_model)
-            with busy("ollama.warmup"):
-                result = await self._ollama.embed(["test"], model=embed_model)
-            if result:
-                return True, embed_model
-            return False, f"Embedding model '{embed_model}' returned empty result"
-        except Exception as exc:
-            return False, f"Embedding model '{embed_model}' not available: {exc}"
+        return True, embed_model
 
     # ── Multi-turn tool calling orchestration loop ──
 
