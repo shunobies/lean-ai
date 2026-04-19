@@ -6,10 +6,89 @@ that translates the detailed instruction into a single tool invocation.
 """
 
 import logging
+from typing import Literal
 
 from pydantic import BaseModel, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
+
+
+# ── Phase 2 exploration schemas ─────────────────────────────────────────────
+#
+# FileObservation is written incrementally by the request model via the
+# record_file_observation tool during Phase 2 exploration. FileSummary is
+# produced by a final chat_structured synthesis pass that merges the
+# observations, scratchpad, and journal into a validated shape that is then
+# rendered to markdown and fed to downstream phases as {file_summary}.
+
+FileRole = Literal["modify", "create", "reference", "missing"]
+AssumptionOutcome = Literal["confirmed", "falsified", "unable_to_verify"]
+
+
+class FileObservation(BaseModel):
+    """One file the exploration model decided is relevant to the task."""
+
+    file_path: str
+    """Repo-relative path."""
+
+    role: FileRole
+    """Why this file matters: modify (changes needed), create (new file to
+    write), reference (read for context / pattern), missing (expected but
+    absent — should be in missing_infrastructure too)."""
+
+    reason: str
+    """One-line explanation of why this file is relevant."""
+
+    relevant_sections: str = ""
+    """Line ranges + brief description of the sections that matter."""
+
+    key_snippets: list[str] = []
+    """Short quoted excerpts (15-25 lines each) the planner should keep in
+    hand for design and implementation."""
+
+
+class MissingItem(BaseModel):
+    """Infrastructure the task assumes but that was not found."""
+
+    name: str
+    reason: str
+    blocking: bool = False
+
+
+class VerifiedReference(BaseModel):
+    """External dependency verified via web search during exploration."""
+
+    dependency: str
+    docs_url: str
+    version: str = ""
+    confirmed_patterns: str = ""
+
+
+class AssumptionStatus(BaseModel):
+    """Outcome of processing one ASSUMPTION from the Phase 1 scope checklist."""
+
+    assumption: str
+    """Echoed from the scope's ASSUMPTIONS section."""
+
+    status: AssumptionOutcome
+    """Result of running the verification hint."""
+
+    evidence: str = ""
+    """What the model found (e.g. 'grep for celery in pyproject.toml: no match')."""
+
+
+class FileSummary(BaseModel):
+    """Validated Phase 2 output — produced by the synthesis pass."""
+
+    files_to_modify: list[FileObservation] = []
+    files_to_create: list[FileObservation] = []
+    files_read_for_context: list[FileObservation] = []
+    missing_infrastructure: list[MissingItem] = []
+    verified_references: list[VerifiedReference] = []
+    assumptions_resolved: list[AssumptionStatus] = []
+    notes: str = ""
+    """Free-form catch-all for cross-file references, tricky invariants, or
+    anything the structured fields do not capture."""
 
 # Tools valid in implementation plan steps (Phase 4 output).
 # Includes read_file (executor reads before editing), run_tests, run_lint,

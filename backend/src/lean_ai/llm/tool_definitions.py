@@ -670,6 +670,75 @@ QUERY_CONTEXT_TOOL: dict = {
 }
 
 
+# ── File observation capture (Phase 2 exploration) ─────────────────────────
+
+RECORD_FILE_OBSERVATION_TOOL: dict = {
+    "type": "function",
+    "function": {
+        "name": "record_file_observation",
+        "description": (
+            "Record a structured observation about a file during Phase 2 "
+            "exploration. Call this after reading or grepping when the file "
+            "is relevant to the task. Observations are the authoritative "
+            "way findings reach downstream phases — free-form prose is for "
+            "narrating reasoning, not for transcribing file content. "
+            "If called twice for the same file_path, the second call "
+            "replaces the first (latest understanding wins)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": (
+                        "Path relative to the repository root "
+                        "(e.g. 'src/models/user.py')."
+                    ),
+                },
+                "role": {
+                    "type": "string",
+                    "enum": [
+                        "modify", "create", "reference", "missing",
+                    ],
+                    "description": (
+                        "modify = existing file that will change; "
+                        "create = new file to be written; "
+                        "reference = read for context/pattern, not "
+                        "modified; missing = expected but not found in the "
+                        "codebase (list it in missing_infrastructure too)."
+                    ),
+                },
+                "reason": {
+                    "type": "string",
+                    "description": (
+                        "One-line reason this file is relevant to the task."
+                    ),
+                },
+                "relevant_sections": {
+                    "type": "string",
+                    "description": (
+                        "Line ranges plus a brief description of the "
+                        "sections that matter. Example: 'lines 42-88: "
+                        "search_wiki function signature and HTTP call'."
+                    ),
+                },
+                "key_snippets": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Short quoted excerpts (15-25 lines each) that the "
+                        "planner must keep in hand for design and "
+                        "implementation. Include imports, signatures, and "
+                        "non-obvious invariants."
+                    ),
+                },
+            },
+            "required": ["file_path", "role", "reason"],
+        },
+    },
+}
+
+
 # Read-only tools for planning phases
 PLANNING_TOOLS: list[dict] = [
     tool

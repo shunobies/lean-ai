@@ -565,11 +565,13 @@ async def merge_session(session_id: str, repo_root: str):
         if merge_sha:
             await log_commit(db, session_id, merge_sha, f"merge: {branch_name}")
 
-        # Clean up per-session scratchpad and journal
+        # Clean up per-session scratchpad, journal, and observations
         from lean_ai.tools.journal import delete_journal
+        from lean_ai.tools.observations import delete_observations
         from lean_ai.tools.scratchpad import delete_scratchpad
         delete_scratchpad(repo_root, session_id)
         delete_journal(repo_root, session_id)
+        delete_observations(repo_root, session_id)
 
         await update_session(
             db, session_id, status="merged", merge_commit_sha=merge_sha,
@@ -622,11 +624,13 @@ async def abandon_session(session_id: str, repo_root: str):
         if stashed:
             await git_stash_pop(repo_root)
 
-        # Clean up per-session scratchpad and journal
+        # Clean up per-session scratchpad, journal, and observations
         from lean_ai.tools.journal import delete_journal
+        from lean_ai.tools.observations import delete_observations
         from lean_ai.tools.scratchpad import delete_scratchpad
         delete_scratchpad(repo_root, session_id)
         delete_journal(repo_root, session_id)
+        delete_observations(repo_root, session_id)
 
         await update_session(db, session_id, status="abandoned")
 

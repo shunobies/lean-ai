@@ -199,6 +199,20 @@ def _make_read_only_executor(
                 return "\n".join(lines)
             finally:
                 await db.close()
+        elif name == "record_file_observation":
+            from lean_ai.tools.observations import record_observation
+            result = await record_observation(
+                file_path=arguments.get("file_path", ""),
+                role=arguments.get("role", ""),
+                reason=arguments.get("reason", ""),
+                relevant_sections=arguments.get("relevant_sections", ""),
+                key_snippets=arguments.get("key_snippets") or [],
+                repo_root=repo_root,
+                session_id=session_id,
+            )
+            return (
+                result.output if result.success else result.error or "Error"
+            )
         elif name == "task_complete":
             return "Exploration marked complete."
         return f"Unknown tool: {name}"
@@ -264,7 +278,7 @@ async def run_phase2_exploration(
             t0=t0,
         )
     else:
-        file_identification = await _run_serial_exploration(
+        exploration_output = await _run_serial_exploration(
             task=task,
             scope=scope,
             context=context,
@@ -280,6 +294,20 @@ async def run_phase2_exploration(
             on_tool_call=on_tool_call,
             on_tool_result=on_tool_result,
             on_metrics=on_metrics,
+        )
+
+        # Synthesis pass: coerce recorded observations + scratchpad +
+        # journal + prose into a validated FileSummary, then render to
+        # markdown for the downstream {file_summary} contract.
+        file_identification = await _synthesize_file_summary(
+            task=task,
+            scope=scope,
+            exploration_output=exploration_output,
+            repo_root=repo_root,
+            session_id=session_id,
+            explorer=explorer,
+            phase_max_tokens=phase_max_tokens,
+            on_thinking=on_thinking,
         )
 
     elapsed = time.monotonic() - t0
@@ -444,8 +472,12 @@ async def _run_serial_exploration(
     on_metrics: Callable | None,
 ) -> str:
     """Serial Phase 2 (num_parallel=1) with scratchpad + context refresh."""
+    import json as _json
+
+    from lean_ai.llm.tool_definitions import RECORD_FILE_OBSERVATION_TOOL
     from lean_ai.tools import scratchpad
     from lean_ai.tools.journal import read_journal
+    from lean_ai.tools.observations import read_observations
     from lean_ai.workflow.ws_handler import ws_send_nowait
 
     # Inject existing scratchpad + journal (crash recovery)
@@ -475,6 +507,7 @@ async def _run_serial_exploration(
         """Rebuild Phase 2 messages for context refresh."""
         pad = scratchpad.read_scratchpad(repo_root, session_id)
         jrnl = read_journal(repo_root, session_id)
+        obs = read_observations(repo_root, session_id)
         new_messages: list[dict] = [
             {"role": "system", "content": PLAN_EXPLORATION_SYSTEM_PROMPT},
             {
@@ -486,6 +519,11 @@ async def _run_serial_exploration(
             },
         ]
         refresh_parts = ["[CONTEXT REFRESHED]"]
+        if obs:
+            refresh_parts.append(
+                "RECORDED FILE OBSERVATIONS (do not re-record these):\n"
+                + _json.dumps(obs, indent=2, ensure_ascii=False)
+            )
         if jrnl:
             refresh_parts.append(
                 f"SESSION JOURNAL (permanent findings):\n{jrnl}"
@@ -494,7 +532,7 @@ async def _run_serial_exploration(
             refresh_parts.append(
                 f"SCRATCHPAD (current state):\n{pad}"
             )
-        if pad or jrnl:
+        if obs or pad or jrnl:
             new_messages.append({
                 "role": "user",
                 "content": "\n\n".join(refresh_parts),
@@ -520,14 +558,24 @@ async def _run_serial_exploration(
     def _phase2_reminder() -> str:
         return (
             base_reminder
-            + "\n\nCall update_scratchpad to save volatile progress "
-            "and add_journal_entry for key findings that must "
-            "survive context refresh."
+            + "\n\nCall record_file_observation for every relevant file, "
+            "update_scratchpad for volatile progress, and add_journal_entry "
+            "for findings that must survive a context refresh."
         )
+
+    # Phase-2-specific tool filter: drop KB tools (not useful for file
+    # identification), add record_file_observation for deterministic capture.
+    phase2_tools = [
+        t for t in build_planning_tools_with_scratchpad()
+        if t["function"]["name"] not in (
+            "search_knowledge", "list_knowledge_documents",
+        )
+    ]
+    phase2_tools.append(RECORD_FILE_OBSERVATION_TOOL)
 
     _tool_calls, file_identification = await explorer.chat_with_tools(
         messages=phase2_messages,
-        tools=build_planning_tools_with_scratchpad(),
+        tools=phase2_tools,
         tool_executor_fn=executor,
         max_turns=settings.implementation_max_turns,
         max_tokens=phase_max_tokens,
@@ -542,3 +590,179 @@ async def _run_serial_exploration(
     )
 
     return file_identification
+
+
+async def _synthesize_file_summary(
+    *,
+    task: str,
+    scope: str,
+    exploration_output: str,
+    repo_root: str,
+    session_id: str,
+    explorer: "LLMClient",
+    phase_max_tokens: int,
+    on_thinking: Callable | None = None,
+) -> str:
+    """Consolidate Phase 2 findings into a validated FileSummary and render
+    it to markdown for downstream phases.
+
+    Reads recorded observations, scratchpad, and journal, plus the
+    exploration model's prose output, and coerces everything into a
+    ``FileSummary`` via ``chat_structured``. Returns the markdown-rendered
+    string that flows into Phase 3 / Phase 4 as ``{file_summary}``.
+
+    On structured-output failure, falls back to returning the raw
+    exploration output so the pipeline keeps moving.
+    """
+    import json as _json
+
+    from lean_ai.llm.plan_schema import FileSummary
+    from lean_ai.tools import scratchpad
+    from lean_ai.tools.journal import read_journal
+    from lean_ai.tools.observations import read_observations
+
+    observations = read_observations(repo_root, session_id)
+    pad = scratchpad.read_scratchpad(repo_root, session_id) if session_id else ""
+    jrnl = read_journal(repo_root, session_id) if session_id else ""
+
+    if not observations:
+        logger.warning(
+            "Phase 2 synthesis: zero recorded observations — "
+            "falling back to exploration prose only.",
+        )
+
+    observations_json = _json.dumps(
+        observations, indent=2, ensure_ascii=False,
+    )
+
+    user_payload_parts = [
+        f"TASK: {task}",
+        f"PHASE 1 SCOPE (source of ASSUMPTIONS):\n{scope}",
+        f"RECORDED FILE OBSERVATIONS ({len(observations)}):\n{observations_json}",
+    ]
+    if pad:
+        user_payload_parts.append(f"EXPLORATION SCRATCHPAD:\n{pad}")
+    if jrnl:
+        user_payload_parts.append(f"EXPLORATION JOURNAL:\n{jrnl}")
+    if exploration_output.strip():
+        user_payload_parts.append(
+            f"EXPLORATION PROSE (model narrative):\n{exploration_output}"
+        )
+    user_payload_parts.append(
+        "Produce a FileSummary merging every source above. Bucket "
+        "observations by role, populate missing_infrastructure, "
+        "verified_references, and assumptions_resolved from the scope + "
+        "prose + journal. Use the notes field for anything that does "
+        "not fit the structured fields."
+    )
+
+    synthesis_system = registry.get("planning.exploration_synthesis_system")
+
+    try:
+        summary = await explorer.chat_structured(
+            messages=[
+                {"role": "system", "content": synthesis_system},
+                {"role": "user", "content": "\n\n".join(user_payload_parts)},
+            ],
+            schema=FileSummary,
+            max_tokens=phase_max_tokens,
+            thinking_callback=on_thinking,
+        )
+    except Exception:
+        logger.warning(
+            "Phase 2 synthesis failed — falling back to raw exploration "
+            "output",
+            exc_info=True,
+        )
+        return exploration_output
+
+    logger.info(
+        "Phase 2 synthesis: modify=%d create=%d reference=%d missing=%d "
+        "refs=%d assumptions=%d",
+        len(summary.files_to_modify),
+        len(summary.files_to_create),
+        len(summary.files_read_for_context),
+        len(summary.missing_infrastructure),
+        len(summary.verified_references),
+        len(summary.assumptions_resolved),
+    )
+
+    return _format_file_summary(summary)
+
+
+def _format_file_summary(summary: "FileSummary") -> str:  # noqa: F821
+    """Render a FileSummary to the markdown shape downstream phases consume
+    as ``{file_summary}`` — preserves the historical section names so Phase
+    3 / Phase 4 prompts do not need to change.
+    """
+    lines: list[str] = []
+
+    def _render_files(header: str, items: list) -> None:
+        if not items:
+            return
+        lines.append(f"{header}:")
+        for i, item in enumerate(items, 1):
+            entry = f"{i}. {item.file_path} — {item.reason}"
+            if item.relevant_sections:
+                entry += f" — {item.relevant_sections}"
+            lines.append(entry)
+            for snippet in item.key_snippets:
+                snippet = snippet.strip("\n")
+                if not snippet:
+                    continue
+                lines.append("   ```")
+                for snippet_line in snippet.splitlines():
+                    lines.append(f"   {snippet_line}")
+                lines.append("   ```")
+        lines.append("")
+
+    _render_files(
+        "FILES TO MODIFY (include key content you read)",
+        summary.files_to_modify,
+    )
+    _render_files(
+        "FILES TO CREATE",
+        summary.files_to_create,
+    )
+    _render_files(
+        "FILES READ FOR CONTEXT (not modified, but content informs changes)",
+        summary.files_read_for_context,
+    )
+
+    if summary.missing_infrastructure:
+        lines.append(
+            "MISSING INFRASTRUCTURE (assumed by the task but not found):"
+        )
+        for i, m in enumerate(summary.missing_infrastructure, 1):
+            blocking = " [BLOCKING]" if m.blocking else ""
+            lines.append(f"{i}. {m.name} — {m.reason}{blocking}")
+        lines.append("")
+
+    if summary.verified_references:
+        lines.append(
+            "VERIFIED REFERENCES (from internet search):"
+        )
+        for i, r in enumerate(summary.verified_references, 1):
+            entry = f"{i}. {r.dependency} — {r.docs_url}"
+            if r.version:
+                entry += f" — version: {r.version}"
+            if r.confirmed_patterns:
+                entry += f" — {r.confirmed_patterns}"
+            lines.append(entry)
+        lines.append("")
+
+    if summary.assumptions_resolved:
+        lines.append("ASSUMPTIONS RESOLVED (from Phase 1 checklist):")
+        for i, a in enumerate(summary.assumptions_resolved, 1):
+            entry = f"{i}. [{a.status}] {a.assumption}"
+            if a.evidence:
+                entry += f" — {a.evidence}"
+            lines.append(entry)
+        lines.append("")
+
+    if summary.notes.strip():
+        lines.append("NOTES:")
+        lines.append(summary.notes.strip())
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
