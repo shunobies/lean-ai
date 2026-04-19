@@ -505,8 +505,8 @@
         },
         "lean-ai.embeddingContextWindow": {
           "type": "number",
-          "default": 0,
-          "markdownDescription": "**Embeddings** — Manual context window for the embedding model. `0` = auto-detect via Ollama's `show` API. Set a positive value (e.g. `8192`) when auto-detection is unreliable for your embedding model. Accepts shorthand (e.g. `8` = 8k). Default: `0`"
+          "default": 8192,
+          "markdownDescription": "**Embeddings** — Context window used to size embedding batches. Defaults to `8192` (8k) so `/init` never blocks on Ollama's `show` API. Raise for embedding models with larger context windows (e.g. `32` for qwen3-embedding). Accepts shorthand (e.g. `8` = 8k). Set `0` to re-enable auto-detect via `show` — a 5s timeout caps any hang. Default: `8192`"
         },
         "lean-ai.visionModel": {
           "type": "string",

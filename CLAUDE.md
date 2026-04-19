@@ -225,7 +225,7 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_INLINE_OLLAMA_URL` | *(falls back to OLLAMA_URL)* | Ollama instance for inline model |
 | `LEAN_AI_EMBEDDING_MODEL` | `qwen3-embedding:0.6b` | Embedding model for semantic search (always Ollama) |
 | `LEAN_AI_ENABLE_EMBEDDINGS` | `true` | Enable embedding generation + RRF hybrid search |
-| `LEAN_AI_EMBEDDING_CONTEXT_WINDOW` | `0` | Manual embedding context window (accepts shorthand; `0` = auto-detect via Ollama show API). Use when auto-detection is unreliable for your embedding model |
+| `LEAN_AI_EMBEDDING_CONTEXT_WINDOW` | `8192` | Context window used to size embedding batches (accepts shorthand). Defaults to 8k so `/init` never blocks on Ollama's `show` API. Raise for embedding models with larger windows (e.g. qwen3-embedding → `32`). Set `0` to re-enable auto-detect via `show` (a 5s timeout caps any hang) |
 | `LEAN_AI_VISION_MODEL` | *(empty)* | Vision model for describing images (e.g. `qwen3-vl:8b`). Empty = vision disabled. Always Ollama |
 | `LEAN_AI_VISION_OLLAMA_URL` | *(falls back to OLLAMA_URL)* | Ollama instance for vision model |
 | `LEAN_AI_VISION_MAX_TOKENS` | `1024` | Max tokens for image description |

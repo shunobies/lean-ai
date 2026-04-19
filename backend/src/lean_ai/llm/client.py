@@ -660,7 +660,17 @@ class OllamaProvider(LLMProvider):
         if not embed_model:
             return None
         try:
-            info = await self._embed_client.show(model=embed_model)
+            info = await asyncio.wait_for(
+                self._embed_client.show(model=embed_model),
+                timeout=5.0,
+            )
+        except TimeoutError:
+            logger.warning(
+                "Embedding model 'show' timed out after 5s — "
+                "falling back to default batch size. "
+                "Set LEAN_AI_EMBEDDING_CONTEXT_WINDOW to bypass auto-detect.",
+            )
+            return None
         except Exception as exc:
             logger.debug("Could not query embedding model info: %s", exc)
             return None

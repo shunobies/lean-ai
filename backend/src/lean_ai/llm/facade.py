@@ -322,8 +322,19 @@ class LLMClient:
             return False, "No embedding model configured (LEAN_AI_EMBEDDING_MODEL)"
 
         # Existence check — show() returns model info without loading.
+        # Wrapped in a 5s timeout so a slow/unresponsive Ollama can't wedge
+        # the init pipeline. On timeout we treat the model as unavailable
+        # and skip embedding (matches the not-found branch).
         try:
-            await self._ollama._embed_client.show(model=embed_model)
+            await asyncio.wait_for(
+                self._ollama._embed_client.show(model=embed_model),
+                timeout=5.0,
+            )
+        except TimeoutError:
+            return False, (
+                f"Embedding model '{embed_model}' check timed out "
+                "after 5s — is Ollama responsive?"
+            )
         except Exception as exc:
             return False, (
                 f"Embedding model '{embed_model}' not found in Ollama: {exc}"

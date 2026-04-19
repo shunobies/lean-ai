@@ -242,8 +242,12 @@ class Settings(BaseSettings):
     enable_embeddings: bool = True
     embedding_ollama_url: str | None = None
     embedding_batch_size: int = 0  # 0 = auto (50% of model context window). Positive = override
-    # 0 = auto-detect via Ollama show API. Positive = override (accepts shorthand).
-    embedding_context_window: int = 0
+    # Context window used to size embedding batches. Defaults to a safe 8192
+    # tokens so /init never blocks on an Ollama `show` call (previous default
+    # of 0 enabled auto-detect, which could hang indefinitely if Ollama was
+    # slow or mid-cold-load). Users on embedding models with larger windows
+    # can raise this (accepts shorthand). Set to 0 to re-enable auto-detect.
+    embedding_context_window: int = 8192
 
     # ── Vision model (always Ollama, on-demand) ──
     vision_model: str = ""  # e.g. "qwen3-vl:8b". Empty = vision disabled
