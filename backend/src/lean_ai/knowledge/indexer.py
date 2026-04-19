@@ -23,11 +23,15 @@ import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from whoosh.fields import ID, NUMERIC, TEXT, Schema
 from whoosh.index import create_in, exists_in, open_dir
 from whoosh.qparser import MultifieldParser
 from whoosh.query import And, NumericRange, Term
+
+if TYPE_CHECKING:
+    from lean_ai.indexer.indexer import EmbeddingRunStats
 
 from lean_ai.config import settings
 from lean_ai.indexer.manifest import (
@@ -502,7 +506,7 @@ async def generate_knowledge_embeddings(
     repo_root: str,
     llm_client,
     batch_size: int = 0,
-) -> int:
+) -> "EmbeddingRunStats":
     """Generate embeddings for knowledge chunks, skipping unchanged ones.
 
     Uses a content hash per chunk stored in the embedding index to avoid
@@ -515,9 +519,11 @@ async def generate_knowledge_embeddings(
     ``/api/health`` responses during this call as expected rather than
     as a dead backend.
 
-    Args:
-        batch_size: Chunks per Ollama embed call.  ``0`` (default) uses
-            adaptive sizing via ``llm_client.compute_embedding_batch_size``.
+    Returns:
+        EmbeddingRunStats with a breakdown of embedded, unchanged,
+        orphaned-removed, and failed-batch counts. Shares the code-side
+        dataclass from ``lean_ai.indexer.indexer`` so the caller can
+        format either result uniformly.
     """
     from lean_ai.runtime_state import busy
 
@@ -531,15 +537,22 @@ async def _generate_knowledge_embeddings_inner(
     repo_root: str,
     llm_client,
     batch_size: int,
-) -> int:
+) -> "EmbeddingRunStats":
     import asyncio
     import hashlib
 
     from lean_ai.indexer.embeddings import EmbeddingStore
+    from lean_ai.indexer.indexer import EmbeddingRunStats
+
+    stats = EmbeddingRunStats()
 
     idx_path = knowledge_index_dir(repo_root)
     if not exists_in(idx_path):
-        return 0
+        logger.info(
+            "generate_knowledge_embeddings: no knowledge index at %s — "
+            "nothing to embed", idx_path,
+        )
+        return stats
 
     store = EmbeddingStore(idx_path)
     existing_index = store.get_index()
@@ -562,7 +575,8 @@ async def _generate_knowledge_embeddings_inner(
     reader.close()
 
     if not all_chunks:
-        return 0
+        logger.info("generate_knowledge_embeddings: knowledge index is empty")
+        return stats
 
     # Drop orphaned embeddings (chunks deleted from Whoosh).
     current_ids = {cid for cid, _ in all_chunks}
@@ -573,6 +587,7 @@ async def _generate_knowledge_embeddings_inner(
         logger.info(
             "Removed %d orphaned knowledge embeddings", len(orphaned),
         )
+    stats.orphaned_removed = len(orphaned)
 
     # Find chunks needing embedding (new or content changed).
     to_embed: list[tuple[str, str, str]] = []
@@ -585,22 +600,27 @@ async def _generate_knowledge_embeddings_inner(
             continue
         to_embed.append((chunk_id, text, content_hash))
 
+    stats.unchanged = len(all_chunks) - len(to_embed)
+
     if not to_embed:
         store.flush_index()
         logger.info(
-            "Knowledge embeddings up to date — %d chunks unchanged",
-            len(all_chunks),
+            "Knowledge embeddings up to date — %d chunks unchanged, "
+            "%d orphaned removed (no embed calls made)",
+            stats.unchanged, stats.orphaned_removed,
         )
-        return 0
+        return stats
 
     # Resolve batch size: explicit > adaptive > fallback.
     if batch_size <= 0:
         batch_size = await llm_client.compute_embedding_batch_size(to_embed)
 
     total_to_embed = len(to_embed)
+    stats.total_batches = (total_to_embed + batch_size - 1) // batch_size
     logger.info(
-        "Generating embeddings for %d knowledge chunks (batch_size=%d)",
-        total_to_embed, batch_size,
+        "Generating embeddings for %d knowledge chunks (batch_size=%d, "
+        "%d unchanged, %d orphaned removed)",
+        total_to_embed, batch_size, stats.unchanged, stats.orphaned_removed,
     )
 
     # Producer-consumer: overlap Ollama compute with disk I/O.
@@ -621,6 +641,7 @@ async def _generate_knowledge_embeddings_inner(
                 embeddings = await llm_client.embed(batch_texts)
                 await queue.put((batch_ids, embeddings, batch_hashes))
             except Exception as e:
+                stats.failed_batches += 1
                 logger.warning(
                     "Knowledge embedding batch %d failed: %s",
                     i // batch_size, e,
@@ -648,14 +669,14 @@ async def _generate_knowledge_embeddings_inner(
     await producer_task
 
     store.flush_index()
+    stats.embedded = total
     logger.info(
         "Generated %d knowledge embeddings "
-        "(%d unchanged, %d orphaned removed)",
-        total,
-        len(all_chunks) - len(to_embed),
-        len(orphaned),
+        "(%d unchanged, %d orphaned removed, %d/%d batches failed)",
+        stats.embedded, stats.unchanged, stats.orphaned_removed,
+        stats.failed_batches, stats.total_batches,
     )
-    return total
+    return stats
 
 
 def search_knowledge(

@@ -106,29 +106,58 @@ export async function handleInitCommand(
     }
 
     // ── Embedding status ──
+    // Statuses: success | up_to_date | partial | failed | skipped
+    // The breakdown fields let us distinguish "nothing to do" (up_to_date)
+    // from "silently broken" (failed/partial), which the previous
+    // collapsed-to-success message could not.
     const es = indexResult.embedding_status;
+    const codeCnt = indexResult.embedding_code_count ?? 0;
+    const knowledgeCnt = indexResult.embedding_knowledge_count ?? 0;
+    const codeUnchanged = indexResult.embedding_code_unchanged ?? 0;
+    const knowledgeUnchanged = indexResult.embedding_knowledge_unchanged ?? 0;
+    const failedBatches = indexResult.embedding_failed_batches ?? 0;
+    const totalBatches = indexResult.embedding_total_batches ?? 0;
+    const detail = indexResult.embedding_message ?? "";
+
     if (es === "success") {
-        const codeCnt = indexResult.embedding_code_count ?? 0;
-        const knowledgeCnt = indexResult.embedding_knowledge_count ?? 0;
         const parts: string[] = [];
-        if (codeCnt > 0) { parts.push(`${codeCnt} code chunks`); }
-        if (knowledgeCnt > 0) { parts.push(`${knowledgeCnt} knowledge chunks`); }
+        if (codeCnt > 0) { parts.push(`${codeCnt} code chunks (${codeUnchanged} unchanged)`); }
+        if (knowledgeCnt > 0) { parts.push(`${knowledgeCnt} knowledge chunks (${knowledgeUnchanged} unchanged)`); }
         ctx.postMessage({
             type: "reply",
             text: `Embeddings generated: ${parts.join(" + ")}.`,
+            cls: "msg-system",
+        });
+    } else if (es === "up_to_date") {
+        const parts: string[] = [];
+        if (codeUnchanged > 0) { parts.push(`${codeUnchanged} code chunks`); }
+        if (knowledgeUnchanged > 0) { parts.push(`${knowledgeUnchanged} knowledge chunks`); }
+        const body = parts.length
+            ? `${parts.join(" + ")} already up to date — no embed calls needed.`
+            : "No chunks to embed.";
+        ctx.postMessage({
+            type: "reply",
+            text: `Embeddings: ${body}`,
+            cls: "msg-system",
+        });
+    } else if (es === "partial") {
+        anyFailure = true;
+        ctx.postMessage({
+            type: "reply",
+            text: `Embeddings partial: ${detail || `${failedBatches}/${totalBatches} batches failed`}. Check backend logs for details.`,
             cls: "msg-system",
         });
     } else if (es === "failed") {
         anyFailure = true;
         ctx.postMessage({
             type: "reply",
-            text: `Embedding generation failed: ${indexResult.embedding_message ?? "unknown error"}`,
+            text: `Embedding generation failed: ${detail || "unknown error"}. Check backend logs.`,
             cls: "msg-system",
         });
-    } else if (es === "skipped" && indexResult.embedding_message) {
+    } else if (es === "skipped" && detail) {
         ctx.postMessage({
             type: "reply",
-            text: `Embeddings skipped: ${indexResult.embedding_message}`,
+            text: `Embeddings skipped: ${detail}`,
             cls: "msg-system",
         });
     }

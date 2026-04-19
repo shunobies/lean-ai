@@ -1,6 +1,7 @@
 """Whoosh BM25F search index with full and incremental indexing."""
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 from whoosh.fields import ID, NUMERIC, TEXT, Schema
@@ -21,6 +22,20 @@ from lean_ai.indexer.manifest import (
 from lean_ai.indexer.tree import list_repo_tree
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class EmbeddingRunStats:
+    """Breakdown of a generate_embeddings run for user-visible diagnostics."""
+    embedded: int = 0          # newly embedded chunks
+    unchanged: int = 0         # content-hash matched, skipped
+    orphaned_removed: int = 0  # chunks dropped (file deleted or re-chunked)
+    failed_batches: int = 0    # batches that raised in the producer
+    total_batches: int = 0     # total batches attempted
+
+    def __int__(self) -> int:
+        # Backward compat with callers that still treat the return as an int.
+        return self.embedded
 
 INDEX_SCHEMA = Schema(
     chunk_id=ID(stored=True, unique=True),
@@ -200,7 +215,7 @@ async def generate_embeddings(
     repo_root: str,
     llm_client,
     batch_size: int = 0,
-) -> int:
+) -> EmbeddingRunStats:
     """Generate embeddings for indexed chunks, skipping unchanged ones.
 
     Uses a content hash per chunk stored in the embedding index to avoid
@@ -215,9 +230,11 @@ async def generate_embeddings(
     responses during this call as expected rather than as a dead
     backend.
 
-    Args:
-        batch_size: Chunks per Ollama embed call.  ``0`` (default) uses
-            adaptive sizing via ``llm_client.compute_embedding_batch_size``.
+    Returns:
+        EmbeddingRunStats with a breakdown of embedded, unchanged,
+        orphaned-removed, and failed-batch counts so the caller can build
+        a user-visible message that distinguishes "nothing to do" from
+        "silently broken".
     """
     from lean_ai.runtime_state import busy
 
@@ -231,13 +248,19 @@ async def _generate_embeddings_inner(
     repo_root: str,
     llm_client,
     batch_size: int,
-) -> int:
+) -> EmbeddingRunStats:
     import asyncio
     import hashlib
 
+    stats = EmbeddingRunStats()
+
     idx_dir = _index_dir(repo_root)
     if not exists_in(str(idx_dir)):
-        return 0
+        logger.info(
+            "generate_embeddings: no Whoosh index at %s — nothing to embed",
+            idx_dir,
+        )
+        return stats
 
     store = EmbeddingStore(str(idx_dir))
     existing_index = store.get_index()
@@ -253,7 +276,8 @@ async def _generate_embeddings_inner(
     reader.close()
 
     if not all_chunks:
-        return 0
+        logger.info("generate_embeddings: Whoosh index is empty")
+        return stats
 
     # Drop orphaned embeddings (chunks deleted from Whoosh).
     current_ids = {cid for cid, _ in all_chunks}
@@ -262,6 +286,7 @@ async def _generate_embeddings_inner(
         store.remove_chunks(orphaned)
         store.compact()
         logger.info("Removed %d orphaned embeddings", len(orphaned))
+    stats.orphaned_removed = len(orphaned)
 
     # Find chunks needing embedding (new or content changed).
     to_embed: list[tuple[str, str, str]] = []
@@ -274,22 +299,27 @@ async def _generate_embeddings_inner(
             continue
         to_embed.append((chunk_id, content, content_hash))
 
+    stats.unchanged = len(all_chunks) - len(to_embed)
+
     if not to_embed:
         store.flush_index()
         logger.info(
-            "Embeddings up to date — %d chunks unchanged",
-            len(all_chunks),
+            "Embeddings up to date — %d chunks unchanged, %d orphaned removed "
+            "(no embed calls made)",
+            stats.unchanged, stats.orphaned_removed,
         )
-        return 0
+        return stats
 
     # Resolve batch size: explicit > adaptive > fallback.
     if batch_size <= 0:
         batch_size = await llm_client.compute_embedding_batch_size(to_embed)
 
     total_to_embed = len(to_embed)
+    stats.total_batches = (total_to_embed + batch_size - 1) // batch_size
     logger.info(
-        "Generating embeddings for %d code chunks (batch_size=%d)",
-        total_to_embed, batch_size,
+        "Generating embeddings for %d code chunks (batch_size=%d, "
+        "%d unchanged, %d orphaned removed)",
+        total_to_embed, batch_size, stats.unchanged, stats.orphaned_removed,
     )
 
     # Producer-consumer: overlap Ollama compute with disk I/O.
@@ -310,6 +340,7 @@ async def _generate_embeddings_inner(
                 embeddings = await llm_client.embed(batch_texts)
                 await queue.put((batch_ids, embeddings, batch_hashes))
             except Exception as e:
+                stats.failed_batches += 1
                 logger.warning(
                     "Embedding batch %d failed: %s", i // batch_size, e,
                 )
@@ -336,13 +367,14 @@ async def _generate_embeddings_inner(
     await producer_task
 
     store.flush_index()
+    stats.embedded = total
     logger.info(
-        "Generated %d embeddings (%d unchanged, %d orphaned removed)",
-        total,
-        len(all_chunks) - len(to_embed),
-        len(orphaned),
+        "Generated %d embeddings (%d unchanged, %d orphaned removed, "
+        "%d/%d batches failed)",
+        stats.embedded, stats.unchanged, stats.orphaned_removed,
+        stats.failed_batches, stats.total_batches,
     )
-    return total
+    return stats
 
 
 def search_index(

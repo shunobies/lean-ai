@@ -28,11 +28,7 @@ export type PostSseFn = (
 // Workspace Indexing
 // ---------------------------------------------------------------------------
 
-export async function indexWorkspace(
-    postJson: PostJsonFn,
-    repoRoot: string,
-    forceReindex = false,
-): Promise<{
+export interface IndexWorkspaceResponse {
     index_status: string;
     index_file_count?: number;
     index_chunk_count?: number;
@@ -41,30 +37,28 @@ export async function indexWorkspace(
     knowledge_doc_count?: number;
     knowledge_chunk_count?: number;
     knowledge_skipped_extensions?: string[];
+    // embedding_status: "skipped" | "success" | "up_to_date" | "partial" | "failed"
     embedding_status?: string;
     embedding_code_count?: number;
     embedding_knowledge_count?: number;
+    embedding_code_unchanged?: number;
+    embedding_knowledge_unchanged?: number;
+    embedding_failed_batches?: number;
+    embedding_total_batches?: number;
     embedding_message?: string;
-}> {
+}
+
+export async function indexWorkspace(
+    postJson: PostJsonFn,
+    repoRoot: string,
+    forceReindex = false,
+): Promise<IndexWorkspaceResponse> {
     // No timeout — embedding generation can take minutes for large repos.
     // Uses PostJsonFn which goes through _postJsonNoTimeout (no timeout).
     return (await postJson("/api/init-workspace", {
         repo_root: repoRoot,
         force_reindex: forceReindex,
-    })) as {
-        index_status: string;
-        index_file_count?: number;
-        index_chunk_count?: number;
-        num_parallel?: number;
-        knowledge_status?: string;
-        knowledge_doc_count?: number;
-        knowledge_chunk_count?: number;
-        knowledge_skipped_extensions?: string[];
-        embedding_status?: string;
-        embedding_code_count?: number;
-        embedding_knowledge_count?: number;
-        embedding_message?: string;
-    };
+    })) as IndexWorkspaceResponse;
 }
 
 // ---------------------------------------------------------------------------

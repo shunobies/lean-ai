@@ -31,6 +31,66 @@ logger = logging.getLogger(__name__)
 generation_router = APIRouter()
 
 
+def _format_embedding_summary(code_stats, know_stats) -> tuple[str, str]:
+    """Build ``(status, message)`` for the init response.
+
+    Distinguishes "idle — nothing to do" from "silently broken" so the
+    user can tell the difference without reading backend logs.
+
+    Status values:
+    - ``success`` — at least one chunk was embedded
+    - ``up_to_date`` — all indexed chunks were unchanged (no embed calls)
+    - ``partial`` — some batches succeeded, some failed
+    - ``failed`` — every batch failed
+    - ``skipped`` — nothing to index (covered by caller, not here)
+    """
+    def _fmt(label: str, s) -> str | None:
+        if s is None:
+            return None
+        if s.embedded > 0 and s.failed_batches == 0:
+            return f"{s.embedded} {label} embedded ({s.unchanged} unchanged)"
+        if s.embedded > 0 and s.failed_batches > 0:
+            return (
+                f"{s.embedded} {label} embedded, "
+                f"{s.failed_batches}/{s.total_batches} batches failed"
+            )
+        if s.embedded == 0 and s.failed_batches > 0:
+            return (
+                f"{label}: all {s.failed_batches} batches failed "
+                f"— check Ollama logs"
+            )
+        # embedded == 0, no failures → up-to-date
+        total = s.unchanged + s.orphaned_removed
+        if total == 0:
+            return f"no {label} to embed"
+        return f"{s.unchanged} {label} already up to date"
+
+    parts = [p for p in (_fmt("code chunks", code_stats),
+                         _fmt("knowledge chunks", know_stats)) if p]
+
+    code_failed = code_stats is not None and code_stats.failed_batches > 0
+    know_failed = know_stats is not None and know_stats.failed_batches > 0
+    code_embedded = code_stats is not None and code_stats.embedded > 0
+    know_embedded = know_stats is not None and know_stats.embedded > 0
+    any_embedded = code_embedded or know_embedded
+    any_failed = code_failed or know_failed
+    any_ran = code_stats is not None or know_stats is not None
+
+    if not any_ran:
+        return "failed", "Embedding task did not produce stats"
+    if any_embedded and not any_failed:
+        status = "success"
+    elif any_embedded and any_failed:
+        status = "partial"
+    elif any_failed and not any_embedded:
+        status = "failed"
+    else:
+        status = "up_to_date"
+
+    message = "; ".join(parts) if parts else "No chunks to embed"
+    return status, message
+
+
 @generation_router.post("/init-workspace", response_model=InitWorkspaceResponse)
 async def init_workspace(request: InitWorkspaceRequest):
     """Index the workspace and prepare for agent workflows.
@@ -112,6 +172,10 @@ async def init_workspace(request: InitWorkspaceRequest):
         embedding_status = "skipped"
         embedding_code_count = 0
         embedding_knowledge_count = 0
+        embedding_code_unchanged = 0
+        embedding_knowledge_unchanged = 0
+        embedding_failed_batches = 0
+        embedding_total_batches = 0
         embedding_message = ""
 
         embed_ok, embed_msg = await llm_client.check_embedding_model()
@@ -145,17 +209,27 @@ async def init_workspace(request: InitWorkspaceRequest):
                     *embed_tasks, return_exceptions=True,
                 )
 
-                # Unpack results.
+                # Unpack results — each task returns an EmbeddingRunStats
+                # dataclass (or Exception on failure).
+                code_stats = None
                 code_result = results[0]
                 if isinstance(code_result, Exception):
                     logger.warning("Code embedding failed: %s", code_result)
                 else:
-                    embedding_code_count = code_result
+                    code_stats = code_result
+                    embedding_code_count = code_stats.embedded
+                    embedding_code_unchanged = code_stats.unchanged
+                    embedding_failed_batches += code_stats.failed_batches
+                    embedding_total_batches += code_stats.total_batches
                     logger.info(
-                        "Code embedding complete: %d chunks for %s",
-                        embedding_code_count, request.repo_root,
+                        "Code embedding complete: +%d embedded, %d unchanged, "
+                        "%d orphaned removed, %d/%d batches failed",
+                        code_stats.embedded, code_stats.unchanged,
+                        code_stats.orphaned_removed,
+                        code_stats.failed_batches, code_stats.total_batches,
                     )
 
+                know_stats = None
                 if len(results) > 1:
                     know_result = results[1]
                     if isinstance(know_result, Exception):
@@ -163,20 +237,27 @@ async def init_workspace(request: InitWorkspaceRequest):
                             "Knowledge embedding failed: %s", know_result,
                         )
                     else:
-                        embedding_knowledge_count = know_result
+                        know_stats = know_result
+                        embedding_knowledge_count = know_stats.embedded
+                        embedding_knowledge_unchanged = know_stats.unchanged
+                        embedding_failed_batches += know_stats.failed_batches
+                        embedding_total_batches += know_stats.total_batches
                         logger.info(
-                            "Knowledge embedding complete: %d chunks for %s",
-                            embedding_knowledge_count, request.repo_root,
+                            "Knowledge embedding complete: +%d embedded, "
+                            "%d unchanged, %d orphaned removed, "
+                            "%d/%d batches failed",
+                            know_stats.embedded, know_stats.unchanged,
+                            know_stats.orphaned_removed,
+                            know_stats.failed_batches,
+                            know_stats.total_batches,
                         )
 
-                embedding_status = "success"
-                parts = []
-                if embedding_code_count:
-                    parts.append(f"{embedding_code_count} code chunks")
-                if embedding_knowledge_count:
-                    parts.append(f"{embedding_knowledge_count} knowledge chunks")
-                embedding_message = (
-                    ", ".join(parts) if parts else "No chunks to embed"
+                # Build a user-visible message that distinguishes
+                # "nothing to do" from "silently broken". The old message
+                # collapsed both into "No chunks to embed" which confused
+                # users into thinking /init was broken when it was idle.
+                embedding_status, embedding_message = _format_embedding_summary(
+                    code_stats, know_stats,
                 )
             except Exception as exc:
                 embedding_status = "failed"
@@ -194,6 +275,10 @@ async def init_workspace(request: InitWorkspaceRequest):
         embedding_status = "failed"
         embedding_code_count = 0
         embedding_knowledge_count = 0
+        embedding_code_unchanged = 0
+        embedding_knowledge_unchanged = 0
+        embedding_failed_batches = 0
+        embedding_total_batches = 0
         embedding_message = str(e)
 
     return InitWorkspaceResponse(
@@ -212,6 +297,10 @@ async def init_workspace(request: InitWorkspaceRequest):
         embedding_status=embedding_status,
         embedding_code_count=embedding_code_count,
         embedding_knowledge_count=embedding_knowledge_count,
+        embedding_code_unchanged=embedding_code_unchanged,
+        embedding_knowledge_unchanged=embedding_knowledge_unchanged,
+        embedding_failed_batches=embedding_failed_batches,
+        embedding_total_batches=embedding_total_batches,
         embedding_message=embedding_message,
     )
 

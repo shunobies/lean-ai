@@ -28,9 +28,16 @@ class InitWorkspaceResponse(BaseModel):
     knowledge_doc_count: int | None = None
     knowledge_chunk_count: int | None = None
     knowledge_skipped_extensions: list[str] | None = None
+    # embedding_status now includes ``up_to_date`` and ``partial`` in
+    # addition to ``skipped`` / ``success`` / ``failed`` so the extension
+    # can tell the difference between "nothing to do" and "silently broken".
     embedding_status: str = "skipped"
     embedding_code_count: int = 0
     embedding_knowledge_count: int = 0
+    embedding_code_unchanged: int = 0
+    embedding_knowledge_unchanged: int = 0
+    embedding_failed_batches: int = 0
+    embedding_total_batches: int = 0
     embedding_message: str = ""
 
 

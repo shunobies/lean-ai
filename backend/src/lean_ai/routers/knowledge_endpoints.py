@@ -47,9 +47,10 @@ async def index_knowledge_endpoint(request: IndexKnowledgeRequest):
     chunk_count = stats.get("chunk_count", 0)
     if settings.enable_embeddings and chunk_count > 0:
         try:
-            embedding_count = await generate_knowledge_embeddings(
+            embed_stats = await generate_knowledge_embeddings(
                 request.repo_root, llm_client,
             )
+            embedding_count = embed_stats.embedded
         except Exception as e:
             logger.warning("Knowledge embedding generation failed: %s", e)
 
