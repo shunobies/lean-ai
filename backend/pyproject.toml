@@ -78,6 +78,12 @@ packages = ["src/lean_ai"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Disable the cacheprovider plugin: back-to-back pytest runs hung at
+# process exit (futex wait) when the cache was enabled, even though the
+# test phase itself completed in ~3.8s. We don't use --lf / --ff / --nf
+# anywhere, so the cache provides no value in exchange for the flaky
+# exit behaviour.
+addopts = ["-p", "no:cacheprovider"]
 
 [tool.ruff]
 target-version = "py310"
