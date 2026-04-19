@@ -170,6 +170,53 @@ class DesignAndRisks(BaseModel):
     do not fit the structured fields."""
 
 
+# ── Phase 4 plan assembly schemas ───────────────────────────────────────────
+#
+# NameRegistryEntry is one canonical-name row per NEW entity introduced by
+# the plan. ExecutionPlan carries naming_conventions and name_registry as
+# typed lists rather than free-form text so post-generation validation can
+# reason over them and the assembly prompt can shrink.
+
+
+class NameRegistryEntry(BaseModel):
+    """Canonical names for ONE new entity introduced by the plan.
+
+    Populated by Phase 4. Injected into every step's system prompt during
+    execution via ``format_name_registry_for_prompt`` to prevent naming
+    drift across files. Only ``entity`` is required — every other field
+    defaults to empty and is only populated when applicable to the kind of
+    entity this row represents (e.g. a plain data class has no route).
+    """
+
+    entity: str
+    """Human-readable entity name (e.g. 'User Profile Page')."""
+
+    model_class: str = ""
+    """Exact class or type name (e.g. 'UserProfilePage')."""
+
+    module_namespace: str = ""
+    """Dotted module path (e.g. 'app.pages.user_profile')."""
+
+    import_stmt: str = ""
+    """Literal import statement other files should use."""
+
+    db_table: str = ""
+    """Table or collection name, if applicable."""
+
+    file_path: str = ""
+    """Repo-relative path to the file defining this entity."""
+
+    route_endpoint: str = ""
+    """HTTP route / endpoint, if applicable."""
+
+    registered_in: list[str] = []
+    """Files where this entity must be registered. Each entry here should
+    have a corresponding ``edit_file`` step in the plan."""
+
+    test_file: str = ""
+    """Test file path, if applicable."""
+
+
 # Tools valid in implementation plan steps (Phase 4 output).
 # Includes read_file (executor reads before editing), run_tests, run_lint,
 # format_code — only truly non-plan tools (list_directory, directory_tree,
@@ -282,19 +329,20 @@ class ExecutionPlan(BaseModel):
     decision — covers: problem being solved, approach taken, what load-bearing
     structures are being touched and why."""
 
-    naming_conventions: str = ""
-    """Naming conventions observed in existing code: variable casing,
-    function/method naming, class naming, file naming patterns,
-    import styles.  Extracted from files read during exploration."""
+    naming_conventions: list[NamingConvention] = []
+    """Naming conventions observed in existing code. Populated by Phase 4
+    as a typed list (category / pattern / source_file). Rendered to text
+    via ``format_naming_conventions_for_prompt`` when injected into
+    step-execution system prompts."""
 
-    name_registry: str = ""
-    """Canonical name mapping for every new entity introduced by this plan.
+    name_registry: list[NameRegistryEntry] = []
+    """Canonical name mapping for every NEW entity introduced by this plan.
 
-    Each entity lists its exact names across the stack: class/model name,
-    namespace/module, import path, table/collection name, file path,
-    route/endpoint, registration files, test file.  Populated by Phase 5
-    and injected into every step's system prompt to prevent naming
-    inconsistencies."""
+    Each entry carries the entity's names across the stack (class,
+    namespace, import path, table, file, route, registration files,
+    test file). Populated by Phase 4 and rendered to text via
+    ``format_name_registry_for_prompt`` when injected into per-step
+    system prompts to prevent naming drift."""
 
     steps: list[PlanStep]
     """Ordered list of steps to execute.  Each step is one tool call."""
@@ -311,6 +359,73 @@ class ExecutionPlan(BaseModel):
 
     test_strategy: str
     """How to verify the changes work (included in run_tests steps)."""
+
+    plan_validation_warnings: list[str] = []
+    """Non-blocking warnings from post-generation plan validation
+    (hallucinated paths, uncovered missing files, edit/create mismatches,
+    etc.). Populated by the Phase 4 validators and surfaced on the
+    extension approval screen so users can see them alongside the plan.
+    Empty when the plan validated cleanly."""
+
+
+def format_naming_conventions_for_prompt(
+    conventions: list[NamingConvention],
+) -> str:
+    """Render naming conventions as a prompt-friendly markdown table.
+
+    Returns empty string when the list is empty so callers can skip the
+    section cleanly.
+    """
+    if not conventions:
+        return ""
+    lines = ["| category | pattern | source_file |", "|---|---|---|"]
+    for nc in conventions:
+        lines.append(f"| {nc.category} | {nc.pattern} | {nc.source_file} |")
+    return "\n".join(lines)
+
+
+def format_name_registry_for_prompt(
+    entries: list[NameRegistryEntry],
+) -> str:
+    """Render the name registry in the text shape per-step prompts expect.
+
+    Matches the pre-structured template used by ``build_step_system_prompt``:
+
+        Entity "<Name>":
+          model/class: <...>
+          namespace/module: <...>
+          import: <...>
+          ...
+
+    Rows are included only when their field is populated — entities
+    without a route or DB table simply omit those lines. Returns empty
+    string when the list is empty.
+    """
+    if not entries:
+        return ""
+    blocks: list[str] = []
+    for entry in entries:
+        block = [f'Entity "{entry.entity}":']
+        if entry.model_class:
+            block.append(f"  model/class: {entry.model_class}")
+        if entry.module_namespace:
+            block.append(f"  namespace/module: {entry.module_namespace}")
+        if entry.import_stmt:
+            block.append(f"  import: {entry.import_stmt}")
+        if entry.db_table:
+            block.append(f"  table/collection: {entry.db_table}")
+        if entry.file_path:
+            block.append(f"  file: {entry.file_path}")
+        if entry.route_endpoint:
+            block.append(f"  route/endpoint: {entry.route_endpoint}")
+        if entry.registered_in:
+            block.append(
+                f"  registered in: {', '.join(entry.registered_in)}"
+            )
+        if entry.test_file:
+            block.append(f"  test: {entry.test_file}")
+        blocks.append("\n".join(block))
+    return "\n\n".join(blocks)
 
 
 def _render_step(
@@ -349,11 +464,13 @@ def plan_to_markdown(
 
     parts.append(f"## Scope\n\n{plan.scope}\n")
 
-    if plan.naming_conventions:
-        parts.append(f"## Naming Conventions\n\n{plan.naming_conventions}\n")
+    naming_text = format_naming_conventions_for_prompt(plan.naming_conventions)
+    if naming_text:
+        parts.append(f"## Naming Conventions\n\n{naming_text}\n")
 
-    if plan.name_registry:
-        parts.append(f"## Name Registry\n\n{plan.name_registry}\n")
+    registry_text = format_name_registry_for_prompt(plan.name_registry)
+    if registry_text:
+        parts.append(f"## Name Registry\n\n{registry_text}\n")
 
     if plan.tdd_test_steps:
         parts.append("## TEST PHASE (Expert Model)\n")

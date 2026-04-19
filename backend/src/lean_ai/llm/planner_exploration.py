@@ -4,6 +4,8 @@ Handles read-only tool execution, parallel fan-out/merge, and serial
 exploration paths. Extracted from planner.py for maintainability.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import time
@@ -29,17 +31,18 @@ from lean_ai.llm.tool_definitions import (
 
 if TYPE_CHECKING:
     from lean_ai.llm.facade import LLMClient
+    from lean_ai.llm.plan_schema import FileSummary
     from lean_ai.workflow.ws_dispatcher import WSMessageDispatcher
 
 logger = logging.getLogger(__name__)
 
 
 def _make_read_only_executor(
-    explorer: "LLMClient",
+    explorer: LLMClient,
     repo_root: str,
     session_id: str,
     ws: WebSocket | None,
-    dispatcher: "WSMessageDispatcher | None",
+    dispatcher: WSMessageDispatcher | None,
     small_ctx: bool,
 ) -> Callable:
     """Create a tool executor for read-only planning tools.
@@ -227,19 +230,24 @@ async def run_phase2_exploration(
     context: str,
     repo_root: str,
     session_id: str,
-    explorer: "LLMClient",
+    explorer: LLMClient,
     phase_max_tokens: int,
     ws: WebSocket | None,
-    dispatcher: "WSMessageDispatcher | None",
+    dispatcher: WSMessageDispatcher | None,
     on_content: Callable | None = None,
     on_thinking: Callable | None = None,
     on_tool_call: Callable | None = None,
     on_tool_result: Callable | None = None,
     on_metrics: Callable | None = None,
-) -> tuple[str, float]:
+) -> tuple[FileSummary | None, str, float]:
     """Run Phase 2: File identification + content reading.
 
-    Returns (file_identification_output, elapsed_seconds).
+    Returns ``(FileSummary | None, file_identification_markdown, elapsed)``.
+    The structured ``FileSummary`` is non-None only on the serial path
+    (``num_parallel=1``) where the synthesis pass succeeded. Parallel
+    mode returns ``None`` for the structured object since Phase 2a/2b
+    produce free-form text. Phase 4 validators skip cleanly when the
+    object is ``None``.
     """
     t0 = time.monotonic()
     small_ctx = settings._active_context_window <= 32768
@@ -258,6 +266,8 @@ async def run_phase2_exploration(
             ),
         },
     ]
+
+    file_summary_obj: FileSummary | None = None
 
     if settings.num_parallel >= 2:
         file_identification = await _run_parallel_exploration(
@@ -298,8 +308,10 @@ async def run_phase2_exploration(
 
         # Synthesis pass: coerce recorded observations + scratchpad +
         # journal + prose into a validated FileSummary, then render to
-        # markdown for the downstream {file_summary} contract.
-        file_identification = await _synthesize_file_summary(
+        # markdown for the downstream {file_summary} contract. We keep
+        # the structured object around so Phase 4 validators can do
+        # set-membership checks without re-parsing markdown.
+        file_summary_obj, file_identification = await _synthesize_file_summary(
             task=task,
             scope=scope,
             exploration_output=exploration_output,
@@ -311,7 +323,7 @@ async def run_phase2_exploration(
         )
 
     elapsed = time.monotonic() - t0
-    return file_identification, elapsed
+    return file_summary_obj, file_identification, elapsed
 
 
 async def _run_parallel_exploration(
@@ -321,7 +333,7 @@ async def _run_parallel_exploration(
     context: str,
     repo_root: str,
     session_id: str,
-    explorer: "LLMClient",
+    explorer: LLMClient,
     phase_max_tokens: int,
     ws: WebSocket | None,
     executor: Callable,
@@ -460,7 +472,7 @@ async def _run_serial_exploration(
     context: str,
     repo_root: str,
     session_id: str,
-    explorer: "LLMClient",
+    explorer: LLMClient,
     phase_max_tokens: int,
     ws: WebSocket | None,
     executor: Callable,
@@ -599,20 +611,23 @@ async def _synthesize_file_summary(
     exploration_output: str,
     repo_root: str,
     session_id: str,
-    explorer: "LLMClient",
+    explorer: LLMClient,
     phase_max_tokens: int,
     on_thinking: Callable | None = None,
-) -> str:
-    """Consolidate Phase 2 findings into a validated FileSummary and render
-    it to markdown for downstream phases.
+) -> tuple[FileSummary | None, str]:
+    """Consolidate Phase 2 findings into a validated FileSummary and
+    render it to markdown for downstream phases.
 
     Reads recorded observations, scratchpad, and journal, plus the
     exploration model's prose output, and coerces everything into a
-    ``FileSummary`` via ``chat_structured``. Returns the markdown-rendered
-    string that flows into Phase 3 / Phase 4 as ``{file_summary}``.
+    ``FileSummary`` via ``chat_structured``. Returns a tuple of
+    ``(FileSummary | None, markdown)`` — the structured object (or
+    ``None`` on synthesis failure) alongside the markdown that flows
+    into Phase 3 / Phase 4 as ``{file_summary}``. Phase 4's validators
+    use the structured form for path-set membership checks.
 
-    On structured-output failure, falls back to returning the raw
-    exploration output so the pipeline keeps moving.
+    On structured-output failure, falls back to ``(None, exploration_output)``
+    so the pipeline keeps moving.
     """
     import json as _json
 
@@ -674,7 +689,7 @@ async def _synthesize_file_summary(
             "output",
             exc_info=True,
         )
-        return exploration_output
+        return None, exploration_output
 
     logger.info(
         "Phase 2 synthesis: modify=%d create=%d reference=%d missing=%d "
@@ -687,10 +702,10 @@ async def _synthesize_file_summary(
         len(summary.assumptions_resolved),
     )
 
-    return _format_file_summary(summary)
+    return summary, _format_file_summary(summary)
 
 
-def _format_file_summary(summary: "FileSummary") -> str:  # noqa: F821
+def _format_file_summary(summary: FileSummary) -> str:
     """Render a FileSummary to the markdown shape downstream phases consume
     as ``{file_summary}`` — preserves the historical section names so Phase
     3 / Phase 4 prompts do not need to change.

@@ -15,7 +15,13 @@ from typing import TYPE_CHECKING
 from fastapi import WebSocket
 
 from lean_ai.config import settings
-from lean_ai.llm.plan_schema import ExecutionPlan, PlanStep, plan_to_markdown
+from lean_ai.llm.plan_schema import (
+    ExecutionPlan,
+    PlanStep,
+    format_name_registry_for_prompt,
+    format_naming_conventions_for_prompt,
+    plan_to_markdown,
+)
 from lean_ai.llm.tool_definitions import (
     build_implementation_tools,
     build_tdd_implementation_tools,
@@ -201,10 +207,16 @@ async def execute_plan(
     })
 
     # Build the system prompt once (shared across all steps)
+    naming_text = format_naming_conventions_for_prompt(
+        getattr(plan, "naming_conventions", []) or [],
+    )
+    name_registry_text = format_name_registry_for_prompt(
+        getattr(plan, "name_registry", []) or [],
+    )
     system_prompt = build_step_system_prompt(
         load_execution_context(repo_root),
-        naming_conventions=getattr(plan, "naming_conventions", ""),
-        name_registry=getattr(plan, "name_registry", ""),
+        naming_conventions=naming_text,
+        name_registry=name_registry_text,
     )
 
     # Callbacks for WebSocket progress + conversation logging.
@@ -250,10 +262,8 @@ async def execute_plan(
             fresh_ctx = load_execution_context(repo_root)
             fresh_sys = build_step_system_prompt(
                 fresh_ctx,
-                naming_conventions=getattr(
-                    plan, "naming_conventions", "",
-                ),
-                name_registry=getattr(plan, "name_registry", ""),
+                naming_conventions=naming_text,
+                name_registry=name_registry_text,
             )
             fresh_user = build_step_user_message(
                 step, completed_descriptions, total_steps,
@@ -563,8 +573,12 @@ async def _run_tdd_execution(
     test_system_prompt = build_tdd_test_writing_prompt(
         load_execution_context(repo_root),
         implementation_plan_md=plan_to_markdown(plan, include_context=False),
-        naming_conventions=getattr(plan, "naming_conventions", ""),
-        name_registry=getattr(plan, "name_registry", ""),
+        naming_conventions=format_naming_conventions_for_prompt(
+            getattr(plan, "naming_conventions", []) or [],
+        ),
+        name_registry=format_name_registry_for_prompt(
+            getattr(plan, "name_registry", []) or [],
+        ),
     )
 
     for step in plan.tdd_test_steps:
@@ -681,8 +695,12 @@ async def _run_tdd_execution(
 
     tdd_impl_prompt = build_tdd_step_system_prompt(
         load_execution_context(repo_root),
-        naming_conventions=getattr(plan, "naming_conventions", ""),
-        name_registry=getattr(plan, "name_registry", ""),
+        naming_conventions=format_naming_conventions_for_prompt(
+            getattr(plan, "naming_conventions", []) or [],
+        ),
+        name_registry=format_name_registry_for_prompt(
+            getattr(plan, "name_registry", []) or [],
+        ),
     )
     for step in plan.steps:
         impl_executor = make_tool_executor(

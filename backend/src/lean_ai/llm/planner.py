@@ -26,6 +26,7 @@ from lean_ai.llm.plan_schema import (
     IMPLEMENTATION_STEP_TOOLS,
     DesignAndRisks,
     ExecutionPlan,
+    FileSummary,
     MissingFile,
     VerificationPlan,
     plan_to_markdown,
@@ -228,21 +229,23 @@ async def create_plan(
     )
     logger.info("Planning Phase 2: File identification and reading")
 
-    file_identification, phase2_elapsed = await run_phase2_exploration(
-        task=task,
-        scope=scope,
-        context=context,
-        repo_root=repo_root,
-        session_id=session_id,
-        explorer=explorer,
-        phase_max_tokens=phase_max_tokens,
-        ws=ws,
-        dispatcher=dispatcher,
-        on_content=on_content,
-        on_thinking=on_thinking,
-        on_tool_call=on_tool_call,
-        on_tool_result=on_tool_result,
-        on_metrics=on_metrics,
+    file_summary_obj, file_identification, phase2_elapsed = (
+        await run_phase2_exploration(
+            task=task,
+            scope=scope,
+            context=context,
+            repo_root=repo_root,
+            session_id=session_id,
+            explorer=explorer,
+            phase_max_tokens=phase_max_tokens,
+            ws=ws,
+            dispatcher=dispatcher,
+            on_content=on_content,
+            on_thinking=on_thinking,
+            on_tool_call=on_tool_call,
+            on_tool_result=on_tool_result,
+            on_metrics=on_metrics,
+        )
     )
 
     phase_timings["phase_2_file_identification"] = phase2_elapsed
@@ -484,6 +487,61 @@ async def create_plan(
             len(plan.steps),
             [s.tool for s in plan.steps],
         )
+
+    # ── Phase 4 plan validation ────────────────────────────────────────
+    # Set-membership checks over structured Phase 2 + Phase 3 outputs.
+    # Non-blocking warnings are logged AND surfaced on the plan for the
+    # extension approval screen. Uncovered BLOCKING missing_files
+    # trigger a single auto-revision.
+    plan_warnings = _run_plan_validations(
+        plan, file_summary_obj, design_and_risks_obj,
+    )
+
+    blocking_uncovered = [
+        mf for mf in _uncovered_missing_files(plan, design_and_risks_obj)
+        if mf.blocking
+    ]
+    if blocking_uncovered:
+        logger.warning(
+            "Phase 4 plan validation — %d BLOCKING uncovered missing "
+            "file(s); triggering auto-revision",
+            len(blocking_uncovered),
+        )
+        feedback = (
+            "Phase 3 identified BLOCKING missing files that the plan "
+            "does not cover. Add a create_file or edit_file step for "
+            "each:\n"
+            + "\n".join(
+                f"- {mf.file_path}: {mf.purpose}"
+                for mf in blocking_uncovered
+            )
+        )
+        plan = await _revise_plan(
+            task=task,
+            revision_context=(
+                f"PREVIOUS PLAN (JSON):\n"
+                f"{plan.model_dump_json(indent=2)}\n\n"
+                f"USER FEEDBACK:\n{feedback}"
+            ),
+            llm_client=llm_client,
+            context=context,
+            ws=ws,
+            expert_llm_client=expert_llm_client,
+            on_thinking=on_thinking,
+        )
+        # Revision may re-introduce non-implementation tool steps —
+        # strip again, renumber, then re-validate. On the second pass,
+        # any still-uncovered blocking files fall through to warn-only.
+        plan.steps = [
+            s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS
+        ]
+        for i, step in enumerate(plan.steps, 1):
+            step.step_number = i
+        plan_warnings = _run_plan_validations(
+            plan, file_summary_obj, design_and_risks_obj,
+        )
+
+    plan.plan_validation_warnings = plan_warnings
 
     # Save Phase 4 outputs
     _save_debug_phase(
@@ -945,3 +1003,124 @@ def _format_missing_files(missing: list[MissingFile]) -> str:
         blocking = " [BLOCKING]" if m.blocking else ""
         rows.append(f"{i}. {m.file_path} — {m.purpose}{blocking}")
     return "\n".join(rows)
+
+
+# ── Phase 4 plan validation helpers ─────────────────────────────────────────
+#
+# All checks are set-membership against structured inputs from Phases 2 and
+# 3 — no regex, no parsing of LLM-generated prose. Warnings are logged and
+# also returned as a list so the caller can stash them on the plan for UI
+# surfacing.
+
+
+def _collect_known_paths(
+    file_summary: FileSummary | None,
+    dar: DesignAndRisks,
+) -> set[str]:
+    """Union of every file path the prior phases know about.
+
+    Returns an empty set when Phase 2 produced no structured output
+    (parallel path), which tells the caller to skip membership-based
+    checks cleanly rather than flag every path as invented.
+    """
+    if file_summary is None:
+        return set()
+    paths: set[str] = set()
+    for obs in file_summary.files_to_modify:
+        paths.add(obs.file_path)
+    for obs in file_summary.files_to_create:
+        paths.add(obs.file_path)
+    for obs in file_summary.files_read_for_context:
+        paths.add(obs.file_path)
+    for item in file_summary.missing_infrastructure:
+        paths.add(item.name)
+    for mf in dar.missing_files:
+        paths.add(mf.file_path)
+    return paths
+
+
+def _check_hallucinated_paths(
+    plan: ExecutionPlan,
+    known_paths: set[str],
+) -> list[str]:
+    """Flag any step.file_path that is not in the prior-phase path universe."""
+    if not known_paths:
+        return []
+    plan_paths = {s.file_path for s in plan.steps if s.file_path}
+    return [
+        f"invented path: {p}"
+        for p in sorted(plan_paths - known_paths)
+    ]
+
+
+def _uncovered_missing_files(
+    plan: ExecutionPlan,
+    dar: DesignAndRisks,
+) -> list[MissingFile]:
+    """Return MissingFile entries not covered by any plan step.
+
+    Returns the structured objects so the caller can branch on
+    ``.blocking`` (triggers auto-revision) versus non-blocking (warn only).
+    """
+    step_paths = {s.file_path for s in plan.steps}
+    return [
+        mf for mf in dar.missing_files
+        if mf.file_path not in step_paths
+    ]
+
+
+def _check_edit_create_consistency(
+    plan: ExecutionPlan,
+    file_summary: FileSummary | None,
+    dar: DesignAndRisks,
+) -> list[str]:
+    """Flag edit_file on unknown paths and create_file on existing paths."""
+    if file_summary is None:
+        return []
+    to_modify: set[str] = {
+        o.file_path for o in file_summary.files_to_modify
+    }
+    to_modify |= {
+        o.file_path for o in file_summary.files_read_for_context
+    }
+    to_create: set[str] = {
+        o.file_path for o in file_summary.files_to_create
+    }
+    to_create |= {mf.file_path for mf in dar.missing_files}
+    warnings: list[str] = []
+    for s in plan.steps:
+        if not s.file_path:
+            continue
+        if s.tool == "edit_file" and s.file_path not in to_modify:
+            warnings.append(
+                f"edit_file on unknown-to-modify path: {s.file_path}"
+            )
+        elif s.tool == "create_file" and s.file_path not in to_create:
+            warnings.append(
+                f"create_file on unknown-to-create path: {s.file_path}"
+            )
+    return warnings
+
+
+def _run_plan_validations(
+    plan: ExecutionPlan,
+    file_summary: FileSummary | None,
+    dar: DesignAndRisks,
+) -> list[str]:
+    """Run every validator, log each warning, and return the full list.
+
+    Shared between the pre- and post-revision passes so the logic stays
+    in one place.
+    """
+    warnings: list[str] = []
+    known = _collect_known_paths(file_summary, dar)
+    warnings.extend(_check_hallucinated_paths(plan, known))
+    warnings.extend(_check_edit_create_consistency(plan, file_summary, dar))
+    for mf in _uncovered_missing_files(plan, dar):
+        tag = " [BLOCKING]" if mf.blocking else ""
+        warnings.append(
+            f"uncovered missing file: {mf.file_path} — {mf.purpose}{tag}"
+        )
+    for w in warnings:
+        logger.warning("Phase 4 plan validation — %s", w)
+    return warnings

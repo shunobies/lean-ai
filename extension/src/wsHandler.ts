@@ -32,6 +32,21 @@ export function formatApprovalMessage(msg: Record<string, unknown>): string {
     const parts: string[] = [];
     parts.push("**Plan ready.** Approve to proceed, or type feedback to revise.\n");
 
+    // Plan validation warnings (Phase 4 set-membership checks). Surfaced
+    // above the summary so users see concerns before reading the plan.
+    const warnings = msg.plan_validation_warnings as string[] | undefined;
+    if (warnings && warnings.length > 0) {
+        const items = warnings
+            .map((w) => `<li>${escapeHtml(w)}</li>`)
+            .join("");
+        parts.push(
+            `<div class="plan-validation-warnings">` +
+            `<div class="pvw-title">\u26A0 Plan validation warnings (${warnings.length})</div>` +
+            `<ul>${items}</ul>` +
+            `</div>`,
+        );
+    }
+
     const userSummary = msg.user_summary as string | undefined;
     const plan = msg.plan;
 

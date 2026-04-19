@@ -248,6 +248,7 @@ async def _wait_for_approval(
     await ws_send(ws, "approval_required", {
         "plan": plan_md,
         "user_summary": plan.user_summary,
+        "plan_validation_warnings": list(plan.plan_validation_warnings),
     })
     revision_count = 0
 

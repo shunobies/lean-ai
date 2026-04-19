@@ -59,6 +59,8 @@ class ApprovalRequiredMessage(TypedDict, total=False):
     type: Literal["approval_required"]  # pyright: ignore[reportGeneralTypeIssues]
     plan: str
     plan_object: dict
+    user_summary: str
+    plan_validation_warnings: list[str]
 
 
 class _ApprovalRequiredBase(TypedDict):

@@ -540,6 +540,27 @@ export function getWebviewHtml(chatFontSize: number): string {
         font-size: 11px;
         opacity: 0.75;
     }
+    .plan-validation-warnings {
+        margin: 0 0 10px 0;
+        padding: 8px 10px;
+        border-left: 3px solid var(--vscode-editorWarning-foreground, #d4a94a);
+        background: var(--vscode-editorWarning-background, rgba(212, 169, 74, 0.08));
+        border-radius: 3px;
+        font-size: 12px;
+    }
+    .plan-validation-warnings .pvw-title {
+        font-weight: 600;
+        margin-bottom: 4px;
+        color: var(--vscode-editorWarning-foreground, #d4a94a);
+    }
+    .plan-validation-warnings ul {
+        margin: 0;
+        padding-left: 18px;
+    }
+    .plan-validation-warnings li {
+        margin: 2px 0;
+        line-height: 1.4;
+    }
 
     .thinking-details {
         margin: 4px 0;
