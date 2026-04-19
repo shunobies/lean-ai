@@ -22,17 +22,24 @@ const HEALTH_POLL_INTERVAL_MS = 1000;
 const HEALTH_POLL_MAX_ATTEMPTS = 30; // 30 seconds max wait
 const HEALTH_MONITOR_INTERVAL_MS = 20_000; // Check every 20 s
 // Generous per-probe timeout so a backend that is busy (e.g. running
-// embedding batches during /init) doesn't get misread as dead. A truly
-// dead backend surfaces as ECONNREFUSED within ms — see the fast-path
-// probe below.
+// embedding batches during /init, or waiting on an Ollama cold model
+// load) doesn't get misread as dead. A truly dead backend surfaces as
+// ECONNREFUSED within ms — see the fast-path probe below.
 const HEALTH_PROBE_TIMEOUT_MS = 30_000;
-// Fast probe used to distinguish a slow-but-alive backend from a crashed
-// one. Short timeout — if it succeeds we proceed; if it fails with
-// connection-refused we short-circuit to immediate restart.
+// Fast probe used to distinguish a slow-but-alive backend from a
+// crashed one. A 2 s attempt after a slow main probe; if it fails with
+// ECONNREFUSED/ECONNRESET the backend is genuinely gone and we
+// auto-restart. If it times out or succeeds, the backend is alive —
+// we never auto-restart on slow/timeout alone because killing a slow
+// process cannot make the work it's waiting on (e.g. Ollama loading
+// a model into VRAM) go any faster.
 const FAST_PROBE_TIMEOUT_MS = 2_000;
-// Number of consecutive failed probes required before auto-restart.
-// One failure is a hiccup; three across ~60 s is signal.
-const RESTART_AFTER_CONSECUTIVE_FAILURES = 3;
+// After this many milliseconds of continuous timeout-style failures
+// (i.e. not ECONNREFUSED), surface a one-time notification to the
+// user. Purely informational — the monitor never auto-restarts on a
+// slow backend. 3 minutes covers the biggest reasonable cold-load
+// scenario (8B embedding model on a slow disk).
+const UNRESPONSIVE_NOTIFY_THRESHOLD_MS = 180_000;
 
 let serverProcess: ChildProcess | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
@@ -45,7 +52,12 @@ let _managedInstall: BackendInstallResult | null | undefined;
 let healthMonitorInterval: NodeJS.Timeout | undefined;
 let monitorServerDownNotified = false; // guards one-time "server down" notification
 let monitorRestartInProgress = false;  // prevents concurrent restart attempts
-let monitorConsecutiveFailures = 0;    // tracks threshold before auto-restart
+// Timestamp of the first continuous slow/timeout failure in the
+// current streak. Reset on every successful probe. Used purely to
+// decide when to surface the "backend is unresponsive" notification —
+// never gates restart, which only fires on confirmed ECONNREFUSED.
+let monitorUnresponsiveSinceMs: number | undefined;
+let monitorUnresponsiveNotified = false;
 
 function getConfig() {
     const config = vscode.workspace.getConfiguration("lean-ai");
@@ -228,7 +240,8 @@ function startHealthMonitor(): void {
     stopHealthMonitor();
     monitorServerDownNotified = false;
     monitorRestartInProgress = false;
-    monitorConsecutiveFailures = 0;
+    monitorUnresponsiveSinceMs = undefined;
+    monitorUnresponsiveNotified = false;
 
     const { backendUrl, autoStart } = getConfig();
     if (!autoStart) {
@@ -242,12 +255,8 @@ function startHealthMonitor(): void {
             return; // A restart is already in flight — skip this tick
         }
 
-        // Main probe — generous timeout so a backend that's busy (e.g.
-        // running embedding batches during /init) doesn't get misread
-        // as dead. The backend's ``busy`` field is still returned and
-        // visible to humans inspecting the health endpoint directly;
-        // the monitor itself only needs the 200 OK to know the backend
-        // is alive.
+        // Main probe — generous timeout so a busy backend (embedding
+        // batches, Ollama cold-load, etc.) isn't misread as dead.
         let isUp = false;
         let probeError: unknown = undefined;
         try {
@@ -260,8 +269,10 @@ function startHealthMonitor(): void {
         }
 
         if (isUp) {
-            // Successful probe — reset failure counter and restore notification state.
-            monitorConsecutiveFailures = 0;
+            // Successful probe — clear unresponsive state, restore
+            // notification state.
+            monitorUnresponsiveSinceMs = undefined;
+            monitorUnresponsiveNotified = false;
             if (monitorServerDownNotified) {
                 monitorServerDownNotified = false;
                 channel.appendLine("[Lean AI] Backend reconnected.");
@@ -270,17 +281,22 @@ function startHealthMonitor(): void {
             return;
         }
 
-        // Probe failed. Distinguish timeout (slow but alive) from
-        // connection-refused (definitely dead) via a fast-path probe.
+        // Probe failed. Distinguish "backend is slow but alive" from
+        // "backend process is gone" via a fast-path probe. Only the
+        // latter (ECONNREFUSED/ECONNRESET) is an auto-restart trigger —
+        // killing a slow process doesn't make whatever it's waiting
+        // on (Ollama model load, heavy embedding batch) go any faster.
         let isDeadFast = false;
         try {
-            await fetch(`${backendUrl}/api/health`, {
+            const resp = await fetch(`${backendUrl}/api/health`, {
                 signal: AbortSignal.timeout(FAST_PROBE_TIMEOUT_MS),
             });
-            // If the fast probe somehow succeeds, the backend is back —
-            // treat as transient; skip restart this tick.
-            monitorConsecutiveFailures = 0;
-            return;
+            if (resp.ok) {
+                // Fast probe succeeded — backend recovered mid-tick.
+                monitorUnresponsiveSinceMs = undefined;
+                monitorUnresponsiveNotified = false;
+                return;
+            }
         } catch (fastErr) {
             const code =
                 (fastErr as NodeJS.ErrnoException | undefined)?.code
@@ -291,58 +307,86 @@ function startHealthMonitor(): void {
             }
         }
 
-        monitorConsecutiveFailures += 1;
         if (isDeadFast) {
-            // Definitely dead — restart immediately without waiting for the
-            // consecutive-failure threshold.
-            monitorConsecutiveFailures = RESTART_AFTER_CONSECUTIVE_FAILURES;
+            // Confirmed dead → auto-restart (managedPort) or one-time
+            // notification (external backend).
             channel.appendLine(
-                "[Lean AI] Health monitor: backend process is not reachable (connection refused).",
+                "[Lean AI] Health monitor: backend process unreachable (connection refused).",
             );
-        } else {
-            channel.appendLine(
-                `[Lean AI] Health probe failed ` +
-                `(${monitorConsecutiveFailures}/${RESTART_AFTER_CONSECUTIVE_FAILURES}) ` +
-                `— probe error: ${(probeError as Error)?.name ?? probeError}`,
-            );
-        }
-
-        if (monitorConsecutiveFailures < RESTART_AFTER_CONSECUTIVE_FAILURES) {
-            return; // Waiting for the backend to recover on its own.
-        }
-
-        if (managedPort) {
-            // We own the server — restart it automatically.
-            monitorRestartInProgress = true;
-            channel.appendLine("[Lean AI] Health monitor: restarting backend...");
-            startBackend()
-                .catch((err) => {
-                    channel.appendLine(`[Lean AI] Restart attempt failed: ${err}`);
-                })
-                .finally(() => {
-                    monitorRestartInProgress = false;
-                    monitorConsecutiveFailures = 0;
+            monitorUnresponsiveSinceMs = undefined;
+            monitorUnresponsiveNotified = false;
+            if (managedPort) {
+                monitorRestartInProgress = true;
+                channel.appendLine("[Lean AI] Health monitor: restarting backend...");
+                startBackend()
+                    .catch((err) => {
+                        channel.appendLine(`[Lean AI] Restart attempt failed: ${err}`);
+                    })
+                    .finally(() => {
+                        monitorRestartInProgress = false;
+                    });
+            } else if (!monitorServerDownNotified) {
+                monitorServerDownNotified = true;
+                channel.appendLine("[Lean AI] Health monitor: external backend no longer available.");
+                vscode.window.showWarningMessage(
+                    "Lean AI: The backend server stopped. The window that started it may have been closed.",
+                    "Start Backend Here",
+                ).then(async (choice) => {
+                    if (choice === "Start Backend Here") {
+                        monitorRestartInProgress = true;
+                        try {
+                            await startBackend();
+                        } finally {
+                            monitorRestartInProgress = false;
+                        }
+                    }
                 });
-        } else if (!monitorServerDownNotified) {
-            // We don't own the server — show one-time notification.
-            monitorServerDownNotified = true;
-            channel.appendLine("[Lean AI] Health monitor: external backend no longer available.");
+            }
+            return;
+        }
+
+        // Slow/timeout failure — do NOT auto-restart. Track duration
+        // and surface a one-time notification after the threshold.
+        const now = Date.now();
+        if (monitorUnresponsiveSinceMs === undefined) {
+            monitorUnresponsiveSinceMs = now;
+        }
+        const unresponsiveForMs = now - monitorUnresponsiveSinceMs;
+        const unresponsiveForSec = Math.round(unresponsiveForMs / 1000);
+        const probeName = (probeError as Error)?.name ?? "unknown";
+        channel.appendLine(
+            `[Lean AI] Health probe slow/timeout (${unresponsiveForSec}s, ${probeName}). ` +
+            "Backend is alive but unresponsive — likely busy (model load, indexing, etc.). " +
+            "No restart; waiting.",
+        );
+
+        if (
+            unresponsiveForMs >= UNRESPONSIVE_NOTIFY_THRESHOLD_MS
+            && !monitorUnresponsiveNotified
+        ) {
+            monitorUnresponsiveNotified = true;
+            const mins = Math.round(unresponsiveForMs / 60_000);
             vscode.window.showWarningMessage(
-                "Lean AI: The backend server stopped. The window that started it may have been closed.",
-                "Start Backend Here",
+                `Lean AI: The backend has been unresponsive for ${mins} minute(s). ` +
+                "This is usually a model cold-load or heavy indexing work. " +
+                "Check the Output channel for details.",
+                "Open Output Channel",
+                "Restart Backend",
             ).then(async (choice) => {
-                if (choice === "Start Backend Here") {
+                if (choice === "Open Output Channel") {
+                    channel.show(true);
+                } else if (choice === "Restart Backend" && managedPort) {
                     monitorRestartInProgress = true;
                     try {
                         await startBackend();
                     } finally {
                         monitorRestartInProgress = false;
-                        monitorConsecutiveFailures = 0;
+                        monitorUnresponsiveSinceMs = undefined;
+                        monitorUnresponsiveNotified = false;
                     }
                 }
             });
         }
-
     }, HEALTH_MONITOR_INTERVAL_MS);
 }
 

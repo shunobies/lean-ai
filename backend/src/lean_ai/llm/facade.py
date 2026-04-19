@@ -318,9 +318,17 @@ class LLMClient:
             )
 
         # Warm-up call — triggers cold model load if needed.
+        # Tag the call with ``ollama.warmup`` in the runtime_state
+        # registry so ``/api/health`` reports what the backend is
+        # waiting on. Large embedding models can take minutes to load
+        # from cold disk; the tag lets extension-side tooling and
+        # humans distinguish "alive but warming" from "dead".
+        from lean_ai.runtime_state import busy
+
         try:
             logger.info("Warming up embedding model '%s'…", embed_model)
-            result = await self._ollama.embed(["test"], model=embed_model)
+            with busy("ollama.warmup"):
+                result = await self._ollama.embed(["test"], model=embed_model)
             if result:
                 return True, embed_model
             return False, f"Embedding model '{embed_model}' returned empty result"
