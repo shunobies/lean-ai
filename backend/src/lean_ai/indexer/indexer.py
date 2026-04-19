@@ -210,10 +210,28 @@ async def generate_embeddings(
     the producer sends batches to Ollama while the consumer writes
     completed embeddings to the ``EmbeddingStore``.
 
+    Registers ``embeddings.code`` on the runtime-state busy set while
+    running so extension-side health monitors treat slow ``/api/health``
+    responses during this call as expected rather than as a dead
+    backend.
+
     Args:
         batch_size: Chunks per Ollama embed call.  ``0`` (default) uses
             adaptive sizing via ``llm_client.compute_embedding_batch_size``.
     """
+    from lean_ai.runtime_state import busy
+
+    with busy("embeddings.code"):
+        return await _generate_embeddings_inner(
+            repo_root, llm_client, batch_size,
+        )
+
+
+async def _generate_embeddings_inner(
+    repo_root: str,
+    llm_client,
+    batch_size: int,
+) -> int:
     import asyncio
     import hashlib
 
@@ -280,6 +298,10 @@ async def generate_embeddings(
 
     async def _producer():
         for i in range(0, total_to_embed, batch_size):
+            # Yield to the event loop so /api/health and other handlers
+            # get scheduled between batches — keeps the extension's
+            # health probe responsive during long embedding runs.
+            await asyncio.sleep(0)
             batch = to_embed[i : i + batch_size]
             batch_ids = [cid for cid, _, _ in batch]
             batch_texts = [t for _, t, _ in batch]

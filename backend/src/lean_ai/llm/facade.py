@@ -251,7 +251,12 @@ class LLMClient:
         Returns:
             Batch size clamped to ``[16, 1024]``.
         """
-        min_batch, max_batch, fallback = 16, 1024, 256
+        # Reduced from 1024 to 256 to cap worst-case batch duration.
+        # Larger batches on big embedding models (e.g. qwen3-embedding:8b)
+        # were taking long enough that the extension's health monitor
+        # would time out mid-batch and restart the backend. Users on
+        # fast hardware can still override via LEAN_AI_EMBEDDING_BATCH_SIZE.
+        min_batch, max_batch, fallback = 16, 256, 128
 
         # Manual override.
         if settings.embedding_batch_size > 0:

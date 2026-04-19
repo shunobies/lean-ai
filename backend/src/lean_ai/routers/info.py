@@ -135,10 +135,22 @@ async def inline_predict(request: InlinePredictRequest):
 
 @info_router.get("/health")
 async def health():
-    """Health check."""
-    from lean_ai.llm.vision import is_vision_available
+    """Health check.
 
-    result = {"status": "ok", "vision_available": is_vision_available()}
+    The ``busy`` field lists any long-running tasks currently in flight
+    (e.g. ``embeddings.code`` during ``/init``). Extension-side health
+    monitors should use it to skip automatic restarts when a probe
+    response comes back slow — slow while ``busy`` is non-empty is
+    expected, not a failure.
+    """
+    from lean_ai.llm.vision import is_vision_available
+    from lean_ai.runtime_state import current_busy
+
+    result = {
+        "status": "ok",
+        "vision_available": is_vision_available(),
+        "busy": current_busy(),
+    }
     try:
         from lean_ai.voice.availability import voice_status
         result.update(voice_status())
