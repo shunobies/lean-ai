@@ -105,14 +105,23 @@ User Input
 │  Planning Phase 1: Scope Analysis                                │
 │  Model: request (or primary fallback)                            │
 │                                                                  │
-│  Tools: NONE (single LLM call via chat_raw)                      │
+│  Tools: restricted read-only subset (via chat_with_tools)        │
+│    grep_files, read_file, list_directory,                        │
+│    query_project_context, search_knowledge, task_complete        │
+│  Budget: LEAN_AI_PLAN_PHASE1_MAX_TURNS (default 5)               │
+│  text_only_exit_count=1 — single text response exits loop        │
+│                                                                  │
 │  State: Memories injected (read-only, from memory index)         │
 │                                                                  │
 │  Input: task + full context + session memories (2% budget)       │
-│  Output: scope text (what to change, boundaries)                 │
+│  Output: 8-section scope document:                               │
+│    PROBLEM / PURPOSE, DELIVERABLES, IN SCOPE, OUT OF SCOPE,      │
+│    DOWNSTREAM CONSUMERS, ASSUMPTIONS (with verification hints),  │
+│    SUCCESS CRITERIA, RISKS                                       │
 │                                                                  │
-│  ⚠ No tool use — memories are injected but scope analysis is    │
-│    a single LLM call, not a multi-turn session                   │
+│  Crystal-clear tasks exit with zero tool calls via the           │
+│  text_only_exit_count=1 setting. Tools are used only to resolve  │
+│  genuine ambiguity in the task description.                      │
 └──────────────────────────────────────────────────────────────────┘
          │
          ▼
@@ -150,20 +159,45 @@ User Input
 │  ┌─ IF num_parallel == 1 ─────────────────────────────────────┐  │
 │  │  SERIAL PATH                                                │  │
 │  │                                                              │  │
-│  │  Tools: PLANNING_TOOLS_WITH_SCRATCHPAD                      │  │
-│  │    read_file, grep_files, list_directory, directory_tree     │  │
-│  │    search_internet, fetch_url, search_wiki*, fetch_wiki*    │  │
-│  │    update_scratchpad, add_journal_entry, task_complete       │  │
+│  │  Tools: Phase-2-specific filter of                          │  │
+│  │    build_planning_tools_with_scratchpad()                   │  │
+│  │    • DROPPED: search_knowledge, list_knowledge_documents   │  │
+│  │      (noise for file identification)                         │  │
+│  │    • ADDED:   record_file_observation                        │  │
+│  │    • KEPT:    read_file, grep_files, list_directory,        │  │
+│  │               directory_tree, query_project_context,        │  │
+│  │               search_internet, fetch_url,                    │  │
+│  │               search_wiki*, fetch_wiki*,                    │  │
+│  │               update_scratchpad, add_journal_entry,         │  │
+│  │               task_complete                                  │  │
+│  │                                                              │  │
+│  │  User prompt opens with a STRICT ASSUMPTIONS checklist      │  │
+│  │  walking every Phase 1 verification hint before general     │  │
+│  │  exploration.                                                │  │
 │  │                                                              │  │
 │  │  State:                                                      │  │
+│  │    ✅ Observations (.lean_ai/observations/{id}.json)        │  │
+│  │       — upserted by record_file_observation, re-injected    │  │
+│  │         on context refresh                                   │  │
 │  │    ✅ Scratchpad — available, re-injected on refresh         │  │
-│  │    ✅ Journal — available, re-injected on refresh            │  │
+│  │    ✅ Journal    — available, re-injected on refresh         │  │
 │  │    ✅ Context refresh callback — rebuilds from disk          │  │
 │  │    ✅ Existing pad/journal injected at start (recovery)      │  │
-│  │    ✅ Task reminder every 15 turns includes pad/journal hint │  │
+│  │                                                              │  │
+│  │  SYNTHESIS PASS (after the loop exits):                     │  │
+│  │    _synthesize_file_summary → chat_structured with          │  │
+│  │    planning.exploration_synthesis_system coerces the        │  │
+│  │    observations + scratchpad + journal + prose into a       │  │
+│  │    validated FileSummary Pydantic model:                    │  │
+│  │      files_to_modify, files_to_create,                      │  │
+│  │      files_read_for_context, missing_infrastructure,        │  │
+│  │      verified_references, assumptions_resolved, notes       │  │
 │  └──────────────────────────────────────────────────────────────┘  │
 │                                                                  │
-│  Output: file_identification text (file list + analysis)         │
+│  Output (serial): (FileSummary, markdown, elapsed) tuple         │
+│    • FileSummary propagates to Phase 4 validators                 │
+│    • markdown is what Phase 3/4 prompts see as {file_summary}     │
+│  Output (parallel): (None, raw_text, elapsed) — validators skip   │
 └──────────────────────────────────────────────────────────────────┘
          │
          ▼
@@ -173,22 +207,45 @@ User Input
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  Planning Phase 3: Design Synthesis                              │
+│  Planning Phase 3: Design Synthesis (TWO-PASS)                   │
 │  Model: expert (or primary fallback)                             │
 │                                                                  │
-│  Tools: DESIGN_TOOLS                                             │
-│    search_internet, fetch_url, search_wiki*, fetch_wiki*         │
-│    task_complete                                                  │
+│  PASS 1 — chat_with_tools exploration/verification:              │
+│    Tools: build_design_tools()                                   │
+│      search_internet, fetch_url, search_knowledge,               │
+│      list_knowledge_documents, search_wiki*, fetch_wiki*,        │
+│      task_complete                                                │
+│    max_turns=15, text_only_exit_count=1                          │
 │                                                                  │
-│  State: NONE (no scratchpad/journal access)                      │
+│    The prompt (planning.design_system) calls out                 │
+│    FileSummary.key_snippets as AUTHORITATIVE transcriptions —    │
+│    the expert trusts them rather than re-deriving signatures.    │
+│    Tools are used only for verifying external dependencies NOT   │
+│    already in FileSummary.verified_references.                   │
 │                                                                  │
-│  Input: scope + file_identification + project_context.md         │
-│  Output: naming conventions + change design + gap analysis       │
+│    Output: free-form exploration prose.                          │
 │                                                                  │
-│  ⚠ OBSERVATION: Phase 3 receives the Phase 2 output as text.   │
-│    Scratchpad/journal written in Phase 2 are NOT injected here.  │
-│    Phase 2 findings only flow via the text output parameter.     │
-│    This is by design — expert model gets a clean context.        │
+│  PASS 2 — chat_structured synthesis:                             │
+│    _synthesize_design_and_risks →                                │
+│      planning.design_synthesis_system coerces Pass 1 prose +     │
+│      inputs into a DesignAndRisks Pydantic model:                │
+│        naming_conventions (list[NamingConvention]),              │
+│        change_designs (list[ChangeDesign]),                      │
+│        missing_files (list[MissingFile]),                        │
+│        dependency_order (list[DependencyOrder]),                 │
+│        critical_risks (list[CriticalRisk]),                      │
+│        citations (list[VerifiedReference]),                      │
+│        notes                                                      │
+│                                                                  │
+│  State: NONE (no scratchpad/journal injection — removed)         │
+│    FileSummary from Phase 2 is the authoritative bridge.         │
+│                                                                  │
+│  Input: task + scope + project_context + FileSummary markdown    │
+│  Output: (DesignAndRisks, rendered markdown, missing_files text) │
+│                                                                  │
+│  The old _extract_missing_files secondary LLM call is gone —     │
+│  {missing_files} for Phase 4 is derived deterministically from   │
+│  DesignAndRisks.missing_files via _format_missing_files.         │
 └──────────────────────────────────────────────────────────────────┘
          │
          ▼
@@ -204,8 +261,28 @@ User Input
 │  Tools: NONE (single structured output call via chat_structured) │
 │  State: NONE                                                     │
 │                                                                  │
-│  Input: scope + file_identification + design + project_context   │
-│  Output: ExecutionPlan JSON (steps with tool/file/instruction)   │
+│  Input: scope + FileSummary markdown + DesignAndRisks markdown + │
+│         missing_files (bullet list) + project_context            │
+│  Output: ExecutionPlan schema with:                              │
+│    naming_conventions (list[NamingConvention] — structured now), │
+│    name_registry (list[NameRegistryEntry] — structured now),     │
+│    steps (list[PlanStep]),                                       │
+│    plan_validation_warnings (list[str]),                         │
+│    affected_files, test_strategy, etc.                           │
+│                                                                  │
+│  POST-GENERATION VALIDATION (pure Python, no regex):             │
+│    _check_hallucinated_paths — step.file_path not in the         │
+│      known-paths set built from FileSummary + DesignAndRisks     │
+│    _uncovered_missing_files — DesignAndRisks.missing_files       │
+│      entries not covered by any step                             │
+│    _check_edit_create_consistency — edit_file on unknown-to-     │
+│      modify paths, create_file on unknown-to-create paths        │
+│                                                                  │
+│  Warnings log AND append to plan.plan_validation_warnings,       │
+│  which the approval_required WebSocket message carries through   │
+│  to the extension's approval UI. BLOCKING uncovered missing_files│
+│  trigger a single _revise_plan auto-revision round; any still    │
+│  uncovered on the second pass fall through to warn-only.         │
 └──────────────────────────────────────────────────────────────────┘
          │
          ▼
@@ -221,9 +298,28 @@ User Input
 │  Tools: NONE (single structured output call via chat_structured) │
 │  State: NONE                                                     │
 │                                                                  │
-│  Input: plan JSON + test_command                                 │
+│  Prompt selection (registry-backed):                             │
+│    - planning.verification_user_normal  → tests + run_tests step │
+│    - planning.verification_user_tdd     → tests only, no run_tests
+│                                                                  │
+│  Structured prompt inputs (pure Python helpers):                 │
+│    _build_verification_targets(FileSummary, DesignAndRisks)      │
+│      → bullet list of files needing coverage derived from        │
+│        DesignAndRisks.change_designs + FileSummary.files_to_create
+│    _build_security_concerns(DesignAndRisks)                      │
+│      → bullet list of critical_risks with severity + mitigation  │
+│                                                                  │
+│  Input: plan JSON + test_command + FileSummary object +          │
+│         DesignAndRisks object + rendered file_summary markdown   │
 │  Output: plan with appended test steps + run_tests               │
-│          (TDD: separate tdd_test_steps list)                     │
+│          (TDD: separate tdd_test_steps list, no run_tests)       │
+│                                                                  │
+│  POST-GENERATION VALIDATION:                                     │
+│    _check_test_path_conventions — flags create_file steps whose  │
+│    paths don't contain a test token (test/spec, case-insensitive)│
+│    AND don't match a directory prefix learned from Phase 2's     │
+│    files_read_for_context. Warnings append to                    │
+│    plan.plan_validation_warnings via the Phase 4 surfacing path. │
 └──────────────────────────────────────────────────────────────────┘
          │
          ▼
@@ -526,14 +622,18 @@ re-injecting state. More importantly, the LLM doesn't see what the main
 execution recorded in the scratchpad (architecture decisions, patterns found)
 which could help it reason about why validation failed.
 
-### Issue 2: Parallel Phase 2 — No Scratchpad/Journal/Refresh
-**Location:** `planner_exploration.py:256-360`
-**Severity:** Low (by design)
+### Issue 2: Parallel Phase 2 — No Scratchpad/Journal/Refresh/FileSummary
+**Location:** `planner_exploration.py` parallel path
+**Severity:** Low (deferred — see `incomplete.md`)
 **Description:** Parallel Phase 2 (2a scan + 2b deep-dive) has no scratchpad,
-journal, or context refresh callbacks. The serial path has all three. This is
-intentional — parallel workers are short-lived and independent. But it means
-parallel exploration at small context windows loses mid-exploration findings
-if a worker hits the context limit.
+journal, or context refresh callbacks AND does not run the
+`_synthesize_file_summary` pass — it produces free-form text output and
+returns `None` for the structured `FileSummary`. Downstream Phase 4
+validators (`_check_hallucinated_paths`, `_check_edit_create_consistency`)
+skip cleanly when the object is `None`. Parallel mode is deferred for
+hardening because the primary-audience workflow runs `num_parallel=1`. See
+`incomplete.md` for the parallel-path improvement punch list (regex-based
+file-path extraction in 2a, non-sharing deep-dive workers, etc.).
 
 ### Issue 3: Fix Mode Investigation — No Context Refresh
 **Location:** `fix_mode.py` — investigation phase
@@ -545,15 +645,18 @@ available, so findings can be persisted to disk — but they won't be
 re-injected if context refreshes. The implementation phase that follows DOES
 have a refresh callback and will pick up the disk state.
 
-### Issue 4: Phase 2→3 Scratchpad Handoff
+### Issue 4: Phase 2→3 Bridge — RESOLVED
 **Location:** `planner.py` — transition between Phase 2 and Phase 3
-**Severity:** Informational
-**Description:** Phase 2 (serial) can write to scratchpad/journal, but Phase 3
-does not read them. Phase 3 only receives the Phase 2 text output as a
-parameter. This is by design (expert model gets a clean context), but means
-any nuanced observations the Phase 2 model recorded in the scratchpad that
-didn't make it into the final output text are lost. The journal persists on
-disk but is never read by phases 3-5.
+**Severity:** Resolved
+**Description:** Originally Phase 2 (serial) could write to scratchpad/journal
+but Phase 3 did not read them. Resolved by the Phase 2/3 hardening: Phase 2
+now produces a structured `FileSummary` (with `key_snippets` carrying
+authoritative file transcriptions), which is rendered to markdown and passed
+to Phase 3 as `{file_summary}` and also propagated as a Pydantic object for
+Phase 4 validators. Phase 3 no longer needs scratchpad/journal access — the
+`FileSummary` is the authoritative bridge. The old ad-hoc scratchpad/journal
+injection into Phase 3's message list was removed in the Phase 3 hardening
+pass.
 
 ### Issue 5: Step Artifact Eviction
 **Location:** `executor.py:312-317`

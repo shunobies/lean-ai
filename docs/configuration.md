@@ -389,6 +389,12 @@ The refiner only activates when using cloud providers (OpenAI, Anthropic, or Lea
 | `LEAN_AI_LOOP_DETECTION_THRESHOLD` | `3` | Consecutive identical tool calls before warning (`0` = off) |
 | `LEAN_AI_REFRESH_THRESHOLD` | `0.7` | Refresh context at this fraction of context window usage |
 
+## Planning
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEAN_AI_PLAN_PHASE1_MAX_TURNS` | `5` | Max tool-calling turns for Phase 1 (scope analysis). Phase 1 uses `chat_with_tools` with a restricted read-only tool set (`grep_files`, `read_file`, `list_directory`, `query_project_context`, `search_knowledge`, `task_complete`). `text_only_exit_count=1` means crystal-clear tasks can exit with zero tool calls — the ceiling is only hit when the model genuinely needs to verify assumptions. Set to `0` to disable tool use and fall back to a single-turn scope call. |
+
 ## Tool Execution
 
 | Variable | Default | Description |

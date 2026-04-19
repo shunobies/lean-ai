@@ -1168,33 +1168,43 @@ async def assess_clarity(task: str, llm_client: LLMClient, context: str = "") ->
 
 ### 7.3 Phase 1: Scope Analysis
 
-- **Model:** Primary
-- **Method:** `chat_raw()` with `PLAN_SYSTEM_PROMPT`
-- **Input:** Task + codebase context
-- **Output:** 300-500 word scope analysis covering:
-  - What needs to change
-  - Data flow and downstream consumers
-  - What's out of scope
-  - Key assumptions
-  - Patterns to follow
-- **Streaming:** Content + thinking tokens forwarded via callbacks
+- **Model:** Request (or primary fallback)
+- **Method:** `chat_with_tools()` with a restricted read-only tool subset
+- **Tools available:** `grep_files`, `read_file`, `list_directory`, `query_project_context`, `search_knowledge`, `task_complete`
+- **Budget:** `LEAN_AI_PLAN_PHASE1_MAX_TURNS` (default 5), `text_only_exit_count=1`
+- **Input:** Task + codebase context + session memories (budget-gated at 2% of context window)
+- **Output:** 8-section scope document:
+  - `PROBLEM / PURPOSE` — restates the task + why it matters
+  - `DELIVERABLES` — observable outcomes, not file changes
+  - `IN SCOPE` — concrete greppable entities being created or modified
+  - `OUT OF SCOPE` — tempting-adjacent areas explicitly excluded
+  - `DOWNSTREAM CONSUMERS` — categories of files that reference modified entities
+  - `ASSUMPTIONS (with verification hints)` — each paired with how Phase 2 can falsify it
+  - `SUCCESS CRITERIA` — falsifiable done conditions
+  - `RISKS` — scope-level misunderstandings the team should pressure-test
+- **Prompt:** `planning.scope_system` + `planning.scope_user`, both with a `{PHASE1_MAX_TURNS}` template variable synced to the setting.
+- **Streaming:** Content, thinking, and tool call/result events forwarded via callbacks
 
-### 7.4 Phase 2: File Identification with Tool-Assisted Exploration
+### 7.4 Phase 2: File Identification with Deterministic Capture
 
-- **Model:** Primary
-- **Method:** `chat_with_tools()` with read-only PLANNING_TOOLS
-- **Tools available:** `read_file`, `grep_files`, `list_directory`, `directory_tree`, `task_complete`
+- **Model:** Request (or primary fallback)
+- **Method:** `chat_with_tools()` followed by a `chat_structured` synthesis pass
+- **Tools available (Phase-2-specific filter):** `read_file`, `grep_files`, `list_directory`, `directory_tree`, `query_project_context`, `search_internet`, `fetch_url`, `search_wiki*`, `fetch_wiki*`, `update_scratchpad`, `add_journal_entry`, `record_file_observation`, `task_complete`. KB tools (`search_knowledge`, `list_knowledge_documents`) are **dropped** from this phase — noise for file identification.
 - **Input:** Task + scope + codebase context
-- **Output:** Structured file identification:
-  - FILES TO MODIFY (with relevant sections, 15-25 lines per file)
-  - FILES TO CREATE (with patterns to follow)
-  - FILES READ FOR CONTEXT
-  - MISSING INFRASTRUCTURE
+- **Checklist opener:** Phase 2's user prompt starts with a strict ASSUMPTIONS checklist that walks every verification hint from Phase 1's scope before general exploration.
+- **Deterministic capture:** The model calls `record_file_observation(file_path, role, reason, relevant_sections, key_snippets)` for every relevant file. Observations are upserted by `file_path` into `.lean_ai/observations/{session_id}.json`. No reliance on prose transcription.
+- **Synthesis pass:** After the exploration loop exits, `_synthesize_file_summary` (prompt key `planning.exploration_synthesis_system`) coerces the accumulated observations + scratchpad + journal + prose into a validated `FileSummary` Pydantic model:
+  - `files_to_modify`, `files_to_create`, `files_read_for_context` (each `list[FileObservation]`)
+  - `missing_infrastructure` (`list[MissingItem]`)
+  - `verified_references` (`list[VerifiedReference]`)
+  - `assumptions_resolved` (`list[AssumptionStatus]`) — one per Phase 1 ASSUMPTION
+  - `notes` (free-form catch-all)
+- **Return value:** `(FileSummary | None, markdown, elapsed)` — the structured object propagates to Phase 4 validators; the markdown feeds the `{file_summary}` template variable in Phase 3/4. Parallel path returns `None` for the structured object; validators skip cleanly.
 - **Key directives:**
   - Use `grep_files` to trace ALL downstream consumers of modified entities
-  - Verify assumptions (auth, dependencies, base templates exist)
+  - Verify every Phase 1 assumption with its listed hint
   - Check existing state (table already exists? route registered?)
-  - Read registration files (routes, DI config, middleware, `__init__.py`)
+  - Read registration files (routes, DI config, middleware, `__init__.py`) and `record_file_observation` them as `role: reference`
 - **Budget:** `settings.implementation_max_turns` or unlimited
 - **Privacy pass:** If refiner active, strips sensitive data from file summary before sending to expert
 
@@ -1203,11 +1213,11 @@ async def assess_clarity(task: str, llm_client: LLMClient, context: str = "") ->
 - **Model:** Expert (or primary if no expert)
 - **Method:** `chat_raw()` with `PLAN_SYSTEM_PROMPT` + project_context.md
 - **Input:** Task + scope + file summary + project context
-- **Output:** Three sections in one response:
-  1. **Naming conventions** extracted from existing code (must cite source filenames; fallback to "standard framework conventions")
-  2. **Change design** ONLY for non-obvious files (complex DB schema, multi-component integrations). Level: design (method signatures, column types) NOT code. Target 300-800 words.
-  3. **Gap analysis** — missing required files, dependency order issues, critical risks not covered in the design. Target 200-400 words.
-- Missing files extracted via `_extract_missing_files()` for Phase 4 injection
+- **Two-pass flow:**
+  1. **Pass 1** — `chat_with_tools` exploration/verification with `build_design_tools()` (search_internet, fetch_url, KB, wiki, task_complete), `max_turns=15`, `text_only_exit_count=1` (single-shots when FileSummary.verified_references already covers every external surface). Output is free-form prose.
+  2. **Pass 2** — `chat_structured` synthesis via `_synthesize_design_and_risks` + `planning.design_synthesis_system` produces a validated `DesignAndRisks` Pydantic model: `naming_conventions` (list[NamingConvention]), `change_designs` (list[ChangeDesign], non-obvious files only), `missing_files` (list[MissingFile]), `dependency_order` (list[DependencyOrder]), `critical_risks` (list[CriticalRisk]), `citations` (list[VerifiedReference]), `notes`.
+- `{missing_files}` for Phase 4 is derived deterministically from `DesignAndRisks.missing_files` via `_format_missing_files` (no secondary LLM call).
+- **No scratchpad/journal injection** into Phase 3 — `FileSummary.key_snippets` from Phase 2 is the authoritative bridge and is called out as such in the system prompt.
 - **Anti-hallucination:** Must not simulate commands, invent file listings, or fabricate contents
 
 ### 7.6 Phase 4: Plan Assembly (Structured JSON)
@@ -1228,15 +1238,33 @@ async def assess_clarity(task: str, llm_client: LLMClient, context: str = "") ->
   - Strip mid-plan run_tests/run_lint/format_code steps
   - Dedup steps for same file path (keep first)
   - Re-number steps sequentially
+- **Structured fields on `ExecutionPlan`:**
+  - `naming_conventions` is `list[NamingConvention]` (reuses Phase 3's schema)
+  - `name_registry` is `list[NameRegistryEntry]` (typed per-entity rows with optional `model_class`, `module_namespace`, `import_stmt`, `db_table`, `file_path`, `route_endpoint`, `registered_in`, `test_file`)
+  - `plan_validation_warnings: list[str]` surfaces post-generation validator warnings to the extension's approval UI via the `approval_required` WebSocket message
+- **Post-generation validators (pure Python, no regex):**
+  - `_check_hallucinated_paths` — any `step.file_path` not in the known-paths set built from FileSummary + DesignAndRisks.missing_files
+  - `_uncovered_missing_files` — `DesignAndRisks.missing_files` entries with no covering step
+  - `_check_edit_create_consistency` — `edit_file` on unknown-to-modify paths, `create_file` on unknown-to-create paths
+- **Auto-revision:** When any uncovered missing file has `blocking=True`, Phase 4 fires a single `_revise_plan` round with synthesised feedback. Still-uncovered blocking files on the second pass fall through to warn-only (never hard-blocks the approval screen).
+- **Formatters for executor compatibility:** `format_naming_conventions_for_prompt` and `format_name_registry_for_prompt` render the structured lists back to the text shapes `build_step_system_prompt` / `build_tdd_test_writing_prompt` / `build_tdd_step_system_prompt` already expect — per-step execution prompts are unchanged.
 
 ### 7.7 Phase 5: Verification Step Generation
 
 - **Model:** Expert
 - **Method:** `chat_structured(schema=VerificationPlan)` (only if `test_command` available)
-- **Input:** Task + complete plan + test command + file summary
-- **Output:** Test file creation steps + final `run_tests` step
-- **TDD mode:** Stores test steps in `plan.tdd_test_steps` (without `run_tests`), enhanced prompts for comprehensive test documentation (module docstrings, per-test docstrings, descriptive assertions)
-- **Non-TDD:** Appends test steps + `run_tests` to `plan.steps`
+- **Prompts (registry-backed, one per mode):**
+  - `planning.verification_user_normal` — asks for test-file `create_file` steps + a final `run_tests` step
+  - `planning.verification_user_tdd` — asks for test-file `create_file` steps only, explicitly forbids `run_tests`
+  - `planning.verification_system` — shared, provides executor-model awareness + the common-LLM-defects checklist
+- **Structured inputs:** Phase 5 consumes the Phase 2 `FileSummary` and Phase 3 `DesignAndRisks` objects (not just their markdown). Two pure-Python helpers feed prompt variables:
+  - `_build_verification_targets(FileSummary, DesignAndRisks)` — bullet list of files needing coverage from `change_designs[].file_path` + `files_to_create[].file_path`
+  - `_build_security_concerns(DesignAndRisks)` — bullet list of `critical_risks` with severity + mitigation
+- **Input:** Task + complete plan + test command + file summary markdown + the two structured inputs above
+- **Output:** Test file creation steps + (normal mode) final `run_tests` step
+- **TDD mode:** Stores test steps in `plan.tdd_test_steps` (defensive `run_tests` filter kept as safety). Re-numbers implementation steps to run after the test steps.
+- **Non-TDD:** Appends test steps + `run_tests` to `plan.steps`.
+- **Post-generation validation:** `_check_test_path_conventions` flags `create_file` steps whose paths don't contain `test` or `spec` (case-insensitive) and don't match a directory prefix learned from Phase 2's `files_read_for_context`. Warnings append to `plan.plan_validation_warnings` via the same surfacing mechanism Phase 4 uses.
 
 ### 7.8 Plan Revision
 

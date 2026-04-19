@@ -498,7 +498,39 @@ Receive a webhook event from an external service.
 
 #### `GET /api/health`
 
-Returns `{"status": "ok"}` when the server is running.
+Health check for extension-side monitors.
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "vision_available": true,
+  "stt_available": false,
+  "tts_available": false,
+  "wake_word_available": false,
+  "busy": ["embeddings.code"]
+}
+```
+
+The `busy` field is a list of active long-running task tags from the
+backend's `runtime_state` registry. Current tags:
+
+- `ollama.warmup` — cold load of the embedding model into VRAM (set by
+  `LLMClient.check_embedding_model`); can take minutes for large models.
+- `embeddings.code` — code-index embedding generation in progress.
+- `embeddings.knowledge` — knowledge-base embedding generation in progress.
+
+The extension's health monitor reads this to distinguish "backend is
+slow because it's busy with real work" from "backend is crashed".
+Auto-restart is only triggered by `ECONNREFUSED` / `ECONNRESET` (a
+truly dead process); a slow/timeout probe never triggers restart.
+After 3 minutes of continuous unresponsive probes, the monitor
+surfaces a one-time notification with a manual "Restart Backend"
+button so the user decides.
+
+The voice availability fields (`stt_available`, `tts_available`,
+`wake_word_available`) are omitted when the `voice` extras group is
+not installed.
 
 ## WebSocket Protocol
 
@@ -551,7 +583,7 @@ Keepalive message. Server responds with `{"type": "pong"}`.
 |---|---|
 | `stage_change` | Workflow phase changed (`planning`, `implementing`) |
 | `clarification_needed` | Questions that need user input before planning |
-| `approval_required` | Plan ready for review (includes Markdown plan) |
+| `approval_required` | Plan ready for review. Payload includes `plan` (markdown), `user_summary` (plain-English approach), and `plan_validation_warnings` (`list[str]` of non-blocking warnings from Phase 4/5 post-generation validators — hallucinated paths, uncovered missing files, edit/create inconsistencies, test-path convention violations). The extension surfaces the warnings above the plan on the approval card. |
 | `plan_rejected` | User sent feedback, plan is being revised |
 | `plan_revision` | Revised plan ready (includes revision number) |
 | `refiner_status` | Local refiner progress (`running`, `done`, `skipped`, `error`) |

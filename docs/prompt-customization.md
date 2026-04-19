@@ -87,9 +87,30 @@ Override **policy.quality** (Core Policy) to add project-specific standards. For
 
 Override **policy.web_search** (Core Policy) to make the agent search more or less aggressively — e.g. search after every error, fetch more results, or disable searching entirely.
 
-### Customizing planning scope analysis
+### Customizing planning scope analysis (Phase 1)
 
-Override **planning.scope_system** (Planning) to guide how the agent analyzes tasks for your specific project architecture — e.g. always consider certain directories, or prefer specific design patterns.
+Override **planning.scope_system** or **planning.scope_user** (Planning) to guide how the agent analyzes tasks for your specific project architecture. Phase 1 runs on the request model with a small read-only tool budget (`LEAN_AI_PLAN_PHASE1_MAX_TURNS`, default 5) and produces an 8-section scope document. Both prompts have a `{PHASE1_MAX_TURNS}` template variable the registry fills in from the setting — **do not remove it** from an override; `registry.validate` will flag overrides missing required placeholders.
+
+### Customizing Phase 2 exploration
+
+Override **planning.exploration_system** (Planning) or **planning.exploration_user** (Planning) to change how the agent identifies files and records observations. The user prompt opens with a strict ASSUMPTIONS checklist that walks each Phase 1 verification hint. The separate **planning.exploration_synthesis_system** prompt governs the post-loop `chat_structured` pass that coerces recorded observations + scratchpad + journal + prose into the validated `FileSummary` schema.
+
+### Customizing Phase 3 design synthesis
+
+Override **planning.design_system** or **planning.design_user** (Planning) to tune Pass 1 (tool-enabled exploration/verification). The **planning.design_synthesis_system** prompt governs Pass 2 (coerces Pass 1 prose + inputs into a `DesignAndRisks` schema).
+
+### Customizing Phase 4 plan assembly
+
+Override **planning.assembly_system** or **planning.assembly_user** (Planning). Note that the `naming_conventions` and `name_registry` fields on `ExecutionPlan` are now typed lists (`list[NamingConvention]` and `list[NameRegistryEntry]`) rather than prose strings; the user prompt points the model at the structured schema rather than asking for text templates.
+
+### Customizing Phase 5 verification steps
+
+Two separate prompts per mode — override either without affecting the other:
+
+- **planning.verification_user_normal** — used when a test command is configured and TDD is disabled. Asks for test-file `create_file` steps + a final `run_tests` step.
+- **planning.verification_user_tdd** — used when `LEAN_AI_ENABLE_TDD` is enabled. Asks for test-file `create_file` steps only; explicitly forbids `run_tests`.
+
+Both receive `{verification_targets}` (from `DesignAndRisks.change_designs` + `FileSummary.files_to_create`) and `{security_concerns}` (from `DesignAndRisks.critical_risks`) so the model targets tests precisely. The shared **planning.verification_system** provides executor-model awareness and the common-LLM-defects checklist.
 
 ### Adjusting fix mode investigation
 
@@ -97,7 +118,7 @@ Override **fix.investigation** (Fix Mode) to change how the agent explores your 
 
 ### Customizing the chat assistant
 
-Override **chat.system** (Chat & Refinement) to change the tone, focus, or constraints of the chat conversation.
+Override **chat.system** (Chat & Refinement) to change the tone, focus, or constraints of the chat conversation. The prompt carries a `{CHAT_MAX_TURNS}` template variable kept in sync with the backend's `_CHAT_MAX_TURNS` constant (default 20) — **do not remove it** from an override. The default prompt encodes an **always-explore** default (every substantive reply begins with at least one grounding tool call) and a **strict two-round protocol** for agent-prompt requests (Round 1: explore + ask exactly 3-5 numbered clarifying questions; Round 2: targeted verification + emit `## Suggested Agent Prompt` with a `### References` block inside the fence).
 
 ## YAML File Format
 
