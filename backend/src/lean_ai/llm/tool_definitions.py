@@ -672,6 +672,40 @@ QUERY_CONTEXT_TOOL: dict = {
 
 # ── File observation capture (Phase 2 exploration) ─────────────────────────
 
+REQUEST_CLARIFICATION_TOOL: dict = {
+    "type": "function",
+    "function": {
+        "name": "request_clarification",
+        "description": (
+            "Ask the user one clarifying question during Phase 1 scope "
+            "verification. Use this only when a decision is genuinely needed "
+            "that (a) cannot be answered by inspecting the codebase and "
+            "(b) is not implied by the task description or project context. "
+            "The tool blocks until the user responds; the response is "
+            "returned as the tool result string. Prefer codebase tools "
+            "first — only escalate to the user for choices they alone can "
+            "make (scope boundaries, feature behaviour, UX preferences, "
+            "data contracts, rollout strategy)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": (
+                        "Single concrete question to ask the user. Frame as "
+                        "a specific decision with a concrete default where "
+                        "possible (e.g. 'Default token TTL to 15 minutes, "
+                        "or prefer a different value?')."
+                    ),
+                },
+            },
+            "required": ["question"],
+        },
+    },
+}
+
+
 RECORD_FILE_OBSERVATION_TOOL: dict = {
     "type": "function",
     "function": {

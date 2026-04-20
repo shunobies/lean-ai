@@ -52,7 +52,11 @@ from lean_ai.llm.prompts import (
     PLAN_DESIGN_SYSTEM_PROMPT,
     PLAN_VERIFICATION_SYSTEM_PROMPT,
 )
-from lean_ai.llm.tool_definitions import build_design_tools, build_planning_tools
+from lean_ai.llm.tool_definitions import (
+    REQUEST_CLARIFICATION_TOOL,
+    build_design_tools,
+    build_planning_tools,
+)
 
 if TYPE_CHECKING:
     from lean_ai.llm.facade import LLMClient
@@ -149,13 +153,13 @@ async def create_plan(
     if settings.enable_session_memory:
         memory_context = _retrieve_session_memories(repo_root, task)
 
-    # ── Phase 1: Scope Analysis ──
+    # ── Phase 1: Clarification / verification ──
     await _send_stage(
-        ws, "Phase 1: Analyzing scope...",
+        ws, "Phase 1: Verifying task (asking clarifying questions if needed)...",
         model=explorer.model_name, phase=1,
     )
     logger.info(
-        "Planning Phase 1: Scope analysis (model=%s, tool_budget=%d)",
+        "Planning Phase 1 clarification (model=%s, tool_budget=%d)",
         explorer.model_name, settings.plan_phase1_max_turns,
     )
     t0 = time.monotonic()
@@ -172,7 +176,9 @@ async def create_plan(
     if memory_context:
         phase1_user_content += memory_context
 
-    # Restricted tool subset for Phase 1 — verify assumptions, don't explore.
+    # Restricted tool subset for Phase 1 — verify the task against the
+    # codebase, ask the user only when a decision genuinely can't be
+    # inferred. Scope document assembly happens in Phase 1a (synthesis).
     phase1_tools = [
         t for t in build_planning_tools()
         if t["function"]["name"] in (
@@ -180,6 +186,7 @@ async def create_plan(
             "query_project_context", "search_reference", "task_complete",
         )
     ]
+    phase1_tools.append(REQUEST_CLARIFICATION_TOOL)
 
     # Reuse the same read-only executor Phase 2 uses.
     small_ctx = settings._active_context_window <= 32768
@@ -206,10 +213,28 @@ async def create_plan(
     if on_content:
         await _send_content_done(ws, scope_prose)
 
-    # Coerce the exploration prose into a validated ScopeDocument so Phase 2
-    # always receives the 8-section shape. When synthesis fails twice the
-    # helper emits a programmatic fallback wrapping the task text — never
-    # thin prose — so Phase 2 can't regress to "no real scope."
+    phase_timings["phase_1_clarification"] = time.monotonic() - t0
+    _save_debug_phase(
+        repo_root, session_id, "phase_1_clarification",
+        scope_prose, phase_timings["phase_1_clarification"],
+    )
+    logger.info(
+        "Phase 1 clarification used %d tool calls in %.1fs",
+        len(_phase1_tool_calls), phase_timings["phase_1_clarification"],
+    )
+    await _send_stage_done(
+        ws, "Task verified",
+        model=explorer.model_name, phase=1,
+    )
+
+    # ── Phase 1a: Scope document generation ──
+    # chat_structured → ScopeDocument with programmatic fallback guarantees
+    # Phase 2 always receives the 8-section shape, never raw prose.
+    await _send_stage(
+        ws, "Phase 1a: Generating scope document...",
+        model=explorer.model_name, phase=1,
+    )
+    t0a = time.monotonic()
     scope_obj, scope, scope_synthesized = await _synthesize_scope(
         task=task,
         context=context,
@@ -220,22 +245,19 @@ async def create_plan(
     )
     if not scope_synthesized:
         logger.warning(
-            "Phase 1 scope synthesis fell through to programmatic fallback "
-            "(task-text-only ScopeDocument). Phase 2 must reconstruct "
-            "missing sections from the task during exploration.",
+            "Phase 1a scope synthesis fell through to programmatic "
+            "fallback (task-text-only ScopeDocument). Phase 2 will "
+            "reconstruct missing sections from the task during "
+            "exploration.",
         )
 
-    phase_timings["phase_1_scope"] = time.monotonic() - t0
+    phase_timings["phase_1a_scope"] = time.monotonic() - t0a
     _save_debug_phase(
-        repo_root, session_id, "phase_1_scope",
-        scope, phase_timings["phase_1_scope"],
-    )
-    logger.info(
-        "Phase 1 used %d tool calls in %.1fs",
-        len(_phase1_tool_calls), phase_timings["phase_1_scope"],
+        repo_root, session_id, "phase_1a_scope",
+        scope, phase_timings["phase_1a_scope"],
     )
     await _send_stage_done(
-        ws, "Scope analysis complete",
+        ws, "Scope document generated",
         model=explorer.model_name, phase=1,
     )
 

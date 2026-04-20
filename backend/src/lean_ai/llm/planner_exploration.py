@@ -218,6 +218,52 @@ def _make_read_only_executor(
             )
         elif name == "task_complete":
             return "Exploration marked complete."
+        elif name == "request_clarification":
+            # Phase 1 scope verification only. Blocks until the user replies
+            # via the approval queue — safe because planning runs before
+            # dispatcher.enter_execution_mode() switches user_message to
+            # the interrupt queue.
+            from lean_ai.workflow.ws_dispatcher import WorkflowCancelledError
+            from lean_ai.workflow.ws_handler import ws_send
+
+            question = (arguments.get("question") or "").strip()
+            if not question:
+                return (
+                    "ERROR: request_clarification requires a non-empty "
+                    "'question' string."
+                )
+            if ws is None or dispatcher is None:
+                return (
+                    "ERROR: no active user session — cannot request "
+                    "clarification. Proceed with a best-guess interpretation "
+                    "and record it as an ASSUMPTION."
+                )
+            await ws_send(
+                ws, "clarification_needed", {"questions": [question]},
+            )
+            try:
+                msg = await dispatcher.wait_for_approval()
+            except WorkflowCancelledError:
+                return (
+                    "ERROR: user cancelled while clarification was pending."
+                )
+            if msg is None:
+                return (
+                    "ERROR: session disconnected before the user "
+                    "responded to the clarification question."
+                )
+            if msg.get("type") != "user_message":
+                return (
+                    "ERROR: unexpected message type during clarification: "
+                    f"{msg.get('type')}"
+                )
+            answer = (msg.get("content") or "").strip()
+            if not answer:
+                return (
+                    "User response was empty — proceed with a best-guess "
+                    "interpretation and record it as an ASSUMPTION."
+                )
+            return f"User answered: {answer}"
         return f"Unknown tool: {name}"
 
     return _read_only_executor
