@@ -151,7 +151,7 @@ async def create_plan(
     # ── Cross-session memory retrieval ──
     memory_context = ""
     if settings.enable_session_memory:
-        memory_context = _retrieve_session_memories(repo_root, task)
+        memory_context = await _retrieve_session_memories(repo_root, task)
 
     # ── Phase 1: Clarification / verification ──
     await _send_stage(
@@ -346,6 +346,14 @@ async def create_plan(
         project_context=phase3_project_context_block,
         file_summary=file_summary,
     )
+    if settings.enable_session_memory and getattr(
+        settings, "enable_phase3_memory", True,
+    ):
+        from lean_ai.llm.planner_helpers import retrieve_design_memories
+
+        design_memories = await retrieve_design_memories(repo_root, task)
+        if design_memories:
+            phase3_user_content += design_memories
     phase3_messages = [
         {"role": "system", "content": PLAN_DESIGN_SYSTEM_PROMPT},
         {"role": "user", "content": phase3_user_content},

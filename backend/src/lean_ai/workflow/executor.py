@@ -454,6 +454,7 @@ async def execute_plan(
                 expert_llm_client=expert_llm_client,
                 dispatcher=dispatcher,
                 allowed_files=plan.affected_files,
+                task=task,
             )
 
     # Check for incomplete.md

@@ -114,12 +114,22 @@
         "command": "lean-ai.openNotes",
         "title": "Lean AI: Open Notes & TODOs",
         "icon": "$(note)"
+      },
+      {
+        "command": "lean-ai.openMemories",
+        "title": "Lean AI: Open Memories",
+        "icon": "$(lightbulb)"
       }
     ],
     "menus": {
       "view/title": [
         {
           "command": "lean-ai.refreshSessions",
+          "when": "view == lean-ai.sessionsView",
+          "group": "navigation"
+        },
+        {
+          "command": "lean-ai.openMemories",
           "when": "view == lean-ai.sessionsView",
           "group": "navigation"
         }

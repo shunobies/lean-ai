@@ -19,6 +19,7 @@ import { startBackend, stopBackend, restartBackend, clearManagedInstallCache } f
 import { resetBackend } from "./backendInstaller";
 import { SettingsPanel } from "./settingsPanel";
 import { NotesPanel } from "./notesPanel";
+import { MemoriesPanel } from "./memoriesPanel";
 import { PromptsPanel } from "./promptsPanel";
 import { initNotifications } from "./notifications";
 
@@ -123,6 +124,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
         vscode.commands.registerCommand("lean-ai.openNotes", () => {
             NotesPanel.createOrShow(context);
+        }),
+        vscode.commands.registerCommand("lean-ai.openMemories", () => {
+            MemoriesPanel.createOrShow(context);
         }),
         vscode.commands.registerCommand("lean-ai.openChatInNewWindow", () => {
             sidebarProvider.openChatInNewWindow();

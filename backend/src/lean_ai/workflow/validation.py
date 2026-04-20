@@ -182,6 +182,7 @@ async def _run_validation_fix_loop(
     expert_llm_client: "LLMClient | None" = None,
     dispatcher: WSMessageDispatcher | None = None,
     allowed_files: "list[str] | None" = None,
+    task: str = "",
 ) -> dict:
     """Attempt to fix post-validation failures by resubmitting to the LLM.
 
@@ -263,6 +264,27 @@ async def _run_validation_fix_loop(
             )
         failure_text = "\n\n".join(failure_parts)
 
+        fix_memory_context = ""
+        if settings.enable_session_memory and getattr(
+            settings, "enable_fix_loop_memory", True,
+        ):
+            from lean_ai.llm.planner_helpers import (
+                retrieve_fix_pattern_memories,
+            )
+
+            # Query the memory index with a compact failure signature
+            # (command names + first error line) so we retrieve past
+            # fixes for similar failure shapes.
+            memory_query_parts = list(failures.keys())
+            for res in failures.values():
+                raw = res.get("full_output") or res.get("output") or ""
+                first_line = raw.strip().splitlines()[0] if raw.strip() else ""
+                if first_line:
+                    memory_query_parts.append(first_line[:200])
+            fix_memory_context = await retrieve_fix_pattern_memories(
+                repo_root, " ".join(memory_query_parts),
+            )
+
         messages = [
             {"role": "system", "content": system_prompt},
             {
@@ -278,6 +300,7 @@ async def _run_validation_fix_loop(
                         if allowed_files else "\n"
                     )
                     + failure_text
+                    + fix_memory_context
                 ),
             },
         ]
@@ -385,7 +408,45 @@ async def _run_validation_fix_loop(
         )
 
         # Re-run full validation (including auto-fix passes)
+        failing_commands_before = list(failures.keys())
+        error_snippet_before = failure_text[:3000]
         validation_results = await _run_post_validation(repo_root, ws)
+
+        # Fire memory hook: if this attempt succeeded, extract a fix_pattern
+        still_failing = {
+            k: v for k, v in validation_results.items() if not v["success"]
+        }
+        attempt_succeeded = (
+            bool(failing_commands_before) and not still_failing
+        )
+        try:
+            from lean_ai.workflow.hooks import fire_validation_attempt_hook
+
+            fix_tool_calls_payload = [
+                {
+                    "tool": tc.name,
+                    "arguments": tc.arguments,
+                }
+                for tc in executed
+            ]
+            fire_validation_attempt_hook(
+                repo_root=repo_root,
+                session_id=session_id or "",
+                llm_client=active_client,
+                task=task or "",
+                attempt_num=attempts_used,
+                failing_commands=failing_commands_before,
+                error_output=error_snippet_before,
+                diagnosis=explanation or "",
+                fix_tool_calls=fix_tool_calls_payload,
+                succeeded=attempt_succeeded,
+                ws=ws,
+            )
+        except Exception:
+            logger.debug(
+                "Validation attempt hook scheduling failed (non-fatal)",
+                exc_info=True,
+            )
 
     # Report final status
     final_failures = {

@@ -82,6 +82,7 @@ class _DecryptingYamlSource(PydanticBaseSettingsSource):
         "serve_api_key", "search_api_key",
         "jira_api_token", "servicenow_password",
         "wiki_password",
+        "export_api_key",
     })
 
     def __init__(self, settings_cls: type[BaseSettings], yaml_file: str = "config.yaml") -> None:
@@ -346,6 +347,28 @@ class Settings(BaseSettings):
 
     # ── Cross-session memory ──
     enable_session_memory: bool = True  # Extract and reuse memories across sessions
+    # Curation — which statuses are allowed during retrieval-time filtering.
+    # Comma-separated. Default excludes raw `auto` memories so unconfirmed
+    # extractions don't poison planning until a user (or auto-promotion)
+    # upgrades them.
+    memory_retrieval_statuses: str = "user_confirmed,high_confidence_auto"
+    memory_confidence_ttl_days: int = 90
+    memory_autopromote_threshold: int = 3  # seen_count to auto→high_confidence_auto
+    enable_phase3_memory: bool = True      # Inject memories into Phase 3 design
+    enable_fix_loop_memory: bool = True    # Inject fix_patterns into validation fix loop
+    phase3_memory_budget_percent: float = 0.02
+    fix_loop_memory_budget_percent: float = 0.02
+
+    # ── Self-improvement training pipeline (Phase B+; Layer 1 defaults) ──
+    enable_training_capture: bool = True   # Local capture runs; export gated below
+    training_db_path: str = ".lean_ai/training.db"
+    training_retention_days: int = 365
+    capture_thinking: bool = True          # Preserve <think> blocks for reasoning LoRA
+    scrubbing_strict: bool = True          # Fail-closed on scrubber exception
+    # Empty string disables the /api/export endpoints (returns 503 until set).
+    export_api_key: str = ""
+    export_workspace_salt: str = ""        # Optional stable salt for workspace_id hash
+    memory_export_drop_threshold: float = 0.40  # Drop memories >40% redacted
 
     # ── Integrations (Jira, ServiceNow, etc.) ──
     enable_integrations: bool = False  # Master switch for external integrations

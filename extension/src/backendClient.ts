@@ -67,6 +67,13 @@ import {
     updateTodo as _updateTodo,
     deleteTodo as _deleteTodo,
     addTodo as _addTodo,
+    listMemories as _listMemories,
+    createMemory as _createMemory,
+    confirmMemory as _confirmMemory,
+    rejectMemory as _rejectMemory,
+    deleteMemory as _deleteMemory,
+    type ListMemoriesParams,
+    type MemoryRow,
     chat as _chat,
     chatStream as _chatStream,
     predict as _predict,
@@ -615,6 +622,28 @@ export class BackendClient {
     updateTodo(todoId: number, data: { description?: string; completed?: boolean }) { return _updateTodo(this.baseUrl, todoId, data); }
     deleteTodo(todoId: number) { return _deleteTodo(this.baseUrl, todoId); }
     addTodo(noteId: string, description: string) { return _addTodo(this.baseUrl, noteId, description); }
+
+    listMemories(params: ListMemoriesParams): Promise<MemoryRow[]> {
+        return _listMemories(this.baseUrl, params);
+    }
+    createMemory(req: {
+        repo_root: string;
+        category: string;
+        content: string;
+        tags?: string[];
+        source_task?: string;
+    }): Promise<MemoryRow> {
+        return _createMemory(this.baseUrl, req);
+    }
+    confirmMemory(memoryId: string, repoRoot: string): Promise<MemoryRow> {
+        return _confirmMemory(this.baseUrl, memoryId, repoRoot);
+    }
+    rejectMemory(memoryId: string, repoRoot: string): Promise<MemoryRow> {
+        return _rejectMemory(this.baseUrl, memoryId, repoRoot);
+    }
+    deleteMemory(memoryId: string, repoRoot: string): Promise<void> {
+        return _deleteMemory(this.baseUrl, memoryId, repoRoot);
+    }
 
     chat(
         message: string,

@@ -323,6 +323,114 @@ export async function addTodo(baseUrl: string, noteId: string, description: stri
 }
 
 // ---------------------------------------------------------------------------
+// Memories (cross-session curated memory)
+// ---------------------------------------------------------------------------
+
+export interface MemoryRow {
+    id: string;
+    session_id: string;
+    category: string;
+    content: string;
+    tags: string[];
+    source_task?: string | null;
+    created_at: string;
+    curation_status: string;
+    confidence: number;
+    expires_at?: string | null;
+    source_phase?: string | null;
+    model_name?: string | null;
+    seen_count: number;
+    last_seen_at?: string | null;
+}
+
+export interface ListMemoriesParams {
+    repo_root: string;
+    category?: string;
+    curation_status?: string;
+    limit?: number;
+    include_expired?: boolean;
+}
+
+export async function listMemories(
+    baseUrl: string,
+    params: ListMemoriesParams,
+): Promise<MemoryRow[]> {
+    const qs = new URLSearchParams();
+    qs.set("repo_root", params.repo_root);
+    if (params.category) { qs.set("category", params.category); }
+    if (params.curation_status) { qs.set("curation_status", params.curation_status); }
+    if (params.limit != null) { qs.set("limit", String(params.limit)); }
+    if (params.include_expired) { qs.set("include_expired", "true"); }
+    const resp = await fetch(`${baseUrl}/api/memories?${qs.toString()}`);
+    if (!resp.ok) {
+        throw new Error(`Failed to list memories: ${resp.statusText}`);
+    }
+    return resp.json() as Promise<MemoryRow[]>;
+}
+
+export async function createMemory(
+    baseUrl: string,
+    req: {
+        repo_root: string;
+        category: string;
+        content: string;
+        tags?: string[];
+        source_task?: string;
+    },
+): Promise<MemoryRow> {
+    const resp = await fetch(`${baseUrl}/api/memories`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+    });
+    if (!resp.ok) {
+        throw new Error(`Failed to create memory: ${resp.statusText}`);
+    }
+    return resp.json() as Promise<MemoryRow>;
+}
+
+export async function confirmMemory(
+    baseUrl: string, memoryId: string, repoRoot: string,
+): Promise<MemoryRow> {
+    const resp = await fetch(`${baseUrl}/api/memories/${memoryId}/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo_root: repoRoot }),
+    });
+    if (!resp.ok) {
+        throw new Error(`Failed to confirm memory: ${resp.statusText}`);
+    }
+    return resp.json() as Promise<MemoryRow>;
+}
+
+export async function rejectMemory(
+    baseUrl: string, memoryId: string, repoRoot: string,
+): Promise<MemoryRow> {
+    const resp = await fetch(`${baseUrl}/api/memories/${memoryId}/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo_root: repoRoot }),
+    });
+    if (!resp.ok) {
+        throw new Error(`Failed to reject memory: ${resp.statusText}`);
+    }
+    return resp.json() as Promise<MemoryRow>;
+}
+
+export async function deleteMemory(
+    baseUrl: string, memoryId: string, repoRoot: string,
+): Promise<void> {
+    const qs = new URLSearchParams({ repo_root: repoRoot });
+    const resp = await fetch(
+        `${baseUrl}/api/memories/${memoryId}?${qs.toString()}`,
+        { method: "DELETE" },
+    );
+    if (!resp.ok) {
+        throw new Error(`Failed to delete memory: ${resp.statusText}`);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Chat
 // ---------------------------------------------------------------------------
 

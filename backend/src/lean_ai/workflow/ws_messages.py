@@ -204,6 +204,15 @@ class RefinerStatusMessage(TypedDict, total=False):
     changes: str
 
 
+class MemorySuggestedMessage(TypedDict, total=False):
+    type: Literal["memory_suggested"]  # pyright: ignore[reportGeneralTypeIssues]
+    memory_id: str
+    category: str
+    content: str
+    source_phase: str
+    tags: list[str]
+
+
 # ── Server message type union ───────────────────────────────────
 
 ServerMessageType = Literal[
@@ -230,6 +239,7 @@ ServerMessageType = Literal[
     "pong",
     "vision_description",
     "refiner_status",
+    "memory_suggested",
 ]
 
 # ── Client → Server messages ────────────────────────────────────
@@ -266,6 +276,23 @@ class ResumeMessage(TypedDict, total=False):
     repo_root: str
 
 
+class ConfirmMemoryMessage(TypedDict):
+    type: Literal["confirm_memory"]
+    memory_id: str
+
+
+class RejectMemoryMessage(TypedDict):
+    type: Literal["reject_memory"]
+    memory_id: str
+
+
+class SaveMemoryManualMessage(TypedDict, total=False):
+    type: Literal["save_memory_manual"]  # pyright: ignore[reportGeneralTypeIssues]
+    category: str
+    content: str
+    tags: list[str]
+
+
 ClientMessageType = Literal[
     "user_message",
     "cancel",
@@ -274,6 +301,9 @@ ClientMessageType = Literal[
     "deny_tool",
     "ping",
     "resume",
+    "confirm_memory",
+    "reject_memory",
+    "save_memory_manual",
 ]
 
 # ── Typed send helpers ──────────────────────────────────────────
@@ -401,3 +431,23 @@ def fire_metrics_update(
         "context_window": context_window,
         "context_percent": context_percent,
     })
+
+
+def fire_memory_suggested(ws: WebSocket, *, memory: dict) -> None:
+    """Fire-and-forget memory-suggestion chip (non-blocking).
+
+    Sent when an auto-extracted memory is eligible for user confirmation.
+    The extension surfaces it as an inline chip in the chat stream.
+    """
+    data: dict = {
+        "memory_id": memory.get("id", ""),
+        "category": memory.get("category", ""),
+        "content": memory.get("content", ""),
+    }
+    phase = memory.get("source_phase")
+    if phase:
+        data["source_phase"] = phase
+    tags = memory.get("tags")
+    if tags:
+        data["tags"] = tags
+    ws_send_nowait(ws, "memory_suggested", data)

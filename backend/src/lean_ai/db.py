@@ -93,6 +93,13 @@ async def _ensure_columns(db: aiosqlite.Connection) -> None:
         ("sessions", "base_branch", "TEXT"),
         ("sessions", "stashed", "INTEGER NOT NULL DEFAULT 0"),
         ("sessions", "merge_commit_sha", "TEXT"),
+        ("session_memories", "curation_status", "TEXT NOT NULL DEFAULT 'auto'"),
+        ("session_memories", "confidence", "REAL NOT NULL DEFAULT 0.5"),
+        ("session_memories", "expires_at", "TEXT"),
+        ("session_memories", "source_phase", "TEXT"),
+        ("session_memories", "model_name", "TEXT"),
+        ("session_memories", "seen_count", "INTEGER NOT NULL DEFAULT 1"),
+        ("session_memories", "last_seen_at", "TEXT"),
     ]
     for table, col, col_type in new_columns:
         try:
@@ -100,6 +107,18 @@ async def _ensure_columns(db: aiosqlite.Connection) -> None:
             await db.commit()
         except Exception:
             pass  # Column already exists
+
+    for index_sql in (
+        "CREATE INDEX IF NOT EXISTS idx_mem_status "
+        "ON session_memories(curation_status)",
+        "CREATE INDEX IF NOT EXISTS idx_mem_category "
+        "ON session_memories(category)",
+    ):
+        try:
+            await db.execute(index_sql)
+            await db.commit()
+        except Exception:
+            pass
 
 
 # ── Session helpers ──

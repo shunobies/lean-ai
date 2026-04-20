@@ -37,47 +37,169 @@ PLAN_OUTPUT_PERCENT = 0.40
 MEMORY_CONTEXT_PERCENT = 0.02
 
 
-def _retrieve_session_memories(repo_root: str, task: str) -> str:
-    """Retrieve relevant memories from previous sessions.
+def _allowed_curation_statuses() -> set[str]:
+    """Curation statuses allowed in retrieval, from settings."""
+    raw = getattr(
+        settings, "memory_retrieval_statuses", "user_confirmed,high_confidence_auto",
+    )
+    return {s.strip() for s in str(raw).split(",") if s.strip()}
 
-    Returns a formatted string to append to the Phase 1 user message,
-    or an empty string if no memories are found.
-    Budget-gated at MEMORY_CONTEXT_PERCENT of the active context window.
+
+async def _load_memory_rows(
+    repo_root: str, memory_ids: list[str],
+) -> dict[str, dict]:
+    """Batch-load memory rows from the per-workspace DB."""
+    if not memory_ids:
+        return {}
+    from lean_ai.db import get_db
+
+    db = await get_db(repo_root)
+    try:
+        placeholders = ",".join("?" for _ in memory_ids)
+        cursor = await db.execute(
+            f"SELECT * FROM session_memories WHERE id IN ({placeholders})",
+            tuple(memory_ids),
+        )
+        rows = await cursor.fetchall()
+        return {row["id"]: dict(row) for row in rows}
+    finally:
+        await db.close()
+
+
+def _format_memory_lines(
+    rows: list[dict],
+    header: str,
+    budget: int,
+) -> str:
+    """Format memory rows into a context block, budget-gated."""
+    lines = [header]
+    used = len(lines[0])
+    for r in rows:
+        category = r.get("category") or "general"
+        content = r.get("content") or ""
+        line = f"\n- [{category}] {content}"
+        if used + len(line) > budget:
+            break
+        lines.append(line)
+        used += len(line)
+    return "".join(lines) if len(lines) > 1 else ""
+
+
+async def _retrieve_memories_for_phase(
+    repo_root: str,
+    query: str,
+    *,
+    phase_label: str,
+    categories: list[str] | None = None,
+    limit: int = 5,
+    budget_percent: float = MEMORY_CONTEXT_PERCENT,
+    header: str | None = None,
+) -> str:
+    """Retrieve filtered, curated memories and format them for prompt injection.
+
+    Filters by `curation_status IN settings.memory_retrieval_statuses`,
+    excludes expired memories, and optionally restricts to a category set.
+    Budget-gated by *budget_percent* of the active context window.
     """
     try:
         from lean_ai.memory.index import search_memories
 
-        results = search_memories(repo_root, task, limit=5)
-        if not results:
+        hits = search_memories(repo_root, query, limit=limit * 3)
+        if not hits:
+            return ""
+
+        rows = await _load_memory_rows(
+            repo_root, [h["memory_id"] for h in hits],
+        )
+        allowed = _allowed_curation_statuses()
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+        filtered: list[dict] = []
+        for hit in hits:
+            row = rows.get(hit["memory_id"])
+            if row is None:
+                continue
+            status = row.get("curation_status") or "auto"
+            if status not in allowed:
+                continue
+            expires = row.get("expires_at")
+            if expires and expires <= now:
+                continue
+            if categories and row.get("category") not in categories:
+                continue
+            filtered.append(row)
+            if len(filtered) >= limit:
+                break
+
+        if not filtered:
             return ""
 
         budget = int(
-            settings._active_context_window * MEMORY_CONTEXT_PERCENT * 3.5
+            settings._active_context_window * budget_percent * 3.5
         )
-
-        lines = ["\n\nWORKSPACE MEMORY (from previous sessions):"]
-        used = len(lines[0])
-        for r in results:
-            category = r.get("category") or "general"
-            content = r["content"]
-            line = f"\n- [{category}] {content}"
-            if used + len(line) > budget:
-                break
-            lines.append(line)
-            used += len(line)
-
-        if len(lines) <= 1:
-            return ""
-
-        memory_text = "".join(lines)
-        logger.info(
-            "Injected %d memories into Phase 1 (%d chars)",
-            len(lines) - 1, len(memory_text),
+        header_text = header or (
+            f"\n\nWORKSPACE MEMORY ({phase_label}):"
         )
-        return memory_text
+        text = _format_memory_lines(filtered, header_text, budget)
+        if text:
+            logger.info(
+                "Injected %d memories into %s (%d chars)",
+                len(filtered), phase_label, len(text),
+            )
+        return text
     except Exception:
-        logger.debug("Memory retrieval failed (non-fatal)", exc_info=True)
+        logger.debug(
+            "Memory retrieval failed for %s (non-fatal)",
+            phase_label, exc_info=True,
+        )
         return ""
+
+
+async def _retrieve_session_memories(repo_root: str, task: str) -> str:
+    """Retrieve relevant memories for Phase 1 (scope/clarification).
+
+    Returns a formatted string to append to the Phase 1 user message,
+    or an empty string if no memories are found.
+    """
+    return await _retrieve_memories_for_phase(
+        repo_root,
+        task,
+        phase_label="from previous sessions",
+        header="\n\nWORKSPACE MEMORY (from previous sessions):",
+    )
+
+
+async def retrieve_design_memories(repo_root: str, query: str) -> str:
+    """Retrieve `gotcha`, `convention`, `rejection` memories for Phase 3."""
+    budget = getattr(
+        settings, "phase3_memory_budget_percent", MEMORY_CONTEXT_PERCENT,
+    )
+    return await _retrieve_memories_for_phase(
+        repo_root,
+        query,
+        phase_label="design hints",
+        categories=["gotcha", "convention", "rejection"],
+        limit=6,
+        budget_percent=budget,
+        header="\n\nWORKSPACE MEMORY (design hints from past sessions):",
+    )
+
+
+async def retrieve_fix_pattern_memories(repo_root: str, query: str) -> str:
+    """Retrieve `fix_pattern` + `gotcha` memories for the validation fix loop."""
+    budget = getattr(
+        settings, "fix_loop_memory_budget_percent", MEMORY_CONTEXT_PERCENT,
+    )
+    return await _retrieve_memories_for_phase(
+        repo_root,
+        query,
+        phase_label="fix hints",
+        categories=["fix_pattern", "gotcha"],
+        limit=5,
+        budget_percent=budget,
+        header="\n\nPAST FIX PATTERNS (from previous validation failures):",
+    )
 
 
 def _save_debug_phase(

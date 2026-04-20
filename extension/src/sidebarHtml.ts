@@ -443,6 +443,81 @@ export function getWebviewHtml(chatFontSize: number): string {
         font-size: 12px;
         line-height: 1.5;
     }
+    .memory-suggestion {
+        align-self: stretch;
+        border: 1px solid var(--vscode-panel-border);
+        border-left: 3px solid var(--vscode-textLink-foreground, #3794ff);
+        border-radius: 6px;
+        background: var(--vscode-editorWidget-background);
+        padding: 8px 12px;
+        font-size: 12px;
+        line-height: 1.4;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+    .memory-suggestion .memory-suggestion-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .memory-suggestion .memory-suggestion-label {
+        font-weight: 600;
+        opacity: 0.9;
+    }
+    .memory-suggestion .memory-suggestion-cat {
+        display: inline-block;
+        padding: 1px 7px;
+        border-radius: 10px;
+        font-size: 10px;
+        background: var(--vscode-badge-background);
+        color: var(--vscode-badge-foreground);
+        text-transform: lowercase;
+    }
+    .memory-suggestion .memory-suggestion-body {
+        opacity: 0.9;
+        word-wrap: break-word;
+    }
+    .memory-suggestion .memory-suggestion-actions {
+        display: flex;
+        gap: 6px;
+    }
+    .memory-suggestion .memory-suggestion-actions button {
+        padding: 3px 10px;
+        border: 1px solid var(--vscode-button-border, transparent);
+        border-radius: 3px;
+        font-family: inherit;
+        font-size: 11px;
+        cursor: pointer;
+    }
+    .memory-suggestion .btn-mem-save {
+        background: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+    }
+    .memory-suggestion .btn-mem-save:hover {
+        background: var(--vscode-button-hoverBackground);
+    }
+    .memory-suggestion .btn-mem-dismiss {
+        background: transparent;
+        color: var(--vscode-foreground);
+    }
+    .memory-suggestion .btn-mem-dismiss:hover {
+        background: var(--vscode-list-hoverBackground);
+    }
+    .memory-suggestion.done {
+        opacity: 0.55;
+    }
+    .memory-suggestion.done .memory-suggestion-actions {
+        display: none;
+    }
+    .memory-suggestion .memory-suggestion-result {
+        display: none;
+        font-size: 11px;
+        opacity: 0.75;
+    }
+    .memory-suggestion.done .memory-suggestion-result {
+        display: inline;
+    }
     .tool-approval-card .tool-approval-title {
         font-weight: 600;
         margin-bottom: 4px;
@@ -1517,6 +1592,28 @@ export function getWebviewHtml(chatFontSize: number): string {
         vscode.postMessage({ type: approved ? 'approve_tool' : 'deny_tool', token });
     }
 
+    function saveSuggestedMemory(btn) {
+        const card = btn.closest('.memory-suggestion');
+        if (!card) return;
+        const memoryId = card.dataset.memoryId;
+        if (!memoryId) return;
+        card.classList.add('done');
+        const result = card.querySelector('.memory-suggestion-result');
+        if (result) { result.textContent = '\u2713 Saved'; }
+        vscode.postMessage({ type: 'confirmMemory', memoryId });
+    }
+
+    function dismissSuggestedMemory(btn) {
+        const card = btn.closest('.memory-suggestion');
+        if (!card) return;
+        const memoryId = card.dataset.memoryId;
+        if (!memoryId) return;
+        card.classList.add('done');
+        const result = card.querySelector('.memory-suggestion-result');
+        if (result) { result.textContent = '\u2717 Dismissed'; }
+        vscode.postMessage({ type: 'rejectMemory', memoryId });
+    }
+
     function addMessage(html, cls) {
         addTimestampDivider(new Date());
         const div = document.createElement('div');
@@ -2564,6 +2661,34 @@ export function getWebviewHtml(chatFontSize: number): string {
                     '<button class="btn-approve" onclick="approveToolCmd(this, true)">Allow</button>' +
                     '<button class="btn-deny" onclick="approveToolCmd(this, false)">Deny</button>' +
                     '</div>';
+                messagesEl.appendChild(card);
+                scrollToBottom();
+                break;
+            }
+
+            case 'memory_suggested': {
+                // Auto-extracted memory — inline chip so the user can confirm
+                // without leaving the workflow.
+                const memoryId = msg.memory_id;
+                if (!memoryId) { break; }
+                const category = msg.category || 'general';
+                const content = msg.content || '';
+                const phase = msg.source_phase || '';
+                const card = document.createElement('div');
+                card.className = 'msg memory-suggestion';
+                card.dataset.memoryId = memoryId;
+                card.innerHTML =
+                    '<div class="memory-suggestion-head">' +
+                    '<span class="memory-suggestion-label">&#128161; Remember this?</span>' +
+                    '<span class="memory-suggestion-cat">' + escapeHtml(category) + '</span>' +
+                    (phase ? '<span class="memory-suggestion-cat">' + escapeHtml(phase) + '</span>' : '') +
+                    '</div>' +
+                    '<div class="memory-suggestion-body">' + escapeHtml(content) + '</div>' +
+                    '<div class="memory-suggestion-actions">' +
+                    '<button class="btn-mem-save" onclick="saveSuggestedMemory(this)">Save</button>' +
+                    '<button class="btn-mem-dismiss" onclick="dismissSuggestedMemory(this)">Dismiss</button>' +
+                    '</div>' +
+                    '<span class="memory-suggestion-result"></span>';
                 messagesEl.appendChild(card);
                 scrollToBottom();
                 break;

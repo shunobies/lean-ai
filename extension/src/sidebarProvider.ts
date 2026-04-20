@@ -23,6 +23,7 @@ import type { WsHandlerContext } from "./wsHandler";
 import { SettingsPanel } from "./settingsPanel";
 import { PromptsPanel } from "./promptsPanel";
 import { NotesPanel } from "./notesPanel";
+import { MemoriesPanel } from "./memoriesPanel";
 import {
     notifyApprovalNeeded,
     notifyComplete,
@@ -517,6 +518,33 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             case "openNotes":
                 NotesPanel.createOrShow(this.context);
                 break;
+            case "openMemories":
+                MemoriesPanel.createOrShow(this.context);
+                break;
+            case "confirmMemory": {
+                const memoryId = msg.memoryId as string;
+                try {
+                    await this.client.confirmMemory(
+                        memoryId, this.getRepoRoot(),
+                    );
+                    MemoriesPanel.refreshIfOpen();
+                } catch (err) {
+                    console.error("[Lean AI] confirmMemory failed", err);
+                }
+                break;
+            }
+            case "rejectMemory": {
+                const memoryId = msg.memoryId as string;
+                try {
+                    await this.client.rejectMemory(
+                        memoryId, this.getRepoRoot(),
+                    );
+                    MemoriesPanel.refreshIfOpen();
+                } catch (err) {
+                    console.error("[Lean AI] rejectMemory failed", err);
+                }
+                break;
+            }
             case "openExternal":
                 vscode.env.openExternal(vscode.Uri.parse(msg.url as string));
                 break;

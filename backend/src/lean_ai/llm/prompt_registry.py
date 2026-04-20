@@ -1979,6 +1979,93 @@ def _register_defaults(reg: PromptRegistry) -> None:
     ))
 
     reg.register(PromptEntry(
+        key="memory.extract_rejection",
+        category="Memory",
+        name="Plan Rejection Memory Extraction",
+        description=(
+            "Extracts a `rejection` memory from a user-rejected plan + feedback."
+            " Captures what the original plan got wrong so future plans avoid it."
+        ),
+        template_vars=["session_summary"],
+        default_text=(
+            "The user rejected an initial plan for a coding task and provided "
+            "feedback. Extract 0-2 `rejection` memories that future planning "
+            "phases can consult to avoid repeating the same mistake.\n\n"
+            "A good rejection memory captures:\n"
+            "- What assumption or step the original plan got wrong\n"
+            "- What the user wanted instead (from their feedback)\n"
+            "- A general principle, NOT details specific to this one task\n\n"
+            "DO NOT extract:\n"
+            "- Vague observations (\"the plan was too long\")\n"
+            "- Pure task-restatement without a general lesson\n"
+            "- Multiple overlapping memories — pick the 1-2 strongest signals\n\n"
+            "For each memory, set category=\"rejection\" and add 2-4 tags "
+            "describing the task type and the principle captured.\n\n"
+            "SESSION DATA:\n"
+            "{session_summary}"
+        ),
+    ))
+
+    reg.register(PromptEntry(
+        key="memory.extract_fix_pattern",
+        category="Memory",
+        name="Validation Fix Pattern Extraction",
+        description=(
+            "Extracts a `fix_pattern` memory from a successful validation-loop "
+            "fix. Captures (error signature, root cause, fix approach)."
+        ),
+        template_vars=["session_summary"],
+        default_text=(
+            "A validation command (lint, test, etc.) failed during a coding "
+            "session. The agent diagnosed and fixed it. Extract 0-2 "
+            "`fix_pattern` memories that capture the root-cause → fix mapping "
+            "for future sessions facing a similar failure.\n\n"
+            "A good fix_pattern memory captures:\n"
+            "- The error signature (what the failing command's output looked like)\n"
+            "- The root cause (what was actually broken, in general terms)\n"
+            "- The fix approach (what kind of change resolved it)\n\n"
+            "DO NOT extract:\n"
+            "- Task-specific details (exact file paths, specific variable names)\n"
+            "  unless they are part of the project's convention\n"
+            "- Generic programming advice (\"check imports\")\n"
+            "- Multiple memories for the same fix — pick the strongest\n\n"
+            "For each memory, set category=\"fix_pattern\" and add 2-4 tags "
+            "describing the error class (e.g. \"pytest\", \"import-error\", "
+            "\"ruff\").\n\n"
+            "SESSION DATA:\n"
+            "{session_summary}"
+        ),
+    ))
+
+    reg.register(PromptEntry(
+        key="memory.extract_tdd_dispute",
+        category="Memory",
+        name="TDD Dispute Memory Extraction",
+        description=(
+            "Extracts a memory from a TDD test dispute decision."
+            " Category is `gotcha` (rejected) or `fix_pattern` (accepted)."
+        ),
+        template_vars=["session_summary"],
+        default_text=(
+            "During TDD execution, the primary model disputed a test the "
+            "expert model had written. The expert evaluated and made a "
+            "decision. Extract 0-1 memories capturing the lesson.\n\n"
+            "If the dispute was ACCEPTED (test was flawed, got rewritten):\n"
+            "- category=\"gotcha\"\n"
+            "- content: what pattern in the test was wrong, so future test "
+            "  writing avoids it\n\n"
+            "If the dispute was REJECTED (test was correct, primary adapted):\n"
+            "- category=\"fix_pattern\"\n"
+            "- content: what implementation approach matched the test's "
+            "  expectations, for future similar tests\n\n"
+            "Add 2-4 tags. DO NOT extract if the dispute was about a trivial "
+            "typo or a task-specific detail that won't generalize.\n\n"
+            "SESSION DATA:\n"
+            "{session_summary}"
+        ),
+    ))
+
+    reg.register(PromptEntry(
         key="memory.session_summary",
         category="Memory",
         name="Session Conversation Summary",

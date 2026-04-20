@@ -507,6 +507,20 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
             break;
         }
 
+        // --- Memory suggestion: auto-extracted memory eligible for review ---
+        case "memory_suggested": {
+            // Forward to the webview so it can render the inline confirm/dismiss chip.
+            ctx.postMessage({
+                type: "memory_suggested",
+                memory_id: raw.memory_id as string,
+                category: raw.category as string,
+                content: raw.content as string,
+                source_phase: raw.source_phase as string | undefined,
+                tags: (raw.tags as string[] | undefined) ?? [],
+            });
+            break;
+        }
+
         default:
             console.log("Unhandled WS message type:", raw.type);
             break;
