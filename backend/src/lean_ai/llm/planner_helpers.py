@@ -1,11 +1,11 @@
 """Utility functions for the 5-phase planning pipeline.
 
-Pure helpers, WebSocket stage signaling, and standalone planning
-functions (assess_clarity, _revise_plan) that don't participate
-in the main create_plan orchestration.
+Pure helpers, WebSocket stage signaling, and the ``_revise_plan`` helper
+that doesn't participate in the main ``create_plan`` orchestration.
+Clarifications are handled upstream by the chat two-round Suggested
+Agent Prompt flow; the planner never asks the user clarifying questions.
 """
 
-import json
 import logging
 from collections.abc import Callable
 from pathlib import Path
@@ -20,10 +20,7 @@ from lean_ai.llm.plan_schema import (
     ScopeDocument,
 )
 from lean_ai.llm.prompt_registry import registry
-from lean_ai.llm.prompts import (
-    CLARIFICATION_SYSTEM_PROMPT,
-    PLAN_ASSEMBLY_SYSTEM_PROMPT,
-)
+from lean_ai.llm.prompts import PLAN_ASSEMBLY_SYSTEM_PROMPT
 
 if TYPE_CHECKING:
     from lean_ai.llm.facade import LLMClient
@@ -388,65 +385,6 @@ async def _synthesize_scope(
         len(scope.risks),
     )
     return scope, format_scope_document(scope)
-
-
-async def assess_clarity(
-    task: str,
-    llm_client: "LLMClient",
-    context: str = "",
-) -> list[str] | None:
-    """Assess whether a task is clear enough to plan.
-
-    Returns None if the task is clear, or a list of clarifying questions.
-    """
-    logger.info("Assessing task clarity")
-
-    response = await llm_client.chat_raw(
-        messages=[
-            {"role": "system", "content": CLARIFICATION_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    f"TASK:\n{task}\n\n"
-                    f"PROJECT CONTEXT:\n{context[:5000]}\n\n"
-                    "Is this task clear enough to create a detailed "
-                    "implementation plan?"
-                ),
-            },
-        ],
-        max_tokens=1024,
-    )
-
-    stripped = response.strip()
-    upper = stripped.upper()
-    if upper.startswith("CLEAR") or upper in ("OK", "YES", "N/A", "NONE", "-"):
-        return None
-
-    # Try to parse as JSON array of questions
-    try:
-        questions = json.loads(stripped)
-        if isinstance(questions, list) and all(
-            isinstance(q, str) for q in questions
-        ):
-            return questions[:5]
-    except (json.JSONDecodeError, TypeError):
-        pass
-
-    # Fallback: extract lines that look like questions
-    lines = [
-        ln.strip().lstrip("- ").lstrip("0123456789.)")
-        for ln in stripped.splitlines()
-        if ln.strip() and "?" in ln
-    ]
-    if lines:
-        return lines[:5]
-    # Short non-question responses (e.g. "-", "OK", "N/A") = task is clear
-    if len(stripped) < 20 and "?" not in stripped:
-        logger.info(
-            "Treating short non-question response as CLEAR: %r", stripped,
-        )
-        return None
-    return [stripped]
 
 
 async def _revise_plan(

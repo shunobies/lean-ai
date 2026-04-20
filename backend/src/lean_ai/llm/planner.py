@@ -46,9 +46,6 @@ from lean_ai.llm.planner_helpers import (
     _send_stage_done,
     _synthesize_scope,
 )
-from lean_ai.llm.planner_helpers import (
-    assess_clarity as assess_clarity,
-)
 from lean_ai.llm.prompt_registry import registry
 from lean_ai.llm.prompts import (
     PLAN_ASSEMBLY_SYSTEM_PROMPT,

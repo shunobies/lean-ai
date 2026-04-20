@@ -15,7 +15,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from lean_ai.config import settings
 from lean_ai.llm.plan_schema import ExecutionPlan, plan_to_markdown
-from lean_ai.llm.planner import assess_clarity, create_plan
+from lean_ai.llm.planner import create_plan
 from lean_ai.workflow.callbacks import build_workflow_callbacks
 from lean_ai.workflow.executor import execute_plan
 from lean_ai.workflow.fix_mode import _run_fix
@@ -114,11 +114,12 @@ async def run_workflow(
             dispatcher=dispatcher,
         )
 
-    # ── Phase 1: Clarify (optional) ──────────────────────────────
-    clarify_client = request_llm_client or llm_client
-    task_with_answers = await _clarify_task(
-        task, ws, clarify_client, context, dispatcher=dispatcher,
-    )
+    # Clarifications happen in the chat's two-round Suggested Agent Prompt
+    # flow — by the time a task reaches the planner, the user has already
+    # answered every question the chat surfaced. The planner does NOT run
+    # its own clarify step: Phase 1 rewrites the task into an 8-section
+    # ScopeDocument, recording any under-specified details as ASSUMPTIONS
+    # with verify_hints for Phase 2 to falsify.
 
     # ── Phase 2: Plan ────────────────────────────────────────────
     await ws_send(ws, "stage_change", {"stage": "planning"})
@@ -130,7 +131,7 @@ async def run_workflow(
     planning_cb = build_workflow_callbacks(ws, streaming=True)
 
     plan = await create_plan(
-        task=task_with_answers,
+        task=task,
         repo_root=repo_root,
         llm_client=llm_client,
         context=context,
@@ -151,7 +152,7 @@ async def run_workflow(
     # ── Phase 3: Approve ─────────────────────────────────────────
     approved_plan = await _wait_for_approval(
         plan=plan,
-        task=task_with_answers,
+        task=task,
         repo_root=repo_root,
         llm_client=llm_client,
         context=context,
@@ -167,7 +168,7 @@ async def run_workflow(
     await ws_send(ws, "stage_change", {"stage": "implementing"})
     return await execute_plan(
         plan=approved_plan,
-        task=task_with_answers,
+        task=task,
         repo_root=repo_root,
         ws=ws,
         llm_client=llm_client,
@@ -179,49 +180,6 @@ async def run_workflow(
         expert_llm_client=expert_llm_client,
         dispatcher=dispatcher,
     )
-
-
-# ── Phase 1: Clarification ─────────────────────────────────────────
-
-
-async def _clarify_task(
-    task: str,
-    ws: WebSocket,
-    llm_client: "LLMClient",
-    context: str,
-    dispatcher: WSMessageDispatcher | None = None,
-) -> str:
-    """Optionally ask clarifying questions before planning.
-
-    Returns the original task augmented with user answers, or the task
-    unchanged if no clarifications were needed.
-    """
-    questions = await assess_clarity(task, llm_client, context)
-    if questions is None:
-        logger.info("Task is clear — skipping clarification")
-        return task
-
-    logger.info("Clarification needed — %d questions", len(questions))
-    await ws_send(ws, "clarification_needed", {"questions": questions})
-
-    # Wait for user to respond
-    while True:
-        msg = (
-            await dispatcher.wait_for_approval() if dispatcher else None
-        )
-        if msg is None:
-            raise WebSocketDisconnect()
-
-        if msg.get("type") == "user_message":
-            answer = msg.get("content", "")
-            augmented = (
-                f"{task}\n\n"
-                f"ADDITIONAL DETAILS (from clarification):\n{answer}"
-            )
-            logger.info(
-                "Received clarification answer (%d chars)", len(answer),
-            )
-            return augmented
 
 
 # ── Phase 3: Approval ──────────────────────────────────────────────

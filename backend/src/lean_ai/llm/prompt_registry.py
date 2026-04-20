@@ -867,33 +867,6 @@ def _register_defaults(reg: PromptRegistry) -> None:
     ))
 
     reg.register(PromptEntry(
-        key="planning.clarification_system",
-        category="Planning",
-        name="Task Clarity Assessment",
-        description=(
-            "Assesses whether a task is specific enough to"
-            " plan. Returns CLEAR or clarifying questions."
-        ),
-        warning="Output format is strict: either 'CLEAR' or a JSON array of questions.",
-        default_text=(
-            "Assess whether the following task description is specific enough to create a "
-            "detailed implementation plan. Consider:\n\n"
-            "- Are the requirements clear and unambiguous?\n"
-            "- Are file paths, function names, or component names specified (or inferable "
-            "from the project context)?\n"
-            "- Is the expected behavior described concretely?\n"
-            "- Are there technology choices that need to be made?\n\n"
-            "If the task is clear enough to plan, respond with exactly: CLEAR\n\n"
-            "If clarifications are needed, respond with a JSON array of 3-5 focused "
-            "questions that would fill in the most critical gaps. Example:\n"
-            '["What database should this use — SQLite or PostgreSQL?", '
-            '"Should the endpoint require authentication?"]\n\n'
-            "Do NOT ask questions that can be answered by reading the codebase — the "
-            "planner will explore the codebase during planning."
-        ),
-    ))
-
-    reg.register(PromptEntry(
         key="planning.scope_user",
         category="Planning",
         name="Phase 1: Scope Analysis (User Message)",

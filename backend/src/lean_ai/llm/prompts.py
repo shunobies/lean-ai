@@ -34,7 +34,6 @@ _SIMPLE_KEYS: dict[str, str] = {
     "PLAN_VERIFICATION_SYSTEM_PROMPT": "planning.verification_system",
     "PLAN_ASSEMBLY_SYSTEM_PROMPT": "planning.assembly_system",
     "FIX_INVESTIGATION_PROMPT": "fix.investigation",
-    "CLARIFICATION_SYSTEM_PROMPT": "planning.clarification_system",
     "CHAT_SYSTEM_PROMPT": "chat.system",
     "REFINER_CHAT_PROMPT": "refiner.chat",
     "REFINER_TASK_PROMPT": "refiner.task",
