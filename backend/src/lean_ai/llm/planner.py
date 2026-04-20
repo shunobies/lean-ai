@@ -207,10 +207,10 @@ async def create_plan(
         await _send_content_done(ws, scope_prose)
 
     # Coerce the exploration prose into a validated ScopeDocument so Phase 2
-    # never receives clarifying questions or a half-populated shape as its
-    # scope input. Retries once on validation failure; falls back to raw
-    # prose if both attempts fail so the pipeline does not crash.
-    scope_obj, scope = await _synthesize_scope(
+    # always receives the 8-section shape. When synthesis fails twice the
+    # helper emits a programmatic fallback wrapping the task text — never
+    # thin prose — so Phase 2 can't regress to "no real scope."
+    scope_obj, scope, scope_synthesized = await _synthesize_scope(
         task=task,
         context=context,
         exploration_prose=scope_prose,
@@ -218,10 +218,11 @@ async def create_plan(
         phase_max_tokens=phase_max_tokens,
         on_thinking=on_thinking,
     )
-    if scope_obj is None:
+    if not scope_synthesized:
         logger.warning(
-            "Phase 1 scope synthesis fell back to raw prose — downstream "
-            "phases will see the exploration output verbatim",
+            "Phase 1 scope synthesis fell through to programmatic fallback "
+            "(task-text-only ScopeDocument). Phase 2 must reconstruct "
+            "missing sections from the task during exploration.",
         )
 
     phase_timings["phase_1_scope"] = time.monotonic() - t0

@@ -17,6 +17,7 @@ from lean_ai.config import settings
 from lean_ai.llm.plan_schema import (
     IMPLEMENTATION_STEP_TOOLS,
     ExecutionPlan,
+    ScopeAssumption,
     ScopeDocument,
 )
 from lean_ai.llm.prompt_registry import registry
@@ -303,15 +304,19 @@ async def _synthesize_scope(
     explorer: "LLMClient",
     phase_max_tokens: int,
     on_thinking: "Callable | None" = None,
-) -> tuple[ScopeDocument | None, str]:
+) -> tuple[ScopeDocument, str, bool]:
     """Coerce the Phase 1 exploration prose into a validated ScopeDocument.
 
     Runs a single ``chat_structured`` pass against
-    ``planning.scope_synthesis_system``. On validation failure, retries once
-    with a corrective nudge that explicitly forbids clarifying questions as
-    output. If both attempts fail, falls back to the raw exploration prose
-    so the pipeline keeps moving — downstream phases will see the original
-    text but at least the run does not crash.
+    ``planning.scope_synthesis_system``. On validation failure, retries
+    once with a corrective nudge. If both attempts fail, constructs a
+    programmatic fallback ``ScopeDocument`` that wraps the task text so
+    Phase 2 is guaranteed to receive the 8-section shape — never thin
+    prose that looks like "let me check assumptions…".
+
+    Returns ``(scope_obj, markdown, synthesized)`` where ``synthesized``
+    is ``True`` when the structured call succeeded and ``False`` when the
+    programmatic fallback kicked in (downstream can log / flag that).
     """
     synthesis_system = registry.get("planning.scope_synthesis_system")
 
@@ -326,14 +331,14 @@ async def _synthesize_scope(
         base_payload_parts.append(f"PROJECT CONTEXT:\n{context_slice}")
     if exploration_prose.strip():
         base_payload_parts.append(
-            f"SCOPE ANALYSIS PROSE (from the exploration loop):\n"
+            f"SCOPE ANALYSIS PROSE (from the Phase 1 tool loop):\n"
             f"{exploration_prose}"
         )
     base_payload_parts.append(
-        "Produce the ScopeDocument. Populate every field per the schema "
-        "and the system prompt. Never return clarifying questions — if a "
-        "field is unknown, write a best-guess and add a matching "
-        "assumption with a verify_hint."
+        "Translate the inputs above into the ScopeDocument. Populate every "
+        "field from the task text, context, and prose — when a field is "
+        "not spelled out, write your most reasonable interpretation and "
+        "add a matching assumption with a verify_hint."
     )
     base_payload = "\n\n".join(base_payload_parts)
 
@@ -353,27 +358,29 @@ async def _synthesize_scope(
     except Exception:
         logger.warning(
             "Phase 1 scope synthesis attempt 1 failed — retrying with "
-            "corrective nudge",
+            "corrective payload",
             exc_info=True,
         )
         retry_payload = (
             base_payload
-            + "\n\nCORRECTION: your previous attempt did not conform to "
-            "the ScopeDocument schema. Do NOT ask clarifying questions. "
-            "Populate every field — when a detail is genuinely unknown, "
-            "write the most reasonable interpretation and add an "
-            "assumption whose verify_hint tells Phase 2 how to confirm or "
-            "falsify it."
+            + "\n\nCORRECTION: your previous output did not conform to "
+            "the ScopeDocument schema. This is a pure translation task: "
+            "take the task text and rewrite it into the 8 schema fields. "
+            "Populate every field — when a detail is not spelled out, "
+            "write your best interpretation and record it as an "
+            "assumption with a concrete verify_hint."
         )
         try:
             scope = await _attempt(retry_payload)
         except Exception:
-            logger.warning(
-                "Phase 1 scope synthesis retry failed — falling back to "
-                "raw exploration prose",
+            logger.error(
+                "Phase 1 scope synthesis failed twice — emitting "
+                "programmatic fallback ScopeDocument derived from the "
+                "task text so Phase 2 still receives the 8-section shape",
                 exc_info=True,
             )
-            return None, exploration_prose
+            scope = _fallback_scope_document(task)
+            return scope, format_scope_document(scope), False
 
     logger.info(
         "Phase 1 synthesis: deliverables=%d in_scope=%d assumptions=%d "
@@ -384,7 +391,45 @@ async def _synthesize_scope(
         len(scope.success_criteria),
         len(scope.risks),
     )
-    return scope, format_scope_document(scope)
+    return scope, format_scope_document(scope), True
+
+
+def _fallback_scope_document(task: str) -> ScopeDocument:
+    """Construct a minimal ScopeDocument when the synthesis LLM fails twice.
+
+    Guarantees Phase 2 always receives the 8-section shape even when the
+    request model refuses to produce valid JSON. The task text goes into
+    ``problem`` verbatim (truncated) and a single assumption flags that
+    downstream phases must treat the task description as authoritative.
+    """
+    problem = task.strip()[:4000] or "(task text was empty)"
+    return ScopeDocument(
+        problem=problem,
+        deliverables=[],
+        in_scope=[],
+        out_of_scope=[],
+        downstream_consumers=[],
+        assumptions=[
+            ScopeAssumption(
+                assumption=(
+                    "Phase 1 scope synthesis did not produce a validated "
+                    "ScopeDocument; the PROBLEM section above is the "
+                    "verbatim task and is authoritative."
+                ),
+                verify_hint=(
+                    "Re-read the PROBLEM section, extract file paths and "
+                    "entity names directly from it, and grep the codebase "
+                    "to confirm each reference before planning edits."
+                ),
+            ),
+        ],
+        success_criteria=[],
+        risks=[
+            "Phase 1 synthesis fallback triggered — scope was derived from "
+            "task text only; other structured sections are empty and must "
+            "be reconstructed from the task during Phase 2 exploration.",
+        ],
+    )
 
 
 async def _revise_plan(
