@@ -7,6 +7,10 @@ documenting which tools are available at each stage, how persistent state
 (scratchpad, journal, step artifacts) is managed, and what survives context
 refresh.
 
+> Looking for a narrative walkthrough of a real session — what each phase does,
+> what guardrails keep the LLM on task, and how field-observed issues shaped
+> the current design? See [example-flow.md](example-flow.md).
+
 ---
 
 ## Entry Points

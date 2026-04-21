@@ -181,6 +181,7 @@ See the [full configuration reference](docs/configuration.md) for all options.
 |---|---|
 | [Configuration](docs/configuration.md) | All environment variables, extension settings, and model setup |
 | [Architecture](docs/architecture.md) | Planning pipeline, workflow modes, tools, and internals |
+| [Example Flow](docs/example-flow.md) | End-to-end walkthrough of a real session with every guardrail called out |
 | [Reference Library & Refiner](docs/reference-library.md) | Private docs, RAG enrichment, and cloud privacy |
 | [API Reference](docs/api-reference.md) | REST endpoints and WebSocket protocol |
 | [Extension Guide](docs/extension.md) | VSCode/VSCodium setup, commands, and settings |

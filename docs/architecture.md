@@ -2,6 +2,8 @@
 
 Lean AI is a linear pipeline — no state machine, no complex orchestration. Tasks flow through clear phases, and each component has one job.
 
+> For an end-to-end narrative walkthrough of a real session — from the first chat message through post-execution validation, with every guardrail called out — see [example-flow.md](example-flow.md). For the tool-and-state audit focused on persistence, see [workflow-flow.md](workflow-flow.md).
+
 ## System Overview
 
 ```
