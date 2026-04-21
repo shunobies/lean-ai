@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS validation_attempts (
     fix_tool_calls TEXT,              -- JSON array
     failures_after TEXT,              -- JSON
     succeeded INTEGER NOT NULL DEFAULT 0,
+    regression_failure INTEGER NOT NULL DEFAULT 0,
     trace_uuid TEXT,
     created_at TEXT NOT NULL
 );
@@ -130,6 +131,28 @@ def _db_path(repo_root: str) -> Path:
     return p
 
 
+async def _migrate(db: aiosqlite.Connection) -> None:
+    """Apply idempotent migrations for pre-existing DBs.
+
+    SQLite ``CREATE TABLE IF NOT EXISTS`` keeps old schemas as-is, so
+    columns added after a DB was first created need explicit
+    ``ALTER TABLE``. Each migration here is guarded by a PRAGMA column
+    check so re-running is a no-op.
+    """
+    async def _has_column(table: str, column: str) -> bool:
+        cursor = await db.execute(f"PRAGMA table_info({table})")
+        rows = await cursor.fetchall()
+        return any(row["name"] == column for row in rows)
+
+    # Layer 7 — ``regression_failure`` column on validation_attempts.
+    if not await _has_column("validation_attempts", "regression_failure"):
+        await db.execute(
+            "ALTER TABLE validation_attempts ADD COLUMN "
+            "regression_failure INTEGER NOT NULL DEFAULT 0"
+        )
+        await db.commit()
+
+
 async def get_training_db(repo_root: str) -> aiosqlite.Connection:
     """Open (or create) the training archive DB with WAL mode."""
     db = await aiosqlite.connect(str(_db_path(repo_root)))
@@ -137,6 +160,7 @@ async def get_training_db(repo_root: str) -> aiosqlite.Connection:
     await db.execute("PRAGMA journal_mode = WAL")
     await db.execute("PRAGMA busy_timeout = 5000")
     await db.executescript(_SCHEMA)
+    await _migrate(db)
     await db.commit()
     return db
 
@@ -233,19 +257,22 @@ async def insert_validation_attempt(
     failures_after: dict | None,
     succeeded: bool,
     trace_uuid: str | None = None,
+    regression_failure: bool = False,
 ) -> int:
     cursor = await db.execute(
         "INSERT INTO validation_attempts ("
         "session_id, attempt_num, failures_before, diagnosis, fix_tool_calls, "
-        "failures_after, succeeded, trace_uuid, created_at"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "failures_after, succeeded, regression_failure, trace_uuid, created_at"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             session_id, attempt_num,
             _json_dump(failures_before) if failures_before is not None else None,
             diagnosis,
             _json_dump(fix_tool_calls) if fix_tool_calls is not None else None,
             _json_dump(failures_after) if failures_after is not None else None,
-            1 if succeeded else 0, trace_uuid, _now(),
+            1 if succeeded else 0,
+            1 if regression_failure else 0,
+            trace_uuid, _now(),
         ),
     )
     await db.commit()

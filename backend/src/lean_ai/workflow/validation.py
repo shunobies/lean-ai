@@ -264,6 +264,35 @@ async def _run_validation_fix_loop(
             )
         failure_text = "\n\n".join(failure_parts)
 
+        # Layer 7 — regression-aware banner. If any failing output
+        # names a regression test file, prepend a bright warning so
+        # the LLM knows the tool executor will reject edits to those
+        # paths and the correct fix is an implementation change.
+        from lean_ai.tools.regression_guard import (
+            extract_regression_paths_from_text,
+        )
+        regression_hits: list[str] = []
+        seen_reg: set[str] = set()
+        for result in failures.values():
+            raw = result.get("full_output") or result.get("output") or ""
+            for p in extract_regression_paths_from_text(raw):
+                if p not in seen_reg:
+                    regression_hits.append(p)
+                    seen_reg.add(p)
+        regression_banner = ""
+        if regression_hits:
+            paths_list = ", ".join(f"`{p}`" for p in regression_hits)
+            regression_banner = (
+                "\n**REGRESSION TEST FAILURES DETECTED**: "
+                f"{paths_list} are regression tests guarding "
+                "previously-fixed or core behavior. They are "
+                "IMMUTABLE. Your ONLY acceptable fix is to edit the "
+                "implementation code so these tests pass again. The "
+                "tool executor will REJECT any attempt to edit these "
+                "files. Investigate why the recent changes broke the "
+                "guarded behavior and restore it.\n"
+            )
+
         fix_memory_context = ""
         if settings.enable_session_memory and getattr(
             settings, "enable_fix_loop_memory", True,
@@ -292,6 +321,7 @@ async def _run_validation_fix_loop(
                 "content": (
                     "Validation failed. Fix the failures below.\n"
                     "Workflow: re-run command → diagnose → fix → verify.\n"
+                    + regression_banner
                     + (
                         "\nFILE SCOPE: Only modify files from this list "
                         "(new files are allowed):\n"

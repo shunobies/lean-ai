@@ -297,6 +297,7 @@ def make_tool_executor(
     tdd_protect_tests: bool = False,
     on_test_dispute: "Callable | None" = None,
     allowed_files: "list[str] | None" = None,
+    session_created_regression_files: "set[str] | None" = None,
 ):
     """Create a tool executor closure for the workflow.
 
@@ -313,7 +314,20 @@ def make_tool_executor(
         allowed_files: When set, restrict ``edit_file`` to only these paths.
             ``create_file`` is allowed for genuinely new files but blocked
             if it would overwrite an existing file not on the list.
+        session_created_regression_files: When provided, the executor
+            treats any regression-test-path edit as allowed if the path
+            is in this set (i.e. the current plan is the one that
+            created the regression file). Finalized regression files
+            (not in the set) are unconditionally protected.  A shared
+            ``set`` instance lets the caller inspect which regression
+            paths were created during this session.  When ``None``,
+            every edit to a regression path is rejected.
     """
+
+    # Default to an empty local set so the closure works without a
+    # caller-provided set. Shared reference means caller can inspect.
+    if session_created_regression_files is None:
+        session_created_regression_files = set()
 
     async def execute(name: str, arguments: dict) -> str:
         """Execute a tool and return the result as a string."""
@@ -358,6 +372,22 @@ def make_tool_executor(
                     "with a specific programmatic reason."
                 )
 
+        # Regression guard: regression tests are immutable once
+        # finalized. An edit is only permitted when the file was
+        # created by the CURRENT session (i.e. Phase 5 within this
+        # plan wrote the test and is now refining it).
+        if name == "edit_file":
+            from lean_ai.tools.regression_guard import (
+                REGRESSION_GUARD_ERROR,
+                is_regression_test_path,
+            )
+            target_path = arguments.get("path", "")
+            if (
+                is_regression_test_path(target_path)
+                and target_path not in session_created_regression_files
+            ):
+                return REGRESSION_GUARD_ERROR.format(path=target_path)
+
         # Handle test dispute tool
         if name == "request_test_change":
             if on_test_dispute is not None:
@@ -386,6 +416,14 @@ def make_tool_executor(
             diff = result.metadata.get("diff", "")
             if diff:
                 await send_diff(ws, file=target_path, diff=diff)
+            # Track regression files created this session so subsequent
+            # edit_file calls within the same plan can refine them.
+            # The regression guard promotes them to "finalized" (read-
+            # only) once the plan completes by discarding this set.
+            if result.success:
+                from lean_ai.tools.regression_guard import is_regression_test_path
+                if is_regression_test_path(target_path):
+                    session_created_regression_files.add(target_path)
             return result.output if result.success else f"ERROR: {result.error}"
 
         elif name == "edit_file":

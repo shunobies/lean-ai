@@ -345,7 +345,7 @@ class Settings(BaseSettings):
     # match via re.search. Files matching this pattern are guarded from
     # edits by the regression guard once finalized.
     regression_file_pattern: str = (
-        r"(?i)(?:^|[/\\])regression(?:[/\\]|[_-][^/\\]*\.[A-Za-z0-9]+$)"
+        r"(?i)(?:^|[/\\])regressions?(?:[/\\]|[_-][^/\\]*\.[A-Za-z0-9]+$)"
     )
     # Layer 9 — Core-functionality detection. When enabled, Phase 3 tags
     # load-bearing entities and Phase 5 MUST produce regression tests for

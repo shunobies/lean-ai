@@ -264,7 +264,20 @@ async def on_validation_attempt_complete(
     2. **Curated memory**: on success only, extract a ``fix_pattern``
        memory capturing (error → root-cause → fix).
     """
-    # 1. Training archive — every attempt, pass/fail alike
+    # 1. Training archive — every attempt, pass/fail alike.
+    # Detect regression failures from the error output so exports can
+    # weight fixes that correctly addressed regressions.
+    regression_failure = False
+    try:
+        from lean_ai.tools.regression_guard import (
+            extract_regression_paths_from_text,
+        )
+        regression_failure = bool(
+            extract_regression_paths_from_text(error_output or "")
+        )
+    except Exception:
+        regression_failure = False
+
     try:
         from lean_ai.training.capture import capture_validation_attempt
 
@@ -277,6 +290,7 @@ async def on_validation_attempt_complete(
             fix_tool_calls=fix_tool_calls,
             failures_after=failures_after,
             succeeded=succeeded,
+            regression_failure=regression_failure,
         )
     except Exception:
         logger.debug(

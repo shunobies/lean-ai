@@ -208,6 +208,7 @@ async def capture_validation_attempt(
     failures_after: dict | None,
     succeeded: bool,
     trace_uuid: str | None = None,
+    regression_failure: bool = False,
 ) -> int | None:
     """Persist a fix-loop attempt row."""
     if not _is_enabled():
@@ -231,6 +232,7 @@ async def capture_validation_attempt(
             failures_after=scrubbed["failures_after"],
             succeeded=succeeded,
             trace_uuid=trace_uuid,
+            regression_failure=regression_failure,
         )
 
     try:
