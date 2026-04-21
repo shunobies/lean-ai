@@ -235,3 +235,145 @@ External service → webhook → handle_webhook() → process changes
 ## Scaffolding
 
 19 YAML scaffold recipes (`scaffolds/`) for bootstrapping new projects: FastAPI, Next.js, Laravel, Rails, Django, Flask, Express, and more. Each recipe defines the setup commands and file structure.
+
+## Self-Improvement Pipeline
+
+Lean AI watches every session and learns from it. The pipeline has two
+independent layers: a **curated memory** layer that feeds back into
+planning right away, and a **training archive** that accumulates
+slowly for future LoRA fine-tuning.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     One workflow session                       │
+│                                                                 │
+│  User task ──▶ Plan ──▶ Approve ──▶ Execute ──▶ Validate ──▶ Done│
+│                 │         │           │           │             │
+│                 │         ▼           │           ▼             │
+│                 │    plan_decisions   │    validation_attempts  │
+│                 │    (if revised)     │    (fix loop)           │
+│                 ▼                     ▼                         │
+│              workflow_events ◀────────┴── cancellation/TDD/etc  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+                         │                          │
+                         │ extract (worker LLM)     │ raw capture
+                         ▼                          ▼
+            ┌───────────────────────┐   ┌──────────────────────────┐
+            │  session_memories     │   │  .lean_ai/training.db    │
+            │  (.lean_ai/lean_ai.db)│   │  (append-only archive)   │
+            │                       │   │                          │
+            │  • auto (pending)     │   │  • training_traces       │
+            │  • user_confirmed     │   │  • plan_decisions        │
+            │  • high_confidence…   │   │  • validation_attempts   │
+            │  • user_rejected      │   │  • workflow_events       │
+            │                       │   │  • redaction_audit       │
+            └───────────────────────┘   └──────────────────────────┘
+                         │                          │
+              injected back into                 exported to
+              planning phases 1+3 +              lean-ai-serve
+              validation fix loop                (requires API key)
+```
+
+### Layer 1 — Curated Memory (feedback into the next session)
+
+After every session, a worker LLM reads a compact session summary and
+writes up to five short lessons to the `session_memories` SQLite
+table. Three extra extraction paths capture specific high-value
+signals:
+
+- **Plan rejection** (`schedule_plan_rejection_extraction`) — fires
+  when the user rejects a plan and later approves a revised one. The
+  `(original plan, feedback, revised plan)` triple becomes a
+  `rejection` memory.
+- **Fix success** (`schedule_fix_success_extraction`) — fires when
+  the validation fix loop turns a failing command into a passing one.
+  The `(failing command, diagnosis, fix approach)` triple becomes a
+  `fix_pattern` memory.
+- **TDD dispute** (`schedule_tdd_dispute_extraction`) — fires when
+  the primary model challenges a test and the expert model rules on
+  it. The ruling becomes a `gotcha` or `fix_pattern` memory.
+
+Memories start in `curation_status='auto'` and are **not** visible to
+the planner until a human confirms them (or auto-promotion sees the
+same lesson three times across sessions). This prevents noisy
+extractions from poisoning future plans.
+
+Three planning phases read memories back:
+
+| Phase | Categories retrieved | Purpose |
+|---|---|---|
+| **Phase 1 — Scope** | All | General context from similar past tasks. |
+| **Phase 3 — Design** | `gotcha`, `convention`, `rejection` | Avoid known design mistakes. |
+| **Fix loop** | `fix_pattern`, `gotcha` | Past fixes for similar failing commands. |
+
+Each phase has its own 2% context-window budget so memory injection
+never crowds out the actual prompt. See [Curated Memory](curated-memory.md)
+for the full concept doc and the extension-side UI.
+
+### Layer 2 — Training Archive (fuel for future LoRA)
+
+In parallel with memory extraction, workflow hooks write raw traces
+to `.lean_ai/training.db` — a **separate** SQLite file from the main
+workspace DB so retention/VACUUM never blocks the hot path.
+
+| Table | What it holds | Why it's there |
+|---|---|---|
+| `training_traces` | Full messages + assistant output per LLM turn, optional `pair_id` + `preference` | SFT / DPO / KTO export source |
+| `plan_decisions` | Approve/reject/cancel with `plan_before`, `feedback`, `plan_after` | DPO pairs (rejected → revised-approved) |
+| `validation_attempts` | Per-attempt `(failures_before, diagnosis, fix, failures_after)` | DPO pairs (failed → succeeded on same error) |
+| `workflow_events` | Cancellation / TDD dispute / execution-complete markers | KTO labels and behavior analysis |
+| `redaction_audit` | One row per scrubber match (sha256 prefix only — never the raw secret) | Forensics when a new leak class is discovered |
+
+Before any row is inserted, the payload passes through a **fail-closed
+scrubber** (`training/scrubber.py`) that matches OpenAI / Anthropic /
+Slack / GitHub / AWS tokens, JWTs, SSH keys, bearer headers,
+`LEAN_AI_*_KEY=…` env lines, and high-entropy generic tokens. Any
+scrubber exception drops the trace rather than risk writing unscrubbed
+data. Every match gets a `redaction_audit` row keyed by a 12-character
+sha256 prefix of the matched string so you can retroactively identify
+affected rows without the audit log itself containing secrets.
+
+### Export & aggregation
+
+The archive stays on your machine by default. Setting
+`LEAN_AI_EXPORT_API_KEY` enables a set of authenticated
+`/api/export/*` endpoints that stream JSONL in four formats:
+
+- `raw` — anonymized rows with structure intact
+- `sft` — OpenAI chat JSONL (successful turns only; preserves
+  `reasoning_content` for thinking models)
+- `dpo` — matched `{prompt, chosen, rejected}` pairs
+- `kto` — binary-labeled `{prompt, completion, label}`
+
+A coordinator like `lean-ai-serve` can pull from every registered
+workspace and concatenate. Each row is anonymized twice:
+
+1. **Always**: `session_id` → `sha256(salt:id)[:12]`, `repo_root` →
+   `/workspace-<id>` placeholder.
+2. **Memory-only**: file paths, module names, and CamelCase symbols
+   from the workspace's symbol table are replaced with generic
+   placeholders. Memories where more than 40% of characters had to be
+   redacted are dropped entirely.
+
+See [Training Pipeline](training.md) for the export API, LoRA recipe,
+and vLLM adapter hot-swap walkthrough.
+
+### Auto-promotion and bulk invalidation
+
+`training/maintenance.py` adds two automation helpers on top of the
+two layers:
+
+- **`auto_promote_memory`** — when the memory extractor is about to
+  insert a new row, it first checks whether a near-identical memory
+  already exists. If so, the existing row's `seen_count` is bumped
+  instead of inserting a duplicate. Once `seen_count` crosses
+  `LEAN_AI_MEMORY_AUTOPROMOTE_THRESHOLD` (default 3), the memory
+  promotes from `auto` to `high_confidence_auto`.
+- **`bulk_invalidate_by_model`** — demote every memory produced by a
+  named model in one call, useful when a model regression is
+  discovered. Affected rows move to `superseded`.
+
+Retention pruning (`run_retention_pass`) fires opportunistically at
+session end, throttled to once per workspace per hour, and deletes
+rows older than `LEAN_AI_TRAINING_RETENTION_DAYS` (default 365).

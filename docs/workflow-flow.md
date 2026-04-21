@@ -666,3 +666,170 @@ an LRU-like eviction: oldest entries dropped when over 10% budget. For plans
 with many files, early file contents may be evicted before later steps that
 reference them. The LLM can always `read_file` again, but it costs a tool
 turn and the LLM may not know the content was evicted.
+
+## 9. Memory Lifecycle
+
+Every session feeds the curated-memory store. The lifecycle below
+covers how a single lesson moves from "the LLM just noticed
+something" all the way to "the planner uses this lesson to write a
+better plan next time." For the concept doc see
+[Curated Memory](curated-memory.md); for the retrieval-side plumbing
+see the [Planning phase injection points](#2-plan-mode--full-pipeline).
+
+### 9.1 Extraction triggers
+
+Three specific moments produce a memory. Each triggers a different
+phase-specific extraction prompt (see `memory.extract_rejection`,
+`memory.extract_fix_pattern`, `memory.extract_tdd_dispute` in
+`llm/prompt_registry.py`):
+
+```
+┌──────────────────────────┐     ┌──────────────────────────┐
+│ User rejects plan,       │     │ Fix loop turns a failing │
+│ then approves revised    │     │ command into passing     │
+│ (pipeline.py:220,242)    │     │ (validation.py:388)      │
+└────────────┬─────────────┘     └────────────┬─────────────┘
+             │                                │
+             │   schedule_plan_rejection_     │   schedule_fix_success_
+             │   extraction                   │   extraction
+             └─────────────┬──────────────────┘
+                           ▼
+          ┌────────────────────────────────────────┐
+          │  memory/extractor.py worker queue      │
+          │                                        │
+          │  1. Build phase-specific summary       │
+          │  2. Call worker LLM (chat_structured)  │
+          │  3. Check auto_promote_memory          │
+          │     (dedupe: same lesson bumps         │
+          │     seen_count instead of inserting)   │
+          │  4. Check supersede_user_rejected      │
+          │     (skip lessons user already         │
+          │     rejected)                          │
+          │  5. Insert new auto memory             │
+          │  6. Index in Whoosh                    │
+          │  7. Fire on_memory_created callback    │
+          └────────────────┬───────────────────────┘
+                           │
+                           ▼
+          ┌────────────────────────────────────────┐
+          │   session_memories row                 │
+          │   curation_status='auto'               │
+          │   seen_count=1                         │
+          └────────────────┬───────────────────────┘
+                           │
+                           │  (callback fires
+                           │   fire_memory_suggested)
+                           ▼
+          ┌────────────────────────────────────────┐
+          │  WebSocket → extension                 │
+          │  "memory_suggested" inline chip        │
+          │  in the chat stream                    │
+          └────────────────────────────────────────┘
+```
+
+A third trigger — TDD disputes — fires the same way from
+`tdd.py:110` via `schedule_tdd_dispute_extraction`.
+
+### 9.2 Curation (user in the loop)
+
+Once a memory is `auto`, it's invisible to the planner. Three ways
+it can graduate:
+
+```
+                           auto (default)
+                             │
+                             │
+         ┌──────── 3 paths forward ────────┐
+         │                │                │
+         │                │                │
+   user clicks      same memory       user clicks
+   "Save" on chip   extracted 3×      "Reject" on chip
+   or in panel     across sessions   or in panel
+         │                │                │
+         ▼                ▼                ▼
+   user_confirmed   high_confidence_   user_rejected
+   (confidence=0.9)   auto              (confidence=0.0)
+         │          (confidence>0.5)         │
+         │                │                  │
+         └──────┬─────────┘                  ▼
+                │                    never re-introduced
+                ▼                    (supersede_user_rejected
+        visible to planner:          blocks duplicates)
+        - Phase 1 (all categories)
+        - Phase 3 (design hints)
+        - Fix loop (fix_pattern)
+```
+
+Routing:
+
+| UI action | REST call | DB change |
+|---|---|---|
+| Click **Save** on chip or Memories panel | `POST /api/memories/{id}/confirm` | `curation_status='user_confirmed', confidence=0.9` |
+| Click **Dismiss** / **Reject** | `POST /api/memories/{id}/reject` | `curation_status='user_rejected', confidence=0.0` |
+| Click **Delete** | `DELETE /api/memories/{id}` | Row removed, Whoosh entry removed |
+| Click **+ Add a memory manually** | `POST /api/memories` | New row with `curation_status='user_confirmed'` |
+
+### 9.3 Retrieval (into future planning)
+
+The `_retrieve_memories_for_phase` helper in `planner_helpers.py` is
+the single chokepoint for injection. Three callers wire it in:
+
+```
+     ┌───────────────────────────────────────────────────────────┐
+     │  Planner Phase 1 (scope)                                  │
+     │  _retrieve_session_memories(repo_root, task)              │
+     │  — all categories, 2% of context window                   │
+     └───────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+     ┌───────────────────────────────────────────────────────────┐
+     │  Planner Phase 3 (design)                                 │
+     │  retrieve_design_memories(repo_root, task)                │
+     │  — gotcha + convention + rejection, 2% of context window  │
+     └───────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+     ┌───────────────────────────────────────────────────────────┐
+     │  Validation fix loop                                      │
+     │  retrieve_fix_pattern_memories(                           │
+     │    repo_root, "<failing command> <first error line>"      │
+     │  )                                                        │
+     │  — fix_pattern + gotcha, 2% of context window             │
+     └───────────────────────────────────────────────────────────┘
+```
+
+Filter stack inside each retrieval call:
+
+1. Whoosh BM25F search against memory content + tags + source_task.
+2. Hydrate the top-N hits with their full DB rows.
+3. Keep only rows whose `curation_status` is in
+   `settings.memory_retrieval_statuses`
+   (default `user_confirmed,high_confidence_auto`).
+4. Drop rows where `expires_at < now`.
+5. Restrict by category list if the caller passed one.
+6. Cap final output at the phase's char budget.
+
+Disabling a retrieval point: `LEAN_AI_ENABLE_PHASE3_MEMORY=false` or
+`LEAN_AI_ENABLE_FIX_LOOP_MEMORY=false`. Phase 1 retrieval is always
+on while `LEAN_AI_ENABLE_SESSION_MEMORY=true`.
+
+### 9.4 Training archive capture (parallel path)
+
+Every extraction trigger also writes to the **training archive**
+(`.lean_ai/training.db`) — a separate SQLite file used only for
+future fine-tuning exports. The archive hooks fire from the same
+places but write different shapes:
+
+| Hook site | Memory extraction | Training archive write |
+|---|---|---|
+| `pipeline.py:220` (approve) | `rejection` memory (if preceded by reject) | `plan_decisions` row |
+| `pipeline.py:242` (reject) | — (deferred to eventual approval) | `plan_decisions` row |
+| `validation.py:388` | `fix_pattern` memory (on success) | `validation_attempts` row (both pass and fail) |
+| `tdd.py:110` | `gotcha` or `fix_pattern` memory | `workflow_events` row with `event_type='tdd_dispute'` |
+| `routers/workflow.py:318` | — | `workflow_events` row with `event_type='cancellation'` |
+| `executor.py` (post-exec) | Session-end summary memories | `workflow_events` row with `event_type='execution_complete'` |
+
+Before every training archive write, the payload passes through the
+fail-closed PII/secrets scrubber in `training/scrubber.py`. See
+[Training Pipeline](training.md) for the full capture + export
+architecture.

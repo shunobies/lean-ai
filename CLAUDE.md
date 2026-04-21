@@ -288,6 +288,22 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_WIKI_API_PATH` | `/w/api.php` | MediaWiki API endpoint path |
 | `LEAN_AI_WIKI_USERNAME` | *(empty)* | MediaWiki username for authenticated wikis (bot account) |
 | `LEAN_AI_WIKI_PASSWORD` | *(empty)* | MediaWiki password (stored in OS keychain via extension) |
+| `LEAN_AI_ENABLE_SESSION_MEMORY` | `true` | Master switch for cross-session memory (extraction + retrieval). See `docs/curated-memory.md` |
+| `LEAN_AI_MEMORY_RETRIEVAL_STATUSES` | `user_confirmed,high_confidence_auto` | Comma-separated curation statuses allowed in retrieval |
+| `LEAN_AI_MEMORY_AUTOPROMOTE_THRESHOLD` | `3` | seen_count required to auto-promote `auto` → `high_confidence_auto` |
+| `LEAN_AI_MEMORY_CONFIDENCE_TTL_DAYS` | `90` | Default TTL applied by `set_expiry_from_ttl` |
+| `LEAN_AI_ENABLE_PHASE3_MEMORY` | `true` | Inject `gotcha`/`convention`/`rejection` memories into Phase 3 design |
+| `LEAN_AI_ENABLE_FIX_LOOP_MEMORY` | `true` | Inject `fix_pattern`/`gotcha` memories into the validation fix-loop prompt |
+| `LEAN_AI_PHASE3_MEMORY_BUDGET_PERCENT` | `0.02` | Context-window fraction for Phase 3 memory injection |
+| `LEAN_AI_FIX_LOOP_MEMORY_BUDGET_PERCENT` | `0.02` | Context-window fraction for fix-loop memory injection |
+| `LEAN_AI_ENABLE_TRAINING_CAPTURE` | `true` | Write workflow traces to `.lean_ai/training.db`. See `docs/training.md` |
+| `LEAN_AI_TRAINING_DB_PATH` | `.lean_ai/training.db` | Training archive path (relative to workspace root or absolute) |
+| `LEAN_AI_TRAINING_RETENTION_DAYS` | `365` | Prune archive rows older than this. `0` disables pruning |
+| `LEAN_AI_CAPTURE_THINKING` | `true` | Preserve `<think>` blocks in archived traces (needed for reasoning-model LoRA) |
+| `LEAN_AI_SCRUBBING_STRICT` | `true` | Fail-closed on scrubber exception: drop the trace rather than write unscrubbed data |
+| `LEAN_AI_EXPORT_API_KEY` | *(empty)* | Bearer token for `/api/export/*`. Empty = endpoints return 503 |
+| `LEAN_AI_EXPORT_WORKSPACE_SALT` | *(empty)* | Optional salt mixed into `workspace_id` hash |
+| `LEAN_AI_MEMORY_EXPORT_DROP_THRESHOLD` | `0.40` | Drop exported memories with anonymization ratio above this |
 | `LEAN_AI_PORT` | `8422` | Server port |
 
 **Post-validation auto-detection:** When `LEAN_AI_POST_*_COMMAND` variables are empty, the system falls back to commands auto-detected during `/init-workspace` (stored in `.lean_ai/commands.json`). Manual env vars always take priority. In fix mode, the LLM is instructed to write tests alongside code changes when a test command is available. In plan mode, test creation is handled by Phase 5 (verification step generation) which appends test file steps and a final `run_tests` step after all implementation steps. In TDD mode, Phase 5 produces test steps separately into `tdd_test_steps` (without `run_tests`) — these are executed first by the expert model, then the primary implements code with test files protected. **Validation fix loop:** when `_run_post_validation` detects failures, `_run_validation_fix_loop` retries up to `LEAN_AI_POST_VALIDATION_MAX_RETRIES` times. Each attempt uses a **hardcoded 30-turn budget** (independent of `LEAN_AI_IMPLEMENTATION_MAX_TURNS`), is **file-scoped** to the plan's `affected_files` list (the tool executor blocks edits to files outside the whitelist), and instructs the LLM to: (1) re-run the failing command to confirm the error, (2) read relevant files to find the root cause, (3) record diagnosis in scratchpad, (4) make the minimal fix, (5) re-run to verify. On the **final retry**, the expert model is used if configured. In TDD mode, the fix loop also enforces the test-file guard and provides the `request_test_change` dispute tool so the primary model can escalate flawed tests to the expert rather than editing them directly.
@@ -306,9 +322,11 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 
 ## WebSocket Protocol
 
-Client → server: `user_message` (start workflow or mid-workflow interrupt), `cancel` (stop running workflow), `approve` (approve plan), `approve_tool` / `deny_tool` (shell command gate), `ping`, `resume`.
+Client → server: `user_message` (start workflow or mid-workflow interrupt), `cancel` (stop running workflow), `approve` (approve plan), `approve_tool` / `deny_tool` (shell command gate), `ping`, `resume`. Client message TypedDicts `confirm_memory`/`reject_memory`/`save_memory_manual` are defined in `ws_messages.py` for future use but not currently routed by the dispatcher — the extension uses REST (`/api/memories/*`) for memory curation actions.
 
-Server → client: `token`, `stage_change`, `approval_required`, `tool_progress`, `tool_approval_required`, `diff`, `test_result`, `error`, `complete`, `cancelled`, `index_status`, `stage_status`, `clarification_needed`, `plan_rejected`, `pong`, `branch_created`, `checkpoint`, `merge_complete`, `context_refreshed`, `assistant_content`, `thinking_content`, `metrics_update`.
+Server → client: `token`, `stage_change`, `approval_required`, `tool_progress`, `tool_approval_required`, `diff`, `test_result`, `error`, `complete`, `cancelled`, `index_status`, `stage_status`, `clarification_needed`, `plan_rejected`, `pong`, `branch_created`, `checkpoint`, `merge_complete`, `context_refreshed`, `assistant_content`, `thinking_content`, `metrics_update`, `memory_suggested`.
+
+`memory_suggested` fires from the memory extractor's `on_memory_created` callback when a new `auto` memory is written. Payload: `{memory_id, category, content, source_phase, tags}`. The extension renders it as an inline confirm/dismiss chip in the chat stream; clicks route through REST to `POST /api/memories/{id}/confirm` or `/reject`.
 
 `assistant_content` and `thinking_content` support optional `streaming` (boolean, token-level updates during planning) and `done` (boolean, signals content finalization with full text for markdown formatting) fields.
 
@@ -350,6 +368,17 @@ All under `/api` prefix:
 - `POST /integrations/{name}/unlink` — unlink external task
 - `GET /integrations/linked/all` — list all linked tasks
 - `POST /integrations/{name}/webhook` — receive webhook events
+- `GET /memories?repo_root=...&category=...&curation_status=...&limit=...&include_expired=...` — list curated memories
+- `GET /memories/{id}?repo_root=...` — fetch single memory
+- `POST /memories` — user-authored memory (auto-set `curation_status=user_confirmed`)
+- `POST /memories/{id}/confirm` — promote `auto` → `user_confirmed` (confidence=0.9)
+- `POST /memories/{id}/reject` — mark `user_rejected` (confidence=0.0); blocks future re-introduction via `supersede_user_rejected`
+- `DELETE /memories/{id}?repo_root=...` — permanent delete + Whoosh index removal
+- `GET /export/workspace-id?repo_root=...` — returns 16-char sha256-derived workspace hash. All `/export/*` endpoints require `Authorization: Bearer $LEAN_AI_EXPORT_API_KEY` and return 503 when the key is unset
+- `GET /export/manifest?repo_root=...` — training-archive counts by model/phase/outcome + memory counts by status; cached 60s
+- `GET /export/traces?repo_root=...&format=raw|sft|dpo|kto&model=...&phase=...&outcome=...&since=...&cursor=...&limit=1000` — streaming JSONL
+- `GET /export/memories?repo_root=...&curation_status=...&category=...&limit=500` — streaming JSONL of anonymized memories (second-pass symbol-table redaction + drop-threshold via `LEAN_AI_MEMORY_EXPORT_DROP_THRESHOLD`)
+- `GET /export/events?repo_root=...&event_type=...&since=...&cursor=...&limit=1000` — streaming JSONL of anonymized workflow_events
 
 ## LLM Prompt Authoring Standard
 

@@ -509,6 +509,85 @@ When `LEAN_AI_WIKI_URL` is set, two tools become available to the agent in all w
 
 Authentication is lazy — the agent logs in on the first wiki request using the MediaWiki Action API two-step login flow, then caches session cookies for the remainder of the session. No login is attempted when credentials are empty.
 
+## Curated Memory
+
+Lean AI saves short "memories" about things it learns during each session
+(naming conventions, build gotchas, plan rejections, etc.) and reads them
+back into future planning. See [Curated Memory](curated-memory.md) for
+the full story — the settings below let you tune what the planner reads.
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEAN_AI_ENABLE_SESSION_MEMORY` | `true` | Master switch. Turn off to disable both extraction and retrieval of cross-session memories. Existing rows stay in the DB untouched. |
+| `LEAN_AI_MEMORY_RETRIEVAL_STATUSES` | `user_confirmed,high_confidence_auto` | Comma-separated list of `curation_status` values the planner is allowed to read. Raw `auto` memories (unconfirmed) are excluded by default so bad extractions don't poison plans. |
+| `LEAN_AI_MEMORY_AUTOPROMOTE_THRESHOLD` | `3` | How many times the same lesson must be extracted (across sessions) before it auto-promotes from `auto` to `high_confidence_auto`. Lower = faster promotion, higher = stricter. |
+| `LEAN_AI_MEMORY_CONFIDENCE_TTL_DAYS` | `90` | Default time-to-live in days applied when a memory is given an explicit expiry. Evergreen memories have no expiry unless you set one. |
+| `LEAN_AI_ENABLE_PHASE3_MEMORY` | `true` | Inject `gotcha` / `convention` / `rejection` memories into Phase 3 (design synthesis) of the planner. Turn off if design phases feel too constrained. |
+| `LEAN_AI_ENABLE_FIX_LOOP_MEMORY` | `true` | Inject `fix_pattern` / `gotcha` memories into the validation fix-loop prompt. The fix loop retrieves using a signature built from the failing command name + the first line of its error output. |
+| `LEAN_AI_PHASE3_MEMORY_BUDGET_PERCENT` | `0.02` | Fraction of the active context window used for memory injection in Phase 3. `0.02` = 2%. |
+| `LEAN_AI_FIX_LOOP_MEMORY_BUDGET_PERCENT` | `0.02` | Same budget knob, but for the fix loop. |
+
+### Tuning advice
+
+- **Too few memories reach the planner.** Lower the autopromote
+  threshold or add `auto` to the retrieval statuses (noisier but more
+  context).
+- **Bad memories keep appearing.** Open the Memories panel and click
+  **Reject** — rejected content is never re-introduced, even if the
+  LLM keeps extracting it. If a whole batch came from a bad model,
+  use `bulk_invalidate_by_model` (see
+  [Curated Memory → Bulk actions](curated-memory.md#bulk-actions)).
+- **Disable retrieval for a specific phase.** Set
+  `LEAN_AI_ENABLE_PHASE3_MEMORY=false` or
+  `LEAN_AI_ENABLE_FIX_LOOP_MEMORY=false`. Phase 1 retrieval is always
+  on when session memory is enabled.
+
+## Training Archive & Export
+
+Every workflow decision also gets written to a separate, append-only
+archive at `.lean_ai/training.db` (configurable) so you can later
+export a dataset for LoRA fine-tuning. See
+[Training Pipeline](training.md) for the full story.
+
+> **Important** — Local capture is on by default. The export API is
+> off by default — it returns `503 Service Unavailable` until you set
+> `LEAN_AI_EXPORT_API_KEY`. Nothing leaves your computer without that
+> explicit opt-in.
+
+### Capture settings
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEAN_AI_ENABLE_TRAINING_CAPTURE` | `true` | Master switch. When false, no rows are written to `.lean_ai/training.db`. |
+| `LEAN_AI_TRAINING_DB_PATH` | `.lean_ai/training.db` | Where the archive lives. Relative paths are taken relative to the workspace root; absolute paths are used as-is. Safe to move between workspaces. |
+| `LEAN_AI_TRAINING_RETENTION_DAYS` | `365` | Rows older than this are deleted during the retention pass (runs opportunistically at session end, throttled to once per hour per workspace). Set to `0` to disable pruning (keep forever). |
+| `LEAN_AI_CAPTURE_THINKING` | `true` | Preserve the LLM's thinking/reasoning blocks in the archive. Needed for reasoning-model LoRA training (gpt-oss, Qwen3 thinking mode). Doubles archive size per turn roughly. |
+| `LEAN_AI_SCRUBBING_STRICT` | `true` | Fail-closed mode. If the secret scrubber throws an exception on any input, drop the trace rather than risk writing unscrubbed data. Set to `false` to write with `scrubbed=0` instead. |
+
+### Export settings
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEAN_AI_EXPORT_API_KEY` | *(empty)* | Bearer token required by all `/api/export/*` endpoints. Empty = export disabled entirely (503). Generate with e.g. `openssl rand -hex 24`. |
+| `LEAN_AI_EXPORT_WORKSPACE_SALT` | *(empty)* | Optional string mixed into the `workspace_id` hash. Leave empty if a single coordinator sees your workspace; set a shared salt when multiple coordinators aggregate the same identity. |
+| `LEAN_AI_MEMORY_EXPORT_DROP_THRESHOLD` | `0.40` | When exporting memories, skip any memory where more than this fraction of characters had to be anonymized away. `0.40` = drop memories >40% redacted. Lower = stricter (fewer memories leave), higher = looser. |
+
+### Enabling export
+
+```bash
+# Generate a key and add it to backend/.env
+echo "LEAN_AI_EXPORT_API_KEY=las-export-$(openssl rand -hex 24)" >> backend/.env
+
+# Restart the backend so it picks up the new key
+# Then a coordinator can call:
+curl -H "Authorization: Bearer $LEAN_AI_EXPORT_API_KEY" \
+    "http://localhost:8422/api/export/manifest?repo_root=$(pwd)"
+```
+
+> **Warning** — Treat the export API key like any other secret. Anyone
+> who has it can read every training trace your workspace has
+> captured. Don't commit it to git; don't share it in Slack.
+
 ## Extension Settings
 
 The VSCode/VSCodium extension has its own settings, configured through the editor's settings UI. See [Extension Guide](extension.md#settings) for details.

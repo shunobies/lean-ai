@@ -376,6 +376,105 @@ Update a TODO's text or status.
 
 Delete a TODO item.
 
+### Memories
+
+Cross-session memory is a per-workspace store of short lessons Lean AI
+extracts after sessions — naming conventions, build gotchas, plan
+rejections, validated fix patterns. The planner reads confirmed
+memories back into future planning. See [Curated Memory](curated-memory.md)
+for the concepts, [Configuration Reference — Curated Memory](configuration.md#curated-memory)
+for the settings.
+
+All endpoints are scoped to a workspace via `repo_root` (query param
+or body field).
+
+#### `GET /api/memories?repo_root=/path/to/project`
+
+List memories for a workspace.
+
+**Query parameters:**
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `repo_root` | string | *(required)* | Absolute path to the workspace. |
+| `category` | string | *(none)* | Filter by category (`gotcha`, `convention`, `fix_pattern`, etc.). |
+| `curation_status` | string | *(none)* | Comma-separated list, e.g. `user_confirmed,high_confidence_auto`. |
+| `limit` | int | `100` | Max rows to return. |
+| `include_expired` | bool | `false` | Include rows with `expires_at` in the past. |
+
+**Response:**
+```json
+[
+  {
+    "id": "a1b2c3d4e5f6",
+    "session_id": "xxxxxxxxxxxx",
+    "category": "gotcha",
+    "content": "When pytest fails with ModuleNotFoundError, check PYTHONPATH.",
+    "tags": ["pytest", "python", "imports"],
+    "source_task": "Fix failing test suite",
+    "created_at": "2026-04-20T14:32:10+00:00",
+    "curation_status": "user_confirmed",
+    "confidence": 0.9,
+    "expires_at": null,
+    "source_phase": "plan_rejection",
+    "model_name": "qwen3-coder:30b",
+    "seen_count": 1,
+    "last_seen_at": "2026-04-20T14:32:10+00:00"
+  }
+]
+```
+
+#### `GET /api/memories/{memory_id}?repo_root=/path`
+
+Fetch a single memory by id. Returns `404` if not found.
+
+#### `POST /api/memories`
+
+Create a user-authored memory. These are marked `user_confirmed` with
+`confidence=0.9` so they're immediately available to the planner.
+
+**Request:**
+```json
+{
+  "repo_root": "/path/to/project",
+  "category": "convention",
+  "content": "All API endpoints must accept repo_root as a query parameter.",
+  "tags": ["api", "convention"],
+  "source_task": null
+}
+```
+
+Returns the created memory row (same shape as the list endpoint).
+
+#### `POST /api/memories/{memory_id}/confirm`
+
+Promote an `auto` memory to `user_confirmed`. Sets `confidence=0.9`.
+
+**Request:**
+```json
+{"repo_root": "/path/to/project"}
+```
+
+Returns the updated memory row. `404` if the id doesn't exist.
+
+#### `POST /api/memories/{memory_id}/reject`
+
+Mark a memory as `user_rejected` so it's excluded from retrieval and
+blocks future re-introduction. Sets `confidence=0.0`.
+
+**Request:** same as `/confirm`. Returns the updated row.
+
+#### `DELETE /api/memories/{memory_id}?repo_root=/path`
+
+Permanently delete a memory and its Whoosh index entry.
+
+**Response:**
+```json
+{"deleted": "a1b2c3d4e5f6"}
+```
+
+Returns `404` if the id doesn't exist.
+
 ### Integrations
 
 Integration endpoints are available when `LEAN_AI_ENABLE_INTEGRATIONS=true`. Replace `{name}` with the integration name (`jira` or `servicenow`).
@@ -539,6 +638,172 @@ The voice availability fields (`stt_available`, `tts_available`,
 `wake_word_available`) are omitted when the `voice` extras group is
 not installed.
 
+### Export
+
+The export API exposes the raw training archive (`.lean_ai/training.db`)
+and the workspace's curated memories to an external coordinator — for
+example, the [lean-ai-serve](training.md#5-aggregation-across-workspaces-lean-ai-serve-side)
+aggregator that merges training data from multiple users before LoRA
+fine-tuning.
+
+**All export endpoints require authentication.** If
+`LEAN_AI_EXPORT_API_KEY` is unset, every export endpoint returns
+`503 Service Unavailable`. When set, pass the token as a bearer header:
+
+```
+Authorization: Bearer <LEAN_AI_EXPORT_API_KEY>
+```
+
+A missing, malformed, or wrong header returns `401 Unauthorized`.
+
+> **Security** — The export key grants read access to every training
+> trace in the archive. Treat it like any secret: use
+> `openssl rand -hex 24` to generate, store it in `backend/.env` (or
+> pass as an environment variable), never commit it to git.
+
+All endpoints are scoped to a workspace via `repo_root` (query param).
+Every response is JSONL streamed via `StreamingResponse` (`application/x-ndjson`).
+
+#### `GET /api/export/workspace-id?repo_root=/path`
+
+Return the deterministic 16-character workspace identifier. Use it to
+correlate rows across multiple export calls without revealing the
+actual filesystem path.
+
+**Response:**
+```json
+{"workspace_id": "a1b2c3d4e5f6a7b8"}
+```
+
+#### `GET /api/export/manifest?repo_root=/path`
+
+Return trace counts per model, phase, and outcome, plus memory counts
+by curation status. Cached 60 seconds per workspace.
+
+**Response:**
+```json
+{
+  "total_traces": 1234,
+  "scrubbed_count": 1234,
+  "oldest": "2026-01-01T00:00:00Z",
+  "newest": "2026-04-20T14:32:10Z",
+  "by_model": {"qwen3-coder:30b": 800, "qwen3-coder-next:q8_0": 434},
+  "by_phase": {"implementation": 900, "phase3": 200, "validation_fix": 134},
+  "by_outcome": {"success": 1100, "rejected": 120, "cancelled": 14},
+  "plan_decisions": 50,
+  "validation_attempts": 80,
+  "workflow_events": 200,
+  "memories": {
+    "total": 42,
+    "by_status": {"user_confirmed": 30, "auto": 10, "user_rejected": 2}
+  },
+  "workspace_id": "a1b2c3d4e5f6a7b8"
+}
+```
+
+#### `GET /api/export/traces`
+
+Stream JSONL of training traces in the requested format.
+
+**Query parameters:**
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `repo_root` | string | *(required)* | Workspace path. |
+| `format` | string | `raw` | One of `raw`, `sft`, `dpo`, `kto`. |
+| `model` | string | *(none)* | Filter by `model_name`. |
+| `phase` | string | *(none)* | Filter by `phase` (`implementation`, `phase3`, etc.). |
+| `outcome` | string | *(none)* | Filter by `outcome` (`success`, `rejected`). |
+| `since` | string | *(none)* | ISO-8601 timestamp; only rows created at/after. |
+| `cursor` | int | *(none)* | Last-seen `id` — use for incremental pulls. |
+| `limit` | int | `1000` | Max rows per call. Capped at 10000. |
+
+**Format shapes:**
+
+- **`raw`** — the full row (minus db id), anonymized. `session_id`
+  hashed, `repo_root` stripped.
+- **`sft`** — OpenAI chat JSONL. Only rows with `outcome='success'`.
+  Each line: `{messages: [...], phase, model_name, workspace_id}`.
+  The final assistant message carries `reasoning_content` (thinking
+  trace) when `LEAN_AI_CAPTURE_THINKING=true`.
+- **`dpo`** — matched pairs for direct preference optimization. Rows
+  grouped by `pair_id`; incomplete pairs skipped. Each line:
+  `{prompt, chosen, rejected, pair_id, pair_kind, workspace_id, model_name, phase}`.
+- **`kto`** — binary-labeled for Kahneman-Tversky optimization. Each
+  line: `{prompt, completion, label: bool, workspace_id, phase, model_name, pair_kind}`.
+
+**Example — SFT pull with incremental cursor:**
+```bash
+curl -H "Authorization: Bearer $KEY" \
+  "http://localhost:8422/api/export/traces?repo_root=/my/project&format=sft&limit=10000"
+# pipe to a file, then on next run pass &cursor=<last id seen>
+```
+
+Returns `400 Bad Request` on unknown format or `limit > 10000`.
+
+#### `GET /api/export/memories`
+
+Stream JSONL of curated memories with **workspace-symbol anonymization**
+on top of the normal `repo_root` stripping. File paths, module names,
+and CamelCase symbols from the workspace are replaced with generic
+placeholders so memories are safe to aggregate across users.
+
+Memories where more than `LEAN_AI_MEMORY_EXPORT_DROP_THRESHOLD` of the
+content had to be redacted (default 40%) are dropped entirely — too
+project-specific to generalize.
+
+**Query parameters:**
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `repo_root` | string | *(required)* | Workspace path. |
+| `curation_status` | string | `user_confirmed,high_confidence_auto` | Comma-separated list of statuses to include. |
+| `category` | string | *(none)* | Filter by memory category. |
+| `limit` | int | `500` | Max rows. Capped at 5000. |
+
+**Response format** (one JSON object per line):
+```json
+{
+  "id": "a1b2c3d4e5f6",
+  "category": "gotcha",
+  "content": "When pytest fails in <WORKSPACE_FILE>, check PYTHONPATH.",
+  "tags": ["pytest", "imports"],
+  "curation_status": "user_confirmed",
+  "confidence": 0.9,
+  "anonymization_ratio": 0.12,
+  "workspace_id": "a1b2c3d4e5f6a7b8"
+}
+```
+
+The `anonymization_ratio` field (0.0–1.0) lets downstream consumers
+prefer memories with less redaction.
+
+#### `GET /api/export/events`
+
+Stream JSONL of `workflow_events` rows (cancellations, TDD disputes,
+execution-complete markers, etc.) with standard anonymization.
+
+**Query parameters:**
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `repo_root` | string | *(required)* | Workspace path. |
+| `event_type` | string | *(none)* | Filter (`cancellation`, `tdd_dispute`, `execution_complete`). |
+| `since` | string | *(none)* | ISO-8601 timestamp. |
+| `cursor` | int | *(none)* | Last-seen id. |
+| `limit` | int | `1000` | Max rows. Capped at 10000. |
+
+Each line is an anonymized `workflow_events` row:
+```json
+{
+  "workspace_id": "a1b2c3d4e5f6a7b8",
+  "session_id": "<hashed>",
+  "event_type": "cancellation",
+  "payload": {"task": "refactor auth", "mode": "plan"},
+  "created_at": "2026-04-20T14:32:10Z"
+}
+```
+
 ## WebSocket Protocol
 
 ### Connection
@@ -603,7 +868,32 @@ Keepalive message. Server responds with `{"type": "pong"}`.
 | `test_result` | Test execution results |
 | `branch_created` | Git branch created for the session |
 | `context_refreshed` | Context window was refreshed |
+| `memory_suggested` | Auto-extracted memory eligible for user confirmation — see [`memory_suggested`](#memory_suggested) below |
 | `complete` | Workflow finished (includes summary and files modified) |
 | `merge_complete` | Branch merged successfully |
 | `error` | Error occurred (includes `recoverable` flag) |
 | `pong` | Response to ping |
+
+#### `memory_suggested`
+
+Fired when a session hook (plan rejection, fix-loop success, or TDD
+dispute) extracts a new memory. The extension renders it as an inline
+chip in the chat stream so the user can confirm or dismiss without
+leaving the workflow.
+
+```json
+{
+  "type": "memory_suggested",
+  "memory_id": "a1b2c3d4e5f6",
+  "category": "gotcha",
+  "content": "When pytest fails with ModuleNotFoundError, check that src/ is on PYTHONPATH.",
+  "source_phase": "fix_loop",
+  "tags": ["pytest", "python", "imports"]
+}
+```
+
+Memory confirmation actions (Save / Dismiss) are currently sent via
+REST rather than WebSocket — see
+[Memories](#memories) endpoints above. The extension's chip
+click handler calls `POST /api/memories/{id}/confirm` or
+`POST /api/memories/{id}/reject`.

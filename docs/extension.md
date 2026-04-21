@@ -145,6 +145,68 @@ OS notifications require: `notify-send` on Linux, `osascript` on macOS, or `msht
 
 The model dropdown in the chat panel lets you switch between configured providers and models at runtime. Ollama models are queried live, so pulling a new model makes it immediately available.
 
+### Memory Suggestion Chips
+
+After a plan rejection leads to an approved revision, or after the
+validation fix loop turns a failing test into a passing one, Lean AI
+extracts a short "lesson" and offers it to you inline in the chat as
+a small chip:
+
+```
+💡 Remember: "When pytest fails with ModuleNotFoundError, check that
+   src/ is on PYTHONPATH."
+   [Save]  [Dismiss]
+```
+
+- **Save** — promotes the lesson to `user_confirmed`, making it
+  visible to future planning phases.
+- **Dismiss** — marks it `user_rejected`. The extractor will not try
+  to re-introduce the same lesson again.
+
+You can ignore the chip entirely — it stays in the "Pending Review"
+tab of the Memories panel until you decide.
+
+> **Tip** — The chip appears only for *new* memories. If the same
+> lesson has been extracted before, Lean AI just bumps its seen count
+> silently. See [auto-promotion](curated-memory.md#auto-promotion-when-the-system-confirms-for-you).
+
+See [Curated Memory](curated-memory.md) for the full concept.
+
+### Memories Panel
+
+The Memories panel is a dedicated window for reviewing every lesson
+Lean AI has collected in your workspace. Open it from:
+
+- The **lightbulb icon** in the Sessions view title bar, or
+- The Command Palette → **Lean AI: Open Memories**
+
+The panel has three tabs:
+
+| Tab | What's here |
+|---|---|
+| **Pending Review** | Auto-extracted memories you haven't confirmed yet. |
+| **Confirmed** | Memories the planner currently reads (both `user_confirmed` and `high_confidence_auto`). |
+| **Archive** | Memories you rejected, that expired, or that were superseded. Kept for history. |
+
+Each row shows the memory's category, source phase, confidence
+score, tags, and the full content. Buttons let you:
+
+- **Confirm** a pending memory (promote to `user_confirmed`).
+- **Reject** a pending or confirmed memory (move to archive).
+- **Delete** a memory permanently (removes the row and its search
+  index entry).
+- **Restore** an archived memory (re-confirm it).
+
+At the bottom of the panel, click **+ Add a memory manually** to
+create your own memory. You pick the category, type the content, and
+add comma-separated tags. Manual memories go straight to
+`user_confirmed`.
+
+> **When should I add a memory manually?** When you notice a pattern
+> Lean AI hasn't caught on to yet. Example: *"All new API endpoints
+> must accept `repo_root` as a query parameter."* Typing that once as
+> a `convention` memory means every future planning session sees it.
+
 ## Slash Commands
 
 Type these in the chat panel:
