@@ -129,6 +129,60 @@ class AssumptionStatus(BaseModel):
     """What the model found (e.g. 'grep for celery in pyproject.toml: no match')."""
 
 
+class ExistingCoverage(BaseModel):
+    """Per-source-file record of existing test coverage observed in the
+    repo. Populated by Phase 2 so Phase 5 can avoid re-testing behavior
+    that is already covered."""
+
+    source_file: str
+    """Repo-relative path of the source file under consideration."""
+
+    test_files: list[str] = []
+    """Repo-relative paths of test files that already exercise
+    ``source_file``. Empty when coverage is missing."""
+
+    coverage_notes: str = ""
+    """Short prose on what the existing tests cover and what's still
+    uncovered — used by Phase 5 to decide whether to add or skip."""
+
+
+class TestingInventory(BaseModel):
+    """Phase 2's test-infrastructure inventory, consumed by Phase 5.
+
+    Gives Phase 5 structured knowledge of the project's test framework
+    and existing coverage without needing its own tool budget.
+    """
+
+    test_framework: str = ""
+    """e.g. ``pytest``, ``jest``, ``go test``, ``rspec``, ``junit``.
+    Empty when Phase 2 could not confidently detect a framework."""
+
+    test_directory: str = ""
+    """e.g. ``tests/``, ``__tests__/``, ``spec/``."""
+
+    test_file_pattern: str = ""
+    """Filename pattern e.g. ``test_*.py``, ``*.spec.ts``, ``*_test.go``."""
+
+    assertion_style_excerpt: str = ""
+    """Short literal excerpt from an existing test (imports,
+    setup/teardown, a representative assertion) so Phase 5 can mirror
+    the project's style. Empty when the repo has no tests yet."""
+
+    existing_regression_files: list[str] = []
+    """Repo-relative paths matching the regression-file convention
+    (see ``settings.regression_file_pattern``). These are IMMUTABLE —
+    Phase 5 may reference them but never plan edits to them."""
+
+    affected_files_existing_coverage: list[ExistingCoverage] = []
+    """Per-affected-file coverage record so Phase 5 can skip already-
+    covered behavior and focus on uncovered code paths."""
+
+    notes: str = ""
+    """Anything else Phase 5 should know about the test infrastructure
+    — e.g. 'integration tests live under tests/integration and require
+    a running Postgres'."""
+
+
 class FileSummary(BaseModel):
     """Validated Phase 2 output — produced by the synthesis pass."""
 
@@ -138,6 +192,12 @@ class FileSummary(BaseModel):
     missing_infrastructure: list[MissingItem] = []
     verified_references: list[VerifiedReference] = []
     assumptions_resolved: list[AssumptionStatus] = []
+    testing_inventory: TestingInventory | None = None
+    """Phase 2's test-infrastructure inventory (Layer 6). ``None`` when
+    the project has no test footprint or Phase 2 (e.g. parallel path)
+    did not produce one. Phase 5 renders this into its user prompt so
+    the LLM can target existing coverage gaps precisely."""
+
     notes: str = ""
     """Free-form catch-all for cross-file references, tricky invariants, or
     anything the structured fields do not capture."""

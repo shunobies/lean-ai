@@ -835,6 +835,14 @@ async def _run_phase5_verification(
     if path_warnings:
         plan.plan_validation_warnings.extend(path_warnings)
 
+    # Layer 2 — coverage validator: warn when an executable affected
+    # file has no test step referencing it. Non-blocking.
+    coverage_warnings = _check_affected_files_covered(
+        verification, plan, file_summary_obj,
+    )
+    if coverage_warnings:
+        plan.plan_validation_warnings.extend(coverage_warnings)
+
     elapsed = time.monotonic() - t0
     _save_debug_phase(
         repo_root, session_id, "phase_5_verification",
@@ -1287,4 +1295,88 @@ def _check_test_path_conventions(
         )
     for w in warnings:
         logger.warning("Phase 5 plan validation — %s", w)
+    return warnings
+
+
+# Layer 2 — files that would benefit from a test. We only expand
+# coverage checks to files with executable extensions. Docs / config /
+# lockfiles / generated assets are skipped.
+_EXECUTABLE_EXTENSIONS: frozenset[str] = frozenset({
+    ".py", ".pyi", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+    ".go", ".rs", ".java", ".kt", ".kts", ".cs", ".fs", ".vb",
+    ".rb", ".php", ".swift", ".m", ".mm", ".cpp", ".cxx", ".cc",
+    ".c", ".h", ".hpp", ".hh", ".ex", ".exs", ".erl", ".hrl",
+    ".scala", ".clj", ".cljs", ".lua", ".dart", ".ml", ".mli",
+    ".hs", ".r", ".nim", ".zig", ".v", ".d",
+})
+
+
+def _has_executable_extension(path: str) -> bool:
+    lower = path.lower()
+    return any(lower.endswith(ext) for ext in _EXECUTABLE_EXTENSIONS)
+
+
+def _check_affected_files_covered(
+    verification: VerificationPlan,
+    plan: ExecutionPlan,
+    file_summary: FileSummary | None,
+) -> list[str]:
+    """Flag plan files that receive no test coverage.
+
+    For every file in ``plan.affected_files`` that has an executable
+    extension AND corresponds to a ``FileSummary.files_to_create`` or
+    ``files_to_modify`` observation, verify at least one ``create_file``
+    step in ``verification.steps`` references that path in
+    ``file_path``, ``instruction``, or ``context``. Uncovered paths
+    append a warning to ``plan.plan_validation_warnings``.
+
+    This is intentionally a *warning*, not a blocker — the plan still
+    proceeds and the user sees the warning on the approval screen, so
+    they can decide whether the gap is acceptable (e.g. trivial data
+    classes, pure config).
+    """
+    # Set of paths Phase 2 said this plan will touch as code. Fall back
+    # to ``affected_files`` when no FileSummary was produced (parallel
+    # Phase 2 path returns None).
+    code_paths: set[str] = set()
+    if file_summary is not None:
+        for obs in file_summary.files_to_create:
+            if obs.file_path and _has_executable_extension(obs.file_path):
+                code_paths.add(obs.file_path)
+        for obs in file_summary.files_to_modify:
+            if obs.file_path and _has_executable_extension(obs.file_path):
+                code_paths.add(obs.file_path)
+    else:
+        for p in plan.affected_files:
+            if _has_executable_extension(p):
+                code_paths.add(p)
+
+    if not code_paths:
+        return []
+
+    # Build a haystack of everything Phase 5's create_file test steps
+    # reference. Any code path that appears anywhere in this haystack
+    # is considered covered.
+    haystacks: list[str] = []
+    for step in verification.steps:
+        if step.tool != "create_file":
+            continue
+        haystacks.append(step.file_path or "")
+        haystacks.append(step.instruction or "")
+        haystacks.append(step.context or "")
+    combined = "\n".join(haystacks)
+
+    warnings: list[str] = []
+    for code_path in sorted(code_paths):
+        # Treat the bare filename as a coarse match too, so a test step
+        # that says "test the foo() function from foo.py" counts.
+        filename = code_path.rsplit("/", 1)[-1]
+        if code_path in combined or filename in combined:
+            continue
+        warnings.append(
+            f"affected file has no test coverage: {code_path}"
+        )
+
+    for w in warnings:
+        logger.warning("Phase 5 coverage — %s", w)
     return warnings
