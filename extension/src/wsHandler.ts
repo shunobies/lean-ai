@@ -264,6 +264,7 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
             }
             ctx.postMessage({ type: "sendEnabled" });
             ctx.postMessage({ type: "metricsFinal" });
+            ctx.postMessage({ type: "clearExecutionChecklist" });
             // Close WS so user returns to chat mode automatically
             ctx.closeWebSocket();
             ctx.clearSession();
@@ -276,6 +277,7 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
             ctx.postMessage({ type: "thinking", show: false });
             ctx.postMessage({ type: "cancelled" });
             ctx.postMessage({ type: "metricsFinal" });
+            ctx.postMessage({ type: "clearExecutionChecklist" });
             ctx.closeWebSocket();
             ctx.clearSession();
             ctx.postMessage({ type: "stage", stage: null });
@@ -293,6 +295,7 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
             // Close WS on non-recoverable errors so user returns to chat
             if (!raw.recoverable) {
                 ctx.postMessage({ type: "metricsFinal" });
+                ctx.postMessage({ type: "clearExecutionChecklist" });
                 ctx.closeWebSocket();
                 ctx.clearSession();
                 ctx.postMessage({ type: "stage", stage: null });

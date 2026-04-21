@@ -2141,6 +2141,15 @@ export function getWebviewHtml(chatFontSize: number): string {
                 break;
             }
 
+            case 'clearExecutionChecklist': {
+                progressCardEl.style.display = 'none';
+                progressCardList.innerHTML = '';
+                progressCardCounter.textContent = '';
+                progressCardTotal = 0;
+                progressCardCompleted = 0;
+                break;
+            }
+
             case 'checkpointUpdate': {
                 const idx = msg.stepIndex;
                 const status = msg.status;
