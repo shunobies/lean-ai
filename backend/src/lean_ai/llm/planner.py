@@ -499,6 +499,15 @@ async def create_plan(
 
     phase_timings["phase_4_plan_assembly"] = time.monotonic() - t0
 
+    # Layer 9 — propagate core_functionality tags from Phase 3 into
+    # the ExecutionPlan so they survive plan approval and reach
+    # Phase 5's regression-coverage mandate. Gated by the feature
+    # flag so disabling Layer 9 cleanly suppresses the field.
+    if settings.enable_core_functionality_tagging:
+        plan.core_functionality = list(
+            design_and_risks_obj.core_functionality
+        )
+
     # Safety: strip exploration tools from the implementation plan
     impl_steps = [
         s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS
@@ -842,6 +851,12 @@ async def _run_phase5_verification(
     )
     if coverage_warnings:
         plan.plan_validation_warnings.extend(coverage_warnings)
+
+    # Layer 9 — core-functionality coverage: warn when a core entity
+    # has no matching regression test step. Non-blocking.
+    core_warnings = _check_core_functionality_covered(verification, plan)
+    if core_warnings:
+        plan.plan_validation_warnings.extend(core_warnings)
 
     elapsed = time.monotonic() - t0
     _save_debug_phase(
@@ -1314,6 +1329,79 @@ _EXECUTABLE_EXTENSIONS: frozenset[str] = frozenset({
 def _has_executable_extension(path: str) -> bool:
     lower = path.lower()
     return any(lower.endswith(ext) for ext in _EXECUTABLE_EXTENSIONS)
+
+
+def _check_core_functionality_covered(
+    verification: VerificationPlan,
+    plan: ExecutionPlan,
+) -> list[str]:
+    """Flag core-functionality tags missing a regression test step.
+
+    Layer 9 mandates that every ``plan.core_functionality`` tag whose
+    confidence is at or above
+    ``settings.core_functionality_min_confidence`` receives a
+    regression-file test step in Phase 5. Tags below the confidence
+    threshold are advisory only and do not trigger warnings.
+
+    A step qualifies as a regression test for a tag when its
+    ``file_path`` matches the regression convention AND its
+    ``file_path + instruction + context`` haystack mentions the tag's
+    entity or file_path. Warnings are non-blocking and go to
+    ``plan.plan_validation_warnings``.
+    """
+    from lean_ai.tools.regression_guard import is_regression_test_path
+
+    tags = getattr(plan, "core_functionality", None) or []
+    if not tags:
+        return []
+
+    # Confidence gating — min_confidence is "low" | "medium" | "high".
+    confidence_rank = {"low": 0, "medium": 1, "high": 2}
+    try:
+        min_rank = confidence_rank[settings.core_functionality_min_confidence]
+    except KeyError:
+        min_rank = confidence_rank["medium"]
+
+    enforced_tags = [
+        t for t in tags
+        if confidence_rank.get(t.confidence, 1) >= min_rank
+    ]
+    if not enforced_tags:
+        return []
+
+    # Build haystack of regression-convention test steps only.
+    haystacks: list[tuple[str, str]] = []
+    for step in verification.steps:
+        if step.tool != "create_file" or not step.file_path:
+            continue
+        if not is_regression_test_path(step.file_path):
+            continue
+        haystack = "\n".join([
+            step.file_path or "",
+            step.instruction or "",
+            step.context or "",
+            step.reason or "",
+        ])
+        haystacks.append((step.file_path, haystack))
+
+    warnings: list[str] = []
+    for tag in enforced_tags:
+        entity = tag.entity.strip()
+        file_path = tag.file_path.strip()
+        covered = any(
+            (entity and entity in hay) or (file_path and file_path in hay)
+            for _, hay in haystacks
+        )
+        if not covered:
+            warnings.append(
+                f"core-functionality tag missing regression test: "
+                f"'{entity}' in {file_path} "
+                f"[{tag.source_signal}, confidence={tag.confidence}]"
+            )
+
+    for w in warnings:
+        logger.warning("Phase 5 core-functionality — %s", w)
+    return warnings
 
 
 def _check_affected_files_covered(

@@ -264,6 +264,50 @@ class CriticalRisk(BaseModel):
     mitigation: str
 
 
+CoreFunctionalitySignal = Literal[
+    "phase1_deliverable",
+    "critical_risk_adjacent",
+    "public_api",
+    "downstream_consumer",
+    "user_designated",
+]
+CoreFunctionalityConfidence = Literal["high", "medium", "low"]
+
+
+class CoreFunctionalityTag(BaseModel):
+    """One entity flagged as load-bearing core functionality (Layer 9).
+
+    Phase 3 produces these tags based on deterministic signals; Phase 4
+    propagates them into the ExecutionPlan so Phase 5 knows which
+    entities MUST receive a regression test (as opposed to a regular
+    test). The user may prune/add tags during plan approval.
+    """
+
+    entity: str
+    """Function / class / module / route / CLI-command name. Short
+    and greppable so Phase 5 can reference it in test steps."""
+
+    file_path: str
+    """Repo-relative path of the file containing the entity."""
+
+    reason: str
+    """Short prose on why the entity is core — what breaks if it
+    regresses. Used by Phase 5 to write the regression test's
+    description and by the approval UI to explain the tag."""
+
+    source_signal: CoreFunctionalitySignal
+    """How Phase 3 inferred the tag: ``phase1_deliverable`` (matches
+    a Phase 1 deliverable), ``critical_risk_adjacent`` (co-located
+    with a high-severity risk), ``public_api`` (exported / route /
+    CLI surface), ``downstream_consumer`` (Phase 1 downstream
+    consumer depends on it), ``user_designated`` (added via the
+    approval UI)."""
+
+    confidence: CoreFunctionalityConfidence = "medium"
+    """``high`` / ``medium`` / ``low``. Phase 5 mandates regression
+    coverage for confidence ≥ ``settings.core_functionality_min_confidence``."""
+
+
 class DesignAndRisks(BaseModel):
     """Validated Phase 3 output — produced by the synthesis pass."""
 
@@ -276,6 +320,12 @@ class DesignAndRisks(BaseModel):
     """External dependencies the expert verified during Phase 3. Rendered
     alongside Phase 2's VERIFIED REFERENCES at the Phase 4 boundary (dedupe
     by docs_url)."""
+
+    core_functionality: list[CoreFunctionalityTag] = []
+    """Load-bearing entities that Phase 5 MUST guard with regression
+    tests (Layer 9). Populated by Phase 3's detection rules; propagated
+    into the ExecutionPlan by Phase 4. Empty when Phase 3 found no
+    entities worth tagging or the feature flag is disabled."""
 
     notes: str = ""
     """Free-form catch-all for architectural invariants or edge cases that
@@ -478,6 +528,13 @@ class ExecutionPlan(BaseModel):
     etc.). Populated by the Phase 4 validators and surfaced on the
     extension approval screen so users can see them alongside the plan.
     Empty when the plan validated cleanly."""
+
+    core_functionality: list[CoreFunctionalityTag] = []
+    """Load-bearing entities Phase 5 must guard with regression tests
+    (Layer 9). Copied from ``DesignAndRisks.core_functionality`` during
+    Phase 4 synthesis. Rendered into the approval payload so users can
+    prune/add before approval. Empty when Phase 3 found no entities or
+    the feature flag is disabled."""
 
 
 def format_naming_conventions_for_prompt(
