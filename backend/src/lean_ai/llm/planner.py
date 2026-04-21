@@ -619,23 +619,27 @@ async def create_plan(
         model=expert.model_name, phase=4,
     )
 
-    # ── Phase 5: Verification (only when test_command is available) ──
-    if test_command:
-        phase5_elapsed = await _run_phase5_verification(
-            plan=plan,
-            task=task,
-            file_summary=file_summary,
-            file_summary_obj=file_summary_obj,
-            design_and_risks_obj=design_and_risks_obj,
-            test_command=test_command,
-            expert=expert,
-            plan_assembly_max_tokens=plan_assembly_max_tokens,
-            ws=ws,
-            repo_root=repo_root,
-            session_id=session_id,
-            on_thinking=on_thinking,
-        )
-        phase_timings["phase_5_verification"] = phase5_elapsed
+    # ── Phase 5: Verification (Layer 4 — always runs) ─────────────
+    # When test_command is empty, Phase 5 still runs and seeds test
+    # files on disk; it just omits the final run_tests step and the
+    # run_tests safety-net injection. This guarantees that every plan
+    # leaves the workspace better-tested than it found it, even before
+    # a test runner is configured.
+    phase5_elapsed = await _run_phase5_verification(
+        plan=plan,
+        task=task,
+        file_summary=file_summary,
+        file_summary_obj=file_summary_obj,
+        design_and_risks_obj=design_and_risks_obj,
+        test_command=test_command,
+        expert=expert,
+        plan_assembly_max_tokens=plan_assembly_max_tokens,
+        ws=ws,
+        repo_root=repo_root,
+        session_id=session_id,
+        on_thinking=on_thinking,
+    )
+    phase_timings["phase_5_verification"] = phase5_elapsed
 
     phase_timings["total"] = time.monotonic() - plan_start
 
@@ -793,16 +797,21 @@ async def _run_phase5_verification(
         appended = list(verification.steps)
 
         # Safety net: Phase 5 must never skip running the existing
-        # test suite. If the model omitted a run_tests step, inject
-        # one so the plan always ends with a test execution step —
-        # even when no new test files were created. This guarantees
-        # the existing test suite runs every time a plan executes.
-        if not any(s.tool == "run_tests" for s in appended):
+        # test suite when a runner is configured. If the model omitted
+        # a run_tests step, inject one so the plan always ends with a
+        # test execution step — even when no new test files were
+        # created. When test_command is empty (Layer 4 — always run
+        # Phase 5 without a runner), the safety-net is disabled and
+        # test files are seeded on disk without a run_tests step.
+        if test_command and not any(s.tool == "run_tests" for s in appended):
             logger.warning(
                 "Phase 5 produced no run_tests step — injecting one "
                 "so existing tests run (%s).",
                 test_command,
             )
+            # Defensively filter any run_tests step the LLM tried to
+            # produce with an empty command — only inject when we have
+            # a real command to invoke.
             appended.append(
                 PlanStep(
                     step_number=0,
@@ -822,6 +831,20 @@ async def _run_phase5_verification(
             # Keep the injected step in the debug payload too so the
             # saved JSON reflects what actually ran.
             verification.steps = appended
+        elif not test_command:
+            # Layer 4 — defensive: drop any run_tests step the LLM
+            # produced despite our prompt telling it not to. Running
+            # an empty command is a no-op at best and a crash at
+            # worst.
+            stripped = [s for s in appended if s.tool != "run_tests"]
+            if len(stripped) != len(appended):
+                logger.info(
+                    "Phase 5 dropped %d run_tests step(s) — no test "
+                    "runner is configured for this workspace.",
+                    len(appended) - len(stripped),
+                )
+                appended = stripped
+                verification.steps = appended
 
         for i, step in enumerate(appended, next_step):
             step.step_number = i
@@ -864,11 +887,15 @@ async def _run_phase5_verification(
         verification.model_dump_json(indent=2), elapsed,
     )
     test_steps = len(all_verification_steps)
-    stage_msg = (
-        f"TDD test steps designed — {test_steps} step(s)"
-        if tdd_mode
-        else f"Verification steps added — {test_steps} test step(s)"
-    )
+    if tdd_mode:
+        stage_msg = f"TDD test steps designed — {test_steps} step(s)"
+    elif not test_command:
+        stage_msg = (
+            f"Test files seeded — {test_steps} step(s); no test "
+            f"runner configured"
+        )
+    else:
+        stage_msg = f"Verification steps added — {test_steps} test step(s)"
     await _send_stage_done(
         ws, stage_msg, model=expert.model_name, phase=5,
     )

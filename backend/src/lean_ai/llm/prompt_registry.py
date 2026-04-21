@@ -746,7 +746,8 @@ def _register_defaults(reg: PromptRegistry) -> None:
             "entity (a data class has no route_endpoint, a migration "
             "has no model_class). `registered_in` is the list of files "
             "where the entity must be referenced — each one should have "
-            "a corresponding edit_file step."
+            "a corresponding edit_file step.\n\n"
+            "{TESTABILITY_REQUIREMENT}"
         ),
     ))
 

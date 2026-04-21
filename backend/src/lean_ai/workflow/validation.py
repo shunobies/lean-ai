@@ -202,7 +202,9 @@ async def _run_validation_fix_loop(
     if max_retries <= 0:
         return validation_results
 
-    system_prompt = build_fix_system_prompt(load_condensed_context(repo_root))
+    system_prompt = build_fix_system_prompt(
+        load_condensed_context(repo_root), task=task,
+    )
 
     # Callbacks — same WebSocket progress reporting used by the main loop
     cb = build_workflow_callbacks(
@@ -372,7 +374,7 @@ async def _run_validation_fix_loop(
         # Context refresh: rebuild messages from fresh disk state
         def _build_fix_refresh(current_messages: list[dict]) -> list[dict]:
             fresh_sys = build_fix_system_prompt(
-                load_condensed_context(repo_root),
+                load_condensed_context(repo_root), task=task,
             )
             pad = scratchpad.read_scratchpad(repo_root, session_id)
             jrnl = read_journal(repo_root, session_id)

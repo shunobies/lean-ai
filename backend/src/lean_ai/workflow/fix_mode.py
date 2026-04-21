@@ -76,7 +76,9 @@ async def _run_fix(
         system_prompt = build_request_system_prompt(execution_context)
     else:
         system_prompt = build_fix_system_prompt(
-            execution_context, test_command=commands.get("test", ""),
+            execution_context,
+            test_command=commands.get("test", ""),
+            task=task,
         )
 
     # Callbacks — fire-and-forget (same rationale as plan mode callbacks)
@@ -227,7 +229,9 @@ async def _run_fix(
             fresh_system_prompt = build_request_system_prompt(fresh_context)
         else:
             fresh_system_prompt = build_fix_system_prompt(
-                fresh_context, test_command=commands.get("test", ""),
+                fresh_context,
+                test_command=commands.get("test", ""),
+                task=task,
             )
         pad = scratchpad.read_scratchpad(repo_root, session_id)
         jrnl = read_journal(repo_root, session_id)

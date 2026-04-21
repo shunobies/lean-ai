@@ -9,15 +9,43 @@ from lean_ai.llm.prompts import (
     STEP_EXECUTION_SYSTEM_PROMPT,
 )
 
+# Layer 8 — tokens that suggest a task is a bug fix / regression
+# hunt. Presence of any token (case-insensitive, word-boundary aware
+# where applicable) biases the fix-mode prompt to demand a regression
+# test in the regression-file convention.
+_BUG_FIX_TOKENS: tuple[str, ...] = (
+    "bug", "regression", "broken", "failing", "reproduce",
+    "crash", "error", "issue #", "gh-", "fixes #",
+)
+
+
+def _looks_like_bug_fix(task: str) -> bool:
+    """Best-effort detection of bug-fix / regression tasks.
+
+    Cheap substring scan with lowered input — the false-positive cost
+    is adding a regression test to a non-bug-fix task, which is
+    harmless. The false-negative cost is missing a regression test for
+    a bug fix, which is the failure mode we want to prevent.
+    """
+    if not task:
+        return False
+    lowered = task.lower()
+    return any(token in lowered for token in _BUG_FIX_TOKENS)
+
 
 def build_fix_system_prompt(
     context: str,
     test_command: str = "",
+    task: str = "",
 ) -> str:
     """Build the system prompt for fix mode (no planning).
 
     When *test_command* is provided, the LLM is instructed to write or
     update tests alongside code changes.
+
+    When *task* looks like a bug fix / regression hunt (Layer 8), the
+    prompt also demands a regression test using the regression-file
+    convention so the bug cannot silently return.
     """
     base = FIX_SYSTEM_PROMPT
 
@@ -27,6 +55,28 @@ def build_fix_system_prompt(
             "Cover: happy path, edge cases, error paths, integration, security. "
             f"Run with: {test_command}"
         )
+
+        if _looks_like_bug_fix(task):
+            base += (
+                "\n\nREGRESSION TEST REQUIREMENT: This task looks like "
+                "a bug fix. Before declaring the fix complete, add a "
+                "REGRESSION test in the project's regression directory "
+                "(e.g. tests/regression/) with a filename matching "
+                "`regression_<short_slug>_test.<ext>` or placed under "
+                "a `/regression/` folder. The test MUST:\n"
+                "- Fail against the pre-fix code (use your knowledge of "
+                "the bug's symptom to pick an assertion that the buggy "
+                "code would not satisfy).\n"
+                "- Pass against the post-fix code (run it after the fix "
+                "lands to confirm).\n"
+                "- Reference the original issue / PR / ticket in a "
+                "header comment so a future reader knows what the test "
+                "is guarding against.\n"
+                "Once the plan completes, this file becomes IMMUTABLE — "
+                "the tool executor will reject future edits. If a later "
+                "fix breaks this regression test, the implementation is "
+                "wrong, not the test."
+            )
 
     if not context:
         return base
