@@ -28,6 +28,7 @@ from lean_ai.llm.plan_schema import (
     ExecutionPlan,
     FileSummary,
     MissingFile,
+    PlanStep,
     VerificationPlan,
     plan_to_markdown,
 )
@@ -702,25 +703,54 @@ async def _run_phase5_verification(
     )
     security_concerns = _build_security_concerns(design_and_risks_obj)
 
+    # Layer 6 (testing inventory) populates in a later PR; for now pass
+    # an explicit empty-marker so the prompt still formats cleanly.
+    testing_inventory = _format_testing_inventory(file_summary_obj)
+
+    # Layer 9 (core functionality) populates in a later PR; for now pass
+    # an explicit empty-marker.
+    core_functionality = _format_core_functionality(plan)
+
+    # Layer 4 graceful-degradation scaffolding: when ``test_command`` is
+    # empty, omit the "end with run_tests" rule so the LLM doesn't
+    # invent a phantom test command. The Layer 4 PR removes the
+    # ``if test_command:`` gate around Phase 5 entirely.
+    if test_command:
+        run_tests_rule = (
+            f"- Exactly ONE final run_tests step invoking: "
+            f"{test_command}\n"
+        )
+    else:
+        run_tests_rule = (
+            "- Do NOT include a run_tests step — no test runner is "
+            "configured for this workspace yet. Create the test "
+            "files on disk; the runner will be added later.\n"
+        )
+
     if tdd_mode:
         user_content = registry.format(
             "planning.verification_user_tdd",
             task=task,
             impl_plan_md=impl_plan_md,
+            testing_inventory=testing_inventory,
             verification_targets=verification_targets,
             security_concerns=security_concerns,
+            core_functionality=core_functionality,
             next_step=str(next_step),
         )
     else:
         user_content = registry.format(
             "planning.verification_user_normal",
             task=task,
-            test_command=test_command,
+            test_command=test_command or "(none configured yet)",
             impl_plan_md=impl_plan_md,
             file_summary=file_summary,
+            testing_inventory=testing_inventory,
             verification_targets=verification_targets,
             security_concerns=security_concerns,
+            core_functionality=core_functionality,
             next_step=str(next_step),
+            run_tests_rule=run_tests_rule,
         )
 
     verification = await expert.chat_structured(
@@ -750,10 +780,43 @@ async def _run_phase5_verification(
         for i, step in enumerate(plan.steps, offset + 1):
             step.step_number = i
     else:
-        # Normal mode: append to plan as before.
-        for i, step in enumerate(verification.steps, next_step):
+        # Normal mode: append verification steps to plan.
+        appended = list(verification.steps)
+
+        # Safety net: Phase 5 must never skip running the existing
+        # test suite. If the model omitted a run_tests step, inject
+        # one so the plan always ends with a test execution step —
+        # even when no new test files were created. This guarantees
+        # the existing test suite runs every time a plan executes.
+        if not any(s.tool == "run_tests" for s in appended):
+            logger.warning(
+                "Phase 5 produced no run_tests step — injecting one "
+                "so existing tests run (%s).",
+                test_command,
+            )
+            appended.append(
+                PlanStep(
+                    step_number=0,
+                    tool="run_tests",
+                    file_path="",
+                    instruction=(
+                        f"Run the project's test suite to confirm "
+                        f"the implementation works: {test_command}"
+                    ),
+                    reason=(
+                        "Verify the existing test suite still passes "
+                        "after the plan's changes."
+                    ),
+                    context="",
+                )
+            )
+            # Keep the injected step in the debug payload too so the
+            # saved JSON reflects what actually ran.
+            verification.steps = appended
+
+        for i, step in enumerate(appended, next_step):
             step.step_number = i
-        plan.steps.extend(verification.steps)
+        plan.steps.extend(appended)
 
     # Update affected_files with any new test files.
     all_verification_steps = (
@@ -1108,6 +1171,75 @@ def _build_security_concerns(dar: DesignAndRisks) -> str:
         f"- **[{r.severity}]** {r.risk} — mitigation: {r.mitigation}"
         for r in dar.critical_risks
     )
+
+
+def _format_testing_inventory(file_summary: FileSummary | None) -> str:
+    """Render ``FileSummary.testing_inventory`` (Layer 6) for Phase 5.
+
+    Returns a concise markdown block with framework, directory,
+    assertion style, existing regression files, and per-affected-file
+    coverage. Returns the ``(none)`` sentinel when Phase 2 did not
+    populate the field so the prompt reads cleanly.
+
+    Phase 2 population lands in a later PR; this helper keeps the
+    Phase 5 call site stable until then.
+    """
+    inv = getattr(file_summary, "testing_inventory", None) if file_summary else None
+    if inv is None:
+        return (
+            "(none reported by Phase 2 — detect the framework and "
+            "directory from FILE SUMMARY yourself.)"
+        )
+    lines: list[str] = []
+    if inv.test_framework:
+        lines.append(f"- Framework: {inv.test_framework}")
+    if inv.test_directory:
+        lines.append(f"- Directory: {inv.test_directory}")
+    if inv.test_file_pattern:
+        lines.append(f"- File pattern: {inv.test_file_pattern}")
+    if inv.assertion_style_excerpt:
+        lines.append(
+            "- Assertion style excerpt:\n```\n"
+            + inv.assertion_style_excerpt
+            + "\n```"
+        )
+    if inv.existing_regression_files:
+        lines.append(
+            "- Existing regression files (MUST NOT be modified):"
+        )
+        for p in inv.existing_regression_files:
+            lines.append(f"  - {p}")
+    if inv.affected_files_existing_coverage:
+        lines.append("- Existing coverage for affected files:")
+        for cov in inv.affected_files_existing_coverage:
+            tests = ", ".join(cov.test_files) if cov.test_files else "(none)"
+            lines.append(f"  - {cov.source_file} → {tests}")
+    if inv.notes:
+        lines.append(f"- Notes: {inv.notes}")
+    return "\n".join(lines) if lines else "(empty)"
+
+
+def _format_core_functionality(plan: "ExecutionPlan") -> str:
+    """Render ``plan.core_functionality`` (Layer 9) for Phase 5.
+
+    Returns the ``(none)`` sentinel when no tags were detected or the
+    feature flag is disabled. Layer 9 populates the plan field; this
+    helper keeps the Phase 5 call site stable until then.
+    """
+    tags = getattr(plan, "core_functionality", []) or []
+    if not tags:
+        return (
+            "(none tagged — no mandatory regression tests required "
+            "by Phase 3.)"
+        )
+    lines: list[str] = []
+    for tag in tags:
+        lines.append(
+            f"- **{tag.entity}** in `{tag.file_path}` "
+            f"[{tag.source_signal}, confidence={tag.confidence}] "
+            f"— {tag.reason}"
+        )
+    return "\n".join(lines)
 
 
 _TEST_PATH_TOKENS: tuple[str, ...] = ("test", "spec")

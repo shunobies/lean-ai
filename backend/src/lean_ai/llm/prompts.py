@@ -30,15 +30,21 @@ _SIMPLE_KEYS: dict[str, str] = {
     "SYSTEM_PROMPT": "execution.system",
     "PLAN_SCOPE_SYSTEM_PROMPT": "planning.scope_system",
     "PLAN_EXPLORATION_SYSTEM_PROMPT": "planning.exploration_system",
-    "PLAN_DESIGN_SYSTEM_PROMPT": "planning.design_system",
-    "PLAN_VERIFICATION_SYSTEM_PROMPT": "planning.verification_system",
-    "PLAN_ASSEMBLY_SYSTEM_PROMPT": "planning.assembly_system",
     "FIX_INVESTIGATION_PROMPT": "fix.investigation",
     "CHAT_SYSTEM_PROMPT": "chat.system",
     "REFINER_CHAT_PROMPT": "refiner.chat",
     "REFINER_TASK_PROMPT": "refiner.task",
     "PRIVACY_STRIP_PROMPT": "refiner.privacy_strip",
 }
+
+
+class _MissingKey(dict):
+    """format_map substitution map that leaves unknown placeholders
+    in place so downstream ``.format()`` calls (e.g. per-phase user
+    prompts with their own template vars) still see them."""
+
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
 
 
 def _compose(key: str) -> str:
@@ -53,13 +59,29 @@ def _compose(key: str) -> str:
         web_search += "\n" + registry.get("policy.claim_verification")
     if settings.enable_required_citations:
         web_search += "\n" + registry.get("policy.required_citations")
-    subs = {
+
+    # Phase 5 strict-test-contract policy block. Empty string when the
+    # flag is off so previous-turn prompt content is preserved.
+    strict_test_contract = ""
+    if settings.enable_strict_test_contract:
+        strict_test_contract = registry.get("policy.strict_test_contract")
+
+    # Phase 4 testability requirement. Gated by the same strict flag.
+    testability_requirement = ""
+    if settings.enable_strict_test_contract:
+        testability_requirement = registry.get(
+            "policy.testability_requirement",
+        )
+
+    subs = _MissingKey({
         "TOOL_POLICY": registry.get("policy.tool"),
         "COMPLETION_CONTRACT": registry.get("policy.completion"),
         "QUALITY_RULES": registry.get("policy.quality"),
         "WEB_SEARCH_POLICY": web_search,
         "SCRATCHPAD_POLICY": registry.get("policy.scratchpad"),
-    }
+        "STRICT_TEST_CONTRACT": strict_test_contract,
+        "TESTABILITY_REQUIREMENT": testability_requirement,
+    })
     try:
         return text.format_map(subs)
     except KeyError:
@@ -71,6 +93,9 @@ _COMPOSED_KEYS: dict[str, str] = {
     "STEP_EXECUTION_SYSTEM_PROMPT": "execution.step_system",
     "FIX_SYSTEM_PROMPT": "fix.system",
     "REQUEST_SYSTEM_PROMPT": "fix.request_system",
+    "PLAN_VERIFICATION_SYSTEM_PROMPT": "planning.verification_system",
+    "PLAN_DESIGN_SYSTEM_PROMPT": "planning.design_system",
+    "PLAN_ASSEMBLY_SYSTEM_PROMPT": "planning.assembly_system",
 }
 
 

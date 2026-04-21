@@ -336,6 +336,26 @@ class Settings(BaseSettings):
     enable_tdd: bool = False  # Expert writes tests first, primary implements
     tdd_max_disputes_per_step: int = 3  # Max test disputes per implementation step
 
+    # ── Phase 5 strict-test contract (programmatic-only, hooks required) ──
+    enable_strict_test_contract: bool = True
+    # Opt-in tool-backed exploration turn inside Phase 5 when Phase 2's
+    # testing_inventory is thin. Costs extra turns; disabled by default.
+    enable_phase5_investigation: bool = False
+    # Regression file convention — path-component regex. Case-insensitive
+    # match via re.search. Files matching this pattern are guarded from
+    # edits by the regression guard once finalized.
+    regression_file_pattern: str = (
+        r"(?i)(?:^|[/\\])regression(?:[/\\]|[_-][^/\\]*\.[A-Za-z0-9]+$)"
+    )
+    # Layer 9 — Core-functionality detection. When enabled, Phase 3 tags
+    # load-bearing entities and Phase 5 MUST produce regression tests for
+    # each tag. Prune via approval UI.
+    enable_core_functionality_tagging: bool = True
+    # Minimum confidence to auto-promote a tag into Phase 5's mandatory
+    # regression list. "low" lets the user prune aggressively; "high"
+    # only enforces high-confidence tags.
+    core_functionality_min_confidence: str = "medium"  # "low" | "medium" | "high"
+
     # ── Post-execution validation ──
     enable_post_validation: bool = True  # Master switch
     post_format_command: str = ""     # e.g. "ruff format src/"
