@@ -141,7 +141,27 @@ async def _extract_and_store(item: _ExtractionItem) -> list[dict]:
     db = await get_db(item.repo_root)
     stored: list[dict] = []
     try:
+        from lean_ai.training.maintenance import (
+            auto_promote_memory,
+            supersede_user_rejected,
+        )
+
         for mem_item in items:
+            # Skip memories the user has already rejected (avoid re-introduction)
+            if await supersede_user_rejected(
+                db, category=mem_item.category, content=mem_item.content,
+            ):
+                continue
+            # Auto-promote if we've seen the same lesson before
+            promoted = await auto_promote_memory(
+                db, category=mem_item.category, content=mem_item.content,
+            )
+            if promoted is not None:
+                stored.append(promoted)
+                # No user notification — the memory already exists, seen_count
+                # just ticked up.  The MemoriesPanel will reflect it on next open.
+                continue
+
             memory = await create_memory(
                 db,
                 session_id=item.session_id,

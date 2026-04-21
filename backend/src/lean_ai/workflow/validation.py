@@ -429,6 +429,15 @@ async def _run_validation_fix_loop(
                 }
                 for tc in executed
             ]
+            # Compact failure summaries for the training archive
+            failures_before_summary = {
+                name: (res.get("output") or "")[:500]
+                for name, res in failures.items()
+            }
+            failures_after_summary = {
+                name: (res.get("output") or "")[:500]
+                for name, res in still_failing.items()
+            }
             fire_validation_attempt_hook(
                 repo_root=repo_root,
                 session_id=session_id or "",
@@ -440,6 +449,8 @@ async def _run_validation_fix_loop(
                 diagnosis=explanation or "",
                 fix_tool_calls=fix_tool_calls_payload,
                 succeeded=attempt_succeeded,
+                failures_before=failures_before_summary,
+                failures_after=failures_after_summary,
                 ws=ws,
             )
         except Exception:

@@ -106,8 +106,27 @@ async def evaluate_test_dispute(
     )
 
     explanation = explanation.strip()
+    decision = "accepted" if explanation.upper().startswith("ACCEPTED:") else "rejected"
 
-    if explanation.upper().startswith("ACCEPTED:"):
+    try:
+        from lean_ai.workflow.hooks import fire_workflow_event
+
+        fire_workflow_event(
+            repo_root=repo_root,
+            session_id=session_id or "",
+            event_type="tdd_dispute",
+            payload={
+                "test_file": test_file,
+                "test_function": test_function,
+                "reason": reason,
+                "decision": decision,
+                "explanation": explanation,
+            },
+        )
+    except Exception:
+        logger.debug("tdd_dispute event capture failed (non-fatal)", exc_info=True)
+
+    if decision == "accepted":
         logger.info(
             "TDD dispute ACCEPTED for %s::%s", test_file, test_function,
         )

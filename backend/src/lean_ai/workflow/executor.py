@@ -519,6 +519,39 @@ async def execute_plan(
             ),
         )
 
+    # ── Training archive: execution_complete event ──
+    try:
+        from lean_ai.workflow.hooks import fire_workflow_event
+
+        validation_passed = all(
+            r.get("success", True) for r in (validation_results or {}).values()
+        )
+        fire_workflow_event(
+            repo_root=repo_root,
+            session_id=session_id,
+            event_type="execution_complete",
+            payload={
+                "task": task,
+                "files_modified_count": len(files_modified),
+                "validation_passed": validation_passed,
+                "branch_name": branch_name,
+                "base_branch": base_branch,
+            },
+        )
+    except Exception:
+        logger.debug(
+            "execution_complete event capture failed (non-fatal)",
+            exc_info=True,
+        )
+
+    # ── Retention pass (throttled to once per hour per workspace) ──
+    try:
+        from lean_ai.training.maintenance import run_retention_pass
+
+        asyncio.create_task(run_retention_pass(repo_root))
+    except Exception:
+        logger.debug("retention pass scheduling failed (non-fatal)", exc_info=True)
+
     complete_data: dict = {
         "summary": summary, "files_modified": files_modified,
     }

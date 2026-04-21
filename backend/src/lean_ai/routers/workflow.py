@@ -327,6 +327,21 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                 await update_session(
                                     db, session_id, status="cancelled",
                                 )
+                                try:
+                                    from lean_ai.workflow.hooks import (
+                                        fire_workflow_event,
+                                    )
+                                    fire_workflow_event(
+                                        repo_root=repo_root,
+                                        session_id=session_id,
+                                        event_type="cancellation",
+                                        payload={"task": task, "mode": mode},
+                                    )
+                                except Exception:
+                                    logger.debug(
+                                        "cancellation capture failed (non-fatal)",
+                                        exc_info=True,
+                                    )
                                 continue
                             finally:
                                 await dispatcher.stop()

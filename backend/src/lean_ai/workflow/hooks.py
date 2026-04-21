@@ -177,20 +177,41 @@ async def on_plan_decision(
     feedback: str,
     plan_after: str | None,
     decision: str,
+    revision_count: int = 0,
     ws: WebSocket | None = None,
 ) -> None:
     """Hook: user approved or rejected a plan.
 
-    - decision="approved" after a prior rejection → extract `rejection` memory
-      using the (plan_before, feedback, plan_after) triple. This is the
-      strongest signal — user saw a bad plan, gave feedback, a revised plan
-      satisfied them.
-    - decision="rejected" (intermediate) → capture (plan_before, feedback)
-      and defer extraction until the eventual approval. No-op here.
-    - decision="approved" without prior rejection → no memory extraction.
+    Two jobs:
+
+    1. **Training archive** (always): persist the decision row so
+       exports can build DPO pairs from (rejected → approved) pairs.
+    2. **Curated memory** (approval after prior rejection only): extract
+       a ``rejection`` memory from the (plan_before, feedback, plan_after)
+       triple so future planning avoids the same mistake.
 
     Fire-and-forget; exceptions logged and suppressed.
     """
+    # 1. Training archive
+    try:
+        from lean_ai.training.capture import capture_plan_decision
+
+        await capture_plan_decision(
+            repo_root,
+            session_id=session_id,
+            revision_count=revision_count,
+            task=task,
+            plan_before=plan_before,
+            plan_after=plan_after,
+            feedback=feedback,
+            decision=decision,
+        )
+    except Exception:
+        logger.debug(
+            "Plan-decision training capture failed (non-fatal)", exc_info=True,
+        )
+
+    # 2. Curated memory extraction — only on approval after rejection
     if not getattr(settings, "enable_session_memory", True):
         return
     if decision != "approved" or plan_before is None or not feedback:
@@ -231,14 +252,39 @@ async def on_validation_attempt_complete(
     diagnosis: str,
     fix_tool_calls: list[dict] | None,
     succeeded: bool,
+    failures_before: dict | None = None,
+    failures_after: dict | None = None,
     ws: WebSocket | None = None,
 ) -> None:
     """Hook: one validation fix-loop attempt completed.
 
-    On success, extract a `fix_pattern` memory capturing (error → root-cause
-    → fix). On failure, no memory (the next attempt may still succeed; we
-    extract only when we have a known-good fix to learn from).
+    1. **Training archive**: persist every attempt (both failed and
+       succeeded) so exports can build DPO pairs from failure→success
+       runs on the same error.
+    2. **Curated memory**: on success only, extract a ``fix_pattern``
+       memory capturing (error → root-cause → fix).
     """
+    # 1. Training archive — every attempt, pass/fail alike
+    try:
+        from lean_ai.training.capture import capture_validation_attempt
+
+        await capture_validation_attempt(
+            repo_root,
+            session_id=session_id,
+            attempt_num=attempt_num,
+            failures_before=failures_before,
+            diagnosis=diagnosis,
+            fix_tool_calls=fix_tool_calls,
+            failures_after=failures_after,
+            succeeded=succeeded,
+        )
+    except Exception:
+        logger.debug(
+            "Validation-attempt training capture failed (non-fatal)",
+            exc_info=True,
+        )
+
+    # 2. Curated memory — only on success
     if not getattr(settings, "enable_session_memory", True):
         return
     if not succeeded:
@@ -269,6 +315,64 @@ async def on_validation_attempt_complete(
         )
 
 
+# ── Workflow event hooks (loop, context refresh, cancellation, etc.) ──
+
+async def on_workflow_event(
+    repo_root: str,
+    session_id: str,
+    *,
+    event_type: str,
+    payload: dict | None = None,
+) -> None:
+    """Persist a workflow event to the training archive.
+
+    Covers: ``loop_detected``, ``context_refresh``, ``reminder_injected``,
+    ``claim_unverified``, ``cancellation``, ``tdd_dispute``,
+    ``execution_complete``.
+    """
+    try:
+        from lean_ai.training.capture import capture_workflow_event
+
+        await capture_workflow_event(
+            repo_root,
+            session_id=session_id,
+            event_type=event_type,
+            payload=payload,
+        )
+    except Exception:
+        logger.debug(
+            "Workflow event capture failed (non-fatal, type=%s)",
+            event_type, exc_info=True,
+        )
+
+
+def fire_workflow_event(
+    *,
+    repo_root: str,
+    session_id: str,
+    event_type: str,
+    payload: dict | None = None,
+) -> None:
+    """Fire-and-forget wrapper for on_workflow_event.
+
+    Safe to call from sync code inside ``chat_with_tools`` / workflow
+    hot paths — schedules on the running event loop and never blocks.
+    """
+    import asyncio
+
+    from lean_ai.workflow.callbacks import log_task_exception
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    t = loop.create_task(on_workflow_event(
+        repo_root, session_id,
+        event_type=event_type, payload=payload,
+    ))
+    t.add_done_callback(log_task_exception)
+
+
 def fire_plan_decision_hook(
     *,
     repo_root: str,
@@ -279,6 +383,7 @@ def fire_plan_decision_hook(
     feedback: str,
     plan_after: str | None,
     decision: str,
+    revision_count: int = 0,
     ws: WebSocket | None,
 ) -> None:
     """Fire-and-forget wrapper for on_plan_decision."""
@@ -287,7 +392,8 @@ def fire_plan_decision_hook(
     t = asyncio.create_task(on_plan_decision(
         repo_root, session_id, llm_client,
         task=task, plan_before=plan_before, feedback=feedback,
-        plan_after=plan_after, decision=decision, ws=ws,
+        plan_after=plan_after, decision=decision,
+        revision_count=revision_count, ws=ws,
     ))
     t.add_done_callback(log_task_exception)
 
@@ -304,6 +410,8 @@ def fire_validation_attempt_hook(
     diagnosis: str,
     fix_tool_calls: list[dict] | None,
     succeeded: bool,
+    failures_before: dict | None = None,
+    failures_after: dict | None = None,
     ws: WebSocket | None,
 ) -> None:
     """Fire-and-forget wrapper for on_validation_attempt_complete."""
@@ -314,6 +422,8 @@ def fire_validation_attempt_hook(
         task=task, attempt_num=attempt_num,
         failing_commands=failing_commands, error_output=error_output,
         diagnosis=diagnosis, fix_tool_calls=fix_tool_calls,
-        succeeded=succeeded, ws=ws,
+        succeeded=succeeded,
+        failures_before=failures_before, failures_after=failures_after,
+        ws=ws,
     ))
     t.add_done_callback(log_task_exception)

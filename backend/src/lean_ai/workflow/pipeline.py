@@ -225,9 +225,9 @@ async def _wait_for_approval(
 
         if msg.get("type") == "approve":
             logger.info("Plan approved by user")
-            if last_rejection is not None:
-                from lean_ai.workflow.hooks import fire_plan_decision_hook
+            from lean_ai.workflow.hooks import fire_plan_decision_hook
 
+            if last_rejection is not None:
                 prev_plan_json, prev_feedback = last_rejection
                 fire_plan_decision_hook(
                     repo_root=repo_root,
@@ -238,6 +238,22 @@ async def _wait_for_approval(
                     feedback=prev_feedback,
                     plan_after=plan.model_dump_json(indent=2),
                     decision="approved",
+                    revision_count=revision_count,
+                    ws=ws,
+                )
+            else:
+                # First-attempt approval — still log for training archive,
+                # with empty feedback so memory extraction skips it.
+                fire_plan_decision_hook(
+                    repo_root=repo_root,
+                    session_id=session_id,
+                    llm_client=llm_client,
+                    task=task,
+                    plan_before="",
+                    feedback="",
+                    plan_after=plan.model_dump_json(indent=2),
+                    decision="approved",
+                    revision_count=0,
                     ws=ws,
                 )
             return plan
