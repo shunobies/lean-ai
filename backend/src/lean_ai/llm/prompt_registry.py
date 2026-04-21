@@ -447,6 +447,98 @@ def _register_defaults(reg: PromptRegistry) -> None:
         ),
     ))
 
+    reg.register(PromptEntry(
+        key="policy.testing_environment_awareness",
+        category="Core Policy",
+        name="Testing Environment Awareness Policy",
+        description=(
+            "Phase 2 / Phase 5 policy block: the LLM must detect"
+            " whether the project has a working test setup, and"
+            " include setup steps in the plan when it doesn't."
+            " Covers language-specific setup, web-search for best"
+            " practices, and awareness of primitive vs modern tooling."
+        ),
+        default_text=(
+            "TESTING ENVIRONMENT AWARENESS — testing infrastructure "
+            "differs by language, framework, and project maturity. "
+            "Before proposing ANY test work, confirm the project "
+            "actually has a working test setup.\n\n"
+            "1. DETECT. Look for evidence of a working test setup:\n"
+            "   - A declared test command in `.lean_ai/commands.json`, "
+            "`pyproject.toml`, `package.json` `scripts`, `Cargo.toml`, "
+            "`composer.json`, `Makefile`, `Gemfile`, `build.gradle`, "
+            "etc.\n"
+            "   - A test-config file: `pytest.ini`, `pyproject.toml` "
+            "`[tool.pytest.ini_options]`, `jest.config.*`, "
+            "`vitest.config.*`, `phpunit.xml`, `karma.conf.*`, "
+            "`tsconfig.json` test includes, `.rspec`, `go.mod`'s "
+            "test files, `Cargo.toml` `[dev-dependencies]`, etc.\n"
+            "   - Existing test files that actually import the "
+            "framework.\n"
+            "   If none of the above exists, the project has NO "
+            "working test setup — you cannot skip this step.\n\n"
+            "2. IF NO SETUP EXISTS, research first. Web-search "
+            "\"best practices for setting up {detected_language} "
+            "testing in {current_year}\" — your training data may be "
+            "stale and the idiomatic framework may have changed. "
+            "Pick the canonical framework for the detected language:\n"
+            "   - Python: pytest + pyproject.toml "
+            "`[tool.pytest.ini_options]` (modern) or pytest.ini "
+            "(legacy).\n"
+            "   - Node / TypeScript: vitest (modern) or jest.\n"
+            "   - Rust: built-in cargo test + optional "
+            "`[dev-dependencies]`.\n"
+            "   - PHP: phpunit via composer `require --dev`.\n"
+            "   - Go: built-in `go test` (no framework install "
+            "needed).\n"
+            "   - Ruby: rspec or minitest.\n"
+            "   - Java / Kotlin: JUnit 5 via gradle / maven.\n"
+            "   - C# / .NET: xUnit / NUnit via dotnet add.\n"
+            "   - Older C / C++ / Fortran / assembly: testing may be "
+            "as primitive as a `main` function with asserts — do NOT "
+            "force a modern framework where it would be alien. Pick "
+            "the simplest harness that runs non-interactively.\n\n"
+            "3. INCLUDE SETUP STEPS IN THE PLAN BEFORE TEST CREATION. "
+            "In TDD mode with a greenfield project, Phase A needs a "
+            "project skeleton to write tests INTO — the setup steps "
+            "come before the expert's test-writing phase. Typical "
+            "setup steps:\n"
+            "   - Initialize / update the project manifest "
+            "(`pyproject.toml`, `package.json`, `Cargo.toml`, "
+            "`composer.json`) with test dependencies.\n"
+            "   - Install dependencies (`pip install -e .[dev]`, "
+            "`npm install`, `cargo build`, `composer install`).\n"
+            "   - Create minimal test config if required "
+            "(`pytest.ini`, `jest.config.js`, `phpunit.xml`).\n"
+            "   - Initialize a venv / language-specific environment "
+            "if the project doesn't have one.\n"
+            "   - Record the resulting test command to "
+            "`.lean_ai/commands.json` (the auto-detector writes this "
+            "during `/init-workspace`, but a plan-driven setup "
+            "should update it too).\n\n"
+            "4. PER-PROJECT COMMANDS. The workspace's "
+            "`.lean_ai/commands.json` is the source of truth for "
+            "`test` / `lint` / `format` / `lint_fix` commands. "
+            "Global `LEAN_AI_POST_*_COMMAND` env vars are a legacy "
+            "override that transfer between projects and usually "
+            "don't belong in per-project settings. If the auto-"
+            "detected command looks wrong for the current "
+            "workspace, update `.lean_ai/commands.json` rather than "
+            "the global env var.\n\n"
+            "5. PRIMITIVE-TOOLING AWARENESS. Some ecosystems have "
+            "much lighter test tooling than modern Python / Node / "
+            "Rust. Expecting a rich assertion library, fixture "
+            "system, and parametrized tests in a project that uses "
+            "a bare `assert.h` is a mismatch. Adapt expectations "
+            "down: a pass/fail exit code may be the best available "
+            "signal.\n\n"
+            "6. RECORD THE DECISION. Whenever you establish a new "
+            "test setup, note the chosen framework and command in "
+            "the step's `reason` field so downstream phases (and "
+            "future plans) can find it."
+        ),
+    ))
+
     # ── Planning ──────────────────────────────────────────────────────
 
     reg.register(PromptEntry(
@@ -571,7 +663,8 @@ def _register_defaults(reg: PromptRegistry) -> None:
             "final text output. The synthesis step consolidates these into "
             "a VERIFIED REFERENCES list. If a specific file is affected by "
             "a verified dependency, also call record_file_observation with "
-            "role: reference so the file shows up alongside its context."
+            "role: reference so the file shows up alongside its context.\n\n"
+            "{TESTING_ENVIRONMENT_AWARENESS}"
         ),
     ))
 

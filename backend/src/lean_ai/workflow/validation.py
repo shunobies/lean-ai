@@ -34,21 +34,50 @@ logger = logging.getLogger(__name__)
 
 
 def _effective_post_commands(repo_root: str) -> dict[str, str]:
-    """Resolve post-validation commands: manual settings > auto-detected.
+    """Resolve post-validation commands.
 
-    Returns dict with keys: ``format``, ``lint_fix``, ``lint``, ``test``.
-    Manual ``LEAN_AI_POST_*`` settings always take priority over
-    auto-detected commands from ``.lean_ai/commands.json``.
+    Priority (highest → lowest):
+
+    1. Per-project ``.lean_ai/commands.json`` fields written by
+       ``/init-workspace`` auto-detection OR updated by the LLM
+       during a plan that set up a new testing environment.
+    2. Global ``LEAN_AI_POST_*`` env var settings — used as a
+       fallback when commands.json is missing or has an empty
+       field.
+
+    The inversion from the historical "settings > auto" priority
+    keeps per-project commands authoritative so switching between
+    a Python repo and a PHP / Rust / Go repo no longer requires
+    changing a global env var + restarting the server. When the
+    env var is set but overridden by a per-project command, a
+    debug log line announces the choice.
+
+    Returns dict with keys: ``format``, ``lint_fix``, ``lint``,
+    ``test``. Empty string for any command that has no source.
     """
     from lean_ai.context.command_detection import load_commands_json
 
     auto = load_commands_json(repo_root)
-    return {
-        "format": settings.post_format_command or auto.get("format", ""),
-        "lint_fix": settings.post_lint_fix_command or auto.get("lint_fix", ""),
-        "lint": settings.post_lint_command or auto.get("lint", ""),
-        "test": settings.post_test_command or auto.get("test", ""),
+    env_overrides = {
+        "format": settings.post_format_command,
+        "lint_fix": settings.post_lint_fix_command,
+        "lint": settings.post_lint_command,
+        "test": settings.post_test_command,
     }
+    resolved: dict[str, str] = {}
+    for field, env_val in env_overrides.items():
+        per_project = auto.get(field, "") or ""
+        if per_project:
+            resolved[field] = per_project
+            if env_val and env_val != per_project:
+                logger.debug(
+                    "Post-validation %s: commands.json (%r) "
+                    "overrides env var (%r) for this workspace",
+                    field, per_project, env_val,
+                )
+        else:
+            resolved[field] = env_val or ""
+    return resolved
 
 
 async def _run_post_validation(
