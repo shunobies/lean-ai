@@ -68,7 +68,10 @@ ui-verification = [
     "mss>=9.0.0,<11.0",
     "Pillow>=10.0.0,<12.0",
     "numpy>=1.26.0,<3.0",
-    "pygetwindow>=0.0.9",
+    # pygetwindow imports cleanly only on Windows (raises NotImplementedError
+    # on Linux at import time). macOS desktop capture uses Quartz, Linux uses
+    # wmctrl/xdotool — neither needs pygetwindow.
+    "pygetwindow>=0.0.9; sys_platform == 'win32'",
     "pywin32>=306; sys_platform == 'win32'",
     "pyobjc-framework-Quartz>=10.0; sys_platform == 'darwin'",
     "dbus-next>=0.2.3; sys_platform == 'linux'",
