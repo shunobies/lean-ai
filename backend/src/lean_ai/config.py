@@ -256,6 +256,17 @@ class Settings(BaseSettings):
     vision_max_tokens: int = 1024  # Max tokens for image description
     vision_timeout: float = 120.0  # Timeout per image description (seconds)
 
+    # ── UI Verification (vision-backed screenshot + analysis tools) ──
+    enable_ui_verification: bool = False  # Master switch for verify_web_ui + verify_desktop_ui
+    ui_verification_timeout: float = 180.0  # Outer timeout wrapping whole tool call (seconds)
+    ui_verification_wait_seconds: float = 3.0  # Post-render settling time before capture
+    ui_verification_viewport: str = "1280x800"  # Default browser viewport (WxH)
+    # Per-pass vision timeout (overrides vision_timeout for structured passes)
+    ui_verification_vision_timeout: float = 180.0
+    ui_verification_max_color_samples: int = 5  # Dominant colors returned by Pillow/k-means
+    ui_verification_capture_backend_override: str = ""  # "" = auto-detect
+    # Override values: "mss", "pywin32-print", "mac-screencapture", "mss-x11", "xdg-portal", "grim"
+
     # ── Voice — STT (faster-whisper, always local) ──
     enable_stt: bool = False
     stt_model: str = "turbo"  # tiny|base|small|medium|large-v3|turbo

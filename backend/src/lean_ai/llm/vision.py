@@ -5,18 +5,32 @@ base64-encoded images into rich text descriptions.  The descriptions are
 injected into the user's message so text-only models can understand visual
 content.
 
+Two entry points:
+
+- :func:`describe_image` — free-form prose description.  Used by the chat
+  endpoint to inject image context into the user message.
+- :func:`describe_image_structured` — JSON-schema-constrained extraction.
+  Used by the UI verification pipeline to pull layout, components, and text
+  into Pydantic models.  Temperature is pinned to 0 and Ollama's ``format``
+  parameter enforces the schema so small vision models don't drift.
+
 Disabled when ``LEAN_AI_VISION_MODEL`` is empty (the default).
 """
 
 import asyncio
+import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Generic, TypeVar
 
 import ollama as ollama_lib
+from pydantic import BaseModel, ValidationError
 
 from lean_ai.config import settings
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T", bound=BaseModel)
 
 _VISION_SYSTEM_PROMPT = """\
 Describe this image in detail for a software developer who cannot see it.
@@ -161,6 +175,138 @@ async def describe_images(
         for img in images
     ]
     return list(await asyncio.gather(*tasks))
+
+
+@dataclass
+class StructuredVisionResult(Generic[T]):
+    """Result of a single structured (schema-constrained) image analysis."""
+
+    success: bool
+    parsed: T | None = None
+    raw: str = ""
+    error: str | None = None
+    warnings: list[str] = field(default_factory=list)
+
+
+async def describe_image_structured(
+    image_base64: str,
+    schema: type[T],
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    timeout: float | None = None,
+    max_tokens: int | None = None,
+) -> StructuredVisionResult[T]:
+    """Run a schema-constrained pass over a single image.
+
+    Uses Ollama's ``format`` parameter to enforce the Pydantic model's JSON
+    schema on the output.  Temperature is pinned to 0 for deterministic
+    extraction.  Retries once on empty/invalid responses (common on small
+    vision models after a cold load).
+
+    Args:
+        image_base64: Base64-encoded image data (no ``data:`` URL prefix).
+        schema: Pydantic model class that defines the extraction schema.
+        system_prompt: Full system prompt — caller controls framing.
+            Use capability-first language; do NOT assign the model a persona.
+        user_prompt: User message accompanying the image.
+        timeout: Override ``settings.vision_timeout``.  Pass the UI
+            verification vision timeout for long structured passes.
+        max_tokens: Override ``settings.vision_max_tokens``.
+
+    Returns:
+        StructuredVisionResult with the parsed Pydantic instance, or an error.
+        ``raw`` holds the model's raw JSON text for debugging.
+    """
+    if not settings.vision_model:
+        return StructuredVisionResult(success=False, error="No vision model configured")
+
+    effective_timeout = timeout if timeout is not None else settings.vision_timeout
+    effective_max_tokens = max_tokens if max_tokens is not None else settings.vision_max_tokens
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt, "images": [image_base64]},
+    ]
+
+    client = ollama_lib.AsyncClient(host=settings.effective_vision_url)
+    schema_dict = schema.model_json_schema()
+
+    async def _call() -> str:
+        resp = await asyncio.wait_for(
+            client.chat(
+                model=settings.vision_model,
+                messages=messages,
+                format=schema_dict,
+                options={
+                    "num_predict": effective_max_tokens,
+                    "temperature": 0.0,
+                },
+            ),
+            timeout=effective_timeout,
+        )
+        return resp["message"]["content"]
+
+    def _try_parse(text: str) -> tuple[T | None, str | None]:
+        """Return (parsed, error). Error is None on success."""
+        if not text.strip():
+            return None, "empty response"
+        try:
+            return schema.model_validate_json(text), None
+        except ValidationError as e:
+            return None, f"schema validation failed: {e.errors()[0].get('msg', 'unknown')}"
+        except json.JSONDecodeError as e:
+            return None, f"invalid JSON: {e.msg}"
+
+    warnings: list[str] = []
+    try:
+        raw = await _call()
+        parsed, err = _try_parse(raw)
+        if parsed is None:
+            warnings.append(f"first attempt failed: {err}, retrying")
+            logger.warning("Vision (structured): %s, retrying once", err)
+            raw = await _call()
+            parsed, err = _try_parse(raw)
+            if parsed is None:
+                return StructuredVisionResult(
+                    success=False,
+                    raw=raw,
+                    error=err,
+                    warnings=warnings,
+                )
+
+        logger.info(
+            "Vision (structured): extracted %s using %s",
+            schema.__name__,
+            settings.vision_model,
+        )
+        return StructuredVisionResult(
+            success=True,
+            parsed=parsed,
+            raw=raw,
+            warnings=warnings,
+        )
+
+    except asyncio.TimeoutError:
+        logger.warning("Vision (structured): timeout after %.0fs", effective_timeout)
+        return StructuredVisionResult(
+            success=False,
+            error=f"Vision model timed out after {effective_timeout:.0f}s",
+            warnings=warnings,
+        )
+    except ConnectionError:
+        logger.warning(
+            "Vision (structured): cannot reach Ollama at %s",
+            settings.effective_vision_url,
+        )
+        return StructuredVisionResult(
+            success=False,
+            error=f"Cannot reach Ollama at {settings.effective_vision_url}",
+            warnings=warnings,
+        )
+    except Exception as e:
+        logger.exception("Vision (structured): extraction failed")
+        return StructuredVisionResult(success=False, error=str(e), warnings=warnings)
 
 
 def format_image_descriptions(results: list[VisionResult]) -> str:
