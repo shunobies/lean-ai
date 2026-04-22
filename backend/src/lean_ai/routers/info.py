@@ -145,10 +145,12 @@ async def health():
     """
     from lean_ai.llm.vision import is_vision_available
     from lean_ai.runtime_state import current_busy
+    from lean_ai.tools.ui_analysis import is_analysis_available
 
     result = {
         "status": "ok",
         "vision_available": is_vision_available(),
+        "ui_verification_available": is_analysis_available(),
         "busy": current_busy(),
     }
     try:
