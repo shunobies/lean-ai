@@ -18,6 +18,7 @@ Run it fully local with [Ollama](https://ollama.com), or connect to OpenAI and A
 - **Local Refiner** — when using cloud providers, a local Ollama model pre-processes your prompts: enriches them with private reference library context, strips sensitive data, and structures vague requests into detailed specs. Your proprietary docs never leave your machine. [Learn more](docs/reference-library.md)
 - **Zero prompt engineering** — chat mode helps you refine ideas into detailed tasks. Project context and framework guides teach the LLM your codebase conventions automatically.
 - **Reference library** — drop your internal docs (PDF, EPUB, Word, Markdown) into `.lean_ai/reference/` and the agent uses them for better plans without leaking content to cloud APIs.
+- **UI verification** — the agent can screenshot web pages or desktop GUIs (Tkinter, Qt, Swing, JavaFX, Electron) and analyse layout with a local vision model. Useful for planning UI changes, discussing layout with the agent, or diagnosing visual regressions that pass a type-check but look broken. [Learn more](docs/ui-verification.md)
 - **Built-in code quality** — after every execution, Lean AI runs your project's linter and tests automatically. Failures are fed back to the LLM for self-correction. Lint, test, and format commands are auto-detected from your project files — zero configuration needed. When a test command is available, the agent writes tests alongside code changes.
 - **Git-native workflow** — every task runs on its own branch. Approve to merge, reject to discard. Your main branch stays clean.
 - **19 scaffold recipes** — bootstrap new projects (FastAPI, Next.js, Laravel, Rails, and more) with a single command.
@@ -183,6 +184,7 @@ See the [full configuration reference](docs/configuration.md) for all options.
 | [Architecture](docs/architecture.md) | Planning pipeline, workflow modes, tools, and internals |
 | [Example Flow](docs/example-flow.md) | End-to-end walkthrough of a real session with every guardrail called out |
 | [Reference Library & Refiner](docs/reference-library.md) | Private docs, RAG enrichment, and cloud privacy |
+| [UI Verification](docs/ui-verification.md) | Vision-backed screenshot analysis for web pages and desktop GUIs |
 | [API Reference](docs/api-reference.md) | REST endpoints and WebSocket protocol |
 | [Extension Guide](docs/extension.md) | VSCode/VSCodium setup, commands, and settings |
 | [JetBrains Plugin](jetbrains-plugin/README.md) | IntelliJ, PyCharm, WebStorm, CLion, and all JetBrains IDEs |

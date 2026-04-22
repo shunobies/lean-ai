@@ -85,8 +85,13 @@ pip install -e ".[dev,reference]"
 # Google search provider (requires Chrome installed)
 pip install -e ".[dev,google]"
 
+# UI verification tools (verify_web_ui, verify_desktop_ui)
+# Installs Playwright, Pillow, numpy, mss, plus per-platform window libs.
+# Also requires running the separate Chromium install step — see docs/ui-verification.md
+pip install -e ".[dev,ui-verification]"
+
 # Everything
-pip install -e ".[dev,openai,anthropic,gemini,reference,google]"
+pip install -e ".[dev,openai,anthropic,gemini,reference,google,ui-verification]"
 ```
 
 ## LLM Provider
