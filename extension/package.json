@@ -119,6 +119,14 @@
         "command": "lean-ai.openMemories",
         "title": "Lean AI: Open Memories",
         "icon": "$(lightbulb)"
+      },
+      {
+        "command": "lean-ai.installUiVerification",
+        "title": "Lean AI: Install UI Verification (Chromium)"
+      },
+      {
+        "command": "lean-ai.testUiVerification",
+        "title": "Lean AI: Test UI Verification Pipeline"
       }
     ],
     "menus": {
@@ -592,6 +600,30 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "**Voice Wake Word** — Automatically submit transcribed text after wake word detection. When disabled, text fills the input for review before sending."
+        },
+        "lean-ai.enableUiVerification": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**UI Verification** — Enable the `verify_web_ui` and `verify_desktop_ui` tools. When turned on for the first time, VS Code will prompt to install the workspace-local Chromium browser (~300MB). Requires the `ui-verification` backend extras (`pip install -e \".[ui-verification]\"`) and a configured vision model."
+        },
+        "lean-ai.uiVerificationTimeout": {
+          "type": "number",
+          "default": 180,
+          "minimum": 30,
+          "maximum": 600,
+          "markdownDescription": "**UI Verification** — Timeout in seconds wrapping the whole verify_ui tool call (capture + 3 vision passes + color sampling + focused answer). Vision passes are slow on small local models; raise if you hit timeouts, lower if you want faster failure."
+        },
+        "lean-ai.uiVerificationViewport": {
+          "type": "string",
+          "default": "1280x800",
+          "markdownDescription": "**UI Verification** — Default browser viewport for `verify_web_ui` as `WxH`. Examples: `1280x800` (desktop), `375x812` (mobile)."
+        },
+        "lean-ai.uiVerificationWaitSeconds": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 30,
+          "markdownDescription": "**UI Verification** — Post-render settling time before the screenshot fires, in seconds. Covers transitions, font loading, and late-mounted content."
         },
         "lean-ai.searchApiUrl": {
           "type": "string",

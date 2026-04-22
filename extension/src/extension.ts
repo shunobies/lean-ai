@@ -22,6 +22,11 @@ import { NotesPanel } from "./notesPanel";
 import { MemoriesPanel } from "./memoriesPanel";
 import { PromptsPanel } from "./promptsPanel";
 import { initNotifications } from "./notifications";
+import {
+    installUiVerificationCommand,
+    testUiVerificationCommand,
+    registerUiVerificationWatcher,
+} from "./uiVerification";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     console.log("Lean AI extension activating...");
@@ -131,6 +136,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand("lean-ai.openChatInNewWindow", () => {
             sidebarProvider.openChatInNewWindow();
         }),
+        vscode.commands.registerCommand(
+            "lean-ai.installUiVerification",
+            installUiVerificationCommand,
+        ),
+        vscode.commands.registerCommand(
+            "lean-ai.testUiVerification",
+            testUiVerificationCommand,
+        ),
+        registerUiVerificationWatcher(context),
     );
 
     // Session history commands
