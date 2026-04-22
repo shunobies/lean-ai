@@ -67,3 +67,69 @@ scaffolding (`fire_workflow_event`, `on_workflow_event` in
 `workflow/hooks.py`) is in place — wiring these is a small mechanical
 change once the plumbing path is chosen (probably via an optional
 `telemetry_context` dict parameter on `chat_with_tools`).
+
+## worker_implementation_unfinished — Tool-output compression (deferred)
+
+**Status:** Wired but dead. Machinery exists end-to-end; the activating
+parameter is never supplied.
+
+The [`worker_llm_client`](backend/src/lean_ai/routers/dependencies.py#L180)
+singleton is instantiated at startup, and
+[`tool_executor.py`](backend/src/lean_ai/workflow/tool_executor.py)
+already contains:
+
+- [`_COMPRESSIBLE_TOOLS`](backend/src/lean_ai/workflow/tool_executor.py#L140)
+  — allowlist (`read_file`, `grep_files`, `run_tests`, `run_lint`,
+  `run_command`, `search_internet`, `fetch_url`).
+- [`_compress_with_worker`](backend/src/lean_ai/workflow/tool_executor.py#L166)
+  — size-thresholded LLM summarization of a tool output. Threshold is
+  5% of the active context window × 3.5.
+- [`execute_with_compression`](backend/src/lean_ai/workflow/tool_executor.py#L858)
+  — wraps `execute()` and routes through the worker when
+  `worker_client is not None`.
+
+**The wire is cut at the call sites.** Every `make_tool_executor(...)`
+call in the codebase — plan execution, plan investigation, TDD writing,
+TDD dispute, validation fix loop, fix mode — builds the executor without
+passing `worker_client`. `execute_with_compression` early-returns and
+raw output flows through unchanged.
+
+Not enabling now because the risk of lossy summarization outweighs the
+context-window win in most places:
+
+1. **`edit_file` fidelity** — when a plan step uses `read_file` to set
+   up a find-and-replace, the primary needs byte-exact content.
+   Compression will make edits fail silently.
+2. **`grep_files` line numbers** — Phase 2 observation recording
+   depends on the `file:line:content` format being preserved
+   verbatim. A worker paraphrase breaks `record_file_observation`.
+3. **Test failure signatures** — validation fix-loop diagnosis hinges
+   on the exact error line + stack-trace context. Summaries regularly
+   drop the one line that matters.
+4. **Current spill-to-disk behavior is already good.** Outputs >2000
+   chars are saved to `.lean_ai/tool_output/` and the last 40 lines are
+   returned with a "call `read_file` for the rest" hint (see
+   `tool_executor.py:509-537` for `run_tests` / `run_lint` /
+   `run_command`). For test failures specifically, the failing
+   assertion is usually near the end — the tail is often exactly what
+   the LLM needs and extra context is one tool call away on demand.
+
+**If revisited later** — don't enable globally. Enable selectively
+with per-phase and per-tool guardrails:
+
+- **Where it's safe**: Phase 2 exploration and fix-mode investigation.
+  Both build a mental map rather than write code, so lossy
+  summarization of file reads and grep results is acceptable. Would
+  meaningfully help primary during Phase 2 now that it handles
+  exploration directly.
+- **Where it's not**: plan-step execution, validation fix loop, TDD
+  dispute evaluation — all need exact output for correctness.
+- **Per-tool prompt tuning**: worker prompts must be tool-specific.
+  `grep_files` → "preserve line numbers and file:line:content
+  format"; `run_tests` → "keep the final assertion line and its
+  5-line surrounding context verbatim"; `read_file` → "preserve
+  imports, class signatures, and function boundaries."
+- **Smallest useful change**: a new
+  `LEAN_AI_COMPRESS_PHASE2_TOOL_OUTPUT` setting (default off) that
+  gates `worker_client=worker_llm_client` at the two safe call sites
+  only. No behavior change elsewhere.
