@@ -67,13 +67,24 @@ async def describe_image(
     *,
     prompt: str | None = None,
     filename: str | None = None,
+    system_prompt: str | None = None,
+    user_prompt: str | None = None,
+    timeout: float | None = None,
+    max_tokens: int | None = None,
 ) -> VisionResult:
     """Describe a single base64-encoded image using the vision model.
 
     Args:
         image_base64: Base64-encoded image data (no ``data:`` URL prefix).
-        prompt: Optional context from the user's message for focused description.
+        prompt: Optional context appended to the default system prompt (free-form flow).
         filename: Optional original filename for context.
+        system_prompt: Full system prompt override.  When provided, replaces the
+            default prompt entirely (used by the UI verification focused-answer
+            pass, which builds its own capability-first prompt).
+        user_prompt: Full user message override.  When provided, replaces the
+            default "Describe this image." message.
+        timeout: Override ``settings.vision_timeout``.
+        max_tokens: Override ``settings.vision_max_tokens``.
 
     Returns:
         VisionResult with the text description or error.
@@ -81,16 +92,25 @@ async def describe_image(
     if not settings.vision_model:
         return VisionResult(success=False, error="No vision model configured")
 
-    system_prompt = _VISION_SYSTEM_PROMPT
-    if prompt:
-        system_prompt += f"\n\nAdditional context from the user: {prompt}"
+    if system_prompt is None:
+        effective_system = _VISION_SYSTEM_PROMPT
+        if prompt:
+            effective_system += f"\n\nAdditional context from the user: {prompt}"
+    else:
+        effective_system = system_prompt
 
-    user_content = "Describe this image."
-    if filename:
-        user_content = f"Describe this image (filename: {filename})."
+    if user_prompt is not None:
+        user_content = user_prompt
+    else:
+        user_content = "Describe this image."
+        if filename:
+            user_content = f"Describe this image (filename: {filename})."
+
+    effective_timeout = timeout if timeout is not None else settings.vision_timeout
+    effective_max_tokens = max_tokens if max_tokens is not None else settings.vision_max_tokens
 
     messages = [
-        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": effective_system},
         {"role": "user", "content": user_content, "images": [image_base64]},
     ]
 
@@ -102,11 +122,11 @@ async def describe_image(
                 model=settings.vision_model,
                 messages=messages,
                 options={
-                    "num_predict": settings.vision_max_tokens,
+                    "num_predict": effective_max_tokens,
                     "temperature": 0.3,
                 },
             ),
-            timeout=settings.vision_timeout,
+            timeout=effective_timeout,
         )
         return resp["message"]["content"]
 
@@ -132,8 +152,11 @@ async def describe_image(
         return VisionResult(success=True, description=text)
 
     except asyncio.TimeoutError:
-        logger.warning("Vision: timeout after %.0fs", settings.vision_timeout)
-        return VisionResult(success=False, error="Vision model timed out")
+        logger.warning("Vision: timeout after %.0fs", effective_timeout)
+        return VisionResult(
+            success=False,
+            error=f"Vision model timed out after {effective_timeout:.0f}s",
+        )
     except ConnectionError:
         logger.warning(
             "Vision: cannot reach Ollama at %s",

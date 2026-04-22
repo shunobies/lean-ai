@@ -2918,6 +2918,126 @@ def _register_defaults(reg: PromptRegistry) -> None:
         ),
     ))
 
+    # ── UI Verification (vision-model multi-pass analysis) ───────────
+
+    reg.register(PromptEntry(
+        key="ui_verification.inventory_system",
+        category="UI Verification",
+        name="UI Inventory Pass — System",
+        description=(
+            "Schema-constrained pass that enumerates visual regions and"
+            " components in a screenshot. Temperature pinned to 0."
+        ),
+        default_text=(
+            "Use your knowledge of visual hierarchy, information architecture,"
+            " and UI component taxonomy to inventory what is visible in the"
+            " screenshot.\n\n"
+            "For spatial grounding, treat the screenshot as a 3x3 grid with"
+            " cells named: top-left, top-center, top-right, middle-left,"
+            " center, middle-right, bottom-left, bottom-center, bottom-right.\n\n"
+            "STEP 1 — Identify distinct visual REGIONS (header, main content,"
+            " sidebar, footer, toolbar, modal, etc.). Each region occupies"
+            " one or more grid cells.\n\n"
+            "STEP 2 — Enumerate every COMPONENT you can see (button, input,"
+            " link, card, nav, text block, image, icon, checkbox, radio,"
+            " select, toggle, etc.). For each, record type, location (grid"
+            " cell or region name), label_text if visible, brief styling_notes,"
+            " and your confidence (high / medium / low).\n\n"
+            "VISIBLE STATE ONLY. Do not infer hover, focus, disabled, or error"
+            " states unless there is a clear visual indicator in the"
+            " screenshot. When unsure, use confidence=low.\n\n"
+            "Return JSON matching the provided schema exactly. Use empty"
+            " strings or empty arrays for fields you cannot determine."
+        ),
+    ))
+
+    reg.register(PromptEntry(
+        key="ui_verification.inventory_user",
+        category="UI Verification",
+        name="UI Inventory Pass — User",
+        description="User message for the inventory pass. Brief by design.",
+        default_text="Inventory the visual regions and UI components in this screenshot.",
+    ))
+
+    reg.register(PromptEntry(
+        key="ui_verification.text_system",
+        category="UI Verification",
+        name="UI Text Transcription Pass — System",
+        description=(
+            "Dedicated OCR-style pass. Text transcription from a general"
+            " description is the #1 hallucination source for vision models,"
+            " so this pass is constrained to verbatim output only."
+        ),
+        default_text=(
+            "Use your knowledge of UI typography to transcribe every visible"
+            " text string in the screenshot, VERBATIM.\n\n"
+            "Do NOT paraphrase. Do NOT invent text. Do NOT normalise case,"
+            " punctuation, or whitespace. Transcribe exactly what you see.\n\n"
+            "For any text that is too small, blurry, occluded, or otherwise"
+            " unreadable, set verbatim to the literal string '[unreadable]'.\n\n"
+            "For each text line, record which visual region it belongs to"
+            " (header, main, sidebar, footer, modal, etc.) and your confidence"
+            " in the transcription (high / medium / low).\n\n"
+            "Return JSON matching the provided schema exactly."
+        ),
+    ))
+
+    reg.register(PromptEntry(
+        key="ui_verification.text_user",
+        category="UI Verification",
+        name="UI Text Transcription Pass — User",
+        description="User message for the text transcription pass.",
+        default_text="Transcribe every visible text string in this screenshot.",
+    ))
+
+    reg.register(PromptEntry(
+        key="ui_verification.answer_system",
+        category="UI Verification",
+        name="UI Focused Answer Pass — System",
+        description=(
+            "Final pass: synthesise the inventory + text + sampled colors"
+            " into a focused answer to the user's question."
+        ),
+        default_text=(
+            "Use your knowledge of UI/UX design, visual hierarchy, and"
+            " accessibility to answer the user's question about this UI.\n\n"
+            "You have three sources of grounded information:\n"
+            " 1. A structured inventory of regions and components.\n"
+            " 2. A verbatim transcription of visible text.\n"
+            " 3. A pixel-sampled color palette (reliable; NOT guessed).\n\n"
+            "Ground your answer in these sources plus what you can verify in"
+            " the screenshot itself. Flag anything you are inferring rather"
+            " than observing directly. If the question cannot be answered"
+            " from the visible screenshot, say so plainly and explain what"
+            " would be needed to answer it (a different view, a hover state,"
+            " interaction, etc.).\n\n"
+            "Be concise: a direct answer followed by the 2-5 observations"
+            " that support it."
+        ),
+    ))
+
+    reg.register(PromptEntry(
+        key="ui_verification.answer_user",
+        category="UI Verification",
+        name="UI Focused Answer Pass — User",
+        description=(
+            "User message for the focused answer pass. Template variables:"
+            " question, inventory_json, text_json, colors."
+        ),
+        default_text=(
+            "Question from the caller:\n"
+            "{question}\n\n"
+            "── Inventory (from a prior structured pass) ──\n"
+            "{inventory_json}\n\n"
+            "── Visible text (from a prior verbatim pass) ──\n"
+            "{text_json}\n\n"
+            "── Sampled color palette (pixel-accurate) ──\n"
+            "{colors}\n\n"
+            "Answer the question using the above plus the screenshot itself."
+        ),
+        template_vars=["question", "inventory_json", "text_json", "colors"],
+    ))
+
 
 # Populate the singleton with defaults now that the function is defined.
 _register_defaults(registry)
