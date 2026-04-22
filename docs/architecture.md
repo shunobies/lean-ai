@@ -63,6 +63,20 @@ The planner (`llm/planner.py`) uses decomposed LLM calls to produce high-quality
 
 Each phase uses structured JSON output from the LLM. The planner has read-only tools (`read_file`, `list_directory`, `directory_tree`, `grep_files`) for codebase exploration during phases 1-2.
 
+### Model routing through the planner
+
+| Stage | Which model runs it | Why |
+|---|---|---|
+| `/chat` (conversational refinement before a task is dispatched) | **Request** model | Chatty, higher temperature — good for refining fuzzy ideas with the user. |
+| Phase 1 (clarification / verification) | **Primary** model | Coder-tuned reads the codebase more precisely than a chatty general model. |
+| Phase 2 (file identification / exploration) | **Primary** model | Same reason — plus the worker model automatically compresses tool outputs so the primary doesn't drown in file contents. |
+| Phases 3–5 (design, plan assembly, verification) | **Expert** model (when configured; otherwise primary) | Reasoning-heavy structural work — the largest model available earns its keep here. |
+| Implementation (per-step execution) | **Primary** model | Hands back to the coder-tuned model that now has a structured plan to follow. |
+| Final validation fix retry | **Expert** model (when configured) | Escalation for stubborn failures. |
+| Tool output compression, web summarization, memory extraction | **Worker** model | Small, fast — runs asynchronously so it never blocks the hot path. |
+
+The **request** model participates in chat and `/request` mode only — it does not run any planner phase.
+
 When using cloud providers, the [Local Refiner](reference-library.md#local-refiner) can enrich tasks with reference library context and strip sensitive data before planning begins.
 
 ## Tools

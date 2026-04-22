@@ -87,7 +87,7 @@ User Input
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │  Phase 1: Clarify (optional)                                     │
-│  Model: request (or primary fallback)                            │
+│  Model: primary                                                  │
 │                                                                  │
 │  Tools: NONE (single LLM call via chat_raw)                      │
 │  State: NONE                                                     │
@@ -107,7 +107,7 @@ User Input
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │  Planning Phase 1: Scope Analysis                                │
-│  Model: request (or primary fallback)                            │
+│  Model: primary                                                  │
 │                                                                  │
 │  Tools: restricted read-only subset (via chat_with_tools)        │
 │    grep_files, read_file, list_directory,                        │
@@ -136,7 +136,7 @@ User Input
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │  Planning Phase 2: File Identification + Exploration             │
-│  Model: request (or primary fallback)                            │
+│  Model: primary                                                  │
 │                                                                  │
 │  ┌─ IF num_parallel >= 2 ─────────────────────────────────────┐  │
 │  │  PARALLEL PATH                                              │  │

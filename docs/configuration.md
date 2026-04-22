@@ -209,7 +209,14 @@ The prompt architecture is optimized for this model range: prompts use canonical
 
 ## Request Model
 
-An optional separate model for `/request` mode (open-ended tasks like writing guides, research, documentation). If not configured, the primary model is used.
+An optional separate model for:
+
+- The `/chat` endpoint — conversational refinement of fuzzy ideas into well-scoped tasks before they're dispatched to the planner.
+- `/request` workflow mode — open-ended tasks like writing guides, research, and documentation.
+
+The request model **does not** participate in the planner. Planning phases 1–2 (scope + codebase exploration) run on the primary model, and phases 3–5 (design synthesis, plan assembly, verification) run on the expert model. Routing a chatty general-purpose model through codebase exploration wastes its strengths and produces weaker `FileSummary` output, so those phases stay with the coder-tuned primary.
+
+If not configured, the primary model handles chat and `/request` mode as well.
 
 ### Provider Selection
 

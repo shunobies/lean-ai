@@ -53,9 +53,9 @@ The rest of this document follows the default `plan` flow.
 
 ## 3. Phase 1 — Clarification / Verification
 
-**Runs on**: request model. **Tool budget**: `LEAN_AI_PLAN_PHASE1_MAX_TURNS` (default 5). **Prompts**: `planning.scope_system` + `planning.scope_user`.
+**Runs on**: primary model. **Tool budget**: `LEAN_AI_PLAN_PHASE1_MAX_TURNS` (default 5). **Prompts**: `planning.scope_system` + `planning.scope_user`.
 
-The request model gets a small read-only tool set (`grep_files`, `read_file`, `list_directory`, `query_project_context`, `search_reference`, `search_wiki`, `fetch_wiki_page`, `task_complete`) plus the opt-in `request_clarification` tool. Its job is to verify the task is specific enough to turn into a complete scope document in Phase 1a. It does **not** write the scope document itself.
+The primary model gets a small read-only tool set (`grep_files`, `read_file`, `list_directory`, `query_project_context`, `search_reference`, `search_wiki`, `fetch_wiki_page`, `task_complete`) plus the opt-in `request_clarification` tool. Its job is to verify the task is specific enough to turn into a complete scope document in Phase 1a. It does **not** write the scope document itself.
 
 Four guardrails keep Phase 1 tight:
 
@@ -64,13 +64,13 @@ Four guardrails keep Phase 1 tight:
 - **Turn cap.** 5 turns by default stops runaway exploration.
 - **Summary-before-exit contract.** The system prompt explicitly requires a final summary paragraph capturing the task, verified facts, and answers to any clarifying questions.
 
-For *"add password-reset flow"*, a competent request model typically asks 2–3 questions (*"Which email provider? Rate-limit policy? Token TTL?"*), reads a few files (`auth_router.py`, `users.py`, `settings.py`), and exits with a summary that Phase 1a can deterministically translate into a scope document.
+For *"add password-reset flow"*, a competent primary model typically asks 2–3 questions (*"Which email provider? Rate-limit policy? Token TTL?"*), reads a few files (`auth_router.py`, `users.py`, `settings.py`), and exits with a summary that Phase 1a can deterministically translate into a scope document.
 
 ---
 
 ## 4. Phase 1a — Scope Synthesis
 
-**Runs on**: request model. **Tool budget**: zero (one `chat_structured` call). **Prompt**: `planning.scope_synthesis_system`.
+**Runs on**: primary model. **Tool budget**: zero (one `chat_structured` call). **Prompt**: `planning.scope_synthesis_system`.
 
 Phase 1a is non-interactive — it never asks the user anything. It mechanically maps the task text plus Phase 1's summary into a validated `ScopeDocument` Pydantic model with eight required fields:
 
@@ -91,7 +91,7 @@ Phase 1a is non-interactive — it never asks the user anything. It mechanically
 
 ## 5. Phase 2 — Codebase Exploration
 
-**Runs on**: request model. **Tool budget**: `LEAN_AI_IMPLEMENTATION_MAX_TURNS` (effectively unlimited for exploration). **Prompts**: `planning.exploration_system` + `planning.exploration_user` + `planning.exploration_synthesis_system` (for the post-loop structured pass).
+**Runs on**: primary model. **Tool budget**: `LEAN_AI_IMPLEMENTATION_MAX_TURNS` (effectively unlimited for exploration). **Prompts**: `planning.exploration_system` + `planning.exploration_user` + `planning.exploration_synthesis_system` (for the post-loop structured pass). The worker model automatically compresses large tool outputs before they re-enter the primary's context (see `workflow/tool_executor.py`), so file reads during Phase 2 don't balloon the primary's window.
 
 This is where most of the heavy lifting lives, because every later phase depends on the `FileSummary` that comes out the back. Phase 2 runs `chat_with_tools` with the planning tool set plus `record_file_observation` — a dedicated tool that upserts a structured observation into `.lean_ai/observations/{session_id}.json` keyed by `file_path`.
 

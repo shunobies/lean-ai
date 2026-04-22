@@ -79,7 +79,6 @@ async def create_plan(
     test_command: str = "",
     session_id: str = "",
     expert_llm_client: "LLMClient | None" = None,
-    request_llm_client: "LLMClient | None" = None,
     on_content: "Callable | None" = None,
     on_thinking: "Callable | None" = None,
     on_tool_call: "Callable | None" = None,
@@ -88,17 +87,25 @@ async def create_plan(
 ) -> ExecutionPlan:
     """Create a plan using 5-phase decomposed planning.
 
+    Phases 1–2 (scope + codebase exploration) run on the **primary** model
+    because exploration benefits from a coder-tuned model that can read
+    files precisely. The worker model already compresses large tool
+    outputs before they re-enter the primary's context (see
+    ``workflow/tool_executor.py``), so the primary isn't on its own.
+    Phases 3–5 (design + assembly + verification) run on the **expert**
+    model when configured. The **request** model is reserved for chat
+    and ``/request`` mode — not planning.
+
     Args:
         task: The user's task description (may include clarification answers).
         repo_root: Path to the repository root.
-        llm_client: LLM client for making calls.
+        llm_client: Primary LLM client — runs phases 1–2 and implementation.
         context: Pre-assembled context (project context, search results, etc.).
         revision_context: If revising, the previous plan JSON + user feedback.
         ws: Optional WebSocket for streaming stage progress.
         refiner: Optional local refiner for privacy-stripping file summaries.
         test_command: If set, planner includes test creation steps.
-        request_llm_client: Optional request model for phases 1-2 (codebase
-            exploration). Falls back to llm_client when not configured.
+        expert_llm_client: Optional expert model for phases 3–5 reasoning.
         on_content: Streaming callback for content tokens.
         on_thinking: Streaming callback for thinking tokens.
         on_tool_call: Callback for tool call events (phase 2).
@@ -115,14 +122,11 @@ async def create_plan(
             on_thinking=on_thinking,
         )
 
-    # Explorer client for phases 1-2 (scope + file identification),
-    # falls back to primary when no request model is configured
-    explorer = request_llm_client or llm_client
-    phase_max_tokens = (
-        settings.effective_request_max_tokens
-        if request_llm_client
-        else settings.ollama_max_tokens
-    )
+    # Explorer for phases 1–2 is always the primary model. The request
+    # model is chat-only — routing it through codebase exploration wastes
+    # a chatty-tuned model on a task the coder-tuned primary does better.
+    explorer = llm_client
+    phase_max_tokens = settings.ollama_max_tokens
 
     # Expert client for reasoning-heavy phases (3-5), falls back to standard
     expert = expert_llm_client or llm_client

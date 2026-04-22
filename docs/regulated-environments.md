@@ -38,7 +38,7 @@ This is not a stripped-down local autocomplete. Lean AI with Lean AI Serve provi
 - Post-execution validation (auto-runs lint, format, test)
 - Git-native branch workflow — every change is isolated and reversible
 - Reference library for indexing internal documentation (PDF, EPUB, Word, Markdown)
-- Three-model pipeline: request model for scoping, primary model for coding, expert model for reasoning
+- Four-model pipeline: request model for chat / `/request` mode, primary model for planning exploration + implementation, expert model for reasoning-heavy planning phases, worker model for auxiliary compression/summarization
 - Internet search is optional and can be disabled entirely or routed through a self-hosted SearXNG instance
 
 ## Data Flow Guarantees

@@ -141,7 +141,6 @@ async def run_workflow(
         test_command=plan_commands.get("test", ""),
         session_id=session_id,
         expert_llm_client=expert_llm_client,
-        request_llm_client=request_llm_client,
         on_content=planning_cb.on_content,
         on_thinking=planning_cb.on_thinking,
         on_tool_call=planning_cb.on_tool_call,
@@ -160,7 +159,6 @@ async def run_workflow(
         refiner=refiner,
         test_command=plan_commands.get("test", ""),
         expert_llm_client=expert_llm_client,
-        request_llm_client=request_llm_client,
         dispatcher=dispatcher,
         session_id=session_id,
     )
@@ -196,7 +194,6 @@ async def _wait_for_approval(
     refiner: "PromptRefiner | None" = None,
     test_command: str = "",
     expert_llm_client: "LLMClient | None" = None,
-    request_llm_client: "LLMClient | None" = None,
     dispatcher: WSMessageDispatcher | None = None,
     session_id: str = "",
 ) -> ExecutionPlan:
@@ -300,7 +297,6 @@ async def _wait_for_approval(
                 refiner=refiner,
                 test_command=test_command,
                 expert_llm_client=expert_llm_client,
-                request_llm_client=request_llm_client,
             )
             plan_md = plan_to_markdown(plan)
             await ws_send(ws, "plan_revision", {
