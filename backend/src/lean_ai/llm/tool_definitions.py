@@ -560,12 +560,13 @@ REFERENCE_TOOLS: list[dict] = [
 
 
 def build_implementation_tools() -> list[dict]:
-    """IMPLEMENTATION_TOOLS + context query + reference + wiki tools when configured."""
+    """IMPLEMENTATION_TOOLS + context query + reference + wiki + UI verification tools."""
     from lean_ai.config import settings
 
     tools = [*IMPLEMENTATION_TOOLS, QUERY_CONTEXT_TOOL, *REFERENCE_TOOLS]
     if settings.wiki_url:
         tools.extend(WIKI_TOOLS)
+    tools.extend(_maybe_ui_verification_tools())
     return tools
 
 
@@ -623,6 +624,167 @@ def _maybe_wiki_tools() -> list[dict]:
     from lean_ai.config import settings
 
     return list(WIKI_TOOLS) if settings.wiki_url else []
+
+
+# ── UI Verification tools ───────────────────────────────────────────────
+
+VERIFY_WEB_UI_TOOL: dict = {
+    "type": "function",
+    "function": {
+        "name": "verify_web_ui",
+        "description": (
+            "Capture a headless-Chromium screenshot of a URL, run a "
+            "multi-pass vision analysis, and return a structured "
+            "report: focused answer to your question, inventory of "
+            "visible regions and components, verbatim text "
+            "transcription, and pixel-sampled color palette.\n\n"
+            "Use this when you need to VERIFY what a rendered web UI "
+            "looks like — layout, component placement, visible text, "
+            "colors, obvious broken rendering.  Good for sanity-checking "
+            "after a frontend change, or for discussing layout with the "
+            "user during planning.\n\n"
+            "Not a replacement for deterministic E2E assertions: the "
+            "underlying vision model can miss subtle issues (spacing "
+            "differences, off-by-a-few-pixels regressions).  Each call "
+            "is slow (~10-30s) — use deliberately, not in inner loops.\n\n"
+            "The 'question' parameter is critical — phrase it as a "
+            "specific thing you want answered, e.g. 'Is the login form "
+            "visible and has a Submit button?' or 'Does the settings "
+            "panel include the new dark-mode toggle?'."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": (
+                        "URL to capture. Supports http://, https://, "
+                        "file:// (local HTML), and data: URLs."
+                    ),
+                },
+                "question": {
+                    "type": "string",
+                    "description": (
+                        "Specific question to answer about the UI. "
+                        "Drives the final focused pass."
+                    ),
+                },
+                "viewport": {
+                    "type": "string",
+                    "description": (
+                        "Viewport size as 'WxH', e.g. '1280x800' or "
+                        "'375x812' for mobile. Defaults to the configured "
+                        "workspace viewport."
+                    ),
+                },
+                "wait_for_selector": {
+                    "type": "string",
+                    "description": (
+                        "Optional CSS selector to wait for before "
+                        "capturing (up to 10s). Useful for "
+                        "async-rendered SPAs. Example: "
+                        "'[data-testid=login-form]'."
+                    ),
+                },
+                "wait_seconds": {
+                    "type": "number",
+                    "description": (
+                        "Post-render settling time in seconds before "
+                        "capture. Default 3.0."
+                    ),
+                },
+                "full_page": {
+                    "type": "boolean",
+                    "description": (
+                        "When true, capture the entire scrollable "
+                        "page rather than just the viewport. Default "
+                        "false."
+                    ),
+                },
+            },
+            "required": ["url", "question"],
+        },
+    },
+}
+
+
+VERIFY_DESKTOP_UI_TOOL: dict = {
+    "type": "function",
+    "function": {
+        "name": "verify_desktop_ui",
+        "description": (
+            "Launch a desktop app, capture its main window, run a "
+            "multi-pass vision analysis, and return a structured "
+            "report.  Works for any GUI framework (Tkinter, Qt, "
+            "Swing, JavaFX, Electron, native Win32/Cocoa/GTK).\n\n"
+            "Use this to VERIFY layout of a desktop app during planning "
+            "or after a UI change.  Platform support: Windows, macOS "
+            "(requires Screen Recording permission for the host "
+            "process), Linux X11 (requires wmctrl + xdotool), Linux "
+            "Wayland (full-screen only; window-by-title not "
+            "recoverable without compositor-specific APIs).\n\n"
+            "Subprocess is terminated after capture — do NOT use this "
+            "tool to start a long-running app the user wants to keep "
+            "open.  Launch commands MUST be a list of strings (no "
+            "shell interpolation).  Slow (~10-40s per call)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "launch_command": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Command + args to launch the app, as a list. "
+                        "Example: ['python', 'app.py'] or "
+                        "['java', '-jar', 'build/libs/app.jar']."
+                    ),
+                },
+                "window_title": {
+                    "type": "string",
+                    "description": (
+                        "Substring to match against window titles "
+                        "(case-insensitive). The app's window must "
+                        "contain this text in its title. Ignored on "
+                        "Linux Wayland — full-screen capture is used "
+                        "there."
+                    ),
+                },
+                "question": {
+                    "type": "string",
+                    "description": (
+                        "Specific question to answer about the UI. "
+                        "Drives the final focused pass."
+                    ),
+                },
+                "wait_seconds": {
+                    "type": "number",
+                    "description": (
+                        "Post-window-appearance settling time in "
+                        "seconds before capture. Default 3.0."
+                    ),
+                },
+                "window_timeout": {
+                    "type": "number",
+                    "description": (
+                        "How long to wait for the window to appear, "
+                        "in seconds. Default 30.0."
+                    ),
+                },
+            },
+            "required": ["launch_command", "window_title", "question"],
+        },
+    },
+}
+
+
+def _maybe_ui_verification_tools() -> list[dict]:
+    """Return UI verification tool schemas when the feature is enabled."""
+    from lean_ai.config import settings
+
+    if not settings.enable_ui_verification:
+        return []
+    return [VERIFY_WEB_UI_TOOL, VERIFY_DESKTOP_UI_TOOL]
 
 
 # ── Project context query tool ──────────────────────────────────────────────
@@ -784,7 +946,7 @@ PLANNING_TOOLS: list[dict] = [
 
 
 def build_planning_tools() -> list[dict]:
-    """PLANNING_TOOLS + search tools + context query + wiki tools when configured."""
+    """PLANNING_TOOLS + search + context query + wiki + UI verification tools."""
     search_tools = [
         tool
         for tool in IMPLEMENTATION_TOOLS
@@ -793,6 +955,7 @@ def build_planning_tools() -> list[dict]:
     return (
         PLANNING_TOOLS + search_tools + [QUERY_CONTEXT_TOOL]
         + REFERENCE_TOOLS + _maybe_wiki_tools()
+        + _maybe_ui_verification_tools()
     )
 
 
@@ -814,8 +977,11 @@ DESIGN_TOOLS: list[dict] = [
 
 
 def build_design_tools() -> list[dict]:
-    """Search + task_complete + reference + wiki tools for Phase 3 design synthesis."""
-    return DESIGN_TOOLS + REFERENCE_TOOLS + _maybe_wiki_tools()
+    """Search + task_complete + reference + wiki + UI verification tools for Phase 3."""
+    return (
+        DESIGN_TOOLS + REFERENCE_TOOLS + _maybe_wiki_tools()
+        + _maybe_ui_verification_tools()
+    )
 
 
 # Read-only tools for chat exploration (no task_complete — text exit)
@@ -935,8 +1101,14 @@ CHAT_TOOLS: list[dict] = [
 ]
 
 def build_chat_tools() -> list[dict]:
-    """CHAT_TOOLS + context query + reference + wiki tools when configured."""
-    return [*CHAT_TOOLS, QUERY_CONTEXT_TOOL, *REFERENCE_TOOLS, *_maybe_wiki_tools()]
+    """CHAT_TOOLS + context query + reference + wiki + UI verification tools."""
+    return [
+        *CHAT_TOOLS,
+        QUERY_CONTEXT_TOOL,
+        *REFERENCE_TOOLS,
+        *_maybe_wiki_tools(),
+        *_maybe_ui_verification_tools(),
+    ]
 
 
 # Read-only + diagnostic tools for fix-mode investigation phase
@@ -953,5 +1125,8 @@ INVESTIGATION_TOOLS: list[dict] = [
 
 
 def build_investigation_tools() -> list[dict]:
-    """INVESTIGATION_TOOLS + wiki tools when configured."""
-    return INVESTIGATION_TOOLS + _maybe_wiki_tools()
+    """INVESTIGATION_TOOLS + wiki + UI verification tools when configured."""
+    return (
+        INVESTIGATION_TOOLS + _maybe_wiki_tools()
+        + _maybe_ui_verification_tools()
+    )

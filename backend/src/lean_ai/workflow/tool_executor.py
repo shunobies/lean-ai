@@ -224,6 +224,8 @@ _REQUIRED_PARAMS: dict[str, list[str]] = {
     "search_wiki": ["query"],
     "fetch_wiki_page": ["title"],
     "search_reference": ["query"],
+    "verify_web_ui": ["url", "question"],
+    "verify_desktop_ui": ["launch_command", "window_title", "question"],
 }
 
 # Parameters where empty string is valid
@@ -849,6 +851,36 @@ def make_tool_executor(
                 return "\n".join(lines)
             finally:
                 await db.close()
+
+        elif name == "verify_web_ui":
+            from lean_ai.tools.ui_verification import verify_web_ui
+            return await verify_web_ui(
+                url=arguments["url"],
+                question=arguments["question"],
+                repo_root=repo_root,
+                viewport=arguments.get("viewport"),
+                wait_for_selector=arguments.get("wait_for_selector"),
+                wait_seconds=arguments.get("wait_seconds"),
+                full_page=bool(arguments.get("full_page", False)),
+            )
+
+        elif name == "verify_desktop_ui":
+            from lean_ai.tools.ui_verification import verify_desktop_ui
+            launch_command = arguments.get("launch_command")
+            if not isinstance(launch_command, list):
+                return (
+                    "ERROR: verify_desktop_ui requires launch_command as a "
+                    "list of strings, got "
+                    f"{type(launch_command).__name__}"
+                )
+            return await verify_desktop_ui(
+                launch_command=launch_command,
+                window_title=arguments["window_title"],
+                question=arguments["question"],
+                repo_root=repo_root,
+                wait_seconds=arguments.get("wait_seconds"),
+                window_timeout=arguments.get("window_timeout"),
+            )
 
         elif name == "task_complete":
             return "Task marked complete."
