@@ -132,6 +132,22 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.uiVerificationViewport":    "LEAN_AI_UI_VERIFICATION_VIEWPORT",
     "lean-ai.uiVerificationWaitSeconds": "LEAN_AI_UI_VERIFICATION_WAIT_SECONDS",
 
+    // Per-role optional sampling params (blank → backend omits from options dict)
+    "lean-ai.ollamaMinP":                "LEAN_AI_OLLAMA_MIN_P",
+    "lean-ai.ollamaPresencePenalty":     "LEAN_AI_OLLAMA_PRESENCE_PENALTY",
+    "lean-ai.ollamaExpertMinP":          "LEAN_AI_OLLAMA_EXPERT_MIN_P",
+    "lean-ai.ollamaExpertPresencePenalty": "LEAN_AI_OLLAMA_EXPERT_PRESENCE_PENALTY",
+    "lean-ai.ollamaRequestMinP":         "LEAN_AI_OLLAMA_REQUEST_MIN_P",
+    "lean-ai.ollamaRequestPresencePenalty": "LEAN_AI_OLLAMA_REQUEST_PRESENCE_PENALTY",
+    "lean-ai.ollamaWorkerMinP":          "LEAN_AI_OLLAMA_WORKER_MIN_P",
+    "lean-ai.ollamaWorkerPresencePenalty": "LEAN_AI_OLLAMA_WORKER_PRESENCE_PENALTY",
+
+    // Preserve chain-of-thought across turns (Qwen3.6+/vLLM feature)
+    "lean-ai.preserveThinkingPrimary": "LEAN_AI_PRESERVE_THINKING_PRIMARY",
+    "lean-ai.preserveThinkingExpert":  "LEAN_AI_PRESERVE_THINKING_EXPERT",
+    "lean-ai.preserveThinkingRequest": "LEAN_AI_PRESERVE_THINKING_REQUEST",
+    "lean-ai.preserveThinkingWorker":  "LEAN_AI_PRESERVE_THINKING_WORKER",
+
     // Per-model capability flags (image + audio)
     "lean-ai.supportsImagePrimary": "LEAN_AI_SUPPORTS_IMAGE_PRIMARY",
     "lean-ai.supportsImageExpert":  "LEAN_AI_SUPPORTS_IMAGE_EXPERT",

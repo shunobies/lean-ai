@@ -260,6 +260,18 @@
           "type": "number",
           "markdownDescription": "**Ollama** — Penalty applied to repeated tokens to reduce repetition (1.0 = no penalty). Default: `1.05`"
         },
+        "lean-ai.ollamaMinP": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "markdownDescription": "**Ollama** — Minimum probability cutoff for nucleus sampling (e.g. `0.05`). Leave blank to omit — not all models support this parameter."
+        },
+        "lean-ai.ollamaPresencePenalty": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "markdownDescription": "**Ollama** — Presence penalty for topic breadth (e.g. `1.5`). Leave blank to omit — not all models support this parameter."
+        },
         "lean-ai.ollamaMaxTokens": {
           "type": "number",
           "markdownDescription": "**Ollama** — Maximum tokens to generate per response. Defaults to 25% of the context window."
@@ -471,6 +483,18 @@
         "lean-ai.ollamaWorkerRepeatPenalty": {
           "type": "number",
           "markdownDescription": "**Ollama Worker Model** — Repeat penalty. Defaults to primary."
+        },
+        "lean-ai.ollamaWorkerMinP": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "markdownDescription": "**Ollama Worker Model** — Minimum probability cutoff. Leave blank to inherit from primary."
+        },
+        "lean-ai.ollamaWorkerPresencePenalty": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "markdownDescription": "**Ollama Worker Model** — Presence penalty. Leave blank to inherit from primary."
         },
         "lean-ai.ollamaWorkerMaxTokens": {
           "type": "number",
@@ -883,6 +907,18 @@
           "type": "number",
           "markdownDescription": "**Ollama Expert Model** — Repeat penalty. Leave empty to inherit from the primary model."
         },
+        "lean-ai.ollamaExpertMinP": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "markdownDescription": "**Ollama Expert Model** — Minimum probability cutoff. Leave blank to inherit from primary (which itself may be blank → omitted)."
+        },
+        "lean-ai.ollamaExpertPresencePenalty": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "markdownDescription": "**Ollama Expert Model** — Presence penalty. Leave blank to inherit from primary (which itself may be blank → omitted)."
+        },
         "lean-ai.ollamaExpertMaxTokens": {
           "type": "number",
           "markdownDescription": "**Ollama Expert Model** — Maximum output tokens. Defaults to 25% of expert context window."
@@ -907,9 +943,41 @@
           "type": "number",
           "markdownDescription": "**Ollama Request Model** — Repeat penalty. Leave empty to inherit from the primary model."
         },
+        "lean-ai.ollamaRequestMinP": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "markdownDescription": "**Ollama Request Model** — Minimum probability cutoff. Leave blank to inherit from primary (which itself may be blank → omitted)."
+        },
+        "lean-ai.ollamaRequestPresencePenalty": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "markdownDescription": "**Ollama Request Model** — Presence penalty. Leave blank to inherit from primary."
+        },
         "lean-ai.ollamaRequestMaxTokens": {
           "type": "number",
           "markdownDescription": "**Ollama Request Model** — Maximum output tokens. Defaults to 25% of request context window."
+        },
+        "lean-ai.preserveThinkingPrimary": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Preserve Thinking** — Qwen3.6+/vLLM feature. When enabled, the **primary** model's prior-turn chain-of-thought is kept in the conversation history via `chat_template_kwargs` so the model doesn't re-derive the same reasoning across tool-loop iterations. Improves KV-cache reuse. Ignored by providers that don't honor chat_template_kwargs."
+        },
+        "lean-ai.preserveThinkingExpert": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Preserve Thinking** — As above, for the **expert** model."
+        },
+        "lean-ai.preserveThinkingRequest": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Preserve Thinking** — As above, for the **request** model."
+        },
+        "lean-ai.preserveThinkingWorker": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Preserve Thinking** — As above, for the **worker** model."
         }
       }
     }

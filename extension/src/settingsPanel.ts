@@ -344,6 +344,18 @@ export class SettingsPanel {
             supportsAudioRequest:     "lean-ai.supportsAudioRequest",
             supportsAudioWorker:      "lean-ai.supportsAudioWorker",
             supportsAudioInline:      "lean-ai.supportsAudioInline",
+            ollamaMinP:                    "lean-ai.ollamaMinP",
+            ollamaPresencePenalty:         "lean-ai.ollamaPresencePenalty",
+            ollamaExpertMinP:              "lean-ai.ollamaExpertMinP",
+            ollamaExpertPresencePenalty:   "lean-ai.ollamaExpertPresencePenalty",
+            ollamaRequestMinP:             "lean-ai.ollamaRequestMinP",
+            ollamaRequestPresencePenalty:  "lean-ai.ollamaRequestPresencePenalty",
+            ollamaWorkerMinP:              "lean-ai.ollamaWorkerMinP",
+            ollamaWorkerPresencePenalty:   "lean-ai.ollamaWorkerPresencePenalty",
+            preserveThinkingPrimary:       "lean-ai.preserveThinkingPrimary",
+            preserveThinkingExpert:        "lean-ai.preserveThinkingExpert",
+            preserveThinkingRequest:       "lean-ai.preserveThinkingRequest",
+            preserveThinkingWorker:        "lean-ai.preserveThinkingWorker",
         };
 
         const numericFields = new Set([
@@ -365,10 +377,21 @@ export class SettingsPanel {
             "ollamaTemperature", "ollamaTopP", "ollamaTopK", "ollamaRepeatPenalty",
             "openaiTemperature", "anthropicTemperature",
             "uiVerificationTimeout", "uiVerificationWaitSeconds",
+            "ollamaMinP", "ollamaPresencePenalty",
+            "ollamaExpertMinP", "ollamaExpertPresencePenalty",
+            "ollamaRequestMinP", "ollamaRequestPresencePenalty",
+            "ollamaWorkerMinP", "ollamaWorkerPresencePenalty",
         ]);
 
         // Numeric fields where 0 means "inherit/auto-derive" — treat 0 as unset
         // so the backend receives None and falls back to the primary model's value.
+        // min_p / presence_penalty use "blank = omit". They're NOT in
+        // zeroMeansInherit because 0 is a valid explicit value distinct
+        // from "unset" — settingsPanelHtml's val() returns '' when the
+        // input is empty, which becomes undefined below → backend None.
+        // These names intentionally live only in numericFields (above) so
+        // a literal 0 is preserved.
+
         const zeroMeansInherit = new Set([
             "ollamaExpertTemperature", "ollamaExpertTopP", "ollamaExpertTopK",
             "ollamaExpertRepeatPenalty", "ollamaExpertContextWindow", "ollamaExpertMaxTokens",
@@ -394,6 +417,8 @@ export class SettingsPanel {
             "supportsImageWorker", "supportsImageInline",
             "supportsAudioPrimary", "supportsAudioExpert", "supportsAudioRequest",
             "supportsAudioWorker", "supportsAudioInline",
+            "preserveThinkingPrimary", "preserveThinkingExpert",
+            "preserveThinkingRequest", "preserveThinkingWorker",
         ]);
 
         const coercedMap = new Map<string, unknown>();
@@ -590,6 +615,22 @@ export class SettingsPanel {
             supportsAudioRequest: config.get("lean-ai.supportsAudioRequest", false),
             supportsAudioWorker:  config.get("lean-ai.supportsAudioWorker", false),
             supportsAudioInline:  config.get("lean-ai.supportsAudioInline", false),
+
+            // Optional Ollama sampling params (blank/omit when unset)
+            ollamaMinP:                   config.get("lean-ai.ollamaMinP", ""),
+            ollamaPresencePenalty:        config.get("lean-ai.ollamaPresencePenalty", ""),
+            ollamaExpertMinP:             config.get("lean-ai.ollamaExpertMinP", ""),
+            ollamaExpertPresencePenalty:  config.get("lean-ai.ollamaExpertPresencePenalty", ""),
+            ollamaRequestMinP:            config.get("lean-ai.ollamaRequestMinP", ""),
+            ollamaRequestPresencePenalty: config.get("lean-ai.ollamaRequestPresencePenalty", ""),
+            ollamaWorkerMinP:             config.get("lean-ai.ollamaWorkerMinP", ""),
+            ollamaWorkerPresencePenalty:  config.get("lean-ai.ollamaWorkerPresencePenalty", ""),
+
+            // Preserve thinking per role (Qwen3.6+ / vLLM chat_template_kwargs)
+            preserveThinkingPrimary: config.get("lean-ai.preserveThinkingPrimary", false),
+            preserveThinkingExpert:  config.get("lean-ai.preserveThinkingExpert", false),
+            preserveThinkingRequest: config.get("lean-ai.preserveThinkingRequest", false),
+            preserveThinkingWorker:  config.get("lean-ai.preserveThinkingWorker", false),
 
             // Search
             searchProvider:            config.get("lean-ai.searchProvider", "duckduckgo"),

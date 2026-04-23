@@ -536,6 +536,16 @@ export function getSettingsPanelHtml(): string {
                 <input type="number" id="ollamaMaxTokens" min="0" step="256" placeholder="0">
             </div>
         </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Min P <span class="hint">leave blank to omit — not all models support</span></label>
+                <input type="number" id="ollamaMinP" min="0" max="1" step="0.01" placeholder="">
+            </div>
+            <div class="field">
+                <label>Presence Penalty <span class="hint">leave blank to omit — not all models support</span></label>
+                <input type="number" id="ollamaPresencePenalty" min="0" max="2" step="0.1" placeholder="">
+            </div>
+        </div>
     </div>
 
     <!-- OpenAI fields -->
@@ -664,6 +674,14 @@ export function getSettingsPanelHtml(): string {
                 <span class="capability-warning" data-for="supportsAudioPrimary"></span>
             </div>
         </div>
+        <div class="field-check">
+            <input type="checkbox" id="preserveThinkingPrimary">
+            <div>
+                <label for="preserveThinkingPrimary">Preserve thinking across turns</label>
+                <span class="hint">Qwen3.6+/vLLM feature — keeps chain-of-thought in tool loops. Ignored by providers that don't support chat_template_kwargs.</span>
+                <span class="capability-warning" data-for="preserveThinkingPrimary"></span>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -745,6 +763,16 @@ export function getSettingsPanelHtml(): string {
                     <div class="field">
                     </div>
                 </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Min P <span class="hint">leave blank to inherit from primary</span></label>
+                        <input type="number" id="ollamaExpertMinP" min="0" max="1" step="0.01" placeholder="">
+                    </div>
+                    <div class="field">
+                        <label>Presence Penalty <span class="hint">leave blank to inherit from primary</span></label>
+                        <input type="number" id="ollamaExpertPresencePenalty" min="0" max="2" step="0.1" placeholder="">
+                    </div>
+                </div>
                 <div class="field-check">
                     <input type="checkbox" id="enableThinkingExpert" checked>
                     <div>
@@ -798,6 +826,14 @@ export function getSettingsPanelHtml(): string {
                     <label for="supportsAudioExpert">Supports audio input</label>
                     <span class="hint">Fourth priority in the audio chain.</span>
                     <span class="capability-warning" data-for="supportsAudioExpert"></span>
+                </div>
+            </div>
+            <div class="field-check">
+                <input type="checkbox" id="preserveThinkingExpert">
+                <div>
+                    <label for="preserveThinkingExpert">Preserve thinking across turns</label>
+                    <span class="hint">Qwen3.6+/vLLM — keep chain-of-thought in tool loops.</span>
+                    <span class="capability-warning" data-for="preserveThinkingExpert"></span>
                 </div>
             </div>
         </div>
@@ -882,6 +918,16 @@ export function getSettingsPanelHtml(): string {
                     <div class="field">
                     </div>
                 </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Min P <span class="hint">leave blank to inherit from primary</span></label>
+                        <input type="number" id="ollamaRequestMinP" min="0" max="1" step="0.01" placeholder="">
+                    </div>
+                    <div class="field">
+                        <label>Presence Penalty <span class="hint">leave blank to inherit from primary</span></label>
+                        <input type="number" id="ollamaRequestPresencePenalty" min="0" max="2" step="0.1" placeholder="">
+                    </div>
+                </div>
                 <div class="field-check">
                     <input type="checkbox" id="enableThinkingRequest" checked>
                     <div>
@@ -935,6 +981,14 @@ export function getSettingsPanelHtml(): string {
                     <label for="supportsAudioRequest">Supports audio input</label>
                     <span class="hint">Second priority in the audio chain (after primary).</span>
                     <span class="capability-warning" data-for="supportsAudioRequest"></span>
+                </div>
+            </div>
+            <div class="field-check">
+                <input type="checkbox" id="preserveThinkingRequest">
+                <div>
+                    <label for="preserveThinkingRequest">Preserve thinking across turns</label>
+                    <span class="hint">Qwen3.6+/vLLM — keep chain-of-thought in tool loops.</span>
+                    <span class="capability-warning" data-for="preserveThinkingRequest"></span>
                 </div>
             </div>
         </div>
@@ -1019,6 +1073,16 @@ export function getSettingsPanelHtml(): string {
                     <div class="field">
                     </div>
                 </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Min P <span class="hint">leave blank to inherit from primary</span></label>
+                        <input type="number" id="ollamaWorkerMinP" min="0" max="1" step="0.01" placeholder="">
+                    </div>
+                    <div class="field">
+                        <label>Presence Penalty <span class="hint">leave blank to inherit from primary</span></label>
+                        <input type="number" id="ollamaWorkerPresencePenalty" min="0" max="2" step="0.1" placeholder="">
+                    </div>
+                </div>
                 <div class="field-check">
                     <input type="checkbox" id="enableThinkingWorker">
                     <div>
@@ -1072,6 +1136,14 @@ export function getSettingsPanelHtml(): string {
                     <label for="supportsAudioWorker">Supports audio input</label>
                     <span class="hint">Third priority in the audio chain.</span>
                     <span class="capability-warning" data-for="supportsAudioWorker"></span>
+                </div>
+            </div>
+            <div class="field-check">
+                <input type="checkbox" id="preserveThinkingWorker">
+                <div>
+                    <label for="preserveThinkingWorker">Preserve thinking across turns</label>
+                    <span class="hint">Qwen3.6+/vLLM — keep chain-of-thought in tool loops.</span>
+                    <span class="capability-warning" data-for="preserveThinkingWorker"></span>
                 </div>
             </div>
         </div>
@@ -1463,6 +1535,31 @@ export function getSettingsPanelHtml(): string {
         const m = (model || '').toLowerCase();
         const p = (provider || '').toLowerCase();
 
+        // preserve_thinking: honored by Ollama (Qwen3.6+ chat template) and
+        // Lean AI Serve (vLLM forwards chat_template_kwargs). OpenAI /
+        // Anthropic / Gemini ignore the flag silently.
+        if (kind === 'thinking') {
+            if (p === 'anthropic') {
+                return { level: 'likely-no', message: 'Anthropic does not honor chat_template_kwargs — flag will be a no-op.' };
+            }
+            if (p === 'openai') {
+                return { level: 'likely-no', message: 'Pure OpenAI does not honor chat_template_kwargs — flag will be a no-op (Serve/vLLM does).' };
+            }
+            if (p === 'gemini') {
+                return { level: 'likely-no', message: 'Gemini has its own thinking semantics; this flag is ignored.' };
+            }
+            if (p === 'ollama') {
+                if (/qwen.*3\\.?6|qwen.*-?3\\.6/.test(m)) {
+                    return { level: 'ok', message: '' };
+                }
+                return { level: 'unknown', message: 'Requires Qwen3.6+ (or another model whose chat template honors preserve_thinking).' };
+            }
+            if (p === 'serve') {
+                return { level: 'unknown', message: 'Honored by vLLM via chat_template_kwargs — verify the loaded model\\'s template supports it.' };
+            }
+            return { level: 'unknown', message: 'Unknown provider — verify the chat template honors preserve_thinking.' };
+        }
+
         if (p === 'anthropic' && kind === 'audio') {
             return { level: 'likely-no', message: 'Anthropic does not accept audio input — this flag will be ignored at runtime.' };
         }
@@ -1526,16 +1623,20 @@ export function getSettingsPanelHtml(): string {
     }
 
     const CAPABILITY_CHECKBOXES = [
-        { id: 'supportsImagePrimary', kind: 'image', role: 'primary' },
-        { id: 'supportsAudioPrimary', kind: 'audio', role: 'primary' },
-        { id: 'supportsImageExpert',  kind: 'image', role: 'expert' },
-        { id: 'supportsAudioExpert',  kind: 'audio', role: 'expert' },
-        { id: 'supportsImageRequest', kind: 'image', role: 'request' },
-        { id: 'supportsAudioRequest', kind: 'audio', role: 'request' },
-        { id: 'supportsImageWorker',  kind: 'image', role: 'worker' },
-        { id: 'supportsAudioWorker',  kind: 'audio', role: 'worker' },
-        { id: 'supportsImageInline',  kind: 'image', role: 'inline' },
-        { id: 'supportsAudioInline',  kind: 'audio', role: 'inline' },
+        { id: 'supportsImagePrimary',    kind: 'image',    role: 'primary' },
+        { id: 'supportsAudioPrimary',    kind: 'audio',    role: 'primary' },
+        { id: 'preserveThinkingPrimary', kind: 'thinking', role: 'primary' },
+        { id: 'supportsImageExpert',     kind: 'image',    role: 'expert' },
+        { id: 'supportsAudioExpert',     kind: 'audio',    role: 'expert' },
+        { id: 'preserveThinkingExpert',  kind: 'thinking', role: 'expert' },
+        { id: 'supportsImageRequest',    kind: 'image',    role: 'request' },
+        { id: 'supportsAudioRequest',    kind: 'audio',    role: 'request' },
+        { id: 'preserveThinkingRequest', kind: 'thinking', role: 'request' },
+        { id: 'supportsImageWorker',     kind: 'image',    role: 'worker' },
+        { id: 'supportsAudioWorker',     kind: 'audio',    role: 'worker' },
+        { id: 'preserveThinkingWorker',  kind: 'thinking', role: 'worker' },
+        { id: 'supportsImageInline',     kind: 'image',    role: 'inline' },
+        { id: 'supportsAudioInline',     kind: 'audio',    role: 'inline' },
     ];
 
     function refreshCapabilityWarning(entry) {
@@ -1937,6 +2038,8 @@ export function getSettingsPanelHtml(): string {
             ollamaTopP:            val('ollamaTopP'),
             ollamaTopK:            val('ollamaTopK'),
             ollamaRepeatPenalty:   val('ollamaRepeatPenalty'),
+            ollamaMinP:            val('ollamaMinP'),
+            ollamaPresencePenalty: val('ollamaPresencePenalty'),
             ollamaMaxTokens:       val('ollamaMaxTokens'),
 
             // OpenAI
@@ -1962,6 +2065,9 @@ export function getSettingsPanelHtml(): string {
             serveContextWindow:    val('serveContextWindow'),
             serveMaxTokens:        val('serveMaxTokens'),
 
+            // Primary preserve-thinking (provider-agnostic)
+            preserveThinkingPrimary: val('preserveThinkingPrimary'),
+
             // Expert model
             expertLlmProvider:     expertChecked ? expertProvider : '',
             ollamaModelExpert:     expertChecked && expertProvider === 'ollama' ? val('ollamaModelExpert') : '',
@@ -1970,8 +2076,11 @@ export function getSettingsPanelHtml(): string {
             ollamaExpertTopP:          expertChecked && expertProvider === 'ollama' ? val('ollamaExpertTopP') : '',
             ollamaExpertTopK:          expertChecked && expertProvider === 'ollama' ? val('ollamaExpertTopK') : '',
             ollamaExpertRepeatPenalty: expertChecked && expertProvider === 'ollama' ? val('ollamaExpertRepeatPenalty') : '',
+            ollamaExpertMinP:          expertChecked && expertProvider === 'ollama' ? val('ollamaExpertMinP') : '',
+            ollamaExpertPresencePenalty: expertChecked && expertProvider === 'ollama' ? val('ollamaExpertPresencePenalty') : '',
             ollamaExpertMaxTokens:     expertChecked && expertProvider === 'ollama' ? val('ollamaExpertMaxTokens') : '',
             enableThinkingExpert:      expertChecked && expertProvider === 'ollama' ? val('enableThinkingExpert') : '',
+            preserveThinkingExpert:    expertChecked ? val('preserveThinkingExpert') : '',
             openaiExpertModel:     expertChecked && expertProvider === 'openai' ? val('openaiExpertModel') : '',
             anthropicExpertModel:  expertChecked && expertProvider === 'anthropic' ? val('anthropicExpertModel') : '',
             geminiExpertModel:     expertChecked && expertProvider === 'gemini' ? val('geminiExpertModel') : '',
@@ -1985,8 +2094,11 @@ export function getSettingsPanelHtml(): string {
             ollamaRequestTopP:          requestChecked && requestProvider === 'ollama' ? val('ollamaRequestTopP') : '',
             ollamaRequestTopK:          requestChecked && requestProvider === 'ollama' ? val('ollamaRequestTopK') : '',
             ollamaRequestRepeatPenalty: requestChecked && requestProvider === 'ollama' ? val('ollamaRequestRepeatPenalty') : '',
+            ollamaRequestMinP:          requestChecked && requestProvider === 'ollama' ? val('ollamaRequestMinP') : '',
+            ollamaRequestPresencePenalty: requestChecked && requestProvider === 'ollama' ? val('ollamaRequestPresencePenalty') : '',
             ollamaRequestMaxTokens:     requestChecked && requestProvider === 'ollama' ? val('ollamaRequestMaxTokens') : '',
             enableThinkingRequest:      requestChecked && requestProvider === 'ollama' ? val('enableThinkingRequest') : '',
+            preserveThinkingRequest:    requestChecked ? val('preserveThinkingRequest') : '',
             openaiRequestModel:       requestChecked && requestProvider === 'openai' ? val('openaiRequestModel') : '',
             anthropicRequestModel:    requestChecked && requestProvider === 'anthropic' ? val('anthropicRequestModel') : '',
             geminiRequestModel:       requestChecked && requestProvider === 'gemini' ? val('geminiRequestModel') : '',
@@ -2000,8 +2112,11 @@ export function getSettingsPanelHtml(): string {
             ollamaWorkerTopP:         workerChecked && workerProvider === 'ollama' ? val('ollamaWorkerTopP') : '',
             ollamaWorkerTopK:         workerChecked && workerProvider === 'ollama' ? val('ollamaWorkerTopK') : '',
             ollamaWorkerRepeatPenalty:workerChecked && workerProvider === 'ollama' ? val('ollamaWorkerRepeatPenalty') : '',
+            ollamaWorkerMinP:         workerChecked && workerProvider === 'ollama' ? val('ollamaWorkerMinP') : '',
+            ollamaWorkerPresencePenalty: workerChecked && workerProvider === 'ollama' ? val('ollamaWorkerPresencePenalty') : '',
             ollamaWorkerMaxTokens:    workerChecked && workerProvider === 'ollama' ? val('ollamaWorkerMaxTokens') : '',
             enableThinkingWorker:     workerChecked && workerProvider === 'ollama' ? val('enableThinkingWorker') : '',
+            preserveThinkingWorker:   workerChecked ? val('preserveThinkingWorker') : '',
             openaiWorkerModel:        workerChecked && workerProvider === 'openai' ? val('openaiWorkerModel') : '',
             anthropicWorkerModel:     workerChecked && workerProvider === 'anthropic' ? val('anthropicWorkerModel') : '',
             geminiWorkerModel:        workerChecked && workerProvider === 'gemini' ? val('geminiWorkerModel') : '',
@@ -2155,7 +2270,10 @@ export function getSettingsPanelHtml(): string {
         setVal('ollamaTopP',            v.ollamaTopP);
         setVal('ollamaTopK',            v.ollamaTopK);
         setVal('ollamaRepeatPenalty',   v.ollamaRepeatPenalty);
+        setVal('ollamaMinP',            v.ollamaMinP);
+        setVal('ollamaPresencePenalty', v.ollamaPresencePenalty);
         setVal('ollamaMaxTokens',       v.ollamaMaxTokens);
+        setVal('preserveThinkingPrimary', v.preserveThinkingPrimary);
 
         // OpenAI fields
         setVal('openaiModel',           v.openaiModel);
@@ -2209,8 +2327,11 @@ export function getSettingsPanelHtml(): string {
         setVal('ollamaExpertTopP',         v.ollamaExpertTopP);
         setVal('ollamaExpertTopK',         v.ollamaExpertTopK);
         setVal('ollamaExpertRepeatPenalty',v.ollamaExpertRepeatPenalty);
+        setVal('ollamaExpertMinP',         v.ollamaExpertMinP);
+        setVal('ollamaExpertPresencePenalty', v.ollamaExpertPresencePenalty);
         setVal('ollamaExpertMaxTokens',    v.ollamaExpertMaxTokens);
         setVal('enableThinkingExpert',     v.enableThinkingExpert);
+        setVal('preserveThinkingExpert',   v.preserveThinkingExpert);
         setVal('openaiExpertModel',        v.openaiExpertModel);
         setVal('anthropicExpertModel',     v.anthropicExpertModel);
         setVal('geminiExpertModel',        v.geminiExpertModel);
@@ -2233,8 +2354,11 @@ export function getSettingsPanelHtml(): string {
         setVal('ollamaRequestTopP',       v.ollamaRequestTopP);
         setVal('ollamaRequestTopK',       v.ollamaRequestTopK);
         setVal('ollamaRequestRepeatPenalty',v.ollamaRequestRepeatPenalty);
+        setVal('ollamaRequestMinP',       v.ollamaRequestMinP);
+        setVal('ollamaRequestPresencePenalty', v.ollamaRequestPresencePenalty);
         setVal('ollamaRequestMaxTokens',  v.ollamaRequestMaxTokens);
         setVal('enableThinkingRequest',   v.enableThinkingRequest);
+        setVal('preserveThinkingRequest', v.preserveThinkingRequest);
         setVal('openaiRequestModel',      v.openaiRequestModel);
         setVal('anthropicRequestModel',   v.anthropicRequestModel);
         setVal('geminiRequestModel',      v.geminiRequestModel);
@@ -2257,8 +2381,11 @@ export function getSettingsPanelHtml(): string {
         setVal('ollamaWorkerTopP',         v.ollamaWorkerTopP);
         setVal('ollamaWorkerTopK',         v.ollamaWorkerTopK);
         setVal('ollamaWorkerRepeatPenalty',v.ollamaWorkerRepeatPenalty);
+        setVal('ollamaWorkerMinP',         v.ollamaWorkerMinP);
+        setVal('ollamaWorkerPresencePenalty', v.ollamaWorkerPresencePenalty);
         setVal('ollamaWorkerMaxTokens',    v.ollamaWorkerMaxTokens);
         setVal('enableThinkingWorker',     v.enableThinkingWorker);
+        setVal('preserveThinkingWorker',   v.preserveThinkingWorker);
         setVal('openaiWorkerModel',        v.openaiWorkerModel);
         setVal('anthropicWorkerModel',     v.anthropicWorkerModel);
         setVal('geminiWorkerModel',        v.geminiWorkerModel);
