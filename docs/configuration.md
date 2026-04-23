@@ -143,6 +143,43 @@ Anthropic + audio) is non-blocking: at runtime the backend raises
 `CapabilityError`, logs a warning, and falls back transparently. The
 settings UI shows a red warning chip so you know to uncheck it.
 
+## Per-Role Sampling & Thinking Retention
+
+Three additional per-role knobs, all optional:
+
+**`min_p`** (`LEAN_AI_OLLAMA_{role}_MIN_P`, blank by default) — minimum
+probability cutoff for nucleus sampling. Tightens the candidate set at
+each step; example value `0.05`. Blank means "omit from the Ollama
+options dict" so text-only models that don't implement `min_p` aren't
+confused.
+
+**`presence_penalty`** (`LEAN_AI_OLLAMA_{role}_PRESENCE_PENALTY`, blank
+by default) — penalty against tokens already present in the context,
+encouraging topic breadth. Example value `1.5`. Same blank-= omit
+semantics. Literal `0` is a valid explicit "no penalty" value distinct
+from blank.
+
+Both fields fall back to the primary value when a role's own is blank,
+so you can set `LEAN_AI_OLLAMA_MIN_P=0.05` once and every role inherits.
+`expert`/`request`/`worker` can override.
+
+**`preserve_thinking`** (`LEAN_AI_PRESERVE_THINKING_{role}`, default
+`false`) — Qwen3.6+/vLLM feature. When enabled, the model's previous-turn
+chain-of-thought is retained in the rendered prompt via
+`chat_template_kwargs={"preserve_thinking": true}`. Reduces redundant
+re-reasoning across tool-loop iterations and improves KV-cache reuse.
+
+Honored by:
+- **Ollama** (Qwen3.6+ templates honor the flag; older models ignore it).
+- **Lean AI Serve (vLLM)** — forwarded via `extra_body`.
+
+Ignored silently by Anthropic / Gemini / pure OpenAI. Settings UI warns
+when flagged on a provider that won't use it.
+
+Context-cost mitigation: the backend's tool-loop keeps thinking on the
+**3 most recent** assistant turns and drops it from older ones. Prevents
+a long loop from bloating the window with stale reasoning.
+
 ## LLM Provider
 
 | Variable | Default | Description |

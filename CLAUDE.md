@@ -170,6 +170,8 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_OLLAMA_TOP_P` | `0.8` | Nucleus sampling threshold |
 | `LEAN_AI_OLLAMA_TOP_K` | `20` | Top-k sampling |
 | `LEAN_AI_OLLAMA_REPEAT_PENALTY` | `1.05` | Repetition penalty |
+| `LEAN_AI_OLLAMA_MIN_P` | *(blank)* | Minimum probability cutoff (e.g. `0.05`). Blank = omit from Ollama options dict — models that don't support `min_p` won't be sent the key |
+| `LEAN_AI_OLLAMA_PRESENCE_PENALTY` | *(blank)* | Presence penalty for topic breadth (e.g. `1.5`). Blank = omit |
 | `LEAN_AI_OLLAMA_CONTEXT_WINDOW` | `131072` | Context window — accepts shorthand: `128` = 128k = 131072 |
 | `LEAN_AI_OLLAMA_MAX_TOKENS` | *(derived: 25% of context window)* | Max output tokens |
 | `LEAN_AI_OLLAMA_MODEL_EXPERT` | *(empty)* | Expert model for reasoning-heavy phases (Ollama only) |
@@ -177,6 +179,8 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_OLLAMA_EXPERT_TOP_P` | *(falls back to OLLAMA_TOP_P)* | Expert model top-p |
 | `LEAN_AI_OLLAMA_EXPERT_TOP_K` | *(falls back to OLLAMA_TOP_K)* | Expert model top-k |
 | `LEAN_AI_OLLAMA_EXPERT_REPEAT_PENALTY` | *(falls back to OLLAMA_REPEAT_PENALTY)* | Expert model repetition penalty |
+| `LEAN_AI_OLLAMA_EXPERT_MIN_P` | *(falls back to OLLAMA_MIN_P)* | Expert min_p (blank = inherit → omit) |
+| `LEAN_AI_OLLAMA_EXPERT_PRESENCE_PENALTY` | *(falls back to OLLAMA_PRESENCE_PENALTY)* | Expert presence penalty |
 | `LEAN_AI_OLLAMA_EXPERT_CONTEXT_WINDOW` | *(falls back to OLLAMA_CONTEXT_WINDOW)* | Expert model context window (accepts shorthand) |
 | `LEAN_AI_OLLAMA_EXPERT_MAX_TOKENS` | *(derived: 25% of expert context window)* | Expert model max output tokens |
 | `LEAN_AI_EXPERT_LLM_PROVIDER` | *(empty)* | Provider for expert model: `ollama`, `openai`, `anthropic`, `gemini`, or `serve`. Empty = auto-detect from `OLLAMA_MODEL_EXPERT` |
@@ -189,6 +193,8 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_OLLAMA_REQUEST_TOP_P` | *(falls back to OLLAMA_TOP_P)* | Request model top-p |
 | `LEAN_AI_OLLAMA_REQUEST_TOP_K` | *(falls back to OLLAMA_TOP_K)* | Request model top-k |
 | `LEAN_AI_OLLAMA_REQUEST_REPEAT_PENALTY` | *(falls back to OLLAMA_REPEAT_PENALTY)* | Request model repetition penalty |
+| `LEAN_AI_OLLAMA_REQUEST_MIN_P` | *(falls back to OLLAMA_MIN_P)* | Request min_p |
+| `LEAN_AI_OLLAMA_REQUEST_PRESENCE_PENALTY` | *(falls back to OLLAMA_PRESENCE_PENALTY)* | Request presence penalty |
 | `LEAN_AI_OLLAMA_REQUEST_CONTEXT_WINDOW` | *(falls back to OLLAMA_CONTEXT_WINDOW)* | Request model context window (accepts shorthand) |
 | `LEAN_AI_OLLAMA_REQUEST_MAX_TOKENS` | *(derived: 25% of request context window)* | Request model max output tokens |
 | `LEAN_AI_OPENAI_REQUEST_MODEL` | *(empty)* | OpenAI model for `/request` mode |
@@ -204,6 +210,12 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_GEMINI_WORKER_MODEL` | *(falls back to GEMINI_MODEL)* | Gemini model for worker tasks |
 | `LEAN_AI_SERVE_WORKER_MODEL` | *(falls back to SERVE_MODEL)* | Lean AI Serve model for worker tasks |
 | `LEAN_AI_ENABLE_THINKING_WORKER` | `false` | Enable thinking mode for worker model (disabled by default for speed) |
+| `LEAN_AI_OLLAMA_WORKER_MIN_P` | *(falls back to OLLAMA_MIN_P)* | Worker min_p |
+| `LEAN_AI_OLLAMA_WORKER_PRESENCE_PENALTY` | *(falls back to OLLAMA_PRESENCE_PENALTY)* | Worker presence penalty |
+| `LEAN_AI_PRESERVE_THINKING_PRIMARY` | `false` | Keep primary model's chain-of-thought across tool-loop turns via Qwen3.6+/vLLM `chat_template_kwargs`. Reduces redundant re-reasoning. Ignored by providers that don't honor the kwarg (Anthropic/Gemini/pure OpenAI) |
+| `LEAN_AI_PRESERVE_THINKING_EXPERT` | `false` | Same, for the expert model |
+| `LEAN_AI_PRESERVE_THINKING_REQUEST` | `false` | Same, for the request model |
+| `LEAN_AI_PRESERVE_THINKING_WORKER` | `false` | Same, for the worker model |
 | `LEAN_AI_OPENAI_API_KEY` | *(empty)* | OpenAI API key (required when provider=openai) |
 | `LEAN_AI_OPENAI_MODEL` | `gpt-4o` | OpenAI model name |
 | `LEAN_AI_OPENAI_BASE_URL` | *(empty)* | Custom base URL for OpenAI-compatible APIs (Together, Groq, vLLM) |
