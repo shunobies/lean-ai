@@ -2,7 +2,7 @@
   "name": "lean-ai",
   "displayName": "Lean AI",
   "description": "Single-Model Deterministic Agentic Architecture - Chat Agent & Inline Predictions",
-  "version": "0.15.2",
+  "version": "0.16.0",
   "publisher": "lean-ai",
   "icon": "icon.png",
   "repository": {
@@ -982,7 +982,13 @@
         "lean-ai.reasoningEffortPrimary": {
           "type": "string",
           "default": "",
-          "enum": ["", "low", "medium", "high", "max"],
+          "enum": [
+            "",
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "enumDescriptions": [
             "Off — no soft limit (safety rail still applies)",
             "Low — ~768 thinking tokens",
@@ -995,19 +1001,37 @@
         "lean-ai.reasoningEffortExpert": {
           "type": "string",
           "default": "",
-          "enum": ["", "low", "medium", "high", "max"],
+          "enum": [
+            "",
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "markdownDescription": "**Reasoning Effort** — As above, for the **expert** model. Inherits from primary when blank."
         },
         "lean-ai.reasoningEffortRequest": {
           "type": "string",
           "default": "",
-          "enum": ["", "low", "medium", "high", "max"],
+          "enum": [
+            "",
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "markdownDescription": "**Reasoning Effort** — As above, for the **request** model."
         },
         "lean-ai.reasoningEffortWorker": {
           "type": "string",
           "default": "",
-          "enum": ["", "low", "medium", "high", "max"],
+          "enum": [
+            "",
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
           "markdownDescription": "**Reasoning Effort** — As above, for the **worker** model."
         },
         "lean-ai.maxThinkingTokens": {
