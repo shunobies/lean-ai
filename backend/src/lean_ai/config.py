@@ -232,6 +232,24 @@ class Settings(BaseSettings):
     enable_thinking_request: bool = True  # Independent per-model thinking toggle
     enable_thinking_worker: bool = False  # Disabled by default — worker model prioritizes speed
 
+    # ── Per-role capability declarations ──
+    # Independent booleans — a role may be flagged for one, both, or neither.
+    # At runtime, the active role for the current flow is tried first; if the
+    # role lacks the capability (unflagged OR provider rejects with
+    # CapabilityError), the dedicated fallback kicks in (vision_model for
+    # image, faster-whisper for audio).  Keeps a vision-capable primary from
+    # thrashing with a separate vision model on VRAM-constrained hosts.
+    supports_image_primary: bool = False
+    supports_image_expert: bool = False
+    supports_image_request: bool = False
+    supports_image_worker: bool = False
+    supports_image_inline: bool = False
+    supports_audio_primary: bool = False
+    supports_audio_expert: bool = False
+    supports_audio_request: bool = False
+    supports_audio_worker: bool = False
+    supports_audio_inline: bool = False
+
     # ── Ollama — inline prediction model (always Ollama) ──
     inline_model: str = ""
     inline_max_tokens: int = 256

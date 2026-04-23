@@ -151,16 +151,58 @@ class GeminiProvider(LLMProvider):
 
             # Regular text message
             content = msg.get("content") or ""
-            # Handle Anthropic-style content blocks (list of dicts)
+            # Handle content-block messages (list of dicts).  Image and
+            # audio blocks produced by media_messages.attach_* are emitted
+            # as ``Part.from_bytes`` so the model sees the media natively
+            # instead of a text placeholder.
             if isinstance(content, list):
-                text_parts = []
+                parts_built: list = []
+                text_buf: list[str] = []
+
                 for block in content:
-                    if isinstance(block, dict):
-                        if block.get("type") == "text":
-                            text_parts.append(block.get("text", ""))
-                        elif block.get("type") in ("tool_result", "tool_use"):
-                            text_parts.append(str(block.get("content", "")))
-                content = "\n".join(text_parts)
+                    if not isinstance(block, dict):
+                        continue
+                    btype = block.get("type")
+                    if btype == "text":
+                        text_buf.append(block.get("text", ""))
+                    elif btype in ("tool_result", "tool_use"):
+                        text_buf.append(str(block.get("content", "")))
+                    elif btype in ("image", "audio"):
+                        # Flush any pending text before the media part.
+                        if text_buf:
+                            parts_built.append(
+                                types.Part(text="\n".join(text_buf))
+                            )
+                            text_buf = []
+                        raw_b64 = block.get("data") or ""
+                        mime = block.get("mime_type") or (
+                            "image/png" if btype == "image" else "audio/wav"
+                        )
+                        if raw_b64:
+                            import base64
+                            try:
+                                raw_bytes = base64.b64decode(raw_b64)
+                            except Exception:
+                                logger.warning(
+                                    "Gemini: failed to decode base64 %s block; skipping",
+                                    btype,
+                                )
+                                continue
+                            parts_built.append(
+                                types.Part.from_bytes(
+                                    data=raw_bytes, mime_type=mime,
+                                )
+                            )
+
+                if text_buf:
+                    parts_built.append(types.Part(text="\n".join(text_buf)))
+
+                if parts_built:
+                    contents.append(types.Content(
+                        role=gemini_role, parts=parts_built,
+                    ))
+                continue
+
             if content:
                 contents.append(types.Content(
                     role=gemini_role,

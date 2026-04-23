@@ -19,6 +19,16 @@ logger = logging.getLogger(__name__)
 StreamCallback = Callable[[str], Awaitable[None]]
 
 
+class CapabilityError(Exception):
+    """Raised when a provider is asked to handle media it cannot process.
+
+    Examples: audio sent to Ollama or Anthropic, image sent to a model the
+    selected provider does not accept.  Catching callers typically log the
+    error and fall back to the dedicated path (``vision_model`` for image,
+    faster-whisper for audio).
+    """
+
+
 @dataclass
 class ToolCall:
     """Record of an executed tool call (used by the orchestration loop)."""
