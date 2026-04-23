@@ -51,10 +51,15 @@ async def evaluate_test_dispute(
     """
     from lean_ai.workflow.tool_executor import make_tool_executor
 
+    dispute_telemetry = {
+        "repo_root": repo_root, "session_id": session_id,
+        "phase": "tdd.dispute", "role": "expert",
+    }
     tool_executor = make_tool_executor(
         repo_root, ws, session_id,
         llm_client=expert_client,
         dispatcher=dispatcher,
+        telemetry_context=dispute_telemetry,
     )
 
     # Build context with relevant artifacts from implementation so far
@@ -103,6 +108,7 @@ async def evaluate_test_dispute(
         on_tool_result=cb.on_tool_result,
         on_content=cb.on_content,
         dispatcher=dispatcher,
+        telemetry_context=dispute_telemetry,
     )
 
     explanation = explanation.strip()

@@ -22,8 +22,46 @@ workspace state DB.  Schema defined in [backend/src/lean_ai/training/db.py](../b
 | `training_traces` | one row per LLM turn with messages + assistant_output preserved | SFT / DPO / KTO sources |
 | `plan_decisions` | each approve / reject / cancel with `plan_before`, `feedback`, `plan_after` | DPO pairs (reject→revised-approve) |
 | `validation_attempts` | per-attempt `(failures_before, diagnosis, fix_tool_calls, failures_after)` | DPO pairs (fail→succeed) |
-| `workflow_events` | cancellations, TDD disputes, execution-complete markers | KTO labels / behaviour analysis |
+| `workflow_events` | cancellations, TDD disputes, execution-complete markers, plus four in-loop guardrail events and `session_start` model-layout fingerprints | KTO labels / behaviour analysis |
+| `tool_executions` | one row per tool invocation (arguments + result preview + success/latency) | DPO pairs (failed-call → successful-call on same session + tool) |
+| `tool_compressions` | worker-model tool-output summarisation pairs — populated only when the off-by-default compression feature is active | distillation training for a smaller worker model |
+| `clarifications` | Phase 1 `request_clarification` Q/A pairs with outcome | SFT for the "when to ask vs proceed" behaviour |
+| `phase2_syntheses` | raw observations + scratchpad + journal → validated `FileSummary` | SFT for structured-summary generation |
+| `diff_decisions` | user accept/reject decision per proposed file edit | binary-labeled preference data |
 | `redaction_audit` | every PII/secret match the scrubber caught | retroactive data-quality forensics |
+
+### `training_traces` per-turn schema (v2)
+
+Rows now carry a `role` field and `turn_index` alongside the existing
+`phase`.  Every Tier-S/A wiring point populates them so training data
+can be partitioned before fine-tuning:
+
+| column | values | source |
+|---|---|---|
+| `phase` | `planning.phase1` · `planning.phase2` · `planning.phase3` · `implementation` · `validation_fix` · `fix` · `request` · `fix.investigate` · `tdd.write` · `tdd.review` · `tdd.implement` · `tdd.dispute` · `chat` | `telemetry_context['phase']` passed into `chat_with_tools` |
+| `role` | `primary` · `expert` · `worker` · `request` | `telemetry_context['role']` — distinct from `phase` because the same phase can swap roles (e.g. expert escalation on final validation retry) |
+| `turn_index` | 0-based index within the call | set automatically by `chat_with_tools` |
+
+The opt-in `telemetry_context` dict threads through every call site
+documented in [`incomplete.md`](../incomplete.md#training-archive-).
+Callers that don't pass it retain the pre-Tier-S behaviour (no capture,
+no events — the facade is a no-op on that path).
+
+### `workflow_events` event taxonomy
+
+| event_type | fires from | payload highlights |
+|---|---|---|
+| `session_start` | [`pipeline.py`](../backend/src/lean_ai/workflow/pipeline.py) top of `run_workflow` | `mode`, `primary_model`, `primary_provider`, `expert_model`, `expert_provider`, `request_model`, `context_window`, `tdd_enabled` |
+| `loop_detected` | [`facade.py`](../backend/src/lean_ai/llm/facade.py) when N identical tool calls trip the loop detector | `tool_name`, `count`, `turn_index`, `phase`, `role` |
+| `context_refresh` | [`facade.py`](../backend/src/lean_ai/llm/facade.py) when token budget crosses `LEAN_AI_REFRESH_THRESHOLD` | `turn_index`, `prompt_tokens_before`, `context_window`, `phase`, `role` |
+| `reminder_injected` | [`facade.py`](../backend/src/lean_ai/llm/facade.py) on periodic task-reminder nudge | `turn_index`, `reminder_chars`, `phase`, `role` |
+| `claim_unverified` | [`facade.py`](../backend/src/lean_ai/llm/facade.py) on repeated test failures + unverified-claim regex hit | `turn_index`, `recent_test_failures`, `phase`, `role` |
+| `cancellation` | [`routers/workflow.py`](../backend/src/lean_ai/routers/workflow.py) on user cancel | `task`, `mode`, `tail_messages` (last 5 conversation_log rows, 800-char preview each) |
+| `tdd_dispute` | [`tdd.py`](../backend/src/lean_ai/workflow/tdd.py) when expert evaluates a dispute | `test_file`, `test_function`, `decision` (accepted/rejected), `explanation` |
+| `execution_complete` | [`executor.py`](../backend/src/lean_ai/workflow/executor.py) at the end of plan execution | `task`, `files_modified_count`, `validation_passed`, branch names |
+
+Every in-loop event carries an optional `trace_uuid` linking it to the
+exact `training_traces` row whose turn triggered it.
 
 ### Scrubbing guarantee
 
@@ -72,10 +110,27 @@ Unavailable`.  With the key set, authenticated callers can pull:
 | endpoint | purpose |
 |---|---|
 | `GET /api/export/workspace-id?repo_root=…` | deterministic 16-char hash for cross-workspace aggregation |
-| `GET /api/export/manifest?repo_root=…` | counts by model, phase, outcome; memory curation breakdown (cached 60s) |
-| `GET /api/export/traces?repo_root=…&format=sft\|dpo\|kto\|raw` | streams JSONL |
+| `GET /api/export/manifest?repo_root=…` | counts by model, phase, outcome, role; memory curation breakdown; counts for every new table (cached 60s) |
+| `GET /api/export/traces?repo_root=…&format=sft\|dpo\|kto\|raw` | per-turn traces; streams JSONL |
 | `GET /api/export/memories?repo_root=…&curation_status=…` | anonymized curated memories |
 | `GET /api/export/events?repo_root=…&event_type=…` | workflow events |
+| `GET /api/export/tool-executions?repo_root=…&format=raw\|dpo_pairs&tool_name=…` | per-tool-call history; `dpo_pairs` heuristically pairs a failed call with the next successful call on the same session + tool |
+| `GET /api/export/tool-compressions?repo_root=…&tool_name=…` | worker compression (raw, summary) pairs |
+| `GET /api/export/clarifications?repo_root=…&outcome=…` | Phase 1 Q/A pairs |
+| `GET /api/export/phase2-syntheses?repo_root=…` | exploration-to-structured-summary pairs |
+| `GET /api/export/diff-decisions?repo_root=…&accepted=0\|1` | per-file accept/reject decisions |
+
+A POST endpoint pairs with the WS diff message so the extension can
+report the user's decision:
+
+| endpoint | purpose |
+|---|---|
+| `POST /api/diffs/decision` | body: `{repo_root, session_id, file_path, accepted, diff_hash?, note?, trace_uuid?}` — writes a row to `diff_decisions`. Idempotent-safe (the archive is append-only; duplicate posts create duplicate rows so the extension should dedupe locally on `diff_hash`). |
+
+The `diff` WebSocket message now includes a `diff_hash` field
+(`sha256(diff)[:16]`) so the extension can pair its accept/reject
+post with the exact diff the model proposed. See
+[`ws_messages.py`](../backend/src/lean_ai/workflow/ws_messages.py).
 
 ### Quick peek
 

@@ -170,9 +170,16 @@ async def execute_plan(
     """Execute each plan step sequentially with a constrained LLM."""
     if dispatcher:
         dispatcher.enter_execution_mode()
+    # Shared telemetry context for all per-step calls. Mutated in place by
+    # chat_with_tools so make_tool_executor can link tool_executions to
+    # the most recent trace_uuid.
+    exec_telemetry = {
+        "repo_root": repo_root, "session_id": session_id,
+        "phase": "implementation", "role": "primary",
+    }
     tool_executor = make_tool_executor(
         repo_root, ws, session_id, llm_client=llm_client,
-        dispatcher=dispatcher,
+        dispatcher=dispatcher, telemetry_context=exec_telemetry,
     )
     total_steps = len(plan.steps)
     all_executed = []
@@ -228,6 +235,7 @@ async def execute_plan(
     async def _run_step(
         step, client, tools, executor, sys_prompt,
         label_prefix: str = "",
+        telemetry: dict | None = None,
     ):
         """Execute one plan step, collecting artifacts and progress."""
         step_label = f"{label_prefix}Step {step.step_number}"
@@ -327,6 +335,7 @@ async def execute_plan(
             on_metrics=cb.on_metrics,
             on_context_refresh=_build_step_refresh,
             dispatcher=dispatcher,
+            telemetry_context=telemetry or exec_telemetry,
         )
 
         # Update shared state under lock for parallel safety
@@ -603,6 +612,10 @@ async def _run_tdd_execution(
         repo_root, ws, session_id,
         llm_client=expert_llm_client,
         dispatcher=dispatcher,
+        telemetry_context={
+            "repo_root": repo_root, "session_id": session_id,
+            "phase": "tdd.write", "role": "expert",
+        },
     )
     test_system_prompt = build_tdd_test_writing_prompt(
         load_execution_context(repo_root),
@@ -620,6 +633,10 @@ async def _run_tdd_execution(
             step, expert_llm_client, build_implementation_tools(),
             test_tool_executor, test_system_prompt,
             label_prefix="[TDD Test] ",
+            telemetry={
+                "repo_root": repo_root, "session_id": session_id,
+                "phase": "tdd.write", "role": "expert",
+            },
         )
 
     await ws_send(ws, "stage_status", {
@@ -685,12 +702,17 @@ async def _run_tdd_execution(
                 step_artifacts=step_artifacts,
             )
 
+        review_telemetry = {
+            "repo_root": repo_root, "session_id": session_id,
+            "phase": "tdd.review", "role": "primary",
+        }
         review_executor = make_tool_executor(
             repo_root, ws, session_id,
             llm_client=llm_client,
             dispatcher=dispatcher,
             tdd_protect_tests=True,
             on_test_dispute=_review_dispute,
+            telemetry_context=review_telemetry,
         )
 
         review_messages = [
@@ -709,6 +731,7 @@ async def _run_tdd_execution(
             on_thinking=cb.on_thinking,
             on_metrics=cb.on_metrics,
             dispatcher=dispatcher,
+            telemetry_context=review_telemetry,
         )
 
         await ws_send(ws, "stage_status", {
@@ -742,12 +765,20 @@ async def _run_tdd_execution(
             llm_client=llm_client,
             dispatcher=dispatcher,
             tdd_protect_tests=True,
+            telemetry_context={
+                "repo_root": repo_root, "session_id": session_id,
+                "phase": "tdd.implement", "role": "primary",
+            },
         )
 
         await run_step(
             step, llm_client, build_implementation_tools(),
             impl_executor, tdd_impl_prompt,
             label_prefix="[TDD Impl] ",
+            telemetry={
+                "repo_root": repo_root, "session_id": session_id,
+                "phase": "tdd.implement", "role": "primary",
+            },
         )
 
     await ws_send(ws, "stage_status", {

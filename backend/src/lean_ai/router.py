@@ -8,6 +8,7 @@ from fastapi import APIRouter
 
 from lean_ai.routers.chat import chat_router
 from lean_ai.routers.dependencies import llm_client  # noqa: F401
+from lean_ai.routers.diffs import diffs_router
 from lean_ai.routers.export import export_router
 from lean_ai.routers.generation import generation_router
 from lean_ai.routers.info import info_router
@@ -36,4 +37,5 @@ router.include_router(prompts_router)
 router.include_router(voice_router)
 router.include_router(ui_verification_router)
 router.include_router(integrations_router)
+router.include_router(diffs_router)
 router.include_router(export_router)

@@ -167,11 +167,17 @@ async def _compress_tool_output(
     output: str,
     tool_name: str,
     worker_client: "LLMClient",
+    *,
+    telemetry_context: dict | None = None,
 ) -> str:
     """Compress large tool output using the worker model.
 
     Trigger threshold: 5% of context window in chars.  When the output
     exceeds this, the worker model produces a concise summary.
+
+    When *telemetry_context* is set the (raw, compressed) pair is
+    captured to ``tool_compressions`` so fine-tuning a smaller worker
+    on this distillation signal is possible.
     """
     threshold = int(settings._active_context_window * 0.05 * 3.5)
     if len(output) <= threshold:
@@ -191,12 +197,20 @@ async def _compress_tool_output(
             max_tokens=1024,
         )
         if compressed and len(compressed.strip()) > 50:
+            stripped = compressed.strip()
             logger.info(
                 "Compressed %s output: %d -> %d chars (%.0f%%)",
-                tool_name, len(output), len(compressed),
-                len(compressed) / len(output) * 100,
+                tool_name, len(output), len(stripped),
+                len(stripped) / len(output) * 100,
             )
-            return compressed.strip()
+            _fire_compression_capture(
+                telemetry_context,
+                tool_name=tool_name,
+                raw_output=output,
+                compressed_output=stripped,
+                worker_client=worker_client,
+            )
+            return stripped
     except Exception:
         logger.warning(
             "Worker model compression failed for %s, using truncation",
@@ -205,6 +219,100 @@ async def _compress_tool_output(
 
     # Fallback: truncate
     return output[:threshold] + "\n... (truncated)"
+
+
+def _fire_compression_capture(
+    telemetry_context: dict | None,
+    *,
+    tool_name: str,
+    raw_output: str,
+    compressed_output: str,
+    worker_client: "LLMClient | None",
+) -> None:
+    """Fire-and-forget capture of a worker compression pair."""
+    if telemetry_context is None or worker_client is None:
+        return
+    repo_root = telemetry_context.get("repo_root")
+    session_id = telemetry_context.get("session_id")
+    if not repo_root or not session_id:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _run():
+        try:
+            from lean_ai.training.capture import capture_tool_compression
+
+            await capture_tool_compression(
+                repo_root,
+                session_id=session_id,
+                phase=telemetry_context.get("phase"),
+                tool_name=tool_name,
+                raw_output=raw_output,
+                compressed_output=compressed_output,
+                worker_model=getattr(worker_client, "model_name", None),
+                worker_provider=getattr(worker_client, "provider_name", None),
+            )
+        except Exception:
+            logger.debug(
+                "capture_tool_compression failed (non-fatal)", exc_info=True,
+            )
+
+    t = loop.create_task(_run())
+    t.add_done_callback(lambda tk: tk.exception() if tk.done() else None)
+
+
+def _fire_tool_execution_capture(
+    telemetry_context: dict | None,
+    *,
+    tool_name: str,
+    arguments: dict,
+    result: str,
+    success: bool,
+    latency_ms: int,
+) -> None:
+    """Fire-and-forget capture of one tool invocation.
+
+    Writes to ``tool_executions`` so fine-tuners can build DPO pairs
+    from (failed call, successful call) on the same session/tool. When
+    telemetry_context is absent, capture is skipped — unchanged
+    behaviour for callers that haven't opted in.
+    """
+    if telemetry_context is None:
+        return
+    repo_root = telemetry_context.get("repo_root")
+    session_id = telemetry_context.get("session_id")
+    if not repo_root or not session_id:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _run():
+        try:
+            from lean_ai.training.capture import capture_tool_execution
+
+            await capture_tool_execution(
+                repo_root,
+                session_id=session_id,
+                tool_name=tool_name,
+                arguments=arguments,
+                result=result,
+                success=success,
+                latency_ms=latency_ms,
+                phase=telemetry_context.get("phase"),
+                trace_uuid=telemetry_context.get("last_trace_uuid"),
+            )
+        except Exception:
+            logger.debug(
+                "capture_tool_execution failed (non-fatal)", exc_info=True,
+            )
+
+    t = loop.create_task(_run())
+    t.add_done_callback(lambda tk: tk.exception() if tk.done() else None)
 
 
 # Required parameters per tool — used for early validation
@@ -300,6 +408,7 @@ def make_tool_executor(
     on_test_dispute: "Callable | None" = None,
     allowed_files: "list[str] | None" = None,
     session_created_regression_files: "set[str] | None" = None,
+    telemetry_context: dict | None = None,
 ):
     """Create a tool executor closure for the workflow.
 
@@ -333,14 +442,30 @@ def make_tool_executor(
 
     async def execute(name: str, arguments: dict) -> str:
         """Execute a tool and return the result as a string."""
+        started = time.monotonic()
         try:
-            return await _execute_inner(name, arguments)
+            result = await _execute_inner(name, arguments)
         except Exception as exc:
             logger.exception("Unhandled exception in tool %s", name)
-            return (
+            result = (
                 f"ERROR: {name} failed: {exc}. "
                 f"You may retry or try a different approach."
             )
+        latency_ms = int((time.monotonic() - started) * 1000)
+        success = not (
+            isinstance(result, str) and result.lstrip().upper().startswith(
+                ("ERROR:", "FAILED"),
+            )
+        )
+        _fire_tool_execution_capture(
+            telemetry_context,
+            tool_name=name,
+            arguments=arguments,
+            result=result if isinstance(result, str) else str(result),
+            success=success,
+            latency_ms=latency_ms,
+        )
+        return result
 
     async def _execute_inner(name: str, arguments: dict) -> str:
         """Inner dispatch — all tool logic lives here."""
@@ -895,7 +1020,10 @@ def make_tool_executor(
             and name in _COMPRESSIBLE_TOOLS
             and not result.startswith("ERROR:")
         ):
-            result = await _compress_tool_output(result, name, worker_client)
+            result = await _compress_tool_output(
+                result, name, worker_client,
+                telemetry_context=telemetry_context,
+            )
         return result
 
     if worker_client is not None:

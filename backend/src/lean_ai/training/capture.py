@@ -21,7 +21,12 @@ from typing import Any
 from lean_ai.config import settings
 from lean_ai.training.db import (
     get_training_db,
+    insert_clarification,
+    insert_diff_decision,
+    insert_phase2_synthesis,
     insert_plan_decision,
+    insert_tool_compression,
+    insert_tool_execution,
     insert_training_trace,
     insert_validation_attempt,
     insert_workflow_event,
@@ -98,6 +103,8 @@ async def capture_turn(
     tokens_prompt: int | None = None,
     tokens_completion: int | None = None,
     latency_ms: int | None = None,
+    role: str | None = None,
+    turn_index: int | None = None,
 ) -> str | None:
     """Persist one LLM turn to ``training_traces``.
 
@@ -130,6 +137,8 @@ async def capture_turn(
             tokens_completion=tokens_completion,
             latency_ms=latency_ms,
             scrubbed=True,
+            role=role,
+            turn_index=turn_index,
         )
         return trace_uuid
 
@@ -143,6 +152,256 @@ async def capture_turn(
         )
     except Exception:
         logger.debug("capture_turn failed (non-fatal)", exc_info=True)
+        return None
+
+
+# Cap stored tool-result previews to keep archive size bounded. Full
+# outputs spill to `.lean_ai/tool_output/` anyway.
+_TOOL_PREVIEW_CHARS = 4000
+
+
+async def capture_tool_execution(
+    repo_root: str,
+    *,
+    session_id: str,
+    tool_name: str,
+    arguments: dict | None,
+    result: str,
+    success: bool,
+    latency_ms: int | None = None,
+    phase: str | None = None,
+    turn_index: int | None = None,
+    trace_uuid: str | None = None,
+    pair_id: str | None = None,
+    preference: int | None = None,
+) -> int | None:
+    """Persist one tool invocation to ``tool_executions``.
+
+    The result is truncated to ``_TOOL_PREVIEW_CHARS`` for the archive;
+    full output is already spilled to disk by the workflow.
+    """
+    if not _is_enabled():
+        return None
+
+    preview = result[:_TOOL_PREVIEW_CHARS] if result else None
+    payload = {"arguments": arguments, "result_preview": preview}
+
+    async def _write(db, *, scrubbed, audit_rows):
+        return await insert_tool_execution(
+            db,
+            session_id=session_id,
+            trace_uuid=trace_uuid,
+            phase=phase,
+            turn_index=turn_index,
+            tool_name=tool_name,
+            arguments=scrubbed["arguments"],
+            result_preview=scrubbed["result_preview"],
+            result_length=len(result) if result else 0,
+            success=success,
+            latency_ms=latency_ms,
+            pair_id=pair_id,
+            preference=preference,
+        )
+
+    try:
+        return await _scrub_and_write(
+            repo_root,
+            writer=_write,
+            audit_source_table="tool_executions",
+            audit_source_id_factory=lambda row_id: f"te-{row_id}",
+            payload=payload,
+        )
+    except Exception:
+        logger.debug(
+            "capture_tool_execution failed (non-fatal)", exc_info=True,
+        )
+        return None
+
+
+async def capture_tool_compression(
+    repo_root: str,
+    *,
+    session_id: str,
+    tool_name: str,
+    raw_output: str,
+    compressed_output: str,
+    worker_model: str | None = None,
+    worker_provider: str | None = None,
+    phase: str | None = None,
+    followup_progress: int | None = None,
+) -> int | None:
+    """Persist a worker compression pair to ``tool_compressions``.
+
+    Emitted whenever the worker compression path runs — no-op today
+    because the feature is off by default, but the capture is live so
+    activating compression produces distillation data immediately.
+    """
+    if not _is_enabled():
+        return None
+
+    payload = {"raw_output": raw_output, "compressed_output": compressed_output}
+
+    async def _write(db, *, scrubbed, audit_rows):
+        return await insert_tool_compression(
+            db,
+            session_id=session_id,
+            phase=phase,
+            tool_name=tool_name,
+            raw_output=scrubbed["raw_output"],
+            compressed_output=scrubbed["compressed_output"],
+            worker_model=worker_model,
+            worker_provider=worker_provider,
+            followup_progress=followup_progress,
+        )
+
+    try:
+        return await _scrub_and_write(
+            repo_root,
+            writer=_write,
+            audit_source_table="tool_compressions",
+            audit_source_id_factory=lambda row_id: f"tc-{row_id}",
+            payload=payload,
+        )
+    except Exception:
+        logger.debug(
+            "capture_tool_compression failed (non-fatal)", exc_info=True,
+        )
+        return None
+
+
+async def capture_clarification(
+    repo_root: str,
+    *,
+    session_id: str,
+    question: str,
+    answer: str | None,
+    outcome: str,
+    task: str | None = None,
+    phase: str = "planning.phase1",
+    trace_uuid: str | None = None,
+) -> int | None:
+    """Persist a Phase 1 clarification Q/A pair."""
+    if not _is_enabled():
+        return None
+    payload = {"task": task, "question": question, "answer": answer}
+
+    async def _write(db, *, scrubbed, audit_rows):
+        return await insert_clarification(
+            db,
+            session_id=session_id,
+            phase=phase,
+            task=scrubbed["task"],
+            question=scrubbed["question"],
+            answer=scrubbed["answer"],
+            outcome=outcome,
+            trace_uuid=trace_uuid,
+        )
+
+    try:
+        return await _scrub_and_write(
+            repo_root,
+            writer=_write,
+            audit_source_table="clarifications",
+            audit_source_id_factory=lambda row_id: f"cl-{row_id}",
+            payload=payload,
+        )
+    except Exception:
+        logger.debug(
+            "capture_clarification failed (non-fatal)", exc_info=True,
+        )
+        return None
+
+
+async def capture_phase2_synthesis(
+    repo_root: str,
+    *,
+    session_id: str,
+    task: str | None,
+    scope: str | None,
+    observations: list | None,
+    scratchpad: str | None,
+    journal: str | None,
+    exploration_output: str | None,
+    file_summary: dict | None,
+    trace_uuid: str | None = None,
+) -> int | None:
+    """Persist Phase 2 (raw evidence → structured synthesis) pair."""
+    if not _is_enabled():
+        return None
+    payload = {
+        "task": task, "scope": scope, "observations": observations,
+        "scratchpad": scratchpad, "journal": journal,
+        "exploration_output": exploration_output,
+        "file_summary": file_summary,
+    }
+
+    async def _write(db, *, scrubbed, audit_rows):
+        return await insert_phase2_synthesis(
+            db,
+            session_id=session_id,
+            task=scrubbed["task"],
+            scope=scrubbed["scope"],
+            observations=scrubbed["observations"],
+            scratchpad=scrubbed["scratchpad"],
+            journal=scrubbed["journal"],
+            exploration_output=scrubbed["exploration_output"],
+            file_summary=scrubbed["file_summary"],
+            trace_uuid=trace_uuid,
+        )
+
+    try:
+        return await _scrub_and_write(
+            repo_root,
+            writer=_write,
+            audit_source_table="phase2_syntheses",
+            audit_source_id_factory=lambda row_id: f"p2s-{row_id}",
+            payload=payload,
+        )
+    except Exception:
+        logger.debug(
+            "capture_phase2_synthesis failed (non-fatal)", exc_info=True,
+        )
+        return None
+
+
+async def capture_diff_decision(
+    repo_root: str,
+    *,
+    session_id: str,
+    file_path: str,
+    accepted: bool,
+    diff_hash: str | None = None,
+    note: str | None = None,
+    trace_uuid: str | None = None,
+) -> int | None:
+    """Persist a user's accept/reject decision on a proposed diff."""
+    if not _is_enabled():
+        return None
+    payload = {"file_path": file_path, "note": note}
+
+    async def _write(db, *, scrubbed, audit_rows):
+        return await insert_diff_decision(
+            db,
+            session_id=session_id,
+            file_path=scrubbed["file_path"],
+            accepted=accepted,
+            diff_hash=diff_hash,
+            note=scrubbed["note"],
+            trace_uuid=trace_uuid,
+        )
+
+    try:
+        return await _scrub_and_write(
+            repo_root,
+            writer=_write,
+            audit_source_table="diff_decisions",
+            audit_source_id_factory=lambda row_id: f"dd-{row_id}",
+            payload=payload,
+        )
+    except Exception:
+        logger.debug(
+            "capture_diff_decision failed (non-fatal)", exc_info=True,
+        )
         return None
 
 
@@ -256,6 +515,7 @@ async def capture_workflow_event(
     session_id: str,
     event_type: str,
     payload: dict | None,
+    trace_uuid: str | None = None,
 ) -> int | None:
     """Persist a workflow event (loop / refresh / reminder / cancel / claim)."""
     if not _is_enabled():
@@ -269,6 +529,7 @@ async def capture_workflow_event(
             session_id=session_id,
             event_type=event_type,
             payload=scrubbed,
+            trace_uuid=trace_uuid,
         )
 
     try:

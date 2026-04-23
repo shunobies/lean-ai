@@ -111,9 +111,13 @@ class TestTypedSendHelpers:
     async def test_send_diff(self):
         ws = FakeWebSocket()
         await send_diff(ws, file="a.py", diff="+new line")
-        assert ws.sent[-1] == {
-            "type": "diff", "file": "a.py", "diff": "+new line",
-        }
+        # Shape now includes diff_hash — the extension echoes it back on
+        # accept/reject so training captures pair decisions to diffs.
+        msg = ws.sent[-1]
+        assert msg["type"] == "diff"
+        assert msg["file"] == "a.py"
+        assert msg["diff"] == "+new line"
+        assert isinstance(msg["diff_hash"], str) and len(msg["diff_hash"]) == 16
 
     @pytest.mark.asyncio
     async def test_send_test_result(self):

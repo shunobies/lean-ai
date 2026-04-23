@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
@@ -41,6 +42,24 @@ _CHAT_MAX_TURNS = 20
 def _get_chat_client():
     """Return the active client for chat endpoints — request model when configured, else primary."""
     return request_llm_client or llm_client
+
+
+def _chat_telemetry_context(repo_root: str | None) -> dict | None:
+    """Build a telemetry context for a chat request.
+
+    Chat runs don't have a persistent session_id, so one is minted per
+    call. Rows land in the workspace training DB only when a workspace
+    is open — ephemeral chats (no repo_root) are skipped to keep the
+    archive scoped to a project.
+    """
+    if not repo_root:
+        return None
+    return {
+        "repo_root": repo_root,
+        "session_id": f"chat-{uuid.uuid4().hex[:12]}",
+        "phase": "chat",
+        "role": "request" if request_llm_client is not None else "primary",
+    }
 
 
 def _get_chat_max_tokens() -> int:
@@ -542,6 +561,7 @@ async def chat(request: ChatRequest):
                 t for t in tools
                 if t["function"]["name"] in ("search_internet", "fetch_url")
             ]
+        telemetry_context = _chat_telemetry_context(repo_root)
         _, reply = await _chat_client.chat_with_tools(
             messages=messages,
             tools=tools,
@@ -549,6 +569,7 @@ async def chat(request: ChatRequest):
             max_turns=_CHAT_MAX_TURNS,
             max_tokens=_get_chat_max_tokens(),
             text_only_exit_count=1,
+            telemetry_context=telemetry_context,
         )
 
         metrics = _chat_client.last_chat_metrics or {}
@@ -619,6 +640,7 @@ async def _stream_chat_with_tools(
                 on_thinking=_on_thinking,
                 on_tool_call=_on_tool_call,
                 on_tool_result=_on_tool_result,
+                telemetry_context=_chat_telemetry_context(repo_root),
             )
         except Exception as e:
             await queue.put({"type": "error", "message": str(e)})

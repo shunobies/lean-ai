@@ -337,12 +337,13 @@ async def on_workflow_event(
     *,
     event_type: str,
     payload: dict | None = None,
+    trace_uuid: str | None = None,
 ) -> None:
     """Persist a workflow event to the training archive.
 
     Covers: ``loop_detected``, ``context_refresh``, ``reminder_injected``,
     ``claim_unverified``, ``cancellation``, ``tdd_dispute``,
-    ``execution_complete``.
+    ``execution_complete``, ``session_start``.
     """
     try:
         from lean_ai.training.capture import capture_workflow_event
@@ -352,6 +353,7 @@ async def on_workflow_event(
             session_id=session_id,
             event_type=event_type,
             payload=payload,
+            trace_uuid=trace_uuid,
         )
     except Exception:
         logger.debug(
@@ -366,6 +368,7 @@ def fire_workflow_event(
     session_id: str,
     event_type: str,
     payload: dict | None = None,
+    trace_uuid: str | None = None,
 ) -> None:
     """Fire-and-forget wrapper for on_workflow_event.
 
@@ -382,7 +385,7 @@ def fire_workflow_event(
         return
     t = loop.create_task(on_workflow_event(
         repo_root, session_id,
-        event_type=event_type, payload=payload,
+        event_type=event_type, payload=payload, trace_uuid=trace_uuid,
     ))
     t.add_done_callback(log_task_exception)
 

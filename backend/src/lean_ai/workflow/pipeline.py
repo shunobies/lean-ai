@@ -62,6 +62,46 @@ async def run_workflow(
     """
     logger.info("Workflow (%s): starting task: %s", mode, task[:100])
 
+    # Emit a session_start fingerprint — one row per workflow invocation,
+    # carrying the exact model layout used. Consumers need this to
+    # partition training data by model + provider before fine-tuning.
+    try:
+        from lean_ai.workflow.hooks import fire_workflow_event
+
+        fire_workflow_event(
+            repo_root=repo_root,
+            session_id=session_id,
+            event_type="session_start",
+            payload={
+                "mode": mode,
+                "task_length": len(task),
+                "primary_model": getattr(llm_client, "model_name", None),
+                "primary_provider": getattr(llm_client, "provider_name", None),
+                "expert_model": (
+                    getattr(expert_llm_client, "model_name", None)
+                    if expert_llm_client else None
+                ),
+                "expert_provider": (
+                    getattr(expert_llm_client, "provider_name", None)
+                    if expert_llm_client else None
+                ),
+                "request_model": (
+                    getattr(request_llm_client, "model_name", None)
+                    if request_llm_client else None
+                ),
+                "request_provider": (
+                    getattr(request_llm_client, "provider_name", None)
+                    if request_llm_client else None
+                ),
+                "context_window": getattr(
+                    settings, "_active_context_window", None,
+                ),
+                "tdd_enabled": bool(getattr(settings, "enable_tdd", False)),
+            },
+        )
+    except Exception:
+        logger.debug("session_start event failed (non-fatal)", exc_info=True)
+
     # Validate TDD requirements: expert model + sufficient context window
     if settings.enable_tdd and expert_llm_client is None:
         logger.warning(

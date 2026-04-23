@@ -214,6 +214,10 @@ async def create_plan(
         on_content=on_content,
         on_thinking=on_thinking,
         on_metrics=on_metrics,
+        telemetry_context={
+            "repo_root": repo_root, "session_id": session_id,
+            "phase": "planning.phase1", "role": "primary",
+        },
     )
     if on_content:
         await _send_content_done(ws, scope_prose)
@@ -409,6 +413,10 @@ async def create_plan(
             on_content=on_content,
             on_thinking=on_thinking,
             on_metrics=on_metrics,
+            telemetry_context={
+                "repo_root": repo_root, "session_id": session_id,
+                "phase": "planning.phase3", "role": "expert",
+            },
         )
     )
     if on_content:

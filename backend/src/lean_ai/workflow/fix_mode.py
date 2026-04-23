@@ -66,9 +66,16 @@ async def _run_fix(
         active_client = request_llm_client or llm_client
     else:
         active_client = expert_llm_client or llm_client
+    fix_role = "request" if is_request else (
+        "expert" if expert_llm_client is not None else "primary"
+    )
+    fix_telemetry = {
+        "repo_root": repo_root, "session_id": session_id,
+        "phase": mode, "role": fix_role,
+    }
     tool_executor = make_tool_executor(
         repo_root, ws, session_id, llm_client=active_client,
-        dispatcher=dispatcher,
+        dispatcher=dispatcher, telemetry_context=fix_telemetry,
     )
     commands = _effective_post_commands(repo_root)
     execution_context = load_condensed_context(repo_root)
@@ -154,6 +161,8 @@ async def _run_fix(
             })
             return refreshed
 
+        investigation_telemetry = dict(fix_telemetry)
+        investigation_telemetry["phase"] = "fix.investigate"
         executed_investigation, _ = await active_client.chat_with_tools(
             messages=messages,
             tools=build_investigation_tools(),
@@ -167,6 +176,7 @@ async def _run_fix(
             on_metrics=cb.on_metrics,
             on_context_refresh=_build_investigation_refresh,
             dispatcher=dispatcher,
+            telemetry_context=investigation_telemetry,
         )
 
         # Transition: swap system prompt, nudge LLM to start fixing
@@ -290,6 +300,7 @@ async def _run_fix(
         on_metrics=cb.on_metrics,
         on_context_refresh=_build_context_refresh,
         dispatcher=dispatcher,
+        telemetry_context=fix_telemetry,
     )
 
     # ── Completion ────────────────────────────────────────────────

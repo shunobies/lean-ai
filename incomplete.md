@@ -44,29 +44,28 @@ output, checklist-driven assumption verification), and every improvement to
 the serial path would need to be re-ported to the parallel path if it were
 kept. Revisit if a heavy-machine user actually benefits from it.
 
-## Training Archive — per-turn capture + in-loop events (deferred)
+## Training Archive — per-turn capture + in-loop events (resolved)
 
-Phase B (training archive) captures plan decisions, validation attempts,
-cancellations, TDD disputes, and execution-complete events via explicit
-workflow hooks. The `capture_turn` helper exists in
-[backend/src/lean_ai/training/capture.py](backend/src/lean_ai/training/capture.py)
-but is **not wired** into `build_workflow_callbacks` yet — doing so would
-give us one `training_traces` row per LLM turn without instrumenting each
-call site, but the callback needs to assemble a per-turn payload across
-`on_tool_call` / `on_content` / `on_thinking` / `on_metrics` which fire
-in different orders depending on provider streaming behaviour. Not worth
-the complexity for Phase B; the explicit hooks already produce the
-highest-value training signal (matched plan-rejection → approval pairs
-and validation fix-loop pairs).
+**Wired.** `chat_with_tools` now takes an optional `telemetry_context`
+dict (`{repo_root, session_id, phase, role}`) threaded through every
+high-value call site: Phase 1 / 2 / 3 in the planner, per-step
+implementation execution, validation fix loop, fix/request modes, all
+four TDD phases, and the chat endpoint. The 4 previously-deferred
+events (`loop_detected`, `context_refresh`, `reminder_injected`,
+`claim_unverified`) fire at their natural call sites and link back to
+the `training_traces` row via `trace_uuid`. A `session_start` event
+records the model layout fingerprint at the top of `run_workflow`.
 
-Similarly, the in-loop events (`loop_detected` at `facade.py:536`,
-`context_refresh` at `facade.py:760`, `reminder_injected` at
-`facade.py:724`, `claim_unverified` at `facade.py:435`) would require
-threading `repo_root` + `session_id` through `chat_with_tools`. The
-scaffolding (`fire_workflow_event`, `on_workflow_event` in
-`workflow/hooks.py`) is in place — wiring these is a small mechanical
-change once the plumbing path is chosen (probably via an optional
-`telemetry_context` dict parameter on `chat_with_tools`).
+Additional tables added alongside the wire-up: `tool_executions`,
+`tool_compressions`, `clarifications`, `phase2_syntheses`,
+`diff_decisions`. See [docs/training.md](docs/training.md) for the
+expanded schema and [docs/training-ingestion.md](docs/training-ingestion.md)
+for the lean_ai_serve consumer contract.
+
+Parallel-path Phase 2 (`LEAN_AI_NUM_PARALLEL>=2`) is still not wired
+for per-turn capture — it remains the deferred exploration path
+documented above. Local-first users get full capture; heavy-machine
+parallel users see `training_traces` rows only for the serial portions.
 
 ## worker_implementation_unfinished — Tool-output compression (deferred)
 

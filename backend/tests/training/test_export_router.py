@@ -354,3 +354,160 @@ def test_plan_decisions_included_in_manifest(client, tmp_path, auth_headers):
     )
     assert resp.status_code == 200
     assert resp.json()["plan_decisions"] == 1
+
+
+# ── Tier S/A new-table exports ─────────────────────────────
+
+
+async def _seed_tool_executions(repo_root):
+    from lean_ai.training.capture import capture_tool_execution
+
+    # Pair of identical tool, first failed, then succeeded — generates
+    # a DPO pair under format=dpo_pairs.
+    await capture_tool_execution(
+        str(repo_root), session_id="s1", tool_name="edit_file",
+        arguments={"path": "foo.py", "search": "old", "replace": "new"},
+        result="ERROR: string 'old' not found", success=False, latency_ms=20,
+    )
+    await capture_tool_execution(
+        str(repo_root), session_id="s1", tool_name="edit_file",
+        arguments={"path": "foo.py", "search": "oldvalue", "replace": "newvalue"},
+        result="Modified foo.py", success=True, latency_ms=15,
+    )
+
+
+def test_export_tool_executions_raw(client, tmp_path, auth_headers):
+    import asyncio
+    asyncio.run(_seed_tool_executions(tmp_path))
+
+    resp = client.get(
+        f"/api/export/tool-executions?repo_root={tmp_path}",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    lines = [
+        ln for ln in resp.text.strip().split("\n") if ln
+    ]
+    assert len(lines) == 2
+    parsed = [json.loads(ln) for ln in lines]
+    assert all("tool_name" in p and p["tool_name"] == "edit_file"
+               for p in parsed)
+    # Anonymization should apply — session_id gets hashed.
+    assert all(p["session_id"] != "s1" for p in parsed)
+
+
+def test_export_tool_executions_dpo_pairs(client, tmp_path, auth_headers):
+    import asyncio
+    asyncio.run(_seed_tool_executions(tmp_path))
+
+    resp = client.get(
+        f"/api/export/tool-executions?repo_root={tmp_path}"
+        f"&format=dpo_pairs",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    lines = [ln for ln in resp.text.strip().split("\n") if ln]
+    assert len(lines) == 1
+    pair = json.loads(lines[0])
+    assert pair["prompt_hint"] == "edit_file"
+    assert "chosen" in pair and "rejected" in pair
+    assert pair["chosen"]["result_preview"] == "Modified foo.py"
+    assert "string 'old' not found" in pair["rejected"]["result_preview"]
+
+
+def test_export_tool_executions_rejects_unknown_format(
+    client, tmp_path, auth_headers,
+):
+    resp = client.get(
+        f"/api/export/tool-executions?repo_root={tmp_path}&format=bogus",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 400
+
+
+async def _seed_phase2_synthesis(repo_root):
+    from lean_ai.training.capture import capture_phase2_synthesis
+
+    await capture_phase2_synthesis(
+        str(repo_root), session_id="s1",
+        task="add audit log", scope="problem\n-\n...",
+        observations=[{"file_path": "a.py", "role": "modify", "reason": "x"}],
+        scratchpad="notes", journal="journal",
+        exploration_output="prose",
+        file_summary={"files_to_modify": ["a.py"]},
+    )
+
+
+def test_export_phase2_syntheses(client, tmp_path, auth_headers):
+    import asyncio
+    asyncio.run(_seed_phase2_synthesis(tmp_path))
+
+    resp = client.get(
+        f"/api/export/phase2-syntheses?repo_root={tmp_path}",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    lines = [ln for ln in resp.text.strip().split("\n") if ln]
+    assert len(lines) == 1
+    row = json.loads(lines[0])
+    assert row["task"] == "add audit log"
+    assert "files_to_modify" in row["file_summary"]
+
+
+async def _seed_clarification(repo_root):
+    from lean_ai.training.capture import capture_clarification
+
+    await capture_clarification(
+        str(repo_root), session_id="s1",
+        question="which engine?", answer="postgres", outcome="answered",
+    )
+
+
+def test_export_clarifications_filter(client, tmp_path, auth_headers):
+    import asyncio
+    asyncio.run(_seed_clarification(tmp_path))
+
+    resp = client.get(
+        f"/api/export/clarifications?repo_root={tmp_path}"
+        f"&outcome=answered",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    lines = [ln for ln in resp.text.strip().split("\n") if ln]
+    assert len(lines) == 1
+    assert json.loads(lines[0])["outcome"] == "answered"
+
+    # Filter that matches nothing returns empty body.
+    resp_empty = client.get(
+        f"/api/export/clarifications?repo_root={tmp_path}"
+        f"&outcome=cancelled",
+        headers=auth_headers,
+    )
+    assert resp_empty.status_code == 200
+    assert resp_empty.text.strip() == ""
+
+
+async def _seed_diff_decision(repo_root):
+    from lean_ai.training.capture import capture_diff_decision
+
+    await capture_diff_decision(
+        str(repo_root), session_id="s1",
+        file_path="src/foo.py", accepted=False,
+        diff_hash="abc", note="introduces regression",
+    )
+
+
+def test_export_diff_decisions(client, tmp_path, auth_headers):
+    import asyncio
+    asyncio.run(_seed_diff_decision(tmp_path))
+
+    resp = client.get(
+        f"/api/export/diff-decisions?repo_root={tmp_path}&accepted=0",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    lines = [ln for ln in resp.text.strip().split("\n") if ln]
+    assert len(lines) == 1
+    row = json.loads(lines[0])
+    assert row["accepted"] == 0
+    assert row["diff_hash"] == "abc"

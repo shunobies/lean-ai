@@ -37,6 +37,83 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _fire_clarification_capture(
+    repo_root: str,
+    session_id: str,
+    *,
+    question: str,
+    answer: str | None,
+    outcome: str,
+    task: str | None = None,
+) -> None:
+    """Fire-and-forget capture of a Phase 1 clarification Q/A pair."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _run():
+        try:
+            from lean_ai.training.capture import capture_clarification
+
+            await capture_clarification(
+                repo_root,
+                session_id=session_id,
+                question=question,
+                answer=answer,
+                outcome=outcome,
+                task=task,
+                phase="planning.phase1",
+            )
+        except Exception:
+            logger.debug(
+                "capture_clarification failed (non-fatal)", exc_info=True,
+            )
+
+    t = loop.create_task(_run())
+    t.add_done_callback(lambda tk: tk.exception() if tk.done() else None)
+
+
+def _fire_phase2_synthesis_capture(
+    repo_root: str,
+    session_id: str,
+    *,
+    task: str | None,
+    scope: str | None,
+    observations: list | None,
+    scratchpad: str | None,
+    journal: str | None,
+    exploration_output: str | None,
+    file_summary: dict | None,
+) -> None:
+    """Fire-and-forget capture of the Phase 2 synthesis pair."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _run():
+        try:
+            from lean_ai.training.capture import capture_phase2_synthesis
+
+            await capture_phase2_synthesis(
+                repo_root,
+                session_id=session_id,
+                task=task, scope=scope,
+                observations=observations,
+                scratchpad=scratchpad, journal=journal,
+                exploration_output=exploration_output,
+                file_summary=file_summary,
+            )
+        except Exception:
+            logger.debug(
+                "capture_phase2_synthesis failed (non-fatal)", exc_info=True,
+            )
+
+    t = loop.create_task(_run())
+    t.add_done_callback(lambda tk: tk.exception() if tk.done() else None)
+
+
 def _make_read_only_executor(
     explorer: LLMClient,
     repo_root: str,
@@ -233,6 +310,10 @@ def _make_read_only_executor(
                     "'question' string."
                 )
             if ws is None or dispatcher is None:
+                _fire_clarification_capture(
+                    repo_root, session_id,
+                    question=question, answer=None, outcome="error",
+                )
                 return (
                     "ERROR: no active user session — cannot request "
                     "clarification. Proceed with a best-guess interpretation "
@@ -244,25 +325,45 @@ def _make_read_only_executor(
             try:
                 msg = await dispatcher.wait_for_approval()
             except WorkflowCancelledError:
+                _fire_clarification_capture(
+                    repo_root, session_id,
+                    question=question, answer=None, outcome="cancelled",
+                )
                 return (
                     "ERROR: user cancelled while clarification was pending."
                 )
             if msg is None:
+                _fire_clarification_capture(
+                    repo_root, session_id,
+                    question=question, answer=None, outcome="disconnected",
+                )
                 return (
                     "ERROR: session disconnected before the user "
                     "responded to the clarification question."
                 )
             if msg.get("type") != "user_message":
+                _fire_clarification_capture(
+                    repo_root, session_id,
+                    question=question, answer=None, outcome="error",
+                )
                 return (
                     "ERROR: unexpected message type during clarification: "
                     f"{msg.get('type')}"
                 )
             answer = (msg.get("content") or "").strip()
             if not answer:
+                _fire_clarification_capture(
+                    repo_root, session_id,
+                    question=question, answer="", outcome="empty",
+                )
                 return (
                     "User response was empty — proceed with a best-guess "
                     "interpretation and record it as an ASSUMPTION."
                 )
+            _fire_clarification_capture(
+                repo_root, session_id,
+                question=question, answer=answer, outcome="answered",
+            )
             return f"User answered: {answer}"
         return f"Unknown tool: {name}"
 
@@ -367,6 +468,46 @@ async def run_phase2_exploration(
             phase_max_tokens=phase_max_tokens,
             on_thinking=on_thinking,
         )
+
+        # Snapshot raw evidence + structured output for training. This
+        # must happen before session close cleans up the observations
+        # file — the pair is the highest-quality supervised data the
+        # pipeline produces for "exploration → structured summary".
+        if file_summary_obj is not None:
+            try:
+                from lean_ai.tools.observations import read_observations
+                from lean_ai.tools.scratchpad import read_scratchpad
+
+                observations = read_observations(repo_root, session_id)
+                scratchpad_text = ""
+                try:
+                    scratchpad_text = read_scratchpad(repo_root, session_id)
+                except Exception:
+                    scratchpad_text = ""
+                journal_path = (
+                    Path(repo_root) / ".lean_ai" / "journals"
+                    / f"{session_id}.md"
+                )
+                journal_text = ""
+                if journal_path.is_file():
+                    try:
+                        journal_text = journal_path.read_text(encoding="utf-8")
+                    except Exception:
+                        journal_text = ""
+                _fire_phase2_synthesis_capture(
+                    repo_root, session_id,
+                    task=task, scope=scope,
+                    observations=observations,
+                    scratchpad=scratchpad_text or None,
+                    journal=journal_text or None,
+                    exploration_output=exploration_output,
+                    file_summary=file_summary_obj.model_dump(),
+                )
+            except Exception:
+                logger.debug(
+                    "phase2 synthesis snapshot failed (non-fatal)",
+                    exc_info=True,
+                )
 
     elapsed = time.monotonic() - t0
     return file_summary_obj, file_identification, elapsed
@@ -645,6 +786,10 @@ async def _run_serial_exploration(
         on_thinking=on_thinking,
         on_metrics=on_metrics,
         on_context_refresh=_build_phase2_refresh,
+        telemetry_context={
+            "repo_root": repo_root, "session_id": session_id,
+            "phase": "planning.phase2", "role": "primary",
+        },
     )
 
     return file_identification

@@ -440,12 +440,19 @@ async def _run_validation_fix_loop(
             if tdd_fix_protect
             else build_implementation_tools()
         )
+        validation_telemetry = {
+            "repo_root": repo_root, "session_id": session_id,
+            "phase": "validation_fix", "role": (
+                "expert" if active_client is expert_llm_client else "primary"
+            ),
+        }
         tool_executor = make_tool_executor(
             repo_root, ws, session_id, llm_client=active_client,
             dispatcher=dispatcher,
             tdd_protect_tests=tdd_fix_protect,
             on_test_dispute=tdd_fix_dispute,
             allowed_files=allowed_files,
+            telemetry_context=validation_telemetry,
         )
         executed, explanation = await active_client.chat_with_tools(
             messages=messages,
@@ -461,6 +468,7 @@ async def _run_validation_fix_loop(
             on_metrics=cb.on_metrics,
             on_context_refresh=_build_fix_refresh,
             dispatcher=dispatcher,
+            telemetry_context=validation_telemetry,
         )
 
         logger.info(

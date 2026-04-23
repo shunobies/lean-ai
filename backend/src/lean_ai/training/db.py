@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS training_traces (
     trace_uuid TEXT UNIQUE NOT NULL,
     session_id TEXT NOT NULL,
     phase TEXT NOT NULL,
+    role TEXT,                        -- primary|expert|worker|request|inline
+    turn_index INTEGER,               -- which turn within the phase
     model_name TEXT NOT NULL,
     provider TEXT NOT NULL,
     messages TEXT NOT NULL,           -- JSON array
@@ -52,6 +54,7 @@ CREATE INDEX IF NOT EXISTS idx_tt_pair ON training_traces(pair_id);
 CREATE INDEX IF NOT EXISTS idx_tt_model_phase ON training_traces(model_name, phase);
 CREATE INDEX IF NOT EXISTS idx_tt_outcome ON training_traces(outcome);
 CREATE INDEX IF NOT EXISTS idx_tt_created ON training_traces(created_at);
+CREATE INDEX IF NOT EXISTS idx_tt_role ON training_traces(role);
 
 CREATE TABLE IF NOT EXISTS plan_decisions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,6 +94,7 @@ CREATE TABLE IF NOT EXISTS workflow_events (
     session_id TEXT NOT NULL,
     event_type TEXT NOT NULL,
     payload TEXT,                     -- JSON
+    trace_uuid TEXT,                  -- optional link to training_traces
     created_at TEXT NOT NULL
 );
 
@@ -108,6 +112,102 @@ CREATE TABLE IF NOT EXISTS redaction_audit (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ra_pattern ON redaction_audit(pattern_name);
+
+-- Per-tool-call log. Sibling of the workspace tool_logs but with
+-- training-shaped fields (pair_id for DPO, phase for slicing).
+CREATE TABLE IF NOT EXISTS tool_executions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    trace_uuid TEXT,
+    phase TEXT,
+    turn_index INTEGER,
+    tool_name TEXT NOT NULL,
+    arguments TEXT,                   -- JSON
+    result_preview TEXT,              -- first ~4000 chars
+    result_length INTEGER,
+    success INTEGER NOT NULL DEFAULT 0,
+    latency_ms INTEGER,
+    pair_id TEXT,
+    preference INTEGER,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_te_session ON tool_executions(session_id);
+CREATE INDEX IF NOT EXISTS idx_te_tool ON tool_executions(tool_name);
+CREATE INDEX IF NOT EXISTS idx_te_pair ON tool_executions(pair_id);
+
+-- Worker-model tool-output compression distillation pairs. Populated
+-- only when the (currently off-by-default) worker compression feature
+-- is activated; the schema exists so capture is live from day one.
+CREATE TABLE IF NOT EXISTS tool_compressions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    phase TEXT,
+    tool_name TEXT NOT NULL,
+    raw_output TEXT,                  -- full raw pre-compression output
+    raw_length INTEGER,
+    compressed_output TEXT,
+    compressed_length INTEGER,
+    compression_ratio REAL,
+    worker_model TEXT,
+    worker_provider TEXT,
+    followup_progress INTEGER,        -- reserved: +1 progress / -1 stalled / 0 unknown
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tc_session ON tool_compressions(session_id);
+CREATE INDEX IF NOT EXISTS idx_tc_tool ON tool_compressions(tool_name);
+
+-- Phase 1 request_clarification Q/A pairs — supervised data for
+-- "when to clarify vs proceed".
+CREATE TABLE IF NOT EXISTS clarifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    phase TEXT NOT NULL DEFAULT 'planning.phase1',
+    task TEXT,
+    question TEXT NOT NULL,
+    answer TEXT,
+    outcome TEXT,                     -- answered|empty|cancelled|disconnected|error
+    trace_uuid TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_cl_session ON clarifications(session_id);
+
+-- Phase 2 observations → FileSummary synthesis pair. One row per
+-- successful synthesis — captured right before the observations file
+-- gets wiped on session close.
+CREATE TABLE IF NOT EXISTS phase2_syntheses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    task TEXT,
+    scope TEXT,
+    observations TEXT,                -- JSON array (raw record_file_observation data)
+    scratchpad TEXT,
+    journal TEXT,
+    exploration_output TEXT,          -- prose from the chat loop
+    file_summary TEXT,                -- JSON — the validated FileSummary
+    trace_uuid TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_p2s_session ON phase2_syntheses(session_id);
+
+-- Per-diff accept/reject decision from the extension UI. Payload is
+-- deliberately small; the full diff lives in training_traces already.
+CREATE TABLE IF NOT EXISTS diff_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    accepted INTEGER NOT NULL,
+    diff_hash TEXT,                   -- sha256 of the diff body for pairing
+    note TEXT,                        -- optional user comment
+    trace_uuid TEXT,                  -- the turn that produced the edit
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_dd_session ON diff_decisions(session_id);
+CREATE INDEX IF NOT EXISTS idx_dd_hash ON diff_decisions(diff_hash);
 """
 
 
@@ -149,6 +249,24 @@ async def _migrate(db: aiosqlite.Connection) -> None:
         await db.execute(
             "ALTER TABLE validation_attempts ADD COLUMN "
             "regression_failure INTEGER NOT NULL DEFAULT 0"
+        )
+        await db.commit()
+
+    # Tier S/A — add role + turn_index to training_traces for older DBs.
+    if not await _has_column("training_traces", "role"):
+        await db.execute("ALTER TABLE training_traces ADD COLUMN role TEXT")
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tt_role ON training_traces(role)"
+        )
+        await db.commit()
+    if not await _has_column("training_traces", "turn_index"):
+        await db.execute(
+            "ALTER TABLE training_traces ADD COLUMN turn_index INTEGER"
+        )
+        await db.commit()
+    if not await _has_column("workflow_events", "trace_uuid"):
+        await db.execute(
+            "ALTER TABLE workflow_events ADD COLUMN trace_uuid TEXT"
         )
         await db.commit()
 
@@ -197,17 +315,20 @@ async def insert_training_trace(
     tokens_completion: int | None = None,
     latency_ms: int | None = None,
     scrubbed: bool = True,
+    role: str | None = None,
+    turn_index: int | None = None,
 ) -> int:
     """Insert a row into ``training_traces`` and return the new id."""
     cursor = await db.execute(
         "INSERT INTO training_traces ("
-        "trace_uuid, session_id, phase, model_name, provider, messages, "
-        "assistant_output, outcome, pair_id, preference, pair_kind, reward, "
-        "tokens_prompt, tokens_completion, latency_ms, scrubbed, created_at"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "trace_uuid, session_id, phase, role, turn_index, model_name, "
+        "provider, messages, assistant_output, outcome, pair_id, preference, "
+        "pair_kind, reward, tokens_prompt, tokens_completion, latency_ms, "
+        "scrubbed, created_at"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            trace_uuid, session_id, phase, model_name, provider,
-            _json_dump(messages), _json_dump(assistant_output),
+            trace_uuid, session_id, phase, role, turn_index, model_name,
+            provider, _json_dump(messages), _json_dump(assistant_output),
             outcome, pair_id, preference, pair_kind, reward,
             tokens_prompt, tokens_completion, latency_ms,
             1 if scrubbed else 0, _now(),
@@ -285,15 +406,156 @@ async def insert_workflow_event(
     session_id: str,
     event_type: str,
     payload: dict | None,
+    trace_uuid: str | None = None,
 ) -> int:
     cursor = await db.execute(
         "INSERT INTO workflow_events ("
-        "session_id, event_type, payload, created_at"
-        ") VALUES (?, ?, ?, ?)",
+        "session_id, event_type, payload, trace_uuid, created_at"
+        ") VALUES (?, ?, ?, ?, ?)",
         (
             session_id, event_type,
             _json_dump(payload) if payload is not None else None,
-            _now(),
+            trace_uuid, _now(),
+        ),
+    )
+    await db.commit()
+    return cursor.lastrowid or 0
+
+
+async def insert_tool_execution(
+    db: aiosqlite.Connection,
+    *,
+    session_id: str,
+    trace_uuid: str | None,
+    phase: str | None,
+    turn_index: int | None,
+    tool_name: str,
+    arguments: dict | None,
+    result_preview: str | None,
+    result_length: int | None,
+    success: bool,
+    latency_ms: int | None,
+    pair_id: str | None = None,
+    preference: int | None = None,
+) -> int:
+    cursor = await db.execute(
+        "INSERT INTO tool_executions ("
+        "session_id, trace_uuid, phase, turn_index, tool_name, arguments, "
+        "result_preview, result_length, success, latency_ms, pair_id, "
+        "preference, created_at"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            session_id, trace_uuid, phase, turn_index, tool_name,
+            _json_dump(arguments) if arguments is not None else None,
+            result_preview, result_length, 1 if success else 0, latency_ms,
+            pair_id, preference, _now(),
+        ),
+    )
+    await db.commit()
+    return cursor.lastrowid or 0
+
+
+async def insert_tool_compression(
+    db: aiosqlite.Connection,
+    *,
+    session_id: str,
+    phase: str | None,
+    tool_name: str,
+    raw_output: str,
+    compressed_output: str,
+    worker_model: str | None,
+    worker_provider: str | None,
+    followup_progress: int | None = None,
+) -> int:
+    raw_len = len(raw_output)
+    comp_len = len(compressed_output)
+    ratio = (comp_len / raw_len) if raw_len else None
+    cursor = await db.execute(
+        "INSERT INTO tool_compressions ("
+        "session_id, phase, tool_name, raw_output, raw_length, "
+        "compressed_output, compressed_length, compression_ratio, "
+        "worker_model, worker_provider, followup_progress, created_at"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            session_id, phase, tool_name, raw_output, raw_len,
+            compressed_output, comp_len, ratio, worker_model, worker_provider,
+            followup_progress, _now(),
+        ),
+    )
+    await db.commit()
+    return cursor.lastrowid or 0
+
+
+async def insert_clarification(
+    db: aiosqlite.Connection,
+    *,
+    session_id: str,
+    phase: str,
+    task: str | None,
+    question: str,
+    answer: str | None,
+    outcome: str,
+    trace_uuid: str | None = None,
+) -> int:
+    cursor = await db.execute(
+        "INSERT INTO clarifications ("
+        "session_id, phase, task, question, answer, outcome, trace_uuid, "
+        "created_at"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (session_id, phase, task, question, answer, outcome, trace_uuid, _now()),
+    )
+    await db.commit()
+    return cursor.lastrowid or 0
+
+
+async def insert_phase2_synthesis(
+    db: aiosqlite.Connection,
+    *,
+    session_id: str,
+    task: str | None,
+    scope: str | None,
+    observations: list | None,
+    scratchpad: str | None,
+    journal: str | None,
+    exploration_output: str | None,
+    file_summary: dict | None,
+    trace_uuid: str | None = None,
+) -> int:
+    cursor = await db.execute(
+        "INSERT INTO phase2_syntheses ("
+        "session_id, task, scope, observations, scratchpad, journal, "
+        "exploration_output, file_summary, trace_uuid, created_at"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            session_id, task, scope,
+            _json_dump(observations) if observations is not None else None,
+            scratchpad, journal, exploration_output,
+            _json_dump(file_summary) if file_summary is not None else None,
+            trace_uuid, _now(),
+        ),
+    )
+    await db.commit()
+    return cursor.lastrowid or 0
+
+
+async def insert_diff_decision(
+    db: aiosqlite.Connection,
+    *,
+    session_id: str,
+    file_path: str,
+    accepted: bool,
+    diff_hash: str | None,
+    note: str | None = None,
+    trace_uuid: str | None = None,
+) -> int:
+    cursor = await db.execute(
+        "INSERT INTO diff_decisions ("
+        "session_id, file_path, accepted, diff_hash, note, trace_uuid, "
+        "created_at"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            session_id, file_path, 1 if accepted else 0, diff_hash, note,
+            trace_uuid, _now(),
         ),
     )
     await db.commit()
@@ -346,6 +608,8 @@ async def prune_expired(
     for table in (
         "training_traces", "plan_decisions", "validation_attempts",
         "workflow_events", "redaction_audit",
+        "tool_executions", "tool_compressions", "clarifications",
+        "phase2_syntheses", "diff_decisions",
     ):
         cursor = await db.execute(
             f"DELETE FROM {table} WHERE created_at < ?", (cutoff,),
@@ -412,8 +676,23 @@ async def manifest_counts(db: aiosqlite.Connection) -> dict:
         out["by_phase"] = await _group("phase")
         out["by_outcome"] = await _group("outcome")
 
-    for table in ("plan_decisions", "validation_attempts", "workflow_events"):
+    for table in (
+        "plan_decisions", "validation_attempts", "workflow_events",
+        "tool_executions", "tool_compressions", "clarifications",
+        "phase2_syntheses", "diff_decisions",
+    ):
         (count,) = await _fetch_one(f"SELECT COUNT(*) FROM {table}") or (0,)
         out[table] = count or 0
+
+    # By-role breakdown on training_traces (Tier S/A cross-cutting).
+    if out["total_traces"]:
+        cursor = await db.execute(
+            "SELECT role, COUNT(*) FROM training_traces "
+            "WHERE role IS NOT NULL GROUP BY role"
+        )
+        rows = await cursor.fetchall()
+        out["by_role"] = {row[0]: row[1] for row in rows}
+    else:
+        out["by_role"] = {}
 
     return out

@@ -106,10 +106,11 @@ class _ToolProgressRequired(TypedDict):
     description: str
 
 
-class DiffMessage(TypedDict):
-    type: Literal["diff"]
+class DiffMessage(TypedDict, total=False):
+    type: Literal["diff"]  # pyright: ignore[reportGeneralTypeIssues]
     file: str
     diff: str
+    diff_hash: str  # sha256(diff)[:16] — used to pair accept/reject decisions
 
 
 class TestResultMessage(TypedDict, total=False):
@@ -344,7 +345,12 @@ async def send_error(ws: WebSocket, *, message: str) -> None:
 
 
 async def send_diff(ws: WebSocket, *, file: str, diff: str) -> None:
-    await ws_send(ws, "diff", {"file": file, "diff": diff})
+    import hashlib
+
+    diff_hash = hashlib.sha256((diff or "").encode("utf-8")).hexdigest()[:16]
+    await ws_send(ws, "diff", {
+        "file": file, "diff": diff, "diff_hash": diff_hash,
+    })
 
 
 async def send_test_result(

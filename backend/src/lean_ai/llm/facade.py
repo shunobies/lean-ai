@@ -8,6 +8,7 @@ import re
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from enum import Enum, auto
+from time import monotonic as _monotonic
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
@@ -349,6 +350,7 @@ class LLMClient:
         on_context_refresh: Callable | None = None,
         on_budget_interrupt: Callable | None = None,
         dispatcher: "WSMessageDispatcher | None" = None,
+        telemetry_context: dict | None = None,
     ) -> tuple[list[ToolCall], str]:
         """Multi-turn tool calling loop with unified turn supervisor.
 
@@ -383,6 +385,18 @@ class LLMClient:
         last_prompt_tokens: int | None = None
 
         effective_max = max_turns if max_turns > 0 else 2**31
+
+        # Telemetry is opt-in: callers pass a dict with repo_root +
+        # session_id to enable per-turn trace capture and in-loop events
+        # (loop_detected, context_refresh, reminder_injected,
+        # claim_unverified). If absent, chat_with_tools behaves exactly
+        # as before — no capture, no events.
+        telemetry_context = telemetry_context if telemetry_context else None
+        if telemetry_context is not None:
+            # Initialise mutable output keys so callers can read them
+            # after return without KeyError.
+            telemetry_context.setdefault("trace_uuids", [])
+            telemetry_context.setdefault("last_trace_uuid", None)
 
         messages[:] = _sanitize_messages(messages)
 
@@ -425,11 +439,42 @@ class LLMClient:
                 if on_content:
                     await on_content(token)
 
+            # Snapshot the input messages before the provider call so the
+            # per-turn capture records exactly what was sent, independent
+            # of the tool-result appends that follow.
+            turn_messages_in: list[dict] | None = None
+            turn_started_at: float | None = None
+            if telemetry_context is not None:
+                turn_messages_in = [dict(m) for m in messages]
+                turn_started_at = _monotonic()
+
             content, tool_calls, metrics = await self._provider.chat_with_tools_single(
                 messages, tools, max_tokens=tokens,
                 stream_callback=_stream_wrapper if _stream_cb else None,
                 thinking_callback=_think_cb,
             )
+
+            # Fire per-turn training capture (fire-and-forget). Must
+            # happen BEFORE any mutation of messages (tool results)
+            # because the capture payload is the pre-turn prompt +
+            # model output.
+            if telemetry_context is not None and turn_messages_in is not None:
+                latency_ms = (
+                    int((_monotonic() - turn_started_at) * 1000)
+                    if turn_started_at is not None else None
+                )
+                _fire_capture_turn(
+                    telemetry_context=telemetry_context,
+                    turn_index=turn,
+                    messages=turn_messages_in,
+                    content=content,
+                    thinking=metrics.thinking,
+                    tool_calls=tool_calls,
+                    model_name=self._provider.model_name,
+                    provider=self._provider.provider_name,
+                    metrics=metrics,
+                    latency_ms=latency_ms,
+                )
 
             last_prompt_tokens = metrics.prompt_tokens
 
@@ -583,6 +628,15 @@ class LLMClient:
                                     count=str(state.consecutive_same_tool),
                                 ),
                             })
+                            _fire_in_loop_event(
+                                telemetry_context,
+                                event_type="loop_detected",
+                                payload={
+                                    "tool_name": tc.name,
+                                    "count": state.consecutive_same_tool,
+                                    "turn_index": turn,
+                                },
+                            )
                             state.consecutive_same_tool = 0
 
             # Bound thinking history so long tool loops don't blow the
@@ -661,13 +715,40 @@ class LLMClient:
                     prompt_tokens=last_prompt_tokens or None,
                     on_context_refresh=on_context_refresh,
                 )
-                if refreshed and on_metrics:
-                    est_new = sum(
-                        len(m.get("content") or "") for m in messages
-                    ) // 4
-                    await on_metrics(est_new, self._provider.context_window)
+                if refreshed:
+                    _fire_in_loop_event(
+                        telemetry_context,
+                        event_type="context_refresh",
+                        payload={
+                            "turn_index": turn,
+                            "prompt_tokens_before": last_prompt_tokens,
+                            "context_window": self._provider.context_window,
+                        },
+                    )
+                    if on_metrics:
+                        est_new = sum(
+                            len(m.get("content") or "") for m in messages
+                        ) // 4
+                        await on_metrics(est_new, self._provider.context_window)
             elif action.verdict == TurnVerdict.NUDGE:
                 messages.append({"role": "user", "content": action.message})
+                # Classify the nudge — reminder is the only kind that
+                # fires on a turn that had tool calls; the text-only
+                # and truncation nudges have their own continue path.
+                is_reminder = (
+                    bool(task_reminder)
+                    and reminder_interval > 0
+                    and (turn + 1) % reminder_interval == 0
+                )
+                if is_reminder:
+                    _fire_in_loop_event(
+                        telemetry_context,
+                        event_type="reminder_injected",
+                        payload={
+                            "turn_index": turn,
+                            "reminder_chars": len(action.message),
+                        },
+                    )
                 if not tool_calls:
                     continue  # Skip to next turn for text-only nudges
 
@@ -694,6 +775,14 @@ class LLMClient:
                     "role": "user",
                     "content": registry.get("nudge.claim_verification"),
                 })
+                _fire_in_loop_event(
+                    telemetry_context,
+                    event_type="claim_unverified",
+                    payload={
+                        "turn_index": turn,
+                        "recent_test_failures": state.recent_test_failures,
+                    },
+                )
                 # Reset so we don't nudge every turn once triggered
                 state.recent_test_failures = 0
 
@@ -912,3 +1001,139 @@ def _trim_old_thinking(messages: list[dict], *, keep_recent: int = 3) -> None:
     assistant_indices = [i for i, m in enumerate(messages) if _has_thinking(m)]
     for idx in assistant_indices[:-keep_recent]:
         _strip(messages[idx])
+
+
+# ── Training capture helpers ─────────────────────────────────────
+# Kept at module scope so chat_with_tools stays readable. All calls
+# are fire-and-forget: on failure we log at debug level and continue.
+
+
+def _serialize_tool_call_for_capture(tc: ToolCallInfo) -> dict:
+    return {"name": tc.name, "arguments": tc.arguments}
+
+
+def _build_assistant_output(
+    content: str,
+    thinking: str | None,
+    tool_calls: list[ToolCallInfo] | None,
+) -> dict:
+    out: dict = {"content": content or ""}
+    if thinking and getattr(settings, "capture_thinking", True):
+        out["thinking"] = thinking
+    if tool_calls:
+        out["tool_calls"] = [
+            _serialize_tool_call_for_capture(tc) for tc in tool_calls
+        ]
+    return out
+
+
+def _fire_capture_turn(
+    *,
+    telemetry_context: dict,
+    turn_index: int,
+    messages: list[dict],
+    content: str,
+    thinking: str | None,
+    tool_calls: list[ToolCallInfo] | None,
+    model_name: str,
+    provider: str,
+    metrics: LLMMetrics,
+    latency_ms: int | None,
+) -> None:
+    """Schedule a training_traces write for the turn that just completed.
+
+    The resulting trace_uuid is appended to
+    ``telemetry_context['trace_uuids']`` and mirrored on
+    ``telemetry_context['last_trace_uuid']`` so downstream hooks (plan
+    decisions, validation attempts, workflow events) can reference the
+    exact turn they followed.
+    """
+    repo_root = telemetry_context.get("repo_root")
+    session_id = telemetry_context.get("session_id")
+    phase = telemetry_context.get("phase") or "unknown"
+    role = telemetry_context.get("role")
+    if not repo_root or not session_id:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    assistant_output = _build_assistant_output(content, thinking, tool_calls)
+
+    async def _run() -> None:
+        try:
+            from lean_ai.training.capture import capture_turn as _capture_turn
+
+            trace_uuid = await _capture_turn(
+                repo_root,
+                session_id=session_id,
+                phase=phase,
+                role=role,
+                turn_index=turn_index,
+                model_name=model_name,
+                provider=provider,
+                messages=messages,
+                assistant_output=assistant_output,
+                outcome="success",
+                tokens_prompt=metrics.prompt_tokens,
+                tokens_completion=metrics.completion_tokens,
+                latency_ms=latency_ms,
+            )
+            if trace_uuid:
+                telemetry_context["last_trace_uuid"] = trace_uuid
+                telemetry_context.setdefault("trace_uuids", []).append(
+                    trace_uuid
+                )
+        except Exception:
+            logger.debug("capture_turn scheduling failed", exc_info=True)
+
+    t = loop.create_task(_run())
+    t.add_done_callback(_log_task_exc)
+
+
+def _fire_in_loop_event(
+    telemetry_context: dict | None,
+    *,
+    event_type: str,
+    payload: dict,
+) -> None:
+    """Schedule a workflow_events write for an in-loop guardrail firing.
+
+    Covers loop_detected, context_refresh, reminder_injected, and
+    claim_unverified — the four events that were scaffolded but left
+    unwired. Uses the fire_workflow_event helper so capture runs on the
+    running loop without blocking chat_with_tools.
+    """
+    if telemetry_context is None:
+        return
+    repo_root = telemetry_context.get("repo_root")
+    session_id = telemetry_context.get("session_id")
+    if not repo_root or not session_id:
+        return
+    try:
+        from lean_ai.workflow.hooks import fire_workflow_event
+
+        # Tag the event with the current phase/role so consumers can
+        # slice recovery behavior by where in the pipeline it fired.
+        enriched = dict(payload)
+        enriched["phase"] = telemetry_context.get("phase")
+        enriched["role"] = telemetry_context.get("role")
+        fire_workflow_event(
+            repo_root=repo_root,
+            session_id=session_id,
+            event_type=event_type,
+            payload=enriched,
+            trace_uuid=telemetry_context.get("last_trace_uuid"),
+        )
+    except Exception:
+        logger.debug("fire_in_loop_event failed", exc_info=True)
+
+
+def _log_task_exc(task: asyncio.Task) -> None:
+    try:
+        exc = task.exception()
+    except (asyncio.CancelledError, asyncio.InvalidStateError):
+        return
+    if exc is not None:
+        logger.debug("background capture task raised", exc_info=exc)

@@ -331,11 +331,44 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                     from lean_ai.workflow.hooks import (
                                         fire_workflow_event,
                                     )
+                                    # Enrich the cancellation payload with a tail
+                                    # snapshot from conversation_logs so training
+                                    # consumers can reconstruct WHERE the user
+                                    # gave up — the final N messages carry the
+                                    # negative signal.
+                                    tail_messages: list[dict] = []
+                                    try:
+                                        cursor = await db.execute(
+                                            "SELECT role, content, tool_name, "
+                                            "created_at FROM conversation_logs "
+                                            "WHERE session_id = ? "
+                                            "ORDER BY id DESC LIMIT 5",
+                                            (session_id,),
+                                        )
+                                        rows = await cursor.fetchall()
+                                        tail_messages = [
+                                            {
+                                                "role": r[0],
+                                                "content": (r[1] or "")[:800],
+                                                "tool_name": r[2],
+                                                "created_at": r[3],
+                                            }
+                                            for r in reversed(rows)
+                                        ]
+                                    except Exception:
+                                        logger.debug(
+                                            "cancellation tail read failed",
+                                            exc_info=True,
+                                        )
                                     fire_workflow_event(
                                         repo_root=repo_root,
                                         session_id=session_id,
                                         event_type="cancellation",
-                                        payload={"task": task, "mode": mode},
+                                        payload={
+                                            "task": task,
+                                            "mode": mode,
+                                            "tail_messages": tail_messages,
+                                        },
                                     )
                                 except Exception:
                                     logger.debug(

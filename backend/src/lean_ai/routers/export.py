@@ -321,6 +321,309 @@ async def export_events_endpoint(
     return StreamingResponse(_stream(), media_type="application/x-ndjson")
 
 
+# ── New-table exports (Tier S.3, S.4, A.6, A.7, A.8) ──────────
+
+
+async def _stream_anonymized_table(
+    repo_root: str,
+    *,
+    table: str,
+    extra_clauses: list[str],
+    extra_params: list,
+    cursor: str | None,
+    limit: int,
+) -> AsyncIterator[bytes]:
+    """Shared helper: stream a training.db table as anonymized JSONL."""
+    clauses: list[str] = []
+    params: list = []
+    cursor_clause, cursor_params = _cursor_predicate(cursor)
+    clauses.append(cursor_clause)
+    params.extend(cursor_params)
+    clauses.extend(extra_clauses)
+    params.extend(extra_params)
+    params.append(limit)
+    where = " AND ".join(clauses)
+
+    db = await get_training_db(repo_root)
+    try:
+        cursor_obj = await db.execute(
+            f"SELECT * FROM {table} WHERE {where} "
+            f"ORDER BY id ASC LIMIT ?",
+            tuple(params),
+        )
+        rows = await cursor_obj.fetchall()
+        for row in rows:
+            anonymized = anonymize_row(dict(row), repo_root)
+            yield (
+                json.dumps(anonymized, ensure_ascii=False) + "\n"
+            ).encode("utf-8")
+    finally:
+        await db.close()
+
+
+@export_router.get("/tool-executions")
+async def export_tool_executions_endpoint(
+    repo_root: str,
+    tool_name: str | None = None,
+    phase: str | None = None,
+    success: int | None = None,
+    format: str = Query(default="raw"),
+    since: str | None = None,
+    cursor: str | None = None,
+    limit: int = 1000,
+    authorization: str | None = Header(default=None),
+):
+    """Stream tool_executions rows as JSONL.
+
+    Supported formats:
+
+    - ``raw`` — one JSON object per row, anonymized.
+    - ``dpo_pairs`` — pair up a failed (``success=0``) call with the
+      next successful (``success=1``) call on the same session + tool
+      name, emitting ``{"prompt_hint": tool_name, "chosen": {arguments,
+      result_preview}, "rejected": {arguments, result_preview},
+      ...}``. Useful for training the model to call tools with
+      argument shapes that actually work.
+    """
+    await require_export_key(authorization)
+    if format not in ("raw", "dpo_pairs"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown format '{format}'. Supported: raw, dpo_pairs",
+        )
+    if limit <= 0 or limit > 10000:
+        raise HTTPException(
+            status_code=400, detail="limit must be between 1 and 10000",
+        )
+    extra_clauses: list[str] = []
+    extra_params: list = []
+    if tool_name:
+        extra_clauses.append("tool_name = ?")
+        extra_params.append(tool_name)
+    if phase:
+        extra_clauses.append("phase = ?")
+        extra_params.append(phase)
+    if success is not None:
+        extra_clauses.append("success = ?")
+        extra_params.append(1 if success else 0)
+    if since:
+        extra_clauses.append("created_at >= ?")
+        extra_params.append(since)
+
+    if format == "raw":
+        return StreamingResponse(
+            _stream_anonymized_table(
+                repo_root, table="tool_executions",
+                extra_clauses=extra_clauses, extra_params=extra_params,
+                cursor=cursor, limit=limit,
+            ),
+            media_type="application/x-ndjson",
+        )
+
+    # dpo_pairs: group rows by (session_id, tool_name) and emit
+    # (failure, following-success) pairs. This is a heuristic pairing —
+    # the trainer downstream can apply stricter joins if needed.
+    async def _stream_pairs() -> AsyncIterator[bytes]:
+        from lean_ai.training.export_formats import anonymize_row
+
+        db = await get_training_db(repo_root)
+        try:
+            clauses = list(extra_clauses)
+            params = list(extra_params)
+            where = " AND ".join(clauses) if clauses else "1=1"
+            cursor_obj = await db.execute(
+                f"SELECT * FROM tool_executions WHERE {where} "
+                f"ORDER BY session_id, tool_name, id ASC",
+                tuple(params),
+            )
+            rows = await cursor_obj.fetchall()
+        finally:
+            await db.close()
+
+        emitted = 0
+        current_key: tuple | None = None
+        pending_failure: dict | None = None
+        for raw in rows:
+            row = dict(raw)
+            key = (row.get("session_id"), row.get("tool_name"))
+            if key != current_key:
+                current_key = key
+                pending_failure = None
+            if not row.get("success") and pending_failure is None:
+                pending_failure = row
+                continue
+            if row.get("success") and pending_failure is not None:
+                failed = pending_failure
+                pending_failure = None
+                pair = {
+                    "prompt_hint": row.get("tool_name"),
+                    "session_id": row.get("session_id"),
+                    "phase": row.get("phase"),
+                    "rejected": {
+                        "arguments": failed.get("arguments"),
+                        "result_preview": failed.get("result_preview"),
+                    },
+                    "chosen": {
+                        "arguments": row.get("arguments"),
+                        "result_preview": row.get("result_preview"),
+                    },
+                }
+                pair = anonymize_row(pair, repo_root)
+                yield (
+                    json.dumps(pair, ensure_ascii=False) + "\n"
+                ).encode("utf-8")
+                emitted += 1
+                if emitted >= limit:
+                    return
+
+    return StreamingResponse(
+        _stream_pairs(), media_type="application/x-ndjson",
+    )
+
+
+@export_router.get("/tool-compressions")
+async def export_tool_compressions_endpoint(
+    repo_root: str,
+    tool_name: str | None = None,
+    since: str | None = None,
+    cursor: str | None = None,
+    limit: int = 1000,
+    authorization: str | None = Header(default=None),
+):
+    """Stream tool_compressions rows as JSONL.
+
+    Worker-model distillation pairs: raw tool output → summary. Only
+    populated when the off-by-default worker compression feature is
+    active. Use these to fine-tune a smaller summarization model.
+    """
+    await require_export_key(authorization)
+    if limit <= 0 or limit > 5000:
+        raise HTTPException(
+            status_code=400, detail="limit must be between 1 and 5000",
+        )
+    extra_clauses: list[str] = []
+    extra_params: list = []
+    if tool_name:
+        extra_clauses.append("tool_name = ?")
+        extra_params.append(tool_name)
+    if since:
+        extra_clauses.append("created_at >= ?")
+        extra_params.append(since)
+
+    return StreamingResponse(
+        _stream_anonymized_table(
+            repo_root, table="tool_compressions",
+            extra_clauses=extra_clauses, extra_params=extra_params,
+            cursor=cursor, limit=limit,
+        ),
+        media_type="application/x-ndjson",
+    )
+
+
+@export_router.get("/clarifications")
+async def export_clarifications_endpoint(
+    repo_root: str,
+    outcome: str | None = None,
+    since: str | None = None,
+    cursor: str | None = None,
+    limit: int = 1000,
+    authorization: str | None = Header(default=None),
+):
+    """Stream Phase 1 clarification Q/A pairs as JSONL."""
+    await require_export_key(authorization)
+    if limit <= 0 or limit > 5000:
+        raise HTTPException(
+            status_code=400, detail="limit must be between 1 and 5000",
+        )
+    extra_clauses: list[str] = []
+    extra_params: list = []
+    if outcome:
+        extra_clauses.append("outcome = ?")
+        extra_params.append(outcome)
+    if since:
+        extra_clauses.append("created_at >= ?")
+        extra_params.append(since)
+
+    return StreamingResponse(
+        _stream_anonymized_table(
+            repo_root, table="clarifications",
+            extra_clauses=extra_clauses, extra_params=extra_params,
+            cursor=cursor, limit=limit,
+        ),
+        media_type="application/x-ndjson",
+    )
+
+
+@export_router.get("/phase2-syntheses")
+async def export_phase2_syntheses_endpoint(
+    repo_root: str,
+    since: str | None = None,
+    cursor: str | None = None,
+    limit: int = 500,
+    authorization: str | None = Header(default=None),
+):
+    """Stream Phase 2 exploration → FileSummary synthesis pairs.
+
+    These are the highest-value supervised training data for teaching
+    a model to produce structured file summaries from raw observations.
+    Payloads can be large (observations + scratchpad + journal + full
+    FileSummary), so the default limit is lower.
+    """
+    await require_export_key(authorization)
+    if limit <= 0 or limit > 2000:
+        raise HTTPException(
+            status_code=400, detail="limit must be between 1 and 2000",
+        )
+    extra_clauses: list[str] = []
+    extra_params: list = []
+    if since:
+        extra_clauses.append("created_at >= ?")
+        extra_params.append(since)
+
+    return StreamingResponse(
+        _stream_anonymized_table(
+            repo_root, table="phase2_syntheses",
+            extra_clauses=extra_clauses, extra_params=extra_params,
+            cursor=cursor, limit=limit,
+        ),
+        media_type="application/x-ndjson",
+    )
+
+
+@export_router.get("/diff-decisions")
+async def export_diff_decisions_endpoint(
+    repo_root: str,
+    accepted: int | None = None,
+    since: str | None = None,
+    cursor: str | None = None,
+    limit: int = 1000,
+    authorization: str | None = Header(default=None),
+):
+    """Stream user accept/reject decisions on diffs."""
+    await require_export_key(authorization)
+    if limit <= 0 or limit > 10000:
+        raise HTTPException(
+            status_code=400, detail="limit must be between 1 and 10000",
+        )
+    extra_clauses: list[str] = []
+    extra_params: list = []
+    if accepted is not None:
+        extra_clauses.append("accepted = ?")
+        extra_params.append(1 if accepted else 0)
+    if since:
+        extra_clauses.append("created_at >= ?")
+        extra_params.append(since)
+
+    return StreamingResponse(
+        _stream_anonymized_table(
+            repo_root, table="diff_decisions",
+            extra_clauses=extra_clauses, extra_params=extra_params,
+            cursor=cursor, limit=limit,
+        ),
+        media_type="application/x-ndjson",
+    )
+
+
 def clear_manifest_cache() -> None:
     """Test helper: reset the manifest cache."""
     _manifest_cache.clear()
