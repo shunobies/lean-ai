@@ -260,23 +260,49 @@ def build_tdd_step_system_prompt(
     """Build the system prompt for TDD implementation steps (primary model).
 
     Extends the standard step prompt with TDD implementation constraints:
-    test files are read-only, and the implementation must adapt to the
-    tests rather than the reverse. Test disputes were already handled in
-    the review phase (Phase B); they are not available here, so the
-    prompt does not mention ``request_test_change``.
+    test files are read-only and the implementation must adapt to the
+    tests rather than the reverse. Disputes are available as a narrow
+    escape hatch (for tests that are logically impossible to satisfy or
+    that encode a wrong contract) — they route through the expert via
+    ``request_test_change`` and never edit tests directly.
     """
     prompt = build_step_system_prompt(context, naming_conventions, name_registry)
     prompt += (
         "\n\nTDD MODE — IMPLEMENTATION PHASE:\n"
-        "- Tests have already been written and reviewed. Implement code "
-        "to make them pass.\n"
-        "- Test files are LOCKED — any edit_file/create_file targeting a "
-        "test file will be rejected.\n"
-        "- If a test seems wrong, your only option is to find an "
-        "implementation that satisfies it. Disputes are not available in "
-        "this phase.\n"
+        "- Tests have already been written and reviewed. Your default "
+        "job is to implement code that makes them pass — adapt to the "
+        "tests, not the other way round.\n"
+        "- Test files are LOCKED — edit_file / create_file targeting a "
+        "test file will be rejected. Never try to work around this by "
+        "editing a different file that changes what the test loads.\n"
         "- Read the relevant test file(s) first with read_file to "
         "understand the contract before writing implementation code.\n"
+        "\nTest Modification Policy (TDD):\n"
+        "- Default: DO NOT dispute. If a test is hard to satisfy, that "
+        "is usually a signal your implementation is wrong, not the "
+        "test.\n"
+        "- Legitimate dispute reasons (the only ones that should reach "
+        "request_test_change):\n"
+        "  1. The test is logically impossible to satisfy with any "
+        "correct implementation (e.g. contradicts another test, "
+        "references a function that cannot exist, asserts behaviour "
+        "the language doesn't support).\n"
+        "  2. The test encodes an old contract that the current task "
+        "explicitly changes — you must cite the task description "
+        "section that requires the contract change.\n"
+        "  3. The test is over-constrained on an internal detail the "
+        "contract does not require (e.g. asserts exact log wording, "
+        "pins a private method signature). Propose a narrower "
+        "assertion.\n"
+        "- How to dispute: call request_test_change(test_file, "
+        "test_function, reason). Your reason must be one short "
+        "paragraph with the specific technical justification — "
+        "\"this test is wrong\" will be rejected. The expert evaluates "
+        "and either edits the test or rejects the dispute with an "
+        "implementation hint.\n"
+        "- Regression tests are IMMUTABLE even via dispute. If a "
+        "regression test is genuinely broken, cancel the session and "
+        "open a new one with /fix.\n"
     )
     return prompt
 

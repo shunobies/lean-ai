@@ -598,6 +598,29 @@ async def _run_tdd_execution(
     """TDD three-phase execution: expert tests → review → implement."""
     from lean_ai.workflow.tdd import evaluate_test_dispute
 
+    # Shared dispute evaluator used by both Phase B (review) and Phase C
+    # (implementation). Tests remain write-protected in both phases;
+    # when the primary genuinely finds a flawed test, it calls
+    # request_test_change and the expert decides whether to edit the
+    # test or reject the dispute. Matches the existing "Test
+    # Modification Policy" (see CLAUDE.md) — tests are not changed
+    # directly, only via an explained, expert-evaluated dispute.
+    plan_context_md = plan_to_markdown(plan)
+
+    async def _tdd_dispute(arguments: dict) -> str:
+        return await evaluate_test_dispute(
+            test_file=arguments["test_file"],
+            test_function=arguments["test_function"],
+            reason=arguments["reason"],
+            repo_root=repo_root,
+            expert_client=expert_llm_client,
+            ws=ws,
+            session_id=session_id,
+            dispatcher=dispatcher,
+            plan_context=plan_context_md,
+            step_artifacts=step_artifacts,
+        )
+
     # ── Phase A: Expert writes tests ──────────────────────────
     await ws_send(ws, "stage_status", {
         "stage": "tdd_test_writing",
@@ -685,23 +708,6 @@ async def _run_tdd_execution(
                     f"\n--- {tf} --- (could not read)"
                 )
 
-        # Dispute callback for review phase
-        plan_context_md = plan_to_markdown(plan)
-
-        async def _review_dispute(arguments: dict) -> str:
-            return await evaluate_test_dispute(
-                test_file=arguments["test_file"],
-                test_function=arguments["test_function"],
-                reason=arguments["reason"],
-                repo_root=repo_root,
-                expert_client=expert_llm_client,
-                ws=ws,
-                session_id=session_id,
-                dispatcher=dispatcher,
-                plan_context=plan_context_md,
-                step_artifacts=step_artifacts,
-            )
-
         review_telemetry = {
             "repo_root": repo_root, "session_id": session_id,
             "phase": "tdd.review", "role": "primary",
@@ -711,7 +717,7 @@ async def _run_tdd_execution(
             llm_client=llm_client,
             dispatcher=dispatcher,
             tdd_protect_tests=True,
-            on_test_dispute=_review_dispute,
+            on_test_dispute=_tdd_dispute,
             telemetry_context=review_telemetry,
         )
 
@@ -765,6 +771,7 @@ async def _run_tdd_execution(
             llm_client=llm_client,
             dispatcher=dispatcher,
             tdd_protect_tests=True,
+            on_test_dispute=_tdd_dispute,
             telemetry_context={
                 "repo_root": repo_root, "session_id": session_id,
                 "phase": "tdd.implement", "role": "primary",
@@ -772,7 +779,7 @@ async def _run_tdd_execution(
         )
 
         await run_step(
-            step, llm_client, build_implementation_tools(),
+            step, llm_client, build_tdd_implementation_tools(),
             impl_executor, tdd_impl_prompt,
             label_prefix="[TDD Impl] ",
             telemetry={
