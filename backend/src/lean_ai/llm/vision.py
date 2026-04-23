@@ -247,13 +247,29 @@ async def describe_image_structured(
     effective_timeout = timeout if timeout is not None else settings.vision_timeout
     effective_max_tokens = max_tokens if max_tokens is not None else settings.vision_max_tokens
 
+    # Inline the schema into the system prompt alongside Ollama's format=
+    # constraint.  format= enforces valid JSON at decode time, but the model
+    # never sees the schema shape without this — small vision models then
+    # produce technically-valid JSON with the nested types flattened or
+    # fields mis-filled.  Gives the model structural context + safety.
+    schema_dict = schema.model_json_schema()
+    schema_json_text = json.dumps(schema_dict, indent=2)
+    system_with_schema = (
+        f"{system_prompt}\n\n"
+        "Respond with a JSON object that matches this schema exactly. "
+        "Populate every required field; use empty lists / empty strings for "
+        "optional fields you cannot determine.\n\n"
+        "```json\n"
+        f"{schema_json_text}\n"
+        "```"
+    )
+
     messages = [
-        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": system_with_schema},
         {"role": "user", "content": user_prompt, "images": [image_base64]},
     ]
 
     client = ollama_lib.AsyncClient(host=settings.effective_vision_url)
-    schema_dict = schema.model_json_schema()
 
     async def _call() -> str:
         resp = await asyncio.wait_for(

@@ -628,6 +628,104 @@ def test_sanitize_handles_empty_list():
     assert _sanitize_messages([]) == []
 
 
+# ── Schema injection tests ──
+
+
+def _dar_sample():
+    """Build the DesignAndRisks schema lazily to keep imports cheap."""
+    from lean_ai.llm.plan_schema import DesignAndRisks
+    return DesignAndRisks
+
+
+def test_inject_schema_appends_to_existing_system_message():
+    """Existing system prompt is preserved; schema JSON appended after it."""
+    from lean_ai.llm.client import _inject_schema_into_messages
+
+    messages = [
+        {"role": "system", "content": "Use your knowledge of architecture."},
+        {"role": "user", "content": "task"},
+    ]
+    out = _inject_schema_into_messages(messages, _dar_sample())
+
+    assert len(out) == 2
+    assert out[0]["role"] == "system"
+    # Original content is preserved
+    assert "Use your knowledge of architecture." in out[0]["content"]
+    # Schema framing is appended
+    assert "JSON object that matches this schema" in out[0]["content"]
+    # Schema itself is present with nested type names
+    assert "naming_conventions" in out[0]["content"]
+    assert "change_designs" in out[0]["content"]
+    assert "critical_risks" in out[0]["content"]
+    # User message is unchanged
+    assert out[1] == {"role": "user", "content": "task"}
+
+
+def test_inject_schema_prepends_when_no_system_message():
+    """When no system message exists, one is inserted at position 0."""
+    from lean_ai.llm.client import _inject_schema_into_messages
+
+    messages = [{"role": "user", "content": "hey"}]
+    out = _inject_schema_into_messages(messages, _dar_sample())
+
+    assert len(out) == 2
+    assert out[0]["role"] == "system"
+    assert out[1]["role"] == "user"
+    assert "Produce JSON matching" in out[0]["content"]
+
+
+def test_inject_schema_only_touches_first_system_message():
+    """If multiple system messages are present, only the first gets the schema."""
+    from lean_ai.llm.client import _inject_schema_into_messages
+
+    messages = [
+        {"role": "system", "content": "first"},
+        {"role": "user", "content": "q"},
+        {"role": "system", "content": "second"},
+    ]
+    out = _inject_schema_into_messages(messages, _dar_sample())
+
+    assert "```json" in out[0]["content"]
+    assert out[2]["content"] == "second"
+
+
+def test_inject_schema_does_not_mutate_original_messages():
+    """Source messages and their dicts must remain unchanged."""
+    from lean_ai.llm.client import _inject_schema_into_messages
+
+    original_system = {"role": "system", "content": "original"}
+    messages = [original_system, {"role": "user", "content": "q"}]
+
+    _inject_schema_into_messages(messages, _dar_sample())
+
+    assert original_system["content"] == "original"
+    assert len(messages) == 2  # original list unchanged
+
+
+def test_inject_schema_covers_every_phase_schema():
+    """Smoke-test that every structured-call schema round-trips through
+    the injector without error and produces a non-trivial payload."""
+    from lean_ai.llm.client import _inject_schema_into_messages
+    from lean_ai.llm.plan_schema import (
+        DesignAndRisks,
+        ExecutionPlan,
+        FileSummary,
+        ScopeDocument,
+        VerificationPlan,
+    )
+
+    msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "u"}]
+    for schema in (
+        ScopeDocument, FileSummary, DesignAndRisks,
+        ExecutionPlan, VerificationPlan,
+    ):
+        out = _inject_schema_into_messages(msgs, schema)
+        assert schema.__name__ in out[0]["content"], (
+            f"{schema.__name__} missing from injected system prompt"
+        )
+        assert len(out[0]["content"]) > len("sys") + 100
+
+
 # ── Context refresh tests ──
 
 

@@ -1,6 +1,7 @@
 """Ollama LLM provider — wraps the Ollama Python SDK."""
 
 import asyncio
+import json
 import logging
 from collections.abc import AsyncIterator
 
@@ -13,6 +14,55 @@ from lean_ai.llm.base import LLMMetrics, LLMProvider, ToolCallInfo, retry_with_b
 logger = logging.getLogger(__name__)
 
 _TRANSIENT_ERRORS = (ConnectionError, TimeoutError, OSError)
+
+
+def _inject_schema_into_messages(
+    messages: list[dict], schema: type[BaseModel],
+) -> list[dict]:
+    """Return a copy of *messages* with the schema inlined into the system prompt.
+
+    Ollama's ``format=`` parameter enforces the schema via constrained decoding
+    at inference time, but the schema itself never reaches the model's context.
+    Without seeing the schema, small / non-reasoning models produce JSON that's
+    technically valid but semantically poor (fields filled in the wrong shape,
+    nested types collapsed into strings, enums miswritten).
+
+    Inlining ``schema.model_json_schema()`` into the system message gives the
+    model both halves: constrained decoding for safety + structural context
+    for quality.  Mirrors the Anthropic provider's approach.
+
+    If there's no system message, one is prepended.  Otherwise the schema
+    block is appended to the existing system message.
+    """
+    schema_json = json.dumps(schema.model_json_schema(), indent=2)
+    schema_block = (
+        "\n\n"
+        "Respond with a JSON object that matches this schema exactly. "
+        "Populate every required field; use empty lists / empty strings for "
+        "optional fields you cannot determine.\n\n"
+        "```json\n"
+        f"{schema_json}\n"
+        "```"
+    )
+
+    augmented: list[dict] = []
+    system_injected = False
+    for msg in messages:
+        if msg.get("role") == "system" and not system_injected:
+            new_msg = dict(msg)
+            new_msg["content"] = (new_msg.get("content") or "") + schema_block
+            augmented.append(new_msg)
+            system_injected = True
+        else:
+            augmented.append(msg)
+
+    if not system_injected:
+        augmented.insert(0, {
+            "role": "system",
+            "content": "Produce JSON matching the schema below." + schema_block,
+        })
+
+    return augmented
 
 
 def _sanitize_messages(messages: list[dict]) -> list[dict]:
@@ -298,17 +348,19 @@ class OllamaProvider(LLMProvider):
             schema.__name__, self._model, bool(thinking_callback),
         )
 
+        augmented_messages = _inject_schema_into_messages(messages, schema)
+
         last_error = None
         for attempt in range(2):
             if thinking_callback:
                 raw, metrics = await self._chat_structured_streaming(
-                    messages, schema, temp, tokens, thinking_callback,
+                    augmented_messages, schema, temp, tokens, thinking_callback,
                 )
             else:
                 async def _chat():
                     return await self._client.chat(
                         model=self._model,
-                        messages=messages,
+                        messages=augmented_messages,
                         format=schema.model_json_schema(),
                         options=self._build_options(temperature=temp, max_tokens=tokens),
                         think=self._enable_thinking,
