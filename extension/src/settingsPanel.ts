@@ -197,6 +197,18 @@ export class SettingsPanel {
                 }
                 break;
             }
+
+            case "runCommand": {
+                const command = msg.command as string;
+                const allowed = new Set([
+                    "lean-ai.installUiVerification",
+                    "lean-ai.testUiVerification",
+                ]);
+                if (command && allowed.has(command)) {
+                    await vscode.commands.executeCommand(command);
+                }
+                break;
+            }
         }
     }
 
@@ -318,6 +330,10 @@ export class SettingsPanel {
             ttsSpeed:                 "lean-ai.ttsSpeed",
             ttsCpuThreads:            "lean-ai.ttsCpuThreads",
             enableWakeWord:           "lean-ai.enableWakeWord",
+            enableUiVerification:     "lean-ai.enableUiVerification",
+            uiVerificationTimeout:    "lean-ai.uiVerificationTimeout",
+            uiVerificationViewport:   "lean-ai.uiVerificationViewport",
+            uiVerificationWaitSeconds:"lean-ai.uiVerificationWaitSeconds",
         };
 
         const numericFields = new Set([
@@ -338,6 +354,7 @@ export class SettingsPanel {
             "implementationMaxTurns", "refreshThreshold", "numParallel", "ttsSpeed", "ttsCpuThreads",
             "ollamaTemperature", "ollamaTopP", "ollamaTopK", "ollamaRepeatPenalty",
             "openaiTemperature", "anthropicTemperature",
+            "uiVerificationTimeout", "uiVerificationWaitSeconds",
         ]);
 
         // Numeric fields where 0 means "inherit/auto-derive" — treat 0 as unset
@@ -362,6 +379,7 @@ export class SettingsPanel {
             "enableRequiredCitations", "debugPlanning", "enableThinking",
             "enableThinkingExpert", "enableThinkingRequest", "enableThinkingWorker",
             "enableStt", "enableTts", "enableWakeWord",
+            "enableUiVerification",
         ]);
 
         const coercedMap = new Map<string, unknown>();
@@ -540,6 +558,12 @@ export class SettingsPanel {
             ttsSpeed:                  config.get("lean-ai.ttsSpeed", 1.0),
             ttsCpuThreads:             config.get("lean-ai.ttsCpuThreads", 0),
             enableWakeWord:            config.get("lean-ai.enableWakeWord", false),
+
+            // UI Verification
+            enableUiVerification:      config.get("lean-ai.enableUiVerification", false),
+            uiVerificationTimeout:     config.get("lean-ai.uiVerificationTimeout", 180),
+            uiVerificationViewport:    config.get("lean-ai.uiVerificationViewport", "1280x800"),
+            uiVerificationWaitSeconds: config.get("lean-ai.uiVerificationWaitSeconds", 3),
 
             // Search
             searchProvider:            config.get("lean-ai.searchProvider", "duckduckgo"),

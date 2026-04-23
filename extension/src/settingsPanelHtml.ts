@@ -1085,6 +1085,42 @@ export function getSettingsPanelHtml(): string {
     </div>
 </div>
 
+<!-- ── UI Verification ── -->
+<div class="section">
+    <h2>UI Verification</h2>
+    <div class="field-check">
+        <input type="checkbox" id="enableUiVerification">
+        <div>
+            <label for="enableUiVerification">Enable verify_web_ui + verify_desktop_ui tools</label>
+            <span class="hint">
+                Vision-backed screenshot analysis. Requires a configured vision model and
+                the <code>ui-verification</code> backend extras. After enabling, run
+                <strong>Lean AI: Install UI Verification (Chromium)</strong> from the
+                command palette to download the workspace-local browser (~300MB).
+                See <a href="https://github.com/shunobies/lean-ai/blob/main/docs/ui-verification.md">docs/ui-verification.md</a>.
+            </span>
+        </div>
+    </div>
+    <div class="field-row">
+        <div class="field">
+            <label>Overall timeout <span class="hint">seconds</span></label>
+            <input type="number" id="uiVerificationTimeout" min="30" max="600" step="10" placeholder="180">
+        </div>
+        <div class="field">
+            <label>Default viewport <span class="hint">WxH, e.g. 1280x800 or 375x812</span></label>
+            <input type="text" id="uiVerificationViewport" placeholder="1280x800">
+        </div>
+        <div class="field">
+            <label>Post-render wait <span class="hint">seconds</span></label>
+            <input type="number" id="uiVerificationWaitSeconds" min="0" max="30" step="0.5" placeholder="3">
+        </div>
+    </div>
+    <div class="field-row" style="gap: 8px; margin-top: 4px;">
+        <button type="button" id="uiVerificationInstallBtn" class="btn-secondary">Install Chromium</button>
+        <button type="button" id="uiVerificationTestBtn" class="btn-secondary">Run Test Capture</button>
+    </div>
+</div>
+
 <!-- ── Advanced (collapsible) ── -->
 <details>
     <summary>Advanced</summary>
@@ -1762,6 +1798,12 @@ export function getSettingsPanelHtml(): string {
             ttsCpuThreads:         val('ttsCpuThreads'),
             enableWakeWord:        val('enableWakeWord'),
 
+            // UI Verification
+            enableUiVerification:      val('enableUiVerification'),
+            uiVerificationTimeout:     val('uiVerificationTimeout'),
+            uiVerificationViewport:    val('uiVerificationViewport'),
+            uiVerificationWaitSeconds: val('uiVerificationWaitSeconds'),
+
             // Advanced
             inlineModel:           val('inlineModel'),
             inlineOllamaUrl:       val('inlineOllamaUrl'),
@@ -1790,6 +1832,14 @@ export function getSettingsPanelHtml(): string {
         const fb = document.getElementById('saveFeedback');
         fb.classList.add('visible');
         setTimeout(() => fb.classList.remove('visible'), 2500);
+    });
+
+    // ── UI Verification action buttons ────────────────────────────────────
+    document.getElementById('uiVerificationInstallBtn').addEventListener('click', () => {
+        vscode.postMessage({ type: 'runCommand', command: 'lean-ai.installUiVerification' });
+    });
+    document.getElementById('uiVerificationTestBtn').addEventListener('click', () => {
+        vscode.postMessage({ type: 'runCommand', command: 'lean-ai.testUiVerification' });
     });
 
     // ── Load initial settings from extension host ─────────────────────────
@@ -1981,6 +2031,12 @@ export function getSettingsPanelHtml(): string {
         setVal('ttsSpeed',              v.ttsSpeed);
         setVal('ttsCpuThreads',         v.ttsCpuThreads);
         setVal('enableWakeWord',        v.enableWakeWord);
+
+        // UI Verification
+        setVal('enableUiVerification',      v.enableUiVerification);
+        setVal('uiVerificationTimeout',     v.uiVerificationTimeout);
+        setVal('uiVerificationViewport',    v.uiVerificationViewport);
+        setVal('uiVerificationWaitSeconds', v.uiVerificationWaitSeconds);
 
         // Advanced
         setVal('inlineModel',           v.inlineModel);

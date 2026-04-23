@@ -126,6 +126,12 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.ttsCpuThreads":             "LEAN_AI_TTS_CPU_THREADS",
     "lean-ai.enableWakeWord":            "LEAN_AI_ENABLE_WAKE_WORD",
 
+    // UI Verification
+    "lean-ai.enableUiVerification":      "LEAN_AI_ENABLE_UI_VERIFICATION",
+    "lean-ai.uiVerificationTimeout":     "LEAN_AI_UI_VERIFICATION_TIMEOUT",
+    "lean-ai.uiVerificationViewport":    "LEAN_AI_UI_VERIFICATION_VIEWPORT",
+    "lean-ai.uiVerificationWaitSeconds": "LEAN_AI_UI_VERIFICATION_WAIT_SECONDS",
+
     // Search
     "lean-ai.searchProvider":            "LEAN_AI_SEARCH_PROVIDER",
     "lean-ai.searchApiUrl":              "LEAN_AI_SEARCH_API_URL",
