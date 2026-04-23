@@ -216,6 +216,11 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_PRESERVE_THINKING_EXPERT` | `false` | Same, for the expert model |
 | `LEAN_AI_PRESERVE_THINKING_REQUEST` | `false` | Same, for the request model |
 | `LEAN_AI_PRESERVE_THINKING_WORKER` | `false` | Same, for the worker model |
+| `LEAN_AI_REASONING_EFFORT_PRIMARY` | *(empty)* | Soft cap on thinking tokens for the primary model: `""` (off) / `"low"` / `"medium"` / `"high"` / `"max"`. Ollama enforces via client-side stream interrupt; OpenAI/Serve forward `reasoning_effort`; Anthropic sets `thinking.budget_tokens`; Gemini sets `thinking_budget` |
+| `LEAN_AI_REASONING_EFFORT_EXPERT` | *(empty → inherit primary)* | Same, for the expert model |
+| `LEAN_AI_REASONING_EFFORT_REQUEST` | *(empty → inherit primary)* | Same, for the request model |
+| `LEAN_AI_REASONING_EFFORT_WORKER` | *(empty → inherit primary)* | Same, for the worker model |
+| `LEAN_AI_MAX_THINKING_TOKENS` | `32768` | Universal safety rail — Ollama client-side cap that fires even on effort=Max/Off. Catches runaway loops. Cloud providers rely on their own native limits |
 | `LEAN_AI_OPENAI_API_KEY` | *(empty)* | OpenAI API key (required when provider=openai) |
 | `LEAN_AI_OPENAI_MODEL` | `gpt-4o` | OpenAI model name |
 | `LEAN_AI_OPENAI_BASE_URL` | *(empty)* | Custom base URL for OpenAI-compatible APIs (Together, Groq, vLLM) |

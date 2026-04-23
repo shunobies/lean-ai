@@ -237,6 +237,70 @@ changes) is recommended for most users because it works across Ollama
 versions and renderers. Route B is for teams who want to also customize
 sampling parameters or chat-template structure in the same artifact.
 
+## Reasoning Effort
+
+Per-role dropdown (`""` / `"low"` / `"medium"` / `"high"` / `"max"`) that
+caps how much the model is allowed to think before it must commit to an
+answer. Each provider enforces via its own native mechanism:
+
+| Provider | Enforcement |
+|---|---|
+| **Ollama** | Client-side: streaming helpers count thinking characters as they arrive, break the async generator when the soft limit is exceeded, and the facade injects a user-role nudge (`nudge.reasoning_budget_exceeded`) asking the model to commit. |
+| **Lean AI Serve / OpenAI** | `extra_body.reasoning_effort` on `chat.completions.create` — OpenAI reasoning models (o1/o3/o4/gpt-5) honor this natively; vLLM forwards it. |
+| **Anthropic** | `thinking.budget_tokens` on the create call (1024 / 4096 / 16384 for low/medium/high); `""` and `"max"` omit the field and Anthropic uses its default against `max_tokens`. |
+| **Gemini** | `ThinkingConfig.thinking_budget` (1024 / 4096 / 16384 for low/medium/high, `-1` for `""` / `"max"` — Gemini decides). |
+
+### Effort → token budget
+
+| Setting | Ollama interrupt | OpenAI | Anthropic `budget_tokens` | Gemini `thinking_budget` |
+|---|---|---|---|---|
+| `""` | no soft limit | param omitted | (default behaviour) | `-1` (dynamic) |
+| `"low"` | ~768 tokens | `"low"` | `1024` | `1024` |
+| `"medium"` | ~3072 | `"medium"` | `4096` | `4096` |
+| `"high"` | ~8192 | `"high"` | `16384` | `16384` |
+| `"max"` | no soft limit | param omitted | (default) | `-1` |
+
+### Universal safety rail
+
+**`LEAN_AI_MAX_THINKING_TOKENS`** (default `32768`) fires even when effort
+is `max` or `""`. Only meaningful for providers where we enforce
+client-side (Ollama today); cloud providers enforce their own hard caps
+via `max_tokens` / `budget_tokens`. Catches truly pathological loops — a
+model thinking for 32k tokens without committing is already broken.
+
+### Interrupt flow (Ollama)
+
+When the Ollama client-side check trips:
+
+1. The streaming async generator breaks out of its `async for chunk`
+   loop — the HTTP connection to Ollama closes.
+2. `metrics.thinking_budget_exceeded` is set True and
+   `metrics.thinking_token_count` holds the approximate tokens consumed.
+3. The facade increments `_TurnState.consecutive_budget_interrupts` and
+   appends `nudge.reasoning_budget_exceeded` as a user message:
+   *"Your reasoning exceeded the configured budget. Stop thinking and
+   produce your final answer now based on what you have already worked
+   through."*
+4. The next turn fires with the partial thinking preserved (same fold
+   logic as `preserve_thinking`) plus the nudge in context.
+5. If the model **still** exceeds budget on two consecutive turns, the
+   loop exits cleanly with whatever content has accumulated rather than
+   looping forever.
+
+### Per-role inheritance
+
+Expert / Request / Worker each fall back to primary when their setting
+is `""`. Pattern matches the existing `ollama_expert_temperature` →
+`ollama_temperature` chain.
+
+### Priority order
+
+The settings panel shows one dropdown per model section. Each provider
+handles its own model-capability mismatch gracefully: a reasoning_effort
+flag on a non-reasoning OpenAI model is silently ignored; an Anthropic
+`budget_tokens` on a non-thinking model is omitted (we only add it when
+`enable_thinking=True`).
+
 ## LLM Provider
 
 | Variable | Default | Description |
