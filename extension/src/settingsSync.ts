@@ -132,6 +132,18 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.uiVerificationViewport":    "LEAN_AI_UI_VERIFICATION_VIEWPORT",
     "lean-ai.uiVerificationWaitSeconds": "LEAN_AI_UI_VERIFICATION_WAIT_SECONDS",
 
+    // Per-model capability flags (image + audio)
+    "lean-ai.supportsImagePrimary": "LEAN_AI_SUPPORTS_IMAGE_PRIMARY",
+    "lean-ai.supportsImageExpert":  "LEAN_AI_SUPPORTS_IMAGE_EXPERT",
+    "lean-ai.supportsImageRequest": "LEAN_AI_SUPPORTS_IMAGE_REQUEST",
+    "lean-ai.supportsImageWorker":  "LEAN_AI_SUPPORTS_IMAGE_WORKER",
+    "lean-ai.supportsImageInline":  "LEAN_AI_SUPPORTS_IMAGE_INLINE",
+    "lean-ai.supportsAudioPrimary": "LEAN_AI_SUPPORTS_AUDIO_PRIMARY",
+    "lean-ai.supportsAudioExpert":  "LEAN_AI_SUPPORTS_AUDIO_EXPERT",
+    "lean-ai.supportsAudioRequest": "LEAN_AI_SUPPORTS_AUDIO_REQUEST",
+    "lean-ai.supportsAudioWorker":  "LEAN_AI_SUPPORTS_AUDIO_WORKER",
+    "lean-ai.supportsAudioInline":  "LEAN_AI_SUPPORTS_AUDIO_INLINE",
+
     // Search
     "lean-ai.searchProvider":            "LEAN_AI_SEARCH_PROVIDER",
     "lean-ai.searchApiUrl":              "LEAN_AI_SEARCH_API_URL",

@@ -606,6 +606,56 @@
           "default": false,
           "markdownDescription": "**UI Verification** — Enable the `verify_web_ui` and `verify_desktop_ui` tools. When turned on for the first time, VS Code will prompt to install the workspace-local Chromium browser (~300MB). Requires the `ui-verification` backend extras (`pip install -e \".[ui-verification]\"`) and a configured vision model."
         },
+        "lean-ai.supportsImagePrimary": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Per-Model Capability** — Declare that the **primary** model accepts images. When checked, image uploads go directly to this model instead of round-tripping through the dedicated vision model. No model swap on VRAM-constrained hosts."
+        },
+        "lean-ai.supportsImageExpert": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Per-Model Capability** — Declare that the **expert** model accepts images. Rarely useful on its own since expert doesn't usually see user images directly."
+        },
+        "lean-ai.supportsImageRequest": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Per-Model Capability** — Declare that the **request** model (chat mode) accepts images. When set, chat image uploads skip the describe step."
+        },
+        "lean-ai.supportsImageWorker": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Per-Model Capability** — Declare that the **worker** model accepts images. The worker handles auxiliary tasks (summarisation, compression) and rarely sees user images, but supplied for symmetry."
+        },
+        "lean-ai.supportsImageInline": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Per-Model Capability** — Declare that the **inline** (FIM) model accepts images. Inline predictions don't carry images in practice; flag for symmetry only."
+        },
+        "lean-ai.supportsAudioPrimary": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Per-Model Capability** — Declare that the **primary** model accepts audio. When checked, mic recordings are transcribed by this model directly instead of faster-whisper. First in the audio priority chain."
+        },
+        "lean-ai.supportsAudioExpert": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Per-Model Capability** — Declare that the **expert** model accepts audio. Consulted only if primary/request/worker are unflagged."
+        },
+        "lean-ai.supportsAudioRequest": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Per-Model Capability** — Declare that the **request** model accepts audio. Second in the audio priority chain (after primary)."
+        },
+        "lean-ai.supportsAudioWorker": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Per-Model Capability** — Declare that the **worker** model accepts audio. Third in the audio priority chain."
+        },
+        "lean-ai.supportsAudioInline": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Per-Model Capability** — Declare that the **inline** model accepts audio. Last in the priority chain; rarely useful since inline models are FIM-tuned."
+        },
         "lean-ai.uiVerificationTimeout": {
           "type": "number",
           "default": 180,

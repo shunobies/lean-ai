@@ -93,6 +93,31 @@ export function getSettingsPanelHtml(): string {
     .request-section.active { display: block; }
     .worker-section { display: none; margin-top: var(--gap); }
     .worker-section.active { display: block; }
+    .capability-row {
+        display: flex;
+        gap: 20px;
+        margin-top: var(--gap);
+        padding-top: 12px;
+        border-top: 1px solid var(--vscode-settings-headerBorder, var(--vscode-panel-border));
+    }
+    .capability-row .field-check { flex: 1; }
+    .capability-warning {
+        display: none;
+        font-size: 0.82em;
+        margin-top: 2px;
+        padding: 2px 6px;
+        border-radius: 3px;
+    }
+    .capability-warning.unknown {
+        display: inline-block;
+        color: var(--vscode-editorWarning-foreground, #c08a00);
+        background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #c08a00) 10%, transparent);
+    }
+    .capability-warning.likely-no {
+        display: inline-block;
+        color: var(--vscode-errorForeground);
+        background: color-mix(in srgb, var(--vscode-errorForeground) 10%, transparent);
+    }
 
     /* Form fields */
     .field {
@@ -620,6 +645,26 @@ export function getSettingsPanelHtml(): string {
             <input type="number" id="serveMaxTokens" min="0" step="256" placeholder="0">
         </div>
     </div>
+
+    <!-- Per-model capability declarations (provider-agnostic) -->
+    <div class="capability-row">
+        <div class="field-check">
+            <input type="checkbox" id="supportsImagePrimary">
+            <div>
+                <label for="supportsImagePrimary">Supports image input</label>
+                <span class="hint">Images go to this model directly — no separate vision model needed.</span>
+                <span class="capability-warning" data-for="supportsImagePrimary"></span>
+            </div>
+        </div>
+        <div class="field-check">
+            <input type="checkbox" id="supportsAudioPrimary">
+            <div>
+                <label for="supportsAudioPrimary">Supports audio input</label>
+                <span class="hint">Mic recordings transcribe via this model — Whisper stays as fallback.</span>
+                <span class="capability-warning" data-for="supportsAudioPrimary"></span>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- ── Expert Model ── -->
@@ -734,6 +779,25 @@ export function getSettingsPanelHtml(): string {
                 <div class="field">
                     <label>Expert Serve Model <span class="hint">falls back to primary Serve model</span></label>
                     <input type="text" id="serveExpertModel" placeholder="">
+                </div>
+            </div>
+        </div>
+        <!-- Expert capability declarations (provider-agnostic) -->
+        <div class="capability-row">
+            <div class="field-check">
+                <input type="checkbox" id="supportsImageExpert">
+                <div>
+                    <label for="supportsImageExpert">Supports image input</label>
+                    <span class="hint">Route images to the expert model when it's the active role.</span>
+                    <span class="capability-warning" data-for="supportsImageExpert"></span>
+                </div>
+            </div>
+            <div class="field-check">
+                <input type="checkbox" id="supportsAudioExpert">
+                <div>
+                    <label for="supportsAudioExpert">Supports audio input</label>
+                    <span class="hint">Fourth priority in the audio chain.</span>
+                    <span class="capability-warning" data-for="supportsAudioExpert"></span>
                 </div>
             </div>
         </div>
@@ -855,6 +919,25 @@ export function getSettingsPanelHtml(): string {
                 </div>
             </div>
         </div>
+        <!-- Request capability declarations (provider-agnostic) -->
+        <div class="capability-row">
+            <div class="field-check">
+                <input type="checkbox" id="supportsImageRequest">
+                <div>
+                    <label for="supportsImageRequest">Supports image input</label>
+                    <span class="hint">Chat-mode images go directly to this model.</span>
+                    <span class="capability-warning" data-for="supportsImageRequest"></span>
+                </div>
+            </div>
+            <div class="field-check">
+                <input type="checkbox" id="supportsAudioRequest">
+                <div>
+                    <label for="supportsAudioRequest">Supports audio input</label>
+                    <span class="hint">Second priority in the audio chain (after primary).</span>
+                    <span class="capability-warning" data-for="supportsAudioRequest"></span>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -970,6 +1053,25 @@ export function getSettingsPanelHtml(): string {
                 <div class="field">
                     <label>Worker Serve Model <span class="hint">falls back to primary Serve model</span></label>
                     <input type="text" id="serveWorkerModel" placeholder="">
+                </div>
+            </div>
+        </div>
+        <!-- Worker capability declarations (provider-agnostic) -->
+        <div class="capability-row">
+            <div class="field-check">
+                <input type="checkbox" id="supportsImageWorker">
+                <div>
+                    <label for="supportsImageWorker">Supports image input</label>
+                    <span class="hint">Worker rarely sees user images; supplied for symmetry.</span>
+                    <span class="capability-warning" data-for="supportsImageWorker"></span>
+                </div>
+            </div>
+            <div class="field-check">
+                <input type="checkbox" id="supportsAudioWorker">
+                <div>
+                    <label for="supportsAudioWorker">Supports audio input</label>
+                    <span class="hint">Third priority in the audio chain.</span>
+                    <span class="capability-warning" data-for="supportsAudioWorker"></span>
                 </div>
             </div>
         </div>
@@ -1136,6 +1238,24 @@ export function getSettingsPanelHtml(): string {
         <div class="field">
             <label>Inline Ollama URL <span class="hint">leave empty to share primary URL</span></label>
             <input type="text" id="inlineOllamaUrl" placeholder="">
+        </div>
+    </div>
+    <div class="capability-row">
+        <div class="field-check">
+            <input type="checkbox" id="supportsImageInline">
+            <div>
+                <label for="supportsImageInline">Supports image input</label>
+                <span class="hint">Inline/FIM rarely carries images; supplied for symmetry.</span>
+                <span class="capability-warning" data-for="supportsImageInline"></span>
+            </div>
+        </div>
+        <div class="field-check">
+            <input type="checkbox" id="supportsAudioInline">
+            <div>
+                <label for="supportsAudioInline">Supports audio input</label>
+                <span class="hint">Last in the audio priority chain.</span>
+                <span class="capability-warning" data-for="supportsAudioInline"></span>
+            </div>
         </div>
     </div>
     <div class="field-row">
@@ -1331,6 +1451,129 @@ export function getSettingsPanelHtml(): string {
 
 <script>
     const vscode = acquireVsCodeApi();
+
+    // ── Per-model capability heuristics ─────────────────────────────────────
+    //
+    // Non-blocking UI hint rendered next to each "Supports image / audio"
+    // checkbox.  Backend doesn't consult this — it attempts the flagged
+    // path and falls back on CapabilityError.  This just tells the user
+    // when a flag is very likely a misconfiguration (e.g. Anthropic + audio).
+
+    function assessCapability(provider, model, kind) {
+        const m = (model || '').toLowerCase();
+        const p = (provider || '').toLowerCase();
+
+        if (p === 'anthropic' && kind === 'audio') {
+            return { level: 'likely-no', message: 'Anthropic does not accept audio input — this flag will be ignored at runtime.' };
+        }
+        if (p === 'ollama' && kind === 'audio') {
+            return { level: 'likely-no', message: 'Common Ollama models do not accept audio input.' };
+        }
+        if (p === 'ollama' && kind === 'image') {
+            if (/qwen.*-?vl|llava|llama.*-?vision|bakllava|moondream|granite-?vision/.test(m)) {
+                return { level: 'ok', message: '' };
+            }
+            return { level: 'unknown', message: 'Verify this Ollama model supports images (qwen3-vl, llava, llama3.2-vision, …).' };
+        }
+        if (p === 'openai') {
+            if (kind === 'image' && /gpt-4o|gpt-4.*vision|gpt-5/.test(m)) {
+                return { level: 'ok', message: '' };
+            }
+            if (kind === 'audio' && /gpt-4o.*(audio|realtime)/.test(m)) {
+                return { level: 'ok', message: '' };
+            }
+            return { level: 'unknown', message: 'Verify the model supports ' + kind + ' input.' };
+        }
+        if (p === 'anthropic' && kind === 'image') {
+            if (/claude-[3-9]/.test(m)) { return { level: 'ok', message: '' }; }
+            return { level: 'unknown', message: 'Most Claude 3+ models accept images; verify yours does.' };
+        }
+        if (p === 'gemini') {
+            if (/(1\\.5|2\\.0|2\\.5|3\\.0)/.test(m)) { return { level: 'ok', message: '' }; }
+            return { level: 'unknown', message: 'Verify this Gemini model supports ' + kind + ' input.' };
+        }
+        if (p === 'serve') {
+            return { level: 'unknown', message: 'Capability depends on the vLLM-loaded model.' };
+        }
+        return { level: 'unknown', message: 'Unknown provider — verify before relying on this.' };
+    }
+
+    // Mapping from checkbox id → (provider-resolver, model-resolver, kind).
+    // Each resolver is a () => string function called at refresh time so
+    // we always see the current form state.
+    function getPrimaryProvider() {
+        const sel = document.querySelector('input[name="provider"]:checked');
+        return sel ? sel.value : 'ollama';
+    }
+    function getPrimaryModel() {
+        const prov = getPrimaryProvider();
+        const map = { ollama: 'ollamaModel', openai: 'openaiModel', anthropic: 'anthropicModel', gemini: 'geminiModel', serve: 'serveModel' };
+        const el = document.getElementById(map[prov] || '');
+        return el ? el.value : '';
+    }
+    function getRoleProvider(roleRadioName, fallback) {
+        const sel = document.querySelector('input[name="' + roleRadioName + '"]:checked');
+        return sel ? sel.value : fallback;
+    }
+    function getRoleModel(role, provider) {
+        const map = {
+            expert: { ollama: 'ollamaModelExpert', openai: 'openaiExpertModel', anthropic: 'anthropicExpertModel', gemini: 'geminiExpertModel', serve: 'serveExpertModel' },
+            request: { ollama: 'ollamaModelRequest', openai: 'openaiRequestModel', anthropic: 'anthropicRequestModel', gemini: 'geminiRequestModel', serve: 'serveRequestModel' },
+            worker: { ollama: 'ollamaModelWorker', openai: 'openaiWorkerModel', anthropic: 'anthropicWorkerModel', gemini: 'geminiWorkerModel', serve: 'serveWorkerModel' },
+        };
+        const el = document.getElementById((map[role] || {})[provider] || '');
+        return el ? el.value : '';
+    }
+
+    const CAPABILITY_CHECKBOXES = [
+        { id: 'supportsImagePrimary', kind: 'image', role: 'primary' },
+        { id: 'supportsAudioPrimary', kind: 'audio', role: 'primary' },
+        { id: 'supportsImageExpert',  kind: 'image', role: 'expert' },
+        { id: 'supportsAudioExpert',  kind: 'audio', role: 'expert' },
+        { id: 'supportsImageRequest', kind: 'image', role: 'request' },
+        { id: 'supportsAudioRequest', kind: 'audio', role: 'request' },
+        { id: 'supportsImageWorker',  kind: 'image', role: 'worker' },
+        { id: 'supportsAudioWorker',  kind: 'audio', role: 'worker' },
+        { id: 'supportsImageInline',  kind: 'image', role: 'inline' },
+        { id: 'supportsAudioInline',  kind: 'audio', role: 'inline' },
+    ];
+
+    function refreshCapabilityWarning(entry) {
+        const cb = document.getElementById(entry.id);
+        if (!cb) { return; }
+        const warning = document.querySelector('.capability-warning[data-for="' + entry.id + '"]');
+        if (!warning) { return; }
+
+        // Only show a warning when the user has actually checked the flag.
+        if (!cb.checked) {
+            warning.className = 'capability-warning';
+            warning.textContent = '';
+            return;
+        }
+
+        let provider = '';
+        let model = '';
+        if (entry.role === 'primary') {
+            provider = getPrimaryProvider();
+            model = getPrimaryModel();
+        } else if (entry.role === 'inline') {
+            provider = 'ollama';
+            const el = document.getElementById('inlineModel');
+            model = el ? el.value : '';
+        } else {
+            const radioName = entry.role + 'Provider';
+            provider = getRoleProvider(radioName, 'ollama');
+            model = getRoleModel(entry.role, provider);
+        }
+
+        const result = assessCapability(provider, model, entry.kind);
+        warning.className = 'capability-warning ' + result.level;
+        warning.textContent = result.level === 'ok' ? '' : result.message;
+    }
+
+    function refreshAllCapabilityWarnings() {
+        for (const entry of CAPABILITY_CHECKBOXES) { refreshCapabilityWarning(entry); }
+    }
 
     // ── API key widget factory ──────────────────────────────────────────────
 
@@ -1798,6 +2041,18 @@ export function getSettingsPanelHtml(): string {
             ttsCpuThreads:         val('ttsCpuThreads'),
             enableWakeWord:        val('enableWakeWord'),
 
+            // Per-model capability flags
+            supportsImagePrimary:  val('supportsImagePrimary'),
+            supportsImageExpert:   val('supportsImageExpert'),
+            supportsImageRequest:  val('supportsImageRequest'),
+            supportsImageWorker:   val('supportsImageWorker'),
+            supportsImageInline:   val('supportsImageInline'),
+            supportsAudioPrimary:  val('supportsAudioPrimary'),
+            supportsAudioExpert:   val('supportsAudioExpert'),
+            supportsAudioRequest:  val('supportsAudioRequest'),
+            supportsAudioWorker:   val('supportsAudioWorker'),
+            supportsAudioInline:   val('supportsAudioInline'),
+
             // UI Verification
             enableUiVerification:      val('enableUiVerification'),
             uiVerificationTimeout:     val('uiVerificationTimeout'),
@@ -1841,6 +2096,32 @@ export function getSettingsPanelHtml(): string {
     document.getElementById('uiVerificationTestBtn').addEventListener('click', () => {
         vscode.postMessage({ type: 'runCommand', command: 'lean-ai.testUiVerification' });
     });
+
+    // ── Capability warning wiring ──────────────────────────────────────────
+    // Refresh the warning chip next to each "Supports image/audio" checkbox
+    // whenever its state changes, the role's provider flips, or the model
+    // name is edited.  Runs once on load too (from setFormValues).
+    for (const entry of CAPABILITY_CHECKBOXES) {
+        const cb = document.getElementById(entry.id);
+        if (cb) { cb.addEventListener('change', () => refreshCapabilityWarning(entry)); }
+    }
+    const _capabilityWatchInputs = [
+        'ollamaModel', 'openaiModel', 'anthropicModel', 'geminiModel', 'serveModel',
+        'ollamaModelExpert', 'openaiExpertModel', 'anthropicExpertModel', 'geminiExpertModel', 'serveExpertModel',
+        'ollamaModelRequest', 'openaiRequestModel', 'anthropicRequestModel', 'geminiRequestModel', 'serveRequestModel',
+        'ollamaModelWorker', 'openaiWorkerModel', 'anthropicWorkerModel', 'geminiWorkerModel', 'serveWorkerModel',
+        'inlineModel',
+    ];
+    for (const id of _capabilityWatchInputs) {
+        const el = document.getElementById(id);
+        if (el) { el.addEventListener('input', refreshAllCapabilityWarnings); }
+    }
+    const _capabilityWatchRadios = ['provider', 'expertProvider', 'requestProvider', 'workerProvider'];
+    for (const name of _capabilityWatchRadios) {
+        document.querySelectorAll('input[name="' + name + '"]').forEach(r => {
+            r.addEventListener('change', refreshAllCapabilityWarnings);
+        });
+    }
 
     // ── Load initial settings from extension host ─────────────────────────
 
@@ -2031,6 +2312,19 @@ export function getSettingsPanelHtml(): string {
         setVal('ttsSpeed',              v.ttsSpeed);
         setVal('ttsCpuThreads',         v.ttsCpuThreads);
         setVal('enableWakeWord',        v.enableWakeWord);
+
+        // Per-model capability flags
+        setVal('supportsImagePrimary', v.supportsImagePrimary);
+        setVal('supportsImageExpert',  v.supportsImageExpert);
+        setVal('supportsImageRequest', v.supportsImageRequest);
+        setVal('supportsImageWorker',  v.supportsImageWorker);
+        setVal('supportsImageInline',  v.supportsImageInline);
+        setVal('supportsAudioPrimary', v.supportsAudioPrimary);
+        setVal('supportsAudioExpert',  v.supportsAudioExpert);
+        setVal('supportsAudioRequest', v.supportsAudioRequest);
+        setVal('supportsAudioWorker',  v.supportsAudioWorker);
+        setVal('supportsAudioInline',  v.supportsAudioInline);
+        refreshAllCapabilityWarnings();
 
         // UI Verification
         setVal('enableUiVerification',      v.enableUiVerification);

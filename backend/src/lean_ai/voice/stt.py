@@ -180,15 +180,99 @@ class STTService:
             audio_data = b"".join(self._audio_buffer)
             self._audio_buffer = []
 
-            text, language = await asyncio.to_thread(
-                self._transcribe, audio_data,
-            )
+            # Try an LLM-backed audio handler first when a role is flagged.
+            # Falls back to faster-whisper on CapabilityError or any runtime
+            # failure so the user's flow never breaks.
+            text, language = await self._transcribe_via_llm_or_whisper(audio_data)
 
             return {
                 "text": text,
                 "language": language,
                 "duration_seconds": round(duration, 2),
             }
+
+    async def _transcribe_via_llm_or_whisper(
+        self, audio_data: bytes,
+    ) -> tuple[str, str | None]:
+        """Dispatch: flagged LLM role → Whisper fallback.
+
+        The first branch wraps the raw PCM in a WAV container (PyAudio
+        captures ``paInt16`` mono 16kHz) and calls ``chat_raw`` on the
+        flagged client with a transcribe-only prompt.  On failure
+        (``CapabilityError`` from the provider, a network hiccup, etc.)
+        logs a warning and drops through to the existing Whisper path.
+        """
+        try:
+            from lean_ai.routers.dependencies import resolve_audio_handler
+        except ImportError:
+            # Circular-import guard — only possible during test module
+            # isolation.  Defer to Whisper.
+            resolve_audio_handler = None  # type: ignore[assignment]
+
+        handler = resolve_audio_handler() if resolve_audio_handler else None
+        if handler is not None:
+            try:
+                text, language = await self._transcribe_via_llm(
+                    audio_data, handler,
+                )
+                return text, language
+            except Exception as exc:  # catches CapabilityError + transport errors
+                logger.warning(
+                    "LLM audio handler %s refused/failed: %s; falling back to Whisper",
+                    handler.provider_name, exc,
+                )
+
+        return await asyncio.to_thread(self._transcribe, audio_data)
+
+    async def _transcribe_via_llm(
+        self, pcm_data: bytes, client,
+    ) -> tuple[str, str | None]:
+        """Transcribe PCM bytes via a flagged LLM client.
+
+        Wraps ``pcm_data`` in a 16kHz mono WAV container, base64-encodes
+        it, attaches via ``media_messages.attach_audio`` in the client's
+        native shape, and sends a transcribe-only prompt.
+        """
+        import base64
+        import io
+        import wave
+
+        from lean_ai.llm.media_messages import attach_audio
+
+        # Wrap raw PCM in a WAV container so the LLM sees a proper header.
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wav_file:
+            wav_file.setnchannels(CHANNELS)
+            wav_file.setsampwidth(FORMAT_WIDTH)
+            wav_file.setframerate(SAMPLE_RATE)
+            wav_file.writeframes(pcm_data)
+        wav_bytes = buf.getvalue()
+        audio_b64 = base64.b64encode(wav_bytes).decode("ascii")
+
+        system_prompt = (
+            "Transcribe the following audio verbatim. "
+            "Respond with ONLY the transcription — no preamble, no "
+            "apologies, no explanatory text."
+        )
+        user_messages = attach_audio(
+            [{"role": "user", "content": ""}],
+            audio_b64,
+            "audio/wav",
+            provider=client.provider_name,
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            *user_messages,
+        ]
+
+        text, _metrics = await client.chat_raw(messages, temperature=0.0)
+        text = (text or "").strip()
+        logger.info(
+            "STT via LLM (%s): %d bytes PCM → %d chars",
+            client.provider_name, len(pcm_data), len(text),
+        )
+        # LLM transcription doesn't expose a detected language — return None.
+        return text, None
 
     def _transcribe(self, audio_data: bytes) -> tuple[str, str | None]:
         """Transcribe raw PCM audio bytes. Runs in a thread."""

@@ -334,6 +334,16 @@ export class SettingsPanel {
             uiVerificationTimeout:    "lean-ai.uiVerificationTimeout",
             uiVerificationViewport:   "lean-ai.uiVerificationViewport",
             uiVerificationWaitSeconds:"lean-ai.uiVerificationWaitSeconds",
+            supportsImagePrimary:     "lean-ai.supportsImagePrimary",
+            supportsImageExpert:      "lean-ai.supportsImageExpert",
+            supportsImageRequest:     "lean-ai.supportsImageRequest",
+            supportsImageWorker:      "lean-ai.supportsImageWorker",
+            supportsImageInline:      "lean-ai.supportsImageInline",
+            supportsAudioPrimary:     "lean-ai.supportsAudioPrimary",
+            supportsAudioExpert:      "lean-ai.supportsAudioExpert",
+            supportsAudioRequest:     "lean-ai.supportsAudioRequest",
+            supportsAudioWorker:      "lean-ai.supportsAudioWorker",
+            supportsAudioInline:      "lean-ai.supportsAudioInline",
         };
 
         const numericFields = new Set([
@@ -380,6 +390,10 @@ export class SettingsPanel {
             "enableThinkingExpert", "enableThinkingRequest", "enableThinkingWorker",
             "enableStt", "enableTts", "enableWakeWord",
             "enableUiVerification",
+            "supportsImagePrimary", "supportsImageExpert", "supportsImageRequest",
+            "supportsImageWorker", "supportsImageInline",
+            "supportsAudioPrimary", "supportsAudioExpert", "supportsAudioRequest",
+            "supportsAudioWorker", "supportsAudioInline",
         ]);
 
         const coercedMap = new Map<string, unknown>();
@@ -564,6 +578,18 @@ export class SettingsPanel {
             uiVerificationTimeout:     config.get("lean-ai.uiVerificationTimeout", 180),
             uiVerificationViewport:    config.get("lean-ai.uiVerificationViewport", "1280x800"),
             uiVerificationWaitSeconds: config.get("lean-ai.uiVerificationWaitSeconds", 3),
+
+            // Per-model capability flags
+            supportsImagePrimary: config.get("lean-ai.supportsImagePrimary", false),
+            supportsImageExpert:  config.get("lean-ai.supportsImageExpert", false),
+            supportsImageRequest: config.get("lean-ai.supportsImageRequest", false),
+            supportsImageWorker:  config.get("lean-ai.supportsImageWorker", false),
+            supportsImageInline:  config.get("lean-ai.supportsImageInline", false),
+            supportsAudioPrimary: config.get("lean-ai.supportsAudioPrimary", false),
+            supportsAudioExpert:  config.get("lean-ai.supportsAudioExpert", false),
+            supportsAudioRequest: config.get("lean-ai.supportsAudioRequest", false),
+            supportsAudioWorker:  config.get("lean-ai.supportsAudioWorker", false),
+            supportsAudioInline:  config.get("lean-ai.supportsAudioInline", false),
 
             // Search
             searchProvider:            config.get("lean-ai.searchProvider", "duckduckgo"),
