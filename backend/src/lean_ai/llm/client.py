@@ -226,12 +226,18 @@ class OllamaProvider(LLMProvider):
         return opts
 
     def _build_chat_template_kwargs(self) -> dict:
-        """Return chat_template_kwargs to forward to Ollama when ``preserve_thinking``
-        is on.  Qwen3.6's chat template honors this flag.  Empty dict when
-        disabled so ``**_build_chat_template_kwargs()`` is a no-op."""
-        if not self._preserve_thinking:
-            return {}
-        return {"chat_template_kwargs": {"preserve_thinking": True}}
+        """Ollama uses a compiled ``RENDERER`` (Go code), not a Jinja template,
+        so the vLLM-style ``chat_template_kwargs`` has nowhere to land here.
+
+        Preserve-thinking behaviour for Ollama is handled in
+        :func:`lean_ai.llm.facade` by folding the ``thinking`` blob into
+        the assistant message's ``content`` as ``<think>...</think>``.  The
+        renderer then forwards the tokens like any other content.
+
+        This helper is retained for API parity with the chat-call splat
+        pattern but always returns an empty dict.
+        """
+        return {}
 
     def _extract_metrics(self, response: dict) -> LLMMetrics:
         """Extract standardized metrics from an Ollama response."""

@@ -442,16 +442,36 @@ class LLMClient:
             # ── Process turn results ──────────────────────────────
             completion_call: ToolCallInfo | None = None
 
-            # Preserve chain-of-thought across turns when the provider has
-            # it enabled (Qwen3.6 / vLLM ``chat_template_kwargs``).  The
-            # thinking blob flows from the streaming loop via metrics.thinking.
+            # Preserve chain-of-thought across turns when the provider has it
+            # enabled.  Two delivery strategies:
+            #
+            #   * Ollama — fold into ``content`` as ``<think>...</think>\n\n...``.
+            #     Ollama's compiled ``RENDERER qwen3.5`` has no
+            #     ``preserve_thinking`` knob; folding makes the thinking visible
+            #     to the renderer via normal content regardless of renderer
+            #     behaviour.  Works with every Ollama version.
+            #   * Everything else (Serve/vLLM, OpenAI, Anthropic, Gemini) —
+            #     attach as a separate ``thinking`` field.  Serve/vLLM's
+            #     Jinja chat template reads it via
+            #     ``chat_template_kwargs={"preserve_thinking": True}`` (set by
+            #     ``OpenAIProvider._extra_body``).  Others silently ignore.
             preserve_thinking = getattr(self._provider, "_preserve_thinking", False)
             turn_thinking = metrics.thinking if preserve_thinking else None
+            fold_into_content = (
+                bool(turn_thinking)
+                and getattr(self._provider, "provider_name", "") == "ollama"
+            )
 
             if not tool_calls:
-                assistant_msg: dict = {"role": "assistant", "content": content}
-                if turn_thinking:
-                    assistant_msg["thinking"] = turn_thinking
+                if fold_into_content:
+                    assistant_msg: dict = {
+                        "role": "assistant",
+                        "content": f"<think>\n{turn_thinking}\n</think>\n\n{content}",
+                    }
+                else:
+                    assistant_msg = {"role": "assistant", "content": content}
+                    if turn_thinking:
+                        assistant_msg["thinking"] = turn_thinking
                 messages.append(assistant_msg)
             else:
                 # Reset text-only/truncation counters on tool use
@@ -468,7 +488,12 @@ class LLMClient:
                 assistant_msg = self._provider.format_assistant_tool_message(
                     content, tool_calls,
                 )
-                if turn_thinking:
+                if fold_into_content:
+                    existing = assistant_msg.get("content") or ""
+                    assistant_msg["content"] = (
+                        f"<think>\n{turn_thinking}\n</think>\n\n{existing}"
+                    )
+                elif turn_thinking:
                     assistant_msg["thinking"] = turn_thinking
                 messages.append(assistant_msg)
 
@@ -808,24 +833,40 @@ def _metrics_to_dict(metrics: LLMMetrics) -> dict:
     }
 
 
+_FOLDED_THINK_RE = re.compile(r"^<think>\n.*?\n</think>\n\n", re.DOTALL)
+
+
 def _trim_old_thinking(messages: list[dict], *, keep_recent: int = 3) -> None:
-    """Strip ``thinking`` from all but the ``keep_recent`` most recent
-    assistant messages.
+    """Strip thinking from all but the ``keep_recent`` most recent assistant
+    messages.  Handles both delivery strategies:
+
+    * Separate ``thinking`` field on the message dict (Serve / OpenAI / others).
+    * ``<think>...</think>\\n\\n`` folded into the start of ``content`` (Ollama).
 
     Operates in place.  Used when ``preserve_thinking`` is on to bound the
     context-window cost of chain-of-thought retention in long tool loops —
-    recent thinking is still visible to the model (most useful for
-    self-coherence), older thinking is dropped.
+    recent thinking stays visible to the model (useful for self-coherence),
+    older thinking is dropped.
     """
+    def _has_thinking(msg: dict) -> bool:
+        if msg.get("role") != "assistant":
+            return False
+        if "thinking" in msg:
+            return True
+        content = msg.get("content")
+        return isinstance(content, str) and bool(_FOLDED_THINK_RE.match(content))
+
+    def _strip(msg: dict) -> None:
+        msg.pop("thinking", None)
+        content = msg.get("content")
+        if isinstance(content, str):
+            msg["content"] = _FOLDED_THINK_RE.sub("", content, count=1)
+
     if keep_recent <= 0:
         for msg in messages:
-            if msg.get("role") == "assistant":
-                msg.pop("thinking", None)
+            _strip(msg) if msg.get("role") == "assistant" else None
         return
 
-    assistant_indices = [
-        i for i, m in enumerate(messages)
-        if m.get("role") == "assistant" and "thinking" in m
-    ]
+    assistant_indices = [i for i, m in enumerate(messages) if _has_thinking(m)]
     for idx in assistant_indices[:-keep_recent]:
-        messages[idx].pop("thinking", None)
+        _strip(messages[idx])

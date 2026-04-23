@@ -164,21 +164,78 @@ so you can set `LEAN_AI_OLLAMA_MIN_P=0.05` once and every role inherits.
 `expert`/`request`/`worker` can override.
 
 **`preserve_thinking`** (`LEAN_AI_PRESERVE_THINKING_{role}`, default
-`false`) — Qwen3.6+/vLLM feature. When enabled, the model's previous-turn
-chain-of-thought is retained in the rendered prompt via
-`chat_template_kwargs={"preserve_thinking": true}`. Reduces redundant
-re-reasoning across tool-loop iterations and improves KV-cache reuse.
+`false`) — retains the model's previous-turn chain-of-thought in the
+rendered prompt so tool-loop iterations don't re-derive the same
+reasoning. Improves KV-cache reuse.
 
-Honored by:
-- **Ollama** (Qwen3.6+ templates honor the flag; older models ignore it).
-- **Lean AI Serve (vLLM)** — forwarded via `extra_body`.
+### How preservation is delivered per provider
 
-Ignored silently by Anthropic / Gemini / pure OpenAI. Settings UI warns
-when flagged on a provider that won't use it.
+- **Ollama** — client-side fold. The backend prepends
+  `<think>\n{thinking}\n</think>\n\n` to the assistant message's `content`
+  before sending the next turn. Works regardless of Ollama's compiled
+  `RENDERER` (qwen3.5, qwen3, etc.) because the think block rides on
+  normal content tokens.
+- **Lean AI Serve (vLLM)** — `extra_body={"chat_template_kwargs": {"preserve_thinking": true}}`.
+  The Jinja chat template reads the kwarg. Requires a model whose template
+  actually honors the flag (Qwen3.6+).
+- **OpenAI / Anthropic / Gemini** — ignored silently. The settings UI
+  warns when flagged on a provider that won't use it.
 
-Context-cost mitigation: the backend's tool-loop keeps thinking on the
-**3 most recent** assistant turns and drops it from older ones. Prevents
-a long loop from bloating the window with stale reasoning.
+### Context-cost mitigation
+
+The tool-loop keeps thinking on the **3 most recent** assistant turns and
+drops it from older ones (both delivery strategies are handled). Prevents
+a long loop from bloating the context window with stale reasoning.
+
+### Optional: Route B — custom Modelfile for Ollama
+
+If you'd rather have Ollama's renderer emit the think block natively
+(instead of relying on the client-side fold, or if you want to also tune
+sampling + template structure in one place), build a derived model with
+a custom `TEMPLATE` that references `.Thinking`:
+
+```
+# Modelfile (save as e.g. Modelfile-qwen3.6-preserve)
+FROM qwen3.6:27b-q8_0
+
+TEMPLATE """{{ if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{ end }}{{ range .Messages }}<|im_start|>{{ .Role }}
+{{ if and (eq .Role "assistant") .Thinking }}<think>
+{{ .Thinking }}
+</think>
+
+{{ end }}{{ .Content }}<|im_end|>
+{{ end }}<|im_start|>assistant
+"""
+
+PARAMETER min_p 0
+PARAMETER presence_penalty 1.5
+PARAMETER repeat_penalty 1
+PARAMETER temperature 1
+PARAMETER top_k 20
+PARAMETER top_p 0.95
+```
+
+Create and point lean-ai at it:
+
+```bash
+ollama create qwen3.6-preserve -f Modelfile-qwen3.6-preserve
+```
+
+Set `LEAN_AI_OLLAMA_MODEL=qwen3.6-preserve` (or set the model in the
+extension Settings panel). Then either:
+
+- Leave `LEAN_AI_PRESERVE_THINKING_PRIMARY=false` — the custom template
+  handles it all (the backend doesn't touch content).
+- Or keep the flag on — the backend's fold AND the renderer both emit
+  think blocks; not a correctness issue but redundant, so prefer one
+  path or the other.
+
+Route A (the default — client-side fold when the flag is on, no Modelfile
+changes) is recommended for most users because it works across Ollama
+versions and renderers. Route B is for teams who want to also customize
+sampling parameters or chat-template structure in the same artifact.
 
 ## LLM Provider
 

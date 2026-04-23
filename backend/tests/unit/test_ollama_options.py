@@ -82,16 +82,14 @@ def test_build_options_both_params_set():
 # ── chat_template_kwargs for preserve_thinking ─────────────────────────
 
 
-def test_chat_template_kwargs_empty_when_preserve_thinking_off():
-    p = _provider(preserve_thinking=False)
-    assert p._build_chat_template_kwargs() == {}
-
-
-def test_chat_template_kwargs_populated_when_preserve_thinking_on():
-    p = _provider(preserve_thinking=True)
-    assert p._build_chat_template_kwargs() == {
-        "chat_template_kwargs": {"preserve_thinking": True},
-    }
+def test_chat_template_kwargs_always_empty_on_ollama():
+    """Ollama's compiled renderer doesn't honor chat_template_kwargs —
+    preserve_thinking is handled client-side via content folding in
+    facade._trim_old_thinking / the chat_with_tools loop.  The helper
+    exists for call-site splat parity but must return an empty dict in
+    both states."""
+    assert _provider(preserve_thinking=False)._build_chat_template_kwargs() == {}
+    assert _provider(preserve_thinking=True)._build_chat_template_kwargs() == {}
 
 
 # OllamaProvider._build_options is private; expose via a test hook so we
