@@ -223,3 +223,87 @@ worker_llm_client: LLMClient | None = create_role_client(
     ),
     semaphore=_llm_semaphore,
 )
+
+
+# ── Media capability resolvers ─────────────────────────────────────────
+
+# When a user submits an image or audio, dispatch asks these helpers
+# which client — if any — already has the capability flag set for its
+# role.  Returning a flagged client lets us attach the media directly
+# to that client's chat call (via ``llm.media_messages.attach_*``) and
+# skip the round-trip through ``vision_model`` / faster-whisper, which
+# on VRAM-constrained hosts would force a model swap.
+#
+# A return of ``("describe", vision_client)`` is the fallback signal for
+# images — dispatch should run the legacy ``describe_image`` flow and
+# inject text.  ``None`` means "feature is disabled; warn the user".
+#
+# For audio, ``None`` means "fall back to faster-whisper".
+
+from typing import Literal  # noqa: E402
+
+
+def _image_fallback_provider() -> "LLMClient | None":
+    """Return a client wrapping ``vision_model`` (always Ollama), or None."""
+    if not settings.vision_model:
+        return None
+    # Lightweight: the existing describe_image path uses its own Ollama
+    # AsyncClient directly rather than our LLMClient facade, so callers
+    # that opt into the describe branch use describe_image(); this helper
+    # just signals the branch.  Return the primary llm_client as a
+    # sentinel — callers check the mode, not the client, for describe.
+    return llm_client
+
+
+def resolve_image_handler(
+    flow: Literal["chat", "workflow"] = "chat",
+) -> tuple[str, "LLMClient"] | None:
+    """Pick the client that should process an inbound image.
+
+    Returns:
+        ``("inline", client)`` — send image blocks to this client directly
+        (it's vision-capable by declaration).
+        ``("describe", client)`` — run the legacy ``describe_image`` flow
+        against ``vision_model``; ``client`` is returned for completeness
+        but the describe path doesn't use it.
+        ``None`` — no image handler available; the caller should warn and
+        drop the attachment.
+
+    ``flow="chat"`` considers the request client first, then primary.
+    ``flow="workflow"`` only considers primary (the role that sees user
+    messages during plan Phase 1/2 and execution).
+    """
+    if flow == "chat":
+        if request_llm_client is not None and settings.supports_image_request:
+            return ("inline", request_llm_client)
+        if settings.supports_image_primary:
+            return ("inline", llm_client)
+    elif flow == "workflow":
+        if settings.supports_image_primary:
+            return ("inline", llm_client)
+
+    fallback = _image_fallback_provider()
+    if fallback is not None:
+        return ("describe", fallback)
+    return None
+
+
+def resolve_audio_handler() -> "LLMClient | None":
+    """Pick the flagged client for audio transcription, else None.
+
+    Priority order: primary → request → worker → expert → inline.
+    Returning ``None`` signals the caller to use faster-whisper.
+    ``CapabilityError`` raised later at dispatch time triggers the same
+    Whisper fallback at the call site.
+    """
+    if settings.supports_audio_primary:
+        return llm_client
+    if settings.supports_audio_request and request_llm_client is not None:
+        return request_llm_client
+    if settings.supports_audio_worker and worker_llm_client is not None:
+        return worker_llm_client
+    if settings.supports_audio_expert and expert_llm_client is not None:
+        return expert_llm_client
+    if settings.supports_audio_inline and _inline_client is not None:
+        return _inline_client
+    return None

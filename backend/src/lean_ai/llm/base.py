@@ -140,6 +140,16 @@ class LLMProvider(ABC):
         """The model identifier used by this provider."""
 
     @property
+    def provider_name(self) -> str:
+        """Kebab-case provider identifier used for media routing.
+
+        One of ``"ollama"``, ``"openai"``, ``"anthropic"``, ``"gemini"``.
+        (``"serve"`` reuses ``OpenAIProvider`` and reports ``"openai"`` —
+        identical content-block shape for images and audio.)
+        """
+        return type(self).__name__.replace("Provider", "").lower()
+
+    @property
     @abstractmethod
     def context_window(self) -> int:
         """Total context window size in tokens."""

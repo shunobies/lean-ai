@@ -155,6 +155,11 @@ class LLMClient:
     def model_name(self) -> str:
         return self._provider.model_name
 
+    @property
+    def provider_name(self) -> str:
+        """Kebab-case provider name used by media routing (image/audio)."""
+        return self._provider.provider_name
+
     # ── Delegated chat methods ──
 
     async def chat_raw(

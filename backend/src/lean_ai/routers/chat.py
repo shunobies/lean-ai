@@ -20,7 +20,12 @@ from lean_ai.routers.context_helpers import (
     read_project_context,
     search_workspace,
 )
-from lean_ai.routers.dependencies import llm_client, refiner, request_llm_client
+from lean_ai.routers.dependencies import (
+    llm_client,
+    refiner,
+    request_llm_client,
+    resolve_image_handler,
+)
 from lean_ai.routers.models import ChatRequest, ChatResponse
 from lean_ai.tools import internet
 from lean_ai.tools.descriptions import humanize_tool_call
@@ -372,6 +377,18 @@ async def _build_chat_messages(
 
     image_descriptions: str = ""
 
+    # Resolve up front so _describe_attachments can skip when the active
+    # role will handle the image natively.
+    image_attachments_raw: list[tuple[str, str]] = [
+        (a.data, a.mime_type)
+        for a in (request.attachments or [])
+        if a.mime_type and a.mime_type.startswith("image/")
+    ]
+    image_handler = (
+        resolve_image_handler("chat") if image_attachments_raw else None
+    )
+    image_mode = image_handler[0] if image_handler is not None else None
+
     async def _describe_attachments():
         nonlocal image_descriptions
         from lean_ai.llm.vision import (
@@ -380,12 +397,15 @@ async def _build_chat_messages(
             is_vision_available,
         )
 
-        if not request.attachments or not is_vision_available():
+        # Only run the legacy describe path when no role is flagged for
+        # inline image handling.  "inline" branch attaches image blocks
+        # directly to the main chat call below — no describe call needed.
+        if image_mode != "describe":
+            return
+        if not is_vision_available():
             return
         image_attachments = [
-            {"data": a.data, "filename": a.filename}
-            for a in request.attachments
-            if a.mime_type and a.mime_type.startswith("image/")
+            {"data": data, "filename": ""} for data, _mime in image_attachments_raw
         ]
         if not image_attachments:
             return
@@ -427,13 +447,60 @@ async def _build_chat_messages(
     )
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
-    # Append image descriptions to the user message
+    # Append image descriptions to the user message (describe branch).
     if image_descriptions:
         user_message = f"{user_message}\n\n{image_descriptions}"
+
+    # Warn the user in-band if images were supplied but no handler is configured.
+    if image_attachments_raw and image_handler is None:
+        user_message = (
+            f"{user_message}\n\n[System: {len(image_attachments_raw)} image "
+            "attachment(s) dropped — no vision-capable model is configured. "
+            "Enable 'Supports Image' on a vision-capable role in Settings, "
+            "or set LEAN_AI_VISION_MODEL.]"
+        )
 
     for msg in request.history[-20:]:
         messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": user_message})
+
+    # Inline-handler branch: attach each image to the last user message in
+    # the active provider's native content-block shape, bypassing the
+    # describe round-trip entirely.
+    if image_mode == "inline" and image_handler is not None:
+        from lean_ai.llm.media_messages import CapabilityError, attach_image
+        target_client = image_handler[1]
+        provider = target_client.provider_name
+        try:
+            for img_b64, mime_type in image_attachments_raw:
+                messages = attach_image(
+                    messages, img_b64, mime_type, provider=provider,
+                )
+        except CapabilityError as exc:
+            logger.warning(
+                "Inline image handler %s refused: %s; falling back to describe",
+                provider, exc,
+            )
+            # Fall back to describe-and-inject if vision_model is set.
+            if settings.vision_model:
+                from lean_ai.llm.vision import (
+                    describe_images,
+                    format_image_descriptions,
+                )
+                try:
+                    fallback = await describe_images(
+                        [{"data": d, "filename": ""} for d, _ in image_attachments_raw],
+                        prompt=request.message,
+                    )
+                    fallback_prose = format_image_descriptions(fallback)
+                    if fallback_prose:
+                        messages[-1]["content"] = (
+                            f"{messages[-1]['content']}\n\n{fallback_prose}"
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "Describe fallback failed after CapabilityError: %s", e,
+                    )
 
     logger.info(
         "Chat: history=%d, files=%d, search=%d, project_ctx=%s, refined=%s, images=%d",
