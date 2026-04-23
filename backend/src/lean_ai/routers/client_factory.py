@@ -55,12 +55,19 @@ class RoleConfig:
     # chain-of-thought in the rendered prompt so tool loops don't re-derive
     # the same reasoning each iteration.
     preserve_thinking: bool = False
+    # Per-role soft cap on thinking tokens.  Ollama enforces via a
+    # client-side stream interrupt; cloud providers forward the setting
+    # to their native reasoning-budget parameter.
+    reasoning_effort: str = ""
 
     use_semaphore: bool = False
 
 
 def _create_openai_provider(
-    model: str, enable_thinking: bool, preserve_thinking: bool = False,
+    model: str,
+    enable_thinking: bool,
+    preserve_thinking: bool = False,
+    reasoning_effort: str = "",
 ) -> LLMProvider:
     from lean_ai.llm.provider_openai import OpenAIProvider
     return OpenAIProvider(
@@ -72,11 +79,15 @@ def _create_openai_provider(
         max_tokens=settings.openai_max_tokens,
         enable_thinking=enable_thinking,
         preserve_thinking=preserve_thinking,
+        reasoning_effort=reasoning_effort,
     )
 
 
 def _create_anthropic_provider(
-    model: str, enable_thinking: bool, preserve_thinking: bool = False,
+    model: str,
+    enable_thinking: bool,
+    preserve_thinking: bool = False,
+    reasoning_effort: str = "",
 ) -> LLMProvider:
     # Anthropic doesn't honor chat_template_kwargs — preserve_thinking is a
     # no-op here.  Accept the arg for interface parity with the other
@@ -90,11 +101,15 @@ def _create_anthropic_provider(
         context_window=settings.anthropic_context_window,
         max_tokens=settings.anthropic_max_tokens,
         enable_thinking=enable_thinking,
+        reasoning_effort=reasoning_effort,
     )
 
 
 def _create_serve_provider(
-    model: str, enable_thinking: bool, preserve_thinking: bool = False,
+    model: str,
+    enable_thinking: bool,
+    preserve_thinking: bool = False,
+    reasoning_effort: str = "",
 ) -> LLMProvider:
     from lean_ai.llm.provider_openai import OpenAIProvider
     return OpenAIProvider(
@@ -106,11 +121,15 @@ def _create_serve_provider(
         max_tokens=settings.serve_max_tokens,
         enable_thinking=enable_thinking,
         preserve_thinking=preserve_thinking,
+        reasoning_effort=reasoning_effort,
     )
 
 
 def _create_gemini_provider(
-    model: str, enable_thinking: bool, preserve_thinking: bool = False,
+    model: str,
+    enable_thinking: bool,
+    preserve_thinking: bool = False,
+    reasoning_effort: str = "",
 ) -> LLMProvider:
     # Gemini has its own thinking-preservation semantics; preserve_thinking
     # is a no-op here.  Accept for interface parity.
@@ -123,6 +142,7 @@ def _create_gemini_provider(
         context_window=settings.gemini_context_window,
         max_tokens=settings.gemini_max_tokens,
         enable_thinking=enable_thinking,
+        reasoning_effort=reasoning_effort,
     )
 
 
@@ -202,7 +222,10 @@ def create_role_client(
 
         try:
             role_provider = factory(
-                model, cfg.enable_thinking, cfg.preserve_thinking,
+                model,
+                cfg.enable_thinking,
+                cfg.preserve_thinking,
+                cfg.reasoning_effort,
             )
             client = LLMClient(provider=role_provider, concurrency_semaphore=sem)
             logger.info(
@@ -239,6 +262,8 @@ def create_role_client(
                 ollama_kw["min_p"] = cfg.ollama_min_p
             if cfg.ollama_presence_penalty is not None:
                 ollama_kw["presence_penalty"] = cfg.ollama_presence_penalty
+            if cfg.reasoning_effort:
+                ollama_kw["reasoning_effort"] = cfg.reasoning_effort
 
             role_provider = OllamaProvider(**ollama_kw)
             client = LLMClient(provider=role_provider, concurrency_semaphore=sem)

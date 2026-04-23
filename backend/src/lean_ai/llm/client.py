@@ -149,6 +149,7 @@ class OllamaProvider(LLMProvider):
         presence_penalty: float | None = None,
         enable_thinking: bool | None = None,
         preserve_thinking: bool = False,
+        reasoning_effort: str = "",
     ):
         effective_url = ollama_url or settings.ollama_url
         self._url = effective_url
@@ -179,6 +180,11 @@ class OllamaProvider(LLMProvider):
             else settings.enable_thinking
         )
         self._preserve_thinking = preserve_thinking
+        # Client-side interrupt configuration.  Cloud providers enforce
+        # reasoning budgets natively; Ollama has no such mechanism, so we
+        # count thinking tokens during streaming and break the stream when
+        # the configured soft limit or universal safety rail is exceeded.
+        self._reasoning_effort = reasoning_effort or ""
 
         self._fim_supported = True
 
@@ -238,6 +244,25 @@ class OllamaProvider(LLMProvider):
         pattern but always returns an empty dict.
         """
         return {}
+
+    def _thinking_budget_exceeded(self, thinking_chars: int) -> bool:
+        """Client-side interrupt check — should we abort streaming now?
+
+        Applies two gates:
+        1. The per-role ``reasoning_effort`` soft limit (``low`` / ``medium``
+           / ``high``; ``""`` and ``"max"`` skip this gate).
+        2. The universal ``settings.max_thinking_tokens`` safety rail (fires
+           even when effort is ``"max"`` / ``""`` — catches runaway loops).
+
+        Argument is accumulated thinking **characters**.  Approximate
+        tokens = ``(chars + 3) // 4`` (rounds up for safety).
+        """
+        from lean_ai.config import reasoning_effort_to_ollama_limit
+        approx_tokens = (thinking_chars + 3) // 4
+        effort_limit = reasoning_effort_to_ollama_limit(self._reasoning_effort)
+        if effort_limit is not None and approx_tokens >= effort_limit:
+            return True
+        return approx_tokens >= settings.max_thinking_tokens
 
     def _extract_metrics(self, response: dict) -> LLMMetrics:
         """Extract standardized metrics from an Ollama response."""
@@ -338,6 +363,8 @@ class OllamaProvider(LLMProvider):
 
         content_parts: list[str] = []
         thinking_parts: list[str] = []
+        thinking_chars = 0
+        budget_exceeded = False
         last_chunk: dict = {}
 
         async for chunk in stream:
@@ -347,8 +374,16 @@ class OllamaProvider(LLMProvider):
 
             if thinking_token:
                 thinking_parts.append(thinking_token)
+                thinking_chars += len(thinking_token)
                 if thinking_callback:
                     await thinking_callback(thinking_token)
+                if self._thinking_budget_exceeded(thinking_chars):
+                    budget_exceeded = True
+                    logger.info(
+                        "chat_raw(stream): thinking budget exceeded at ~%d tokens; aborting stream",
+                        (thinking_chars + 3) // 4,
+                    )
+                    break
 
             if content_token:
                 content_parts.append(content_token)
@@ -362,6 +397,8 @@ class OllamaProvider(LLMProvider):
         thinking = "".join(thinking_parts) or None
         metrics = self._extract_metrics(last_chunk) if last_chunk else LLMMetrics()
         metrics.thinking = thinking
+        metrics.thinking_token_count = (thinking_chars + 3) // 4
+        metrics.thinking_budget_exceeded = budget_exceeded
 
         logger.info("LLM chat_raw response (%d chars, streamed): %s", len(text), text[:200])
         return text, metrics
@@ -527,6 +564,8 @@ class OllamaProvider(LLMProvider):
 
         content_parts: list[str] = []
         thinking_parts: list[str] = []
+        thinking_chars = 0
+        budget_exceeded = False
         last_chunk: dict = {}
         raw_tool_calls: list = []
 
@@ -537,8 +576,17 @@ class OllamaProvider(LLMProvider):
 
             if thinking_token:
                 thinking_parts.append(thinking_token)
+                thinking_chars += len(thinking_token)
                 if thinking_callback:
                     await thinking_callback(thinking_token)
+                if self._thinking_budget_exceeded(thinking_chars):
+                    budget_exceeded = True
+                    logger.info(
+                        "chat_with_tools_single(stream): thinking budget "
+                        "exceeded at ~%d tokens; aborting stream",
+                        (thinking_chars + 3) // 4,
+                    )
+                    break
 
             if content_token:
                 content_parts.append(content_token)
@@ -555,6 +603,8 @@ class OllamaProvider(LLMProvider):
         thinking = "".join(thinking_parts) or None
         metrics = self._extract_metrics(last_chunk) if last_chunk else LLMMetrics()
         metrics.thinking = thinking
+        metrics.thinking_token_count = (thinking_chars + 3) // 4
+        metrics.thinking_budget_exceeded = budget_exceeded
 
         tool_calls = [
             ToolCallInfo(

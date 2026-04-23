@@ -65,6 +65,48 @@ def _expand_ctx(raw: int | str) -> int:
     return n * 1024 if n <= 10_000 else n
 
 
+_REASONING_EFFORT_VALUES = frozenset({"", "low", "medium", "high", "max"})
+
+
+def reasoning_effort_to_ollama_limit(effort: str) -> int | None:
+    """Ollama client-side interrupt threshold in approximate tokens.
+
+    Returns None for ``""`` (off) and ``"max"`` — no soft limit applied.
+    The universal ``max_thinking_tokens`` still caps these cases as a
+    safety rail.
+    """
+    return {"low": 768, "medium": 3072, "high": 8192}.get(effort)
+
+
+def reasoning_effort_to_openai_param(effort: str) -> str | None:
+    """Value for OpenAI ``reasoning_effort`` API parameter.
+
+    Returns None for ``""`` and ``"max"`` so the param is omitted and
+    the provider uses its default behavior.  OpenAI reasoning models
+    accept ``"low" | "medium" | "high"``.
+    """
+    return {"low": "low", "medium": "medium", "high": "high"}.get(effort)
+
+
+def reasoning_effort_to_anthropic_budget(effort: str) -> int | None:
+    """Value for Anthropic ``thinking.budget_tokens``.
+
+    Anthropic requires budget_tokens >= 1024 when thinking is enabled.
+    Returns None for ``""`` and ``"max"`` so the field is omitted and
+    Anthropic uses its default (thinking against ``max_tokens``).
+    """
+    return {"low": 1024, "medium": 4096, "high": 16384}.get(effort)
+
+
+def reasoning_effort_to_gemini_budget(effort: str) -> int:
+    """Value for Gemini 2.5 ``ThinkingConfig.thinking_budget``.
+
+    ``-1`` = dynamic (let the model decide); used for ``""`` and
+    ``"max"`` so the feature is unobtrusive by default.
+    """
+    return {"low": 1024, "medium": 4096, "high": 16384, "max": -1, "": -1}.get(effort, -1)
+
+
 def _default_keyfile_path() -> Path:
     """Resolve the default keyfile path relative to cwd."""
     return Path.cwd() / ".lean_ai" / ".keyfile"
@@ -251,6 +293,25 @@ class Settings(BaseSettings):
     preserve_thinking_expert: bool = False
     preserve_thinking_request: bool = False
     preserve_thinking_worker: bool = False
+
+    # ── Reasoning effort (per-role soft cap on thinking tokens) ──
+    # Values: "" (off) | "low" | "medium" | "high" | "max".  Each provider
+    # enforces via its native mechanism:
+    #   - Ollama → client-side stream interrupt (counts thinking tokens)
+    #   - OpenAI / Serve → extra_body.reasoning_effort (native on o1/o3/
+    #     o4/gpt-5; vLLM forwards)
+    #   - Anthropic → thinking.budget_tokens
+    #   - Gemini → ThinkingConfig.thinking_budget
+    # "max" = no soft limit; "" = provider default (no param sent).
+    reasoning_effort_primary: str = ""
+    reasoning_effort_expert: str = ""
+    reasoning_effort_request: str = ""
+    reasoning_effort_worker: str = ""
+    # Universal client-side safety rail (Ollama only — cloud providers
+    # enforce natively).  Fires even on effort="max"/"".  32k chosen to
+    # catch truly pathological runaway loops; real-world reasoning rarely
+    # exceeds ~16k.
+    max_thinking_tokens: int = 32768
 
     # ── Per-role capability declarations ──
     # Independent booleans — a role may be flagged for one, both, or neither.
@@ -691,6 +752,26 @@ class Settings(BaseSettings):
     @property
     def effective_worker_presence_penalty(self) -> float | None:
         return self._ollama_param_with_fallback("worker", "presence_penalty")
+
+    # ── Reasoning effort effective fallback (string field, custom chain) ──
+
+    def _effective_reasoning_effort(self, role: str) -> str:
+        val = getattr(self, f"reasoning_effort_{role}", "")
+        if val:
+            return val
+        return self.reasoning_effort_primary
+
+    @property
+    def effective_expert_reasoning_effort(self) -> str:
+        return self._effective_reasoning_effort("expert")
+
+    @property
+    def effective_request_reasoning_effort(self) -> str:
+        return self._effective_reasoning_effort("request")
+
+    @property
+    def effective_worker_reasoning_effort(self) -> str:
+        return self._effective_reasoning_effort("worker")
 
     @property
     def effective_worker_context_window(self) -> int:

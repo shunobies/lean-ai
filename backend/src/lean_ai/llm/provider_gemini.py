@@ -60,6 +60,7 @@ class GeminiProvider(LLMProvider):
         retry_max: int | None = None,
         retry_base_delay: float | None = None,
         enable_thinking: bool = False,
+        reasoning_effort: str = "",
     ):
         from google import genai
         from google.genai import types
@@ -72,6 +73,10 @@ class GeminiProvider(LLMProvider):
         self._context_window_val = context_window
         self._temperature = temperature
         self._enable_thinking = enable_thinking
+        # Reasoning effort → ThinkingConfig.thinking_budget override.  When
+        # unset ("" / "max") we use Gemini's dynamic budget (-1) so the
+        # model decides; low / medium / high cap explicitly.
+        self._reasoning_effort = reasoning_effort or ""
         self._retry_max = retry_max if retry_max is not None else settings.llm_retry_max
         self._retry_base_delay = (
             retry_base_delay if retry_base_delay is not None else settings.llm_retry_base_delay
@@ -234,11 +239,23 @@ class GeminiProvider(LLMProvider):
         return None
 
     def _apply_thinking_config(self, config, tokens: int) -> None:
-        """Add thinking config when enabled."""
+        """Add thinking config when enabled.
+
+        Budget resolution:
+        1. ``reasoning_effort`` in (``low``, ``medium``, ``high``) maps to
+           1024 / 4096 / 16384 respectively.
+        2. ``reasoning_effort`` in (``""``, ``"max"``) → ``-1`` (dynamic —
+           Gemini decides).  Matches today's behaviour by default.
+
+        Users who rely on the old ``_THINKING_BUDGET_PERCENT * tokens``
+        heuristic can pick the effort level that matches (medium=4096 is
+        close to 80% of the typical 5-10k thinking windows).
+        """
         if not self._enable_thinking:
             return
         try:
-            budget = max(1024, int(tokens * self._THINKING_BUDGET_PERCENT))
+            from lean_ai.config import reasoning_effort_to_gemini_budget
+            budget = reasoning_effort_to_gemini_budget(self._reasoning_effort)
             config.thinking_config = self._types.ThinkingConfig(
                 thinking_budget=budget,
             )

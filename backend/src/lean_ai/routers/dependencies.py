@@ -27,6 +27,7 @@ def _create_provider():
             presence_penalty=settings.ollama_presence_penalty,
             enable_thinking=settings.enable_thinking,
             preserve_thinking=settings.preserve_thinking_primary,
+            reasoning_effort=settings.reasoning_effort_primary,
         )
 
     if provider == "openai":
@@ -44,6 +45,7 @@ def _create_provider():
             base_url=settings.openai_base_url or None,
             enable_thinking=settings.enable_thinking,
             preserve_thinking=settings.preserve_thinking_primary,
+            reasoning_effort=settings.reasoning_effort_primary,
         )
 
     if provider == "anthropic":
@@ -59,6 +61,7 @@ def _create_provider():
             context_window=settings.anthropic_context_window,
             temperature=settings.anthropic_temperature,
             enable_thinking=settings.enable_thinking,
+            reasoning_effort=settings.reasoning_effort_primary,
         )
 
     if provider == "serve":
@@ -80,6 +83,7 @@ def _create_provider():
             base_url=f"{settings.serve_url.rstrip('/')}/v1",
             enable_thinking=settings.enable_thinking,
             preserve_thinking=settings.preserve_thinking_primary,
+            reasoning_effort=settings.reasoning_effort_primary,
         )
 
     if provider == "gemini":
@@ -95,6 +99,7 @@ def _create_provider():
             context_window=settings.gemini_context_window,
             temperature=settings.gemini_temperature,
             enable_thinking=settings.enable_thinking,
+            reasoning_effort=settings.reasoning_effort_primary,
         )
 
     raise ValueError(
@@ -179,6 +184,7 @@ expert_llm_client: LLMClient | None = create_role_client(
         gemini_model=settings.gemini_expert_model or "",
         serve_model=settings.serve_expert_model or "",
         preserve_thinking=settings.preserve_thinking_expert,
+        reasoning_effort=settings.effective_expert_reasoning_effort,
         use_semaphore=False,
     ),
     semaphore=_llm_semaphore,
@@ -206,6 +212,7 @@ request_llm_client: LLMClient | None = create_role_client(
         gemini_model=settings.gemini_request_model or "",
         serve_model=settings.serve_request_model or "",
         preserve_thinking=settings.preserve_thinking_request,
+        reasoning_effort=settings.effective_request_reasoning_effort,
         use_semaphore=True,
     ),
     semaphore=_llm_semaphore,
@@ -233,6 +240,7 @@ worker_llm_client: LLMClient | None = create_role_client(
         gemini_model=settings.gemini_worker_model or "",
         serve_model=settings.serve_worker_model or "",
         preserve_thinking=settings.preserve_thinking_worker,
+        reasoning_effort=settings.effective_worker_reasoning_effort,
         use_semaphore=True,
     ),
     semaphore=_llm_semaphore,

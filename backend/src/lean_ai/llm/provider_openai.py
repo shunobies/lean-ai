@@ -34,6 +34,7 @@ class OpenAIProvider(LLMProvider):
         retry_base_delay: float | None = None,
         enable_thinking: bool = False,
         preserve_thinking: bool = False,
+        reasoning_effort: str = "",
     ):
         import openai as openai_lib
         self._openai = openai_lib
@@ -51,22 +52,33 @@ class OpenAIProvider(LLMProvider):
         # Pure OpenAI ignores it; no harm in passing for both since Serve
         # reuses OpenAIProvider with a custom base_url.
         self._preserve_thinking = preserve_thinking
+        # Native reasoning_effort for OpenAI's o1/o3/o4/gpt-5 family; vLLM
+        # (Serve) forwards whatever it receives.  Merged into extra_body.
+        self._reasoning_effort = reasoning_effort or ""
         self._retry_max = retry_max if retry_max is not None else settings.llm_retry_max
         self._retry_base_delay = (
             retry_base_delay if retry_base_delay is not None else settings.llm_retry_base_delay
         )
 
     def _extra_body(self) -> dict:
-        """Return OpenAI-SDK ``extra_body`` for preserve_thinking on Serve/vLLM.
+        """Build ``extra_body`` merging every provider-side feature knob.
 
-        vLLM forwards ``chat_template_kwargs`` to the Jinja chat template
-        which — on Qwen3.6+ — reads ``preserve_thinking`` to keep the model's
-        prior-turn chain-of-thought in the rendered prompt.  Unset when the
-        flag is off so upstream OpenAI isn't passed an unknown field.
+        - ``chat_template_kwargs.preserve_thinking`` — vLLM honors this
+          for Qwen3.6+ templates; pure OpenAI ignores it silently.
+        - ``reasoning_effort`` — OpenAI reasoning models (o1/o3/o4/gpt-5)
+          treat this as a first-class parameter; vLLM forwards it.
+
+        Returns an empty dict when no knob is set so the OpenAI SDK
+        doesn't pass an empty extra body.
         """
-        if not self._preserve_thinking:
-            return {}
-        return {"extra_body": {"chat_template_kwargs": {"preserve_thinking": True}}}
+        from lean_ai.config import reasoning_effort_to_openai_param
+        body: dict = {}
+        if self._preserve_thinking:
+            body["chat_template_kwargs"] = {"preserve_thinking": True}
+        effort = reasoning_effort_to_openai_param(self._reasoning_effort)
+        if effort is not None:
+            body["reasoning_effort"] = effort
+        return {"extra_body": body} if body else {}
 
     @property
     def _is_reasoning_model(self) -> bool:

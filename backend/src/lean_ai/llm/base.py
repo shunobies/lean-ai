@@ -60,6 +60,15 @@ class LLMMetrics:
     tokens_per_second: float | None = None
     stop_reason: str | None = None
     thinking: str | None = None
+    # Populated only when the Ollama stream was aborted because thinking
+    # tokens exceeded the configured reasoning_effort soft limit OR the
+    # universal ``max_thinking_tokens`` safety rail.  Cloud providers set
+    # this False — they enforce budgets natively and return a normal
+    # response when the model has finished reasoning.
+    thinking_budget_exceeded: bool = False
+    # Approximate thinking tokens counted during streaming (chars // 4).
+    # Useful for telemetry and debugging interrupt behaviour.
+    thinking_token_count: int = 0
 
     @classmethod
     def from_usage(

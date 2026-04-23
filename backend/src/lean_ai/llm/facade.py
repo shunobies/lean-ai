@@ -51,6 +51,12 @@ class _TurnState:
     max_truncated: int = 5
     loop_detection_threshold: int = 3
     recent_test_failures: int = 0
+    # Reasoning-effort interrupt tracking.  Fires only on providers that
+    # set metrics.thinking_budget_exceeded (Ollama today).  After 2
+    # consecutive budget-exceeded turns the loop exits cleanly with
+    # whatever content has accumulated.
+    consecutive_budget_interrupts: int = 0
+    max_budget_interrupts: int = 2
 
 
 # ── Claim verification ────────────────────────────────────────────
@@ -592,6 +598,37 @@ class LLMClient:
                     explanation_parts.append(summary)
                 logger.info("chat_with_tools: task_complete called — exiting loop")
                 break
+
+            # ── Reasoning-budget interrupt ────────────────────────
+            # When the provider's streaming helper aborted because
+            # thinking tokens exceeded the configured soft limit (or the
+            # universal safety rail), inject a user nudge asking the
+            # model to commit.  The partial assistant message is already
+            # appended; the next turn sees the nudge + its own prior
+            # (truncated) reasoning.
+            if getattr(metrics, "thinking_budget_exceeded", False):
+                state.consecutive_budget_interrupts += 1
+                if state.consecutive_budget_interrupts > state.max_budget_interrupts:
+                    logger.warning(
+                        "chat_with_tools: exiting — %d consecutive reasoning-"
+                        "budget interrupts exceeded cap (%d)",
+                        state.consecutive_budget_interrupts,
+                        state.max_budget_interrupts,
+                    )
+                    break
+                from lean_ai.llm.prompt_registry import registry
+                messages.append({
+                    "role": "user",
+                    "content": registry.get("nudge.reasoning_budget_exceeded"),
+                })
+                logger.info(
+                    "chat_with_tools: reasoning budget interrupt #%d — "
+                    "nudging for final answer (thinking ~%d tokens)",
+                    state.consecutive_budget_interrupts,
+                    getattr(metrics, "thinking_token_count", 0),
+                )
+                continue  # skip _evaluate_turn; start next iteration
+            state.consecutive_budget_interrupts = 0
 
             # ── Evaluate turn — single decision point ─────────────
             action = self._evaluate_turn(

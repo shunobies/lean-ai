@@ -62,6 +62,7 @@ class AnthropicProvider(LLMProvider):
         retry_max: int | None = None,
         retry_base_delay: float | None = None,
         enable_thinking: bool = False,
+        reasoning_effort: str = "",
     ):
         import anthropic as anthropic_lib
         self._anthropic = anthropic_lib
@@ -72,6 +73,10 @@ class AnthropicProvider(LLMProvider):
         self._context_window_val = context_window
         self._temperature = temperature
         self._enable_thinking = enable_thinking
+        # Reasoning effort → thinking.budget_tokens override.  When unset
+        # ("" / "max") we fall back to the existing _THINKING_BUDGET_PERCENT
+        # heuristic so behavior is unchanged for users who don't opt in.
+        self._reasoning_effort = reasoning_effort or ""
         self._retry_max = retry_max if retry_max is not None else settings.llm_retry_max
         self._retry_base_delay = (
             retry_base_delay if retry_base_delay is not None else settings.llm_retry_base_delay
@@ -119,12 +124,23 @@ class AnthropicProvider(LLMProvider):
     def _apply_thinking_kwargs(self, kwargs: dict, tokens: int) -> None:
         """Add extended thinking parameters to API kwargs when enabled.
 
-        Anthropic extended thinking requires temperature=1.0 and adds a
-        ``thinking`` parameter with a budget.
+        Anthropic extended thinking requires temperature=1.0 and a
+        ``thinking.budget_tokens`` >= 1024.  Budget resolution:
+
+        1. If ``reasoning_effort`` is ``low`` / ``medium`` / ``high``, map
+           to 1024 / 4096 / 16384 respectively.
+        2. Otherwise (``""`` / ``"max"``) fall back to
+           ``_THINKING_BUDGET_PERCENT * tokens`` — preserves today's
+           behaviour for users who haven't set the new dropdown.
         """
         if not self._enable_thinking:
             return
-        budget = max(1024, int(tokens * self._THINKING_BUDGET_PERCENT))
+        from lean_ai.config import reasoning_effort_to_anthropic_budget
+        mapped = reasoning_effort_to_anthropic_budget(self._reasoning_effort)
+        if mapped is not None:
+            budget = mapped
+        else:
+            budget = max(1024, int(tokens * self._THINKING_BUDGET_PERCENT))
         kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
         kwargs["temperature"] = 1.0
 

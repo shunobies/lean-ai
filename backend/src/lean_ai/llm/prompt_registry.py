@@ -2863,6 +2863,23 @@ def _register_defaults(reg: PromptRegistry) -> None:
     ))
 
     reg.register(PromptEntry(
+        key="nudge.reasoning_budget_exceeded",
+        category="Advanced",
+        name="Reasoning Budget Interrupt",
+        description=(
+            "Injected as a user-role message when the Ollama streaming"
+            " helper aborts because thinking tokens exceeded the configured"
+            " reasoning_effort limit or the max_thinking_tokens safety"
+            " rail.  After 2 consecutive interrupts the loop exits."
+        ),
+        default_text=(
+            "Your reasoning exceeded the configured budget. Stop thinking "
+            "and produce your final answer now based on what you have "
+            "already worked through."
+        ),
+    ))
+
+    reg.register(PromptEntry(
         key="nudge.loop_detected",
         category="Advanced",
         name="Loop Detection Message",
