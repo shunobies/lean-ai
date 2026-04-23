@@ -27,6 +27,8 @@ interface UIVerificationStatus {
     playwright_installed: boolean;
     chromium_installed: boolean;
     chromium_path: string | null;
+    system_browser_channel: string | null;
+    web_capture_available: boolean;
     desktop_backend: string;
     missing_system_deps: string[];
     macos_screen_recording_granted: boolean | null;
@@ -175,12 +177,29 @@ export async function installUiVerificationCommand(): Promise<void> {
                     { repo_root: repoRoot },
                 );
                 if (result.success) {
+                    // The backend returns success=true both for a clean managed
+                    // install AND for the "OS unsupported but system browser
+                    // detected" fallback. Detect the latter by scanning output
+                    // so the user sees which path was taken.
+                    const usedSystemBrowser =
+                        result.output.includes("system '") &&
+                        result.output.includes("will be used automatically");
+                    const message = usedSystemBrowser
+                        ? "Lean AI: UI verification ready — will use a system-installed browser (Playwright has no Chromium binary for this OS yet)."
+                        : "Lean AI: Chromium installed successfully. UI verification is ready to use.";
                     vscode.window.showInformationMessage(
-                        "Lean AI: Chromium installed successfully. UI verification is ready to use.",
+                        message,
                         "Run Test Capture",
+                        "View Details",
                     ).then((action) => {
                         if (action === "Run Test Capture") {
                             vscode.commands.executeCommand("lean-ai.testUiVerification");
+                        } else if (action === "View Details") {
+                            const doc = vscode.workspace.openTextDocument({
+                                content: result.output,
+                                language: "log",
+                            });
+                            doc.then((d) => vscode.window.showTextDocument(d));
                         }
                     });
                 } else {
@@ -307,14 +326,16 @@ export function registerUiVerificationWatcher(
 
         try {
             const status = await getStatus(repoRoot);
-            if (status.chromium_installed && status.analysis_available) {
+            // A system-installed Chrome/Chromium is also a valid browser for
+            // web capture — no need to prompt for install if web_capture_available.
+            if (status.web_capture_available && status.analysis_available) {
                 return;
             }
 
             const reasons: string[] = [];
             if (!status.playwright_installed) {
                 reasons.push("Playwright is missing — install backend extras first.");
-            } else if (!status.chromium_installed) {
+            } else if (!status.chromium_installed && !status.system_browser_channel) {
                 reasons.push(`Chromium is not installed in .lean_ai/browsers.`);
             }
             if (!status.analysis_available && status.analysis_reason) {
@@ -324,6 +345,10 @@ export function registerUiVerificationWatcher(
                 reasons.push(
                     `Missing system tools for desktop capture: ${status.missing_system_deps.join(", ")}`,
                 );
+            }
+
+            if (reasons.length === 0) {
+                return; // Everything looks fine; don't nag.
             }
 
             const message =

@@ -17,7 +17,6 @@ import pytest
 
 from lean_ai.config import settings
 
-
 # ── ui_capture_web ─────────────────────────────────────────────────────
 
 
@@ -85,6 +84,58 @@ def test_is_chromium_installed_false_when_only_unrelated_dirs(tmp_path: Path):
     assert is_chromium_installed(str(tmp_path)) is False
 
 
+# ── System browser channel detection ──
+
+
+def test_detect_system_browser_channel_chromium_found(monkeypatch):
+    """Linux with chromium on PATH → channel='chromium'."""
+    from lean_ai.tools import ui_capture_web as mod
+
+    monkeypatch.setattr(mod.sys, "platform", "linux")
+    # First two calls (chromium, chromium-browser) hit, Chrome lookups skipped
+    calls = iter(["/usr/bin/chromium", None, None, None])
+    monkeypatch.setattr(mod.shutil, "which", lambda _cmd: next(calls))
+    assert mod.detect_system_browser_channel() == "chromium"
+
+
+def test_detect_system_browser_channel_chrome_fallback(monkeypatch):
+    """Linux with only chrome on PATH → channel='chrome'."""
+    from lean_ai.tools import ui_capture_web as mod
+
+    monkeypatch.setattr(mod.sys, "platform", "linux")
+    # chromium probes return None; chrome probe hits
+    def fake_which(cmd):
+        return "/usr/bin/google-chrome" if "chrome" in cmd else None
+    monkeypatch.setattr(mod.shutil, "which", fake_which)
+    assert mod.detect_system_browser_channel() == "chrome"
+
+
+def test_detect_system_browser_channel_none_on_bare_linux(monkeypatch):
+    """Linux with no browsers on PATH → None (neither managed nor system)."""
+    from lean_ai.tools import ui_capture_web as mod
+
+    monkeypatch.setattr(mod.sys, "platform", "linux")
+    monkeypatch.setattr(mod.shutil, "which", lambda _cmd: None)
+    assert mod.detect_system_browser_channel() is None
+
+
+def test_detect_system_browser_channel_windows_returns_chrome(monkeypatch):
+    """Windows: defer to Playwright's registry lookup — return 'chrome'."""
+    from lean_ai.tools import ui_capture_web as mod
+
+    monkeypatch.setattr(mod.sys, "platform", "win32")
+    # shutil.which isn't consulted — Windows path returns unconditionally
+    assert mod.detect_system_browser_channel() == "chrome"
+
+
+def test_detect_system_browser_channel_macos_returns_chrome(monkeypatch):
+    """macOS: return 'chrome' unconditionally — Playwright checks /Applications."""
+    from lean_ai.tools import ui_capture_web as mod
+
+    monkeypatch.setattr(mod.sys, "platform", "darwin")
+    assert mod.detect_system_browser_channel() == "chrome"
+
+
 # ── ui_capture_desktop ─────────────────────────────────────────────────
 
 
@@ -149,22 +200,24 @@ def test_detect_backend_dispatches_by_platform():
     """When no override is set, backend is chosen from sys.platform + Wayland env."""
     from lean_ai.tools import ui_capture_desktop as mod
 
-    with patch.object(settings, "ui_verification_capture_backend_override", ""):
-        with patch.object(mod, "sys") as fake_sys:
-            # Windows
-            fake_sys.platform = "win32"
-            assert mod.detect_backend() == "mss-win32"
-            # macOS
-            fake_sys.platform = "darwin"
-            assert mod.detect_backend() == "mac-screencapture"
-            # Linux X11 (no WAYLAND_DISPLAY)
-            fake_sys.platform = "linux"
-            env = {k: v for k, v in os.environ.items() if k != "WAYLAND_DISPLAY"}
-            with patch.dict(os.environ, env, clear=True):
-                assert mod.detect_backend() == "mss-x11"
-            # Linux Wayland
-            with patch.dict(os.environ, {"WAYLAND_DISPLAY": "wayland-0"}):
-                assert mod.detect_backend() == "grim"
+    with (
+        patch.object(settings, "ui_verification_capture_backend_override", ""),
+        patch.object(mod, "sys") as fake_sys,
+    ):
+        # Windows
+        fake_sys.platform = "win32"
+        assert mod.detect_backend() == "mss-win32"
+        # macOS
+        fake_sys.platform = "darwin"
+        assert mod.detect_backend() == "mac-screencapture"
+        # Linux X11 (no WAYLAND_DISPLAY)
+        fake_sys.platform = "linux"
+        env = {k: v for k, v in os.environ.items() if k != "WAYLAND_DISPLAY"}
+        with patch.dict(os.environ, env, clear=True):
+            assert mod.detect_backend() == "mss-x11"
+        # Linux Wayland
+        with patch.dict(os.environ, {"WAYLAND_DISPLAY": "wayland-0"}):
+            assert mod.detect_backend() == "grim"
 
 
 def test_wayland_compositor_none_when_not_wayland():
@@ -199,28 +252,33 @@ def test_missing_system_deps_for_x11(tmp_path: Path):
     from lean_ai.tools import ui_capture_desktop as mod
 
     # Force X11 backend
-    with patch.object(settings, "ui_verification_capture_backend_override", "mss-x11"):
-        # shutil.which is what the function uses; patch to return None for both
-        with patch.object(mod.shutil, "which", return_value=None):
-            missing = mod.missing_system_deps()
-            assert "wmctrl" in missing
-            assert "xdotool" in missing
+    with (
+        patch.object(settings, "ui_verification_capture_backend_override", "mss-x11"),
+        patch.object(mod.shutil, "which", return_value=None),
+    ):
+        missing = mod.missing_system_deps()
+        assert "wmctrl" in missing
+        assert "xdotool" in missing
 
 
 def test_missing_system_deps_for_wayland():
     from lean_ai.tools import ui_capture_desktop as mod
 
-    with patch.object(settings, "ui_verification_capture_backend_override", "grim"):
-        with patch.object(mod.shutil, "which", return_value=None):
-            assert mod.missing_system_deps() == ["grim"]
+    with (
+        patch.object(settings, "ui_verification_capture_backend_override", "grim"),
+        patch.object(mod.shutil, "which", return_value=None),
+    ):
+        assert mod.missing_system_deps() == ["grim"]
 
 
 def test_missing_system_deps_empty_when_all_on_path():
     from lean_ai.tools import ui_capture_desktop as mod
 
-    with patch.object(settings, "ui_verification_capture_backend_override", "mss-x11"):
-        with patch.object(mod.shutil, "which", return_value="/usr/bin/fake"):
-            assert mod.missing_system_deps() == []
+    with (
+        patch.object(settings, "ui_verification_capture_backend_override", "mss-x11"),
+        patch.object(mod.shutil, "which", return_value="/usr/bin/fake"),
+    ):
+        assert mod.missing_system_deps() == []
 
 
 # ── ui_analysis availability gating ────────────────────────────────────

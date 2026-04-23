@@ -32,6 +32,7 @@ from lean_ai.tools.ui_capture_desktop import (
 )
 from lean_ai.tools.ui_capture_web import (
     browsers_dir,
+    detect_system_browser_channel,
     install_chromium,
     is_chromium_installed,
     is_playwright_installed,
@@ -56,6 +57,8 @@ class UIVerificationStatus(BaseModel):
     playwright_installed: bool
     chromium_installed: bool
     chromium_path: str | None
+    system_browser_channel: str | None  # "chrome" | "chromium" | None
+    web_capture_available: bool  # True if either managed Chromium or system browser is usable
     desktop_backend: str
     missing_system_deps: list[str]
     macos_screen_recording_granted: bool | None
@@ -127,6 +130,11 @@ async def get_status(repo_root: str = "") -> UIVerificationStatus:
         chromium_installed = is_chromium_installed(repo_root)
         chromium_path = _chromium_path(repo_root)
 
+    system_channel = detect_system_browser_channel()
+    web_capture_available = (
+        is_playwright_installed() and (chromium_installed or system_channel is not None)
+    )
+
     return UIVerificationStatus(
         enabled=settings.enable_ui_verification,
         platform=_platform_label(),
@@ -136,6 +144,8 @@ async def get_status(repo_root: str = "") -> UIVerificationStatus:
         playwright_installed=is_playwright_installed(),
         chromium_installed=chromium_installed,
         chromium_path=chromium_path,
+        system_browser_channel=system_channel,
+        web_capture_available=web_capture_available,
         desktop_backend=detect_backend(),
         missing_system_deps=missing_system_deps(),
         macos_screen_recording_granted=None,  # not programmatically checkable

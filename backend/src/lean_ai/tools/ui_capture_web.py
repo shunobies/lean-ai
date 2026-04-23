@@ -25,10 +25,46 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shutil
+import sys
 import tempfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+# ── System browser detection (fallback when managed Chromium is unavailable) ──
+
+
+def detect_system_browser_channel() -> str | None:
+    """Return a Playwright ``channel`` name if a usable system browser exists.
+
+    Playwright's ``channel`` parameter launches system-installed browsers
+    instead of the version it ships.  This fallback path rescues us on
+    environments where Playwright doesn't yet publish Chromium binaries
+    (fresh distro releases, unusual architectures).
+
+    Returns one of: ``"chromium"``, ``"chrome"``, ``"msedge"``, or ``None``.
+    """
+    if sys.platform == "win32":
+        # On Windows, Playwright uses registry lookups — shutil.which misses
+        # Chrome installed under Program Files.  Prefer Chrome first (most
+        # commonly present), then Edge.  Playwright will raise a clean error
+        # if the channel really isn't there.
+        return "chrome"
+
+    if sys.platform == "darwin":
+        # macOS ships Safari but not Chrome by default; still prefer Chrome
+        # if the user installed it.  /Applications/... paths aren't on PATH,
+        # but Playwright checks them directly.
+        return "chrome"
+
+    # Linux: probe PATH.
+    if shutil.which("chromium") or shutil.which("chromium-browser"):
+        return "chromium"
+    if shutil.which("google-chrome") or shutil.which("google-chrome-stable"):
+        return "chrome"
+    return None
 
 
 # ── Browser isolation ───────────────────────────────────────────────────
@@ -89,9 +125,15 @@ async def install_chromium(repo_root: str) -> tuple[bool, str]:
     so the call matches the Playwright Python package installed in the
     active environment.
 
+    When Playwright refuses the install because the host OS isn't in its
+    supported matrix (common on freshly-released distros), we fall back to
+    a system browser if one is present — the user's Dependabot-esque
+    experience becomes "it worked" rather than "go fight with your OS".
+
     Returns:
-        ``(success, combined_output)``.  ``success`` is False when the
-        subprocess exits non-zero or Playwright isn't installed at all.
+        ``(success, combined_output)``.  ``success`` is True when either the
+        subprocess exits 0 OR the OS isn't supported but a system browser
+        was detected (output explains which path was taken).
     """
     if not is_playwright_installed():
         return False, (
@@ -100,7 +142,6 @@ async def install_chromium(repo_root: str) -> tuple[bool, str]:
         )
 
     browsers_path = _set_browsers_env(repo_root)
-    import sys
 
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
@@ -120,7 +161,47 @@ async def install_chromium(repo_root: str) -> tuple[bool, str]:
 
     output = b"".join(output_chunks).decode("utf-8", errors="replace")
     logger.info("playwright install chromium exit=%d", returncode)
-    return returncode == 0, output
+
+    if returncode == 0:
+        return True, output
+
+    # Playwright refused the install.  If the reason looks like "this OS
+    # isn't supported yet" and the user already has a system browser, we
+    # can use that instead — report success with a note.
+    lowered = output.lower()
+    os_unsupported = (
+        "does not support chromium on" in lowered
+        or "unsupported platform" in lowered
+    )
+    system_channel = detect_system_browser_channel()
+
+    if os_unsupported and system_channel:
+        note = (
+            f"Playwright does not yet publish Chromium binaries for this OS. "
+            f"Good news: system '{system_channel}' is installed and will be "
+            f"used automatically for verify_web_ui calls.\n\n"
+            f"Original Playwright output (informational):\n{output.strip()}"
+        )
+        logger.info(
+            "Install: OS unsupported by Playwright; falling back to system %s",
+            system_channel,
+        )
+        return True, note
+
+    if os_unsupported:
+        note = (
+            "Playwright does not yet publish Chromium binaries for this OS, "
+            "and no system chromium or chrome was found on PATH. Install one:\n"
+            "  Debian/Ubuntu: sudo apt install chromium-browser\n"
+            "  Fedora:        sudo dnf install chromium\n"
+            "  Arch:          sudo pacman -S chromium\n"
+            "  macOS:         brew install --cask google-chrome\n"
+            "  Windows:       download Chrome from https://google.com/chrome\n\n"
+            f"Original Playwright output:\n{output.strip()}"
+        )
+        return False, note
+
+    return False, output
 
 
 # ── Capture ─────────────────────────────────────────────────────────────
@@ -187,13 +268,18 @@ async def capture_web(
         )
 
     _set_browsers_env(repo_root)
-    if not is_chromium_installed(repo_root):
+    managed_installed = is_chromium_installed(repo_root)
+    system_channel = detect_system_browser_channel()
+
+    if not managed_installed and not system_channel:
         raise WebCaptureError(
-            f"Chromium is not installed in {browsers_dir(repo_root)}. "
-            "Open the UI Verification panel in the extension and click "
-            "Install, or run "
-            f"`PLAYWRIGHT_BROWSERS_PATH={browsers_dir(repo_root)} "
-            "python -m playwright install chromium`."
+            f"No Chromium available.  Managed browser at "
+            f"{browsers_dir(repo_root)} is missing and no system "
+            f"chromium/chrome was found on PATH.  Either click "
+            f"'Install Chromium' in the extension's UI Verification panel, "
+            f"or install a system browser: `sudo apt install chromium-browser` "
+            f"(Debian/Ubuntu), `brew install --cask google-chrome` (macOS), "
+            f"or download Chrome from https://google.com/chrome."
         )
 
     w, h = _parse_viewport(viewport)
@@ -210,18 +296,49 @@ async def capture_web(
     from playwright.async_api import async_playwright
 
     async with async_playwright() as pw:
+        launch_kwargs: dict = {"headless": True}
+        if not managed_installed and system_channel:
+            launch_kwargs["channel"] = system_channel
+            logger.info(
+                "Using system browser via channel=%r (managed Chromium not installed)",
+                system_channel,
+            )
+
         try:
-            browser = await pw.chromium.launch(headless=True)
+            browser = await pw.chromium.launch(**launch_kwargs)
         except Exception as e:
-            png_path.unlink(missing_ok=True)
+            # If the managed launch failed AND a system browser is available,
+            # retry with the channel fallback before giving up.
             msg = str(e).lower()
-            if "executable doesn't exist" in msg or "browsers are not installed" in msg:
-                raise WebCaptureError(
-                    "Playwright launched but could not find Chromium. "
-                    f"Browser cache at {browsers_dir(repo_root)} appears incomplete. "
-                    "Re-run the install from the extension panel."
-                ) from e
-            raise WebCaptureError(f"Failed to launch Chromium: {e}") from e
+            if (
+                managed_installed
+                and system_channel
+                and ("does not support" in msg or "executable doesn't exist" in msg)
+            ):
+                logger.warning(
+                    "Managed Chromium launch failed (%s); falling back to system %s",
+                    str(e).split(chr(10))[0][:120], system_channel,
+                )
+                try:
+                    browser = await pw.chromium.launch(
+                        headless=True, channel=system_channel,
+                    )
+                except Exception as retry_err:
+                    png_path.unlink(missing_ok=True)
+                    raise WebCaptureError(
+                        f"Failed to launch both managed Chromium and system "
+                        f"{system_channel}: {retry_err}"
+                    ) from retry_err
+            else:
+                png_path.unlink(missing_ok=True)
+                if "executable doesn't exist" in msg or "browsers are not installed" in msg:
+                    raise WebCaptureError(
+                        "Playwright launched but could not find Chromium. "
+                        f"Browser cache at {browsers_dir(repo_root)} appears incomplete. "
+                        "Re-run the install from the extension panel, or install "
+                        "a system chromium/chrome as a fallback."
+                    ) from e
+                raise WebCaptureError(f"Failed to launch Chromium: {e}") from e
 
         try:
             context = await browser.new_context(
