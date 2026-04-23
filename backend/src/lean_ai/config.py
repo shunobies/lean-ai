@@ -140,6 +140,10 @@ class Settings(BaseSettings):
     ollama_repeat_penalty: float = 1.05
     ollama_context_window: int = 131072  # Accepts shorthand: 128 = 128k = 131072
     ollama_max_tokens: int | None = None  # Derived: 25% of context window
+    # Optional sampling params — blank/None means "omit from options dict"
+    # entirely so text-only models that don't implement these aren't confused.
+    ollama_min_p: float | None = None          # e.g. 0.05 to tighten nucleus
+    ollama_presence_penalty: float | None = None  # e.g. 1.5 to reduce repetition
 
     # ── Ollama — expert model (reasoning-heavy phases) ──
     ollama_model_expert: str = ""  # Empty = use standard model everywhere
@@ -149,6 +153,8 @@ class Settings(BaseSettings):
     ollama_expert_repeat_penalty: float | None = None  # Falls back to ollama_repeat_penalty
     ollama_expert_context_window: int | None = None  # Accepts shorthand; falls back
     ollama_expert_max_tokens: int | None = None  # Derived: 25% of expert context window
+    ollama_expert_min_p: float | None = None  # Falls back to ollama_min_p (None = omit)
+    ollama_expert_presence_penalty: float | None = None  # Falls back; None = omit
 
     # ── OpenAI ──
     openai_api_key: str = ""
@@ -209,6 +215,8 @@ class Settings(BaseSettings):
     ollama_request_repeat_penalty: float | None = None  # Falls back to ollama_repeat_penalty
     ollama_request_context_window: int | None = None  # Accepts shorthand; falls back
     ollama_request_max_tokens: int | None = None  # Derived: 25% of request context window
+    ollama_request_min_p: float | None = None  # Falls back to ollama_min_p (None = omit)
+    ollama_request_presence_penalty: float | None = None  # Falls back; None = omit
     openai_request_model: str = ""
     anthropic_request_model: str = ""
 
@@ -221,6 +229,8 @@ class Settings(BaseSettings):
     ollama_worker_repeat_penalty: float | None = None  # Falls back to ollama_repeat_penalty
     ollama_worker_context_window: int | None = None  # Accepts shorthand; falls back
     ollama_worker_max_tokens: int | None = None  # Derived: 25% of worker context window
+    ollama_worker_min_p: float | None = None  # Falls back to ollama_min_p (None = omit)
+    ollama_worker_presence_penalty: float | None = None  # Falls back; None = omit
     openai_worker_model: str = ""  # Falls back to openai_model when empty
     anthropic_worker_model: str = ""  # Falls back to anthropic_model when empty
     gemini_worker_model: str = ""  # Falls back to gemini_model when empty
@@ -231,6 +241,16 @@ class Settings(BaseSettings):
     enable_thinking_expert: bool = True  # Independent per-model thinking toggle
     enable_thinking_request: bool = True  # Independent per-model thinking toggle
     enable_thinking_worker: bool = False  # Disabled by default — worker model prioritizes speed
+
+    # ── Preserve thinking across turns ──
+    # Qwen3.6+ / vLLM feature: retain chain-of-thought blocks in the message
+    # history so the model doesn't re-derive the same reasoning on every
+    # tool-loop iteration.  Reduces redundant thinking and improves KV-cache
+    # reuse.  Ignored by providers that don't honor chat_template_kwargs.
+    preserve_thinking_primary: bool = False
+    preserve_thinking_expert: bool = False
+    preserve_thinking_request: bool = False
+    preserve_thinking_worker: bool = False
 
     # ── Per-role capability declarations ──
     # Independent booleans — a role may be flagged for one, both, or neither.
@@ -591,6 +611,16 @@ class Settings(BaseSettings):
         return self._ollama_param_with_fallback("expert", "repeat_penalty")
 
     @property
+    def effective_expert_min_p(self) -> float | None:
+        """Returns None when neither role nor primary set it — caller should omit."""
+        return self._ollama_param_with_fallback("expert", "min_p")
+
+    @property
+    def effective_expert_presence_penalty(self) -> float | None:
+        """Returns None when neither role nor primary set it — caller should omit."""
+        return self._ollama_param_with_fallback("expert", "presence_penalty")
+
+    @property
     def effective_expert_context_window(self) -> int:
         """Context window for the expert model provider."""
         ep = (self.expert_llm_provider or "").lower()
@@ -623,6 +653,14 @@ class Settings(BaseSettings):
         return self._ollama_param_with_fallback("request", "repeat_penalty")
 
     @property
+    def effective_request_min_p(self) -> float | None:
+        return self._ollama_param_with_fallback("request", "min_p")
+
+    @property
+    def effective_request_presence_penalty(self) -> float | None:
+        return self._ollama_param_with_fallback("request", "presence_penalty")
+
+    @property
     def effective_request_max_tokens(self) -> int:
         """Max tokens for request model — derived from the request provider's settings."""
         rp = (self.request_llm_provider or "").lower()
@@ -645,6 +683,14 @@ class Settings(BaseSettings):
     @property
     def effective_worker_repeat_penalty(self) -> float:
         return self._ollama_param_with_fallback("worker", "repeat_penalty")
+
+    @property
+    def effective_worker_min_p(self) -> float | None:
+        return self._ollama_param_with_fallback("worker", "min_p")
+
+    @property
+    def effective_worker_presence_penalty(self) -> float | None:
+        return self._ollama_param_with_fallback("worker", "presence_penalty")
 
     @property
     def effective_worker_context_window(self) -> int:

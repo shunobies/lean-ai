@@ -442,8 +442,17 @@ class LLMClient:
             # ── Process turn results ──────────────────────────────
             completion_call: ToolCallInfo | None = None
 
+            # Preserve chain-of-thought across turns when the provider has
+            # it enabled (Qwen3.6 / vLLM ``chat_template_kwargs``).  The
+            # thinking blob flows from the streaming loop via metrics.thinking.
+            preserve_thinking = getattr(self._provider, "_preserve_thinking", False)
+            turn_thinking = metrics.thinking if preserve_thinking else None
+
             if not tool_calls:
-                messages.append({"role": "assistant", "content": content})
+                assistant_msg: dict = {"role": "assistant", "content": content}
+                if turn_thinking:
+                    assistant_msg["thinking"] = turn_thinking
+                messages.append(assistant_msg)
             else:
                 # Reset text-only/truncation counters on tool use
                 state.consecutive_text_only = 0
@@ -459,6 +468,8 @@ class LLMClient:
                 assistant_msg = self._provider.format_assistant_tool_message(
                     content, tool_calls,
                 )
+                if turn_thinking:
+                    assistant_msg["thinking"] = turn_thinking
                 messages.append(assistant_msg)
 
                 # Execute each tool call
@@ -541,6 +552,13 @@ class LLMClient:
                                 ),
                             })
                             state.consecutive_same_tool = 0
+
+            # Bound thinking history so long tool loops don't blow the
+            # context window — the 3 most recent assistant turns keep their
+            # thinking (covers the model's back-reference to its own
+            # reasoning), older turns drop it.
+            if preserve_thinking:
+                _trim_old_thinking(messages, keep_recent=3)
 
             # Exit if task_complete was called
             if completion_call:
@@ -788,3 +806,26 @@ def _metrics_to_dict(metrics: LLMMetrics) -> dict:
         "prompt_tokens": metrics.prompt_tokens,
         "stop_reason": metrics.stop_reason,
     }
+
+
+def _trim_old_thinking(messages: list[dict], *, keep_recent: int = 3) -> None:
+    """Strip ``thinking`` from all but the ``keep_recent`` most recent
+    assistant messages.
+
+    Operates in place.  Used when ``preserve_thinking`` is on to bound the
+    context-window cost of chain-of-thought retention in long tool loops —
+    recent thinking is still visible to the model (most useful for
+    self-coherence), older thinking is dropped.
+    """
+    if keep_recent <= 0:
+        for msg in messages:
+            if msg.get("role") == "assistant":
+                msg.pop("thinking", None)
+        return
+
+    assistant_indices = [
+        i for i, m in enumerate(messages)
+        if m.get("role") == "assistant" and "thinking" in m
+    ]
+    for idx in assistant_indices[:-keep_recent]:
+        messages[idx].pop("thinking", None)

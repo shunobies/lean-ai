@@ -145,7 +145,10 @@ class OllamaProvider(LLMProvider):
         top_p: float | None = None,
         top_k: int | None = None,
         repeat_penalty: float | None = None,
+        min_p: float | None = None,
+        presence_penalty: float | None = None,
         enable_thinking: bool | None = None,
+        preserve_thinking: bool = False,
     ):
         effective_url = ollama_url or settings.ollama_url
         self._url = effective_url
@@ -164,10 +167,18 @@ class OllamaProvider(LLMProvider):
             repeat_penalty if repeat_penalty is not None
             else settings.ollama_repeat_penalty
         )
+        # Optional params — if both the constructor arg and the settings
+        # value are None, stays None so _build_options omits the key.
+        self._min_p = min_p if min_p is not None else settings.ollama_min_p
+        self._presence_penalty = (
+            presence_penalty if presence_penalty is not None
+            else settings.ollama_presence_penalty
+        )
         self._enable_thinking = (
             enable_thinking if enable_thinking is not None
             else settings.enable_thinking
         )
+        self._preserve_thinking = preserve_thinking
 
         self._fim_supported = True
 
@@ -194,8 +205,13 @@ class OllamaProvider(LLMProvider):
     def _build_options(
         self, *, temperature: float | None = None, max_tokens: int | None = None,
     ) -> dict:
-        """Build the Ollama options dict."""
-        return {
+        """Build the Ollama options dict.
+
+        ``min_p`` and ``presence_penalty`` are only added when explicitly
+        configured — blank (None) means "omit from options" so models that
+        don't support the parameter aren't confused.
+        """
+        opts: dict = {
             "temperature": temperature if temperature is not None else self._temperature,
             "top_p": self._top_p,
             "top_k": self._top_k,
@@ -203,6 +219,19 @@ class OllamaProvider(LLMProvider):
             "num_predict": max_tokens if max_tokens is not None else self._max_tokens_val,
             "num_ctx": self._context_window_val,
         }
+        if self._min_p is not None:
+            opts["min_p"] = self._min_p
+        if self._presence_penalty is not None:
+            opts["presence_penalty"] = self._presence_penalty
+        return opts
+
+    def _build_chat_template_kwargs(self) -> dict:
+        """Return chat_template_kwargs to forward to Ollama when ``preserve_thinking``
+        is on.  Qwen3.6's chat template honors this flag.  Empty dict when
+        disabled so ``**_build_chat_template_kwargs()`` is a no-op."""
+        if not self._preserve_thinking:
+            return {}
+        return {"chat_template_kwargs": {"preserve_thinking": True}}
 
     def _extract_metrics(self, response: dict) -> LLMMetrics:
         """Extract standardized metrics from an Ollama response."""
@@ -269,7 +298,7 @@ class OllamaProvider(LLMProvider):
                 model=self._model,
                 messages=messages,
                 options=self._build_options(temperature=temp, max_tokens=tokens),
-                think=self._enable_thinking,
+                think=self._enable_thinking, **self._build_chat_template_kwargs(),
             )
 
         response = await self._retry_with_backoff(_chat, label="chat_raw")
@@ -296,7 +325,7 @@ class OllamaProvider(LLMProvider):
                 messages=messages,
                 stream=True,
                 options=self._build_options(temperature=temp, max_tokens=tokens),
-                think=self._enable_thinking,
+                think=self._enable_thinking, **self._build_chat_template_kwargs(),
             )
 
         stream = await self._retry_with_backoff(_start_stream, label="chat_raw(stream)")
@@ -363,7 +392,7 @@ class OllamaProvider(LLMProvider):
                         messages=augmented_messages,
                         format=schema.model_json_schema(),
                         options=self._build_options(temperature=temp, max_tokens=tokens),
-                        think=self._enable_thinking,
+                        think=self._enable_thinking, **self._build_chat_template_kwargs(),
                     )
 
                 response = await self._retry_with_backoff(
@@ -405,7 +434,7 @@ class OllamaProvider(LLMProvider):
                 format=schema.model_json_schema(),
                 stream=True,
                 options=self._build_options(temperature=temp, max_tokens=tokens),
-                think=self._enable_thinking,
+                think=self._enable_thinking, **self._build_chat_template_kwargs(),
             )
 
         stream = await self._retry_with_backoff(
@@ -452,7 +481,7 @@ class OllamaProvider(LLMProvider):
                     messages=messages,
                     tools=tools,
                     options=self._build_options(max_tokens=tokens),
-                    think=self._enable_thinking,
+                    think=self._enable_thinking, **self._build_chat_template_kwargs(),
                 )
 
             response = await self._retry_with_backoff(
@@ -483,7 +512,7 @@ class OllamaProvider(LLMProvider):
                 tools=tools,
                 stream=True,
                 options=self._build_options(max_tokens=tokens),
-                think=self._enable_thinking,
+                think=self._enable_thinking, **self._build_chat_template_kwargs(),
             )
 
         stream = await self._retry_with_backoff(
@@ -547,7 +576,7 @@ class OllamaProvider(LLMProvider):
                 messages=messages,
                 stream=True,
                 options=self._build_options(temperature=temp, max_tokens=num_predict),
-                think=self._enable_thinking,
+                think=self._enable_thinking, **self._build_chat_template_kwargs(),
             )
 
         stream = await self._retry_with_backoff(_chat, label="chat_stream")
