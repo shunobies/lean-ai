@@ -250,6 +250,16 @@ All settings use the `LEAN_AI_` prefix, or via `backend/.env`. Defined in `backe
 | `LEAN_AI_TTS_SPEED` | `1.0` | TTS playback speed (0.5–2.0) |
 | `LEAN_AI_TTS_MODEL_QUALITY` | `fp16` | ONNX model variant: `fp32` (~311MB), `fp16` (~169MB, 2x faster), `int8` (~88MB) |
 | `LEAN_AI_ENABLE_WAKE_WORD` | `false` | Enable "Hey Computer" wake word detection (openWakeWord) |
+| `LEAN_AI_SUPPORTS_IMAGE_PRIMARY` | `false` | Declare the primary model accepts images. When flagged, chat/workflow image uploads go directly to this model and skip `vision_model` |
+| `LEAN_AI_SUPPORTS_IMAGE_EXPERT` | `false` | Declare the expert model accepts images (rarely useful alone — expert doesn't see user images directly) |
+| `LEAN_AI_SUPPORTS_IMAGE_REQUEST` | `false` | Declare the request/chat model accepts images (preferred over primary in chat flow when set) |
+| `LEAN_AI_SUPPORTS_IMAGE_WORKER` | `false` | Declare the worker model accepts images (symmetric — worker rarely sees user images) |
+| `LEAN_AI_SUPPORTS_IMAGE_INLINE` | `false` | Declare the inline/FIM model accepts images (symmetric — inline doesn't carry images in practice) |
+| `LEAN_AI_SUPPORTS_AUDIO_PRIMARY` | `false` | Declare the primary model accepts audio. When flagged, mic PCM is wrapped as WAV and transcribed by this model instead of faster-whisper (first in priority chain) |
+| `LEAN_AI_SUPPORTS_AUDIO_EXPERT` | `false` | Audio-capable expert (fourth in chain). Consulted only when primary/request/worker are unflagged |
+| `LEAN_AI_SUPPORTS_AUDIO_REQUEST` | `false` | Audio-capable request model (second in chain) |
+| `LEAN_AI_SUPPORTS_AUDIO_WORKER` | `false` | Audio-capable worker (third in chain) |
+| `LEAN_AI_SUPPORTS_AUDIO_INLINE` | `false` | Audio-capable inline model (last in chain) |
 | `LEAN_AI_ENABLE_UI_VERIFICATION` | `false` | Enable `verify_web_ui` + `verify_desktop_ui` tools (vision-backed screenshot analysis). Requires `[ui-verification]` extras + a configured vision model. Install Chromium via `Lean AI: Install UI Verification` command |
 | `LEAN_AI_UI_VERIFICATION_TIMEOUT` | `180.0` | Outer timeout wrapping the whole `verify_*` tool call (seconds) — covers capture + 3 vision passes + color sampling + focused answer |
 | `LEAN_AI_UI_VERIFICATION_VISION_TIMEOUT` | `180.0` | Per-pass vision timeout (overrides `LEAN_AI_VISION_TIMEOUT` for structured extraction passes on small local models) |

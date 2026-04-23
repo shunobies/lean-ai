@@ -15,7 +15,7 @@ Each call returns a markdown report with a focused answer to your question, a st
 
 Before enabling the feature, make sure you have:
 
-1. **A configured vision model** (`LEAN_AI_VISION_MODEL`). Any Ollama vision-capable model works — `qwen3.5:4b-q8_0`, `qwen3-vl:8b`, `llama3.2-vision:11b`, etc. Pull it with `ollama pull <model>`.
+1. **A vision-capable model** — either a dedicated `LEAN_AI_VISION_MODEL` (Ollama only — `qwen3.5:4b-q8_0`, `qwen3-vl:8b`, `llama3.2-vision:11b`, etc. — pull with `ollama pull <model>`), **or** a multimodal primary/request model with `LEAN_AI_SUPPORTS_IMAGE_PRIMARY=true` (or the matching flag for your role). When a flagged role handles the capture, the dedicated vision model is skipped entirely — useful when your primary is already GPT-4o / Claude / Gemini / qwen3-vl and you want to avoid loading a second model. See [configuration.md](configuration.md#per-model-capability-flags).
 2. **The `ui-verification` backend extras installed** (see below).
 3. **Chromium** (for `verify_web_ui`) — installed by running a one-time command from the extension panel.
 4. **Platform-specific system packages** (for `verify_desktop_ui` on Linux X11 — see [Per-Platform Setup](#per-platform-setup)).

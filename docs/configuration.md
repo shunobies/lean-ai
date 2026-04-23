@@ -94,6 +94,55 @@ pip install -e ".[dev,ui-verification]"
 pip install -e ".[dev,openai,anthropic,gemini,reference,google,ui-verification]"
 ```
 
+## Per-Model Capability Flags
+
+Per-role booleans that let a vision- or audio-capable LLM handle
+multimedia directly instead of round-tripping through the dedicated
+`vision_model` or faster-whisper. Useful on VRAM-constrained hosts
+where loading a separate vision model would force the primary to
+unload and reload.
+
+Image flags — set `true` on whichever roles run a vision-capable model.
+At dispatch time the **active role for the current flow** is consulted
+first; if unflagged, the legacy `vision_model` path (Ollama prose
+describer) runs. With neither, images are dropped and a warning appears
+in the assistant's reply.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `LEAN_AI_SUPPORTS_IMAGE_PRIMARY` | `false` | Active role for workflow user messages and the chat fallback |
+| `LEAN_AI_SUPPORTS_IMAGE_REQUEST` | `false` | Preferred for chat endpoint when set (request overrides primary) |
+| `LEAN_AI_SUPPORTS_IMAGE_EXPERT`  | `false` | Symmetric — expert doesn't see user images in current pipeline |
+| `LEAN_AI_SUPPORTS_IMAGE_WORKER`  | `false` | Symmetric |
+| `LEAN_AI_SUPPORTS_IMAGE_INLINE`  | `false` | Symmetric (FIM doesn't carry images) |
+
+Audio flags — same idea, for STT transcription. Priority order:
+`primary → request → worker → expert → inline`. Unflagged → faster-whisper.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `LEAN_AI_SUPPORTS_AUDIO_PRIMARY` | `false` | First in priority chain |
+| `LEAN_AI_SUPPORTS_AUDIO_REQUEST` | `false` | Second |
+| `LEAN_AI_SUPPORTS_AUDIO_WORKER`  | `false` | Third |
+| `LEAN_AI_SUPPORTS_AUDIO_EXPERT`  | `false` | Fourth |
+| `LEAN_AI_SUPPORTS_AUDIO_INLINE`  | `false` | Last |
+
+**Provider capability matrix** (honest — settings UI also warns inline):
+
+| Provider | Image | Audio |
+|---|---|---|
+| Ollama (multimodal: `qwen3-vl`, `llava`, `llama3.2-vision`, `bakllava`, `moondream`) | ✅ | ❌ |
+| Ollama (text-only models) | ❌ | ❌ |
+| OpenAI `gpt-4o*`, `gpt-4-vision` | ✅ | `gpt-4o-audio-preview` / `gpt-4o-realtime-preview` ✅ |
+| Anthropic Claude 3+ / 4+ | ✅ | ❌ |
+| Gemini 2.5 Pro/Flash, 1.5 | ✅ | ✅ |
+| Lean AI Serve | depends on loaded vLLM model | depends on loaded model |
+
+Flagging a capability the provider doesn't actually support (e.g.
+Anthropic + audio) is non-blocking: at runtime the backend raises
+`CapabilityError`, logs a warning, and falls back transparently. The
+settings UI shows a red warning chip so you know to uncheck it.
+
 ## LLM Provider
 
 | Variable | Default | Description |
