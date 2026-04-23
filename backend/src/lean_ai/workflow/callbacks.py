@@ -38,6 +38,7 @@ class WorkflowCallbacks(NamedTuple):
     on_content: Callable
     on_thinking: Callable | None
     on_metrics: Callable | None
+    on_budget_interrupt: Callable
 
 
 def build_workflow_callbacks(
@@ -137,10 +138,23 @@ def build_workflow_callbacks(
 
         on_metrics = _on_metrics
 
+    async def on_budget_interrupt(thinking_token_count: int) -> None:
+        """Emit a ``thinking_content`` marker so the extension renders a
+        ⚠ Reasoning budget exceeded chip in the streaming panel.  Fired
+        by :func:`lean_ai.llm.facade.chat_with_tools` when the provider
+        aborted thinking mid-stream."""
+        fire_thinking_content(ws, content="", truncated=True)
+        logger.info(
+            "Reasoning budget interrupt — notifying extension "
+            "(thinking ~%d tokens)",
+            thinking_token_count,
+        )
+
     return WorkflowCallbacks(
         on_tool_call=on_tool_call,
         on_tool_result=on_tool_result,
         on_content=on_content,
         on_thinking=on_thinking,
         on_metrics=on_metrics,
+        on_budget_interrupt=on_budget_interrupt,
     )

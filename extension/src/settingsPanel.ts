@@ -356,6 +356,11 @@ export class SettingsPanel {
             preserveThinkingExpert:        "lean-ai.preserveThinkingExpert",
             preserveThinkingRequest:       "lean-ai.preserveThinkingRequest",
             preserveThinkingWorker:        "lean-ai.preserveThinkingWorker",
+            reasoningEffortPrimary:        "lean-ai.reasoningEffortPrimary",
+            reasoningEffortExpert:         "lean-ai.reasoningEffortExpert",
+            reasoningEffortRequest:        "lean-ai.reasoningEffortRequest",
+            reasoningEffortWorker:         "lean-ai.reasoningEffortWorker",
+            maxThinkingTokens:             "lean-ai.maxThinkingTokens",
         };
 
         const numericFields = new Set([
@@ -381,6 +386,7 @@ export class SettingsPanel {
             "ollamaExpertMinP", "ollamaExpertPresencePenalty",
             "ollamaRequestMinP", "ollamaRequestPresencePenalty",
             "ollamaWorkerMinP", "ollamaWorkerPresencePenalty",
+            "maxThinkingTokens",
         ]);
 
         // Numeric fields where 0 means "inherit/auto-derive" — treat 0 as unset
@@ -631,6 +637,13 @@ export class SettingsPanel {
             preserveThinkingExpert:  config.get("lean-ai.preserveThinkingExpert", false),
             preserveThinkingRequest: config.get("lean-ai.preserveThinkingRequest", false),
             preserveThinkingWorker:  config.get("lean-ai.preserveThinkingWorker", false),
+
+            // Reasoning effort (string enum) + global max_thinking_tokens (safety rail)
+            reasoningEffortPrimary: config.get("lean-ai.reasoningEffortPrimary", ""),
+            reasoningEffortExpert:  config.get("lean-ai.reasoningEffortExpert", ""),
+            reasoningEffortRequest: config.get("lean-ai.reasoningEffortRequest", ""),
+            reasoningEffortWorker:  config.get("lean-ai.reasoningEffortWorker", ""),
+            maxThinkingTokens:      config.get("lean-ai.maxThinkingTokens", 32768),
 
             // Search
             searchProvider:            config.get("lean-ai.searchProvider", "duckduckgo"),

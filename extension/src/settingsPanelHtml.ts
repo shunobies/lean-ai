@@ -683,6 +683,18 @@ export function getSettingsPanelHtml(): string {
             </div>
         </div>
     </div>
+    <div class="field-row">
+        <div class="field">
+            <label>Reasoning effort <span class="hint">soft cap on thinking tokens</span></label>
+            <select id="reasoningEffortPrimary">
+                <option value="">Off (provider default)</option>
+                <option value="low">Low — ~768 tokens</option>
+                <option value="medium">Medium — ~3072 tokens</option>
+                <option value="high">High — ~8192 tokens</option>
+                <option value="max">Max (no soft limit)</option>
+            </select>
+        </div>
+    </div>
 </div>
 
 <!-- ── Expert Model ── -->
@@ -835,6 +847,18 @@ export function getSettingsPanelHtml(): string {
                     <span class="hint">Qwen3.6+/vLLM — keep chain-of-thought in tool loops.</span>
                     <span class="capability-warning" data-for="preserveThinkingExpert"></span>
                 </div>
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Reasoning effort <span class="hint">blank = inherit from primary</span></label>
+                <select id="reasoningEffortExpert">
+                    <option value="">Inherit from primary</option>
+                    <option value="low">Low — ~768 tokens</option>
+                    <option value="medium">Medium — ~3072 tokens</option>
+                    <option value="high">High — ~8192 tokens</option>
+                    <option value="max">Max (no soft limit)</option>
+                </select>
             </div>
         </div>
     </div>
@@ -992,6 +1016,18 @@ export function getSettingsPanelHtml(): string {
                 </div>
             </div>
         </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Reasoning effort <span class="hint">blank = inherit from primary</span></label>
+                <select id="reasoningEffortRequest">
+                    <option value="">Inherit from primary</option>
+                    <option value="low">Low — ~768 tokens</option>
+                    <option value="medium">Medium — ~3072 tokens</option>
+                    <option value="high">High — ~8192 tokens</option>
+                    <option value="max">Max (no soft limit)</option>
+                </select>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -1145,6 +1181,18 @@ export function getSettingsPanelHtml(): string {
                     <span class="hint">Qwen3.6+/vLLM — keep chain-of-thought in tool loops.</span>
                     <span class="capability-warning" data-for="preserveThinkingWorker"></span>
                 </div>
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Reasoning effort <span class="hint">blank = inherit from primary</span></label>
+                <select id="reasoningEffortWorker">
+                    <option value="">Inherit from primary</option>
+                    <option value="low">Low — ~768 tokens</option>
+                    <option value="medium">Medium — ~3072 tokens</option>
+                    <option value="high">High — ~8192 tokens</option>
+                    <option value="max">Max (no soft limit)</option>
+                </select>
             </div>
         </div>
     </div>
@@ -1395,6 +1443,12 @@ export function getSettingsPanelHtml(): string {
         <div class="field">
             <label>Parallel LLM requests <span class="hint">match OLLAMA_NUM_PARALLEL, 1 = sequential</span></label>
             <input type="number" id="numParallel" min="1" max="16" step="1" placeholder="1">
+        </div>
+    </div>
+    <div class="field-row">
+        <div class="field">
+            <label>Max thinking tokens <span class="hint">universal safety rail (Ollama); fires even on Max effort</span></label>
+            <input type="number" id="maxThinkingTokens" min="1024" max="200000" step="1024" placeholder="32768">
         </div>
     </div>
     <div class="field">
@@ -2067,6 +2121,7 @@ export function getSettingsPanelHtml(): string {
 
             // Primary preserve-thinking (provider-agnostic)
             preserveThinkingPrimary: val('preserveThinkingPrimary'),
+            reasoningEffortPrimary:  val('reasoningEffortPrimary'),
 
             // Expert model
             expertLlmProvider:     expertChecked ? expertProvider : '',
@@ -2081,6 +2136,7 @@ export function getSettingsPanelHtml(): string {
             ollamaExpertMaxTokens:     expertChecked && expertProvider === 'ollama' ? val('ollamaExpertMaxTokens') : '',
             enableThinkingExpert:      expertChecked && expertProvider === 'ollama' ? val('enableThinkingExpert') : '',
             preserveThinkingExpert:    expertChecked ? val('preserveThinkingExpert') : '',
+            reasoningEffortExpert:     expertChecked ? val('reasoningEffortExpert') : '',
             openaiExpertModel:     expertChecked && expertProvider === 'openai' ? val('openaiExpertModel') : '',
             anthropicExpertModel:  expertChecked && expertProvider === 'anthropic' ? val('anthropicExpertModel') : '',
             geminiExpertModel:     expertChecked && expertProvider === 'gemini' ? val('geminiExpertModel') : '',
@@ -2099,6 +2155,7 @@ export function getSettingsPanelHtml(): string {
             ollamaRequestMaxTokens:     requestChecked && requestProvider === 'ollama' ? val('ollamaRequestMaxTokens') : '',
             enableThinkingRequest:      requestChecked && requestProvider === 'ollama' ? val('enableThinkingRequest') : '',
             preserveThinkingRequest:    requestChecked ? val('preserveThinkingRequest') : '',
+            reasoningEffortRequest:     requestChecked ? val('reasoningEffortRequest') : '',
             openaiRequestModel:       requestChecked && requestProvider === 'openai' ? val('openaiRequestModel') : '',
             anthropicRequestModel:    requestChecked && requestProvider === 'anthropic' ? val('anthropicRequestModel') : '',
             geminiRequestModel:       requestChecked && requestProvider === 'gemini' ? val('geminiRequestModel') : '',
@@ -2117,6 +2174,7 @@ export function getSettingsPanelHtml(): string {
             ollamaWorkerMaxTokens:    workerChecked && workerProvider === 'ollama' ? val('ollamaWorkerMaxTokens') : '',
             enableThinkingWorker:     workerChecked && workerProvider === 'ollama' ? val('enableThinkingWorker') : '',
             preserveThinkingWorker:   workerChecked ? val('preserveThinkingWorker') : '',
+            reasoningEffortWorker:    workerChecked ? val('reasoningEffortWorker') : '',
             openaiWorkerModel:        workerChecked && workerProvider === 'openai' ? val('openaiWorkerModel') : '',
             anthropicWorkerModel:     workerChecked && workerProvider === 'anthropic' ? val('anthropicWorkerModel') : '',
             geminiWorkerModel:        workerChecked && workerProvider === 'gemini' ? val('geminiWorkerModel') : '',
@@ -2187,6 +2245,7 @@ export function getSettingsPanelHtml(): string {
             searchDelay:           val('searchDelay'),
             implementationMaxTurns:val('implementationMaxTurns'),
             refreshThreshold:      val('refreshThreshold'),
+            maxThinkingTokens:     val('maxThinkingTokens'),
             numParallel:           val('numParallel'),
             enableRequiredCitations: val('enableRequiredCitations'),
             refinerReferenceChunks:      val('refinerReferenceChunks'),
@@ -2274,6 +2333,7 @@ export function getSettingsPanelHtml(): string {
         setVal('ollamaPresencePenalty', v.ollamaPresencePenalty);
         setVal('ollamaMaxTokens',       v.ollamaMaxTokens);
         setVal('preserveThinkingPrimary', v.preserveThinkingPrimary);
+        setVal('reasoningEffortPrimary',  v.reasoningEffortPrimary);
 
         // OpenAI fields
         setVal('openaiModel',           v.openaiModel);
@@ -2332,6 +2392,7 @@ export function getSettingsPanelHtml(): string {
         setVal('ollamaExpertMaxTokens',    v.ollamaExpertMaxTokens);
         setVal('enableThinkingExpert',     v.enableThinkingExpert);
         setVal('preserveThinkingExpert',   v.preserveThinkingExpert);
+        setVal('reasoningEffortExpert',    v.reasoningEffortExpert);
         setVal('openaiExpertModel',        v.openaiExpertModel);
         setVal('anthropicExpertModel',     v.anthropicExpertModel);
         setVal('geminiExpertModel',        v.geminiExpertModel);
@@ -2359,6 +2420,7 @@ export function getSettingsPanelHtml(): string {
         setVal('ollamaRequestMaxTokens',  v.ollamaRequestMaxTokens);
         setVal('enableThinkingRequest',   v.enableThinkingRequest);
         setVal('preserveThinkingRequest', v.preserveThinkingRequest);
+        setVal('reasoningEffortRequest',  v.reasoningEffortRequest);
         setVal('openaiRequestModel',      v.openaiRequestModel);
         setVal('anthropicRequestModel',   v.anthropicRequestModel);
         setVal('geminiRequestModel',      v.geminiRequestModel);
@@ -2386,6 +2448,7 @@ export function getSettingsPanelHtml(): string {
         setVal('ollamaWorkerMaxTokens',    v.ollamaWorkerMaxTokens);
         setVal('enableThinkingWorker',     v.enableThinkingWorker);
         setVal('preserveThinkingWorker',   v.preserveThinkingWorker);
+        setVal('reasoningEffortWorker',    v.reasoningEffortWorker);
         setVal('openaiWorkerModel',        v.openaiWorkerModel);
         setVal('anthropicWorkerModel',     v.anthropicWorkerModel);
         setVal('geminiWorkerModel',        v.geminiWorkerModel);
@@ -2471,6 +2534,7 @@ export function getSettingsPanelHtml(): string {
         setVal('searchApiUrl',          v.searchApiUrl);
         setVal('searchDelay',           v.searchDelay);
         setVal('implementationMaxTurns',v.implementationMaxTurns);
+        setVal('maxThinkingTokens',     v.maxThinkingTokens);
         setVal('refreshThreshold',      v.refreshThreshold);
         setVal('numParallel',           v.numParallel);
         setVal('enableRequiredCitations', v.enableRequiredCitations);

@@ -172,6 +172,11 @@ class ThinkingContentMessage(TypedDict, total=False):
     type: Literal["thinking_content"]  # pyright: ignore[reportGeneralTypeIssues]
     content: str
     streaming: bool
+    # When True, the provider's thinking stream was aborted because
+    # accumulated tokens crossed the reasoning_effort soft limit or the
+    # max_thinking_tokens safety rail.  The extension renders a warning
+    # chip inline in the collapsible thinking panel.
+    truncated: bool
 
 
 class MetricsUpdateMessage(TypedDict, total=False):
@@ -402,12 +407,23 @@ def fire_assistant_content(
 
 
 def fire_thinking_content(
-    ws: WebSocket, *, content: str, streaming: bool = False,
+    ws: WebSocket,
+    *,
+    content: str = "",
+    streaming: bool = False,
+    truncated: bool = False,
 ) -> None:
-    """Fire-and-forget thinking content (non-blocking)."""
+    """Fire-and-forget thinking content (non-blocking).
+
+    When ``truncated`` is True, the provider's thinking stream was aborted
+    because accumulated tokens crossed the configured budget — the
+    extension renders a warning chip in the thinking panel.
+    """
     data: dict = {"content": content}
     if streaming:
         data["streaming"] = True
+    if truncated:
+        data["truncated"] = True
     ws_send_nowait(ws, "thinking_content", data)
 
 

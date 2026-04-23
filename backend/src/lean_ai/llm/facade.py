@@ -347,6 +347,7 @@ class LLMClient:
         on_thinking: Callable | None = None,
         on_metrics: Callable | None = None,
         on_context_refresh: Callable | None = None,
+        on_budget_interrupt: Callable | None = None,
         dispatcher: "WSMessageDispatcher | None" = None,
     ) -> tuple[list[ToolCall], str]:
         """Multi-turn tool calling loop with unified turn supervisor.
@@ -627,6 +628,10 @@ class LLMClient:
                     state.consecutive_budget_interrupts,
                     getattr(metrics, "thinking_token_count", 0),
                 )
+                if on_budget_interrupt:
+                    await on_budget_interrupt(
+                        getattr(metrics, "thinking_token_count", 0),
+                    )
                 continue  # skip _evaluate_turn; start next iteration
             state.consecutive_budget_interrupts = 0
 

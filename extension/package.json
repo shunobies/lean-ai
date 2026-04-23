@@ -978,6 +978,44 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "**Preserve Thinking** — As above, for the **worker** model."
+        },
+        "lean-ai.reasoningEffortPrimary": {
+          "type": "string",
+          "default": "",
+          "enum": ["", "low", "medium", "high", "max"],
+          "enumDescriptions": [
+            "Off — no soft limit (safety rail still applies)",
+            "Low — ~768 thinking tokens",
+            "Medium — ~3072 thinking tokens",
+            "High — ~8192 thinking tokens",
+            "Max — unlimited soft (safety rail still applies)"
+          ],
+          "markdownDescription": "**Reasoning Effort** — Soft cap on thinking tokens for the **primary** model. Ollama enforces via a client-side stream interrupt; OpenAI/Serve forward `reasoning_effort`; Anthropic sets `thinking.budget_tokens`; Gemini sets `thinking_budget`. Leave blank to use the provider default."
+        },
+        "lean-ai.reasoningEffortExpert": {
+          "type": "string",
+          "default": "",
+          "enum": ["", "low", "medium", "high", "max"],
+          "markdownDescription": "**Reasoning Effort** — As above, for the **expert** model. Inherits from primary when blank."
+        },
+        "lean-ai.reasoningEffortRequest": {
+          "type": "string",
+          "default": "",
+          "enum": ["", "low", "medium", "high", "max"],
+          "markdownDescription": "**Reasoning Effort** — As above, for the **request** model."
+        },
+        "lean-ai.reasoningEffortWorker": {
+          "type": "string",
+          "default": "",
+          "enum": ["", "low", "medium", "high", "max"],
+          "markdownDescription": "**Reasoning Effort** — As above, for the **worker** model."
+        },
+        "lean-ai.maxThinkingTokens": {
+          "type": "number",
+          "default": 32768,
+          "minimum": 1024,
+          "maximum": 200000,
+          "markdownDescription": "**Max Thinking Tokens (Safety Rail)** — Universal cap. Applies to providers where we enforce client-side (Ollama); cloud providers rely on their own native caps. Fires even when Reasoning Effort is set to Max — catches runaway loops."
         }
       }
     }

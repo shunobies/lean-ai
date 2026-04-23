@@ -464,14 +464,16 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
         // --- LLM thinking/reasoning trace (collapsible in chat) ---
         case "thinking_content": {
             const content = (raw.content || "") as string;
-            if (content) {
+            const truncated = raw.truncated === true;
+            if (content || truncated) {
                 ctx.postMessage({
                     type: "llmThinking",
                     text: content,
                     streaming: raw.streaming || false,
+                    truncated,
                 });
                 // TTS: speak finalized thinking content
-                if (!raw.streaming && ctx.onTtsContent) {
+                if (!raw.streaming && content && ctx.onTtsContent) {
                     ctx.onTtsContent(content);
                 }
             }

@@ -148,6 +148,15 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.preserveThinkingRequest": "LEAN_AI_PRESERVE_THINKING_REQUEST",
     "lean-ai.preserveThinkingWorker":  "LEAN_AI_PRESERVE_THINKING_WORKER",
 
+    // Reasoning effort — per-role soft cap (client-side interrupt on
+    // Ollama; native reasoning_effort / thinking.budget_tokens /
+    // thinking_budget on cloud providers)
+    "lean-ai.reasoningEffortPrimary": "LEAN_AI_REASONING_EFFORT_PRIMARY",
+    "lean-ai.reasoningEffortExpert":  "LEAN_AI_REASONING_EFFORT_EXPERT",
+    "lean-ai.reasoningEffortRequest": "LEAN_AI_REASONING_EFFORT_REQUEST",
+    "lean-ai.reasoningEffortWorker":  "LEAN_AI_REASONING_EFFORT_WORKER",
+    "lean-ai.maxThinkingTokens":      "LEAN_AI_MAX_THINKING_TOKENS",
+
     // Per-model capability flags (image + audio)
     "lean-ai.supportsImagePrimary": "LEAN_AI_SUPPORTS_IMAGE_PRIMARY",
     "lean-ai.supportsImageExpert":  "LEAN_AI_SUPPORTS_IMAGE_EXPERT",
