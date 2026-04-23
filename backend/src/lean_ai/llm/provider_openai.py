@@ -33,6 +33,7 @@ class OpenAIProvider(LLMProvider):
         retry_max: int | None = None,
         retry_base_delay: float | None = None,
         enable_thinking: bool = False,
+        preserve_thinking: bool = False,
     ):
         import openai as openai_lib
         self._openai = openai_lib
@@ -46,10 +47,26 @@ class OpenAIProvider(LLMProvider):
         self._context_window_val = context_window
         self._temperature = temperature
         self._enable_thinking = enable_thinking
+        # Forwarded to Lean AI Serve (vLLM) via extra_body.chat_template_kwargs.
+        # Pure OpenAI ignores it; no harm in passing for both since Serve
+        # reuses OpenAIProvider with a custom base_url.
+        self._preserve_thinking = preserve_thinking
         self._retry_max = retry_max if retry_max is not None else settings.llm_retry_max
         self._retry_base_delay = (
             retry_base_delay if retry_base_delay is not None else settings.llm_retry_base_delay
         )
+
+    def _extra_body(self) -> dict:
+        """Return OpenAI-SDK ``extra_body`` for preserve_thinking on Serve/vLLM.
+
+        vLLM forwards ``chat_template_kwargs`` to the Jinja chat template
+        which — on Qwen3.6+ — reads ``preserve_thinking`` to keep the model's
+        prior-turn chain-of-thought in the rendered prompt.  Unset when the
+        flag is off so upstream OpenAI isn't passed an unknown field.
+        """
+        if not self._preserve_thinking:
+            return {}
+        return {"extra_body": {"chat_template_kwargs": {"preserve_thinking": True}}}
 
     @property
     def _is_reasoning_model(self) -> bool:
@@ -124,6 +141,7 @@ class OpenAIProvider(LLMProvider):
                 messages=messages,
                 temperature=temp,
                 max_tokens=tokens,
+                **self._extra_body(),
             )
 
         response = await self._retry_with_backoff(_chat, label="chat_raw")
@@ -156,6 +174,7 @@ class OpenAIProvider(LLMProvider):
             "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},
+            **self._extra_body(),
         }
         if use_reasoning:
             # Reasoning models reject temperature and use max_completion_tokens
@@ -260,6 +279,7 @@ class OpenAIProvider(LLMProvider):
                         temperature=temp,
                         max_tokens=tokens,
                         response_format=response_format,
+                        **self._extra_body(),
                     )
 
                 response = await self._retry_with_backoff(
@@ -304,6 +324,7 @@ class OpenAIProvider(LLMProvider):
                 response_format=response_format,
                 stream=True,
                 stream_options={"include_usage": True},
+                **self._extra_body(),
             )
 
         stream = await self._retry_with_backoff(_start_stream, label=label)
@@ -351,6 +372,7 @@ class OpenAIProvider(LLMProvider):
                 tools=tools,
                 temperature=self._temperature,
                 max_tokens=tokens,
+                **self._extra_body(),
             )
 
         response = await self._retry_with_backoff(
@@ -400,6 +422,7 @@ class OpenAIProvider(LLMProvider):
                 temperature=temp,
                 max_tokens=tokens,
                 stream=True,
+                **self._extra_body(),
             )
 
         stream = await self._retry_with_backoff(_chat, label="chat_stream")

@@ -23,7 +23,10 @@ def _create_provider():
             max_tokens=settings.ollama_max_tokens,
             context_window=settings.ollama_context_window,
             temperature=settings.ollama_temperature,
+            min_p=settings.ollama_min_p,
+            presence_penalty=settings.ollama_presence_penalty,
             enable_thinking=settings.enable_thinking,
+            preserve_thinking=settings.preserve_thinking_primary,
         )
 
     if provider == "openai":
@@ -40,6 +43,7 @@ def _create_provider():
             temperature=settings.openai_temperature,
             base_url=settings.openai_base_url or None,
             enable_thinking=settings.enable_thinking,
+            preserve_thinking=settings.preserve_thinking_primary,
         )
 
     if provider == "anthropic":
@@ -75,6 +79,7 @@ def _create_provider():
             temperature=settings.serve_temperature,
             base_url=f"{settings.serve_url.rstrip('/')}/v1",
             enable_thinking=settings.enable_thinking,
+            preserve_thinking=settings.preserve_thinking_primary,
         )
 
     if provider == "gemini":
@@ -167,10 +172,13 @@ expert_llm_client: LLMClient | None = create_role_client(
         ollama_top_p=settings.effective_expert_top_p,
         ollama_top_k=settings.effective_expert_top_k,
         ollama_repeat_penalty=settings.effective_expert_repeat_penalty,
+        ollama_min_p=settings.effective_expert_min_p,
+        ollama_presence_penalty=settings.effective_expert_presence_penalty,
         openai_model=settings.openai_expert_model or "",
         anthropic_model=settings.anthropic_expert_model or "",
         gemini_model=settings.gemini_expert_model or "",
         serve_model=settings.serve_expert_model or "",
+        preserve_thinking=settings.preserve_thinking_expert,
         use_semaphore=False,
     ),
     semaphore=_llm_semaphore,
@@ -191,10 +199,13 @@ request_llm_client: LLMClient | None = create_role_client(
         ollama_top_p=settings.effective_request_top_p,
         ollama_top_k=settings.effective_request_top_k,
         ollama_repeat_penalty=settings.effective_request_repeat_penalty,
+        ollama_min_p=settings.effective_request_min_p,
+        ollama_presence_penalty=settings.effective_request_presence_penalty,
         openai_model=settings.openai_request_model or "",
         anthropic_model=settings.anthropic_request_model or "",
         gemini_model=settings.gemini_request_model or "",
         serve_model=settings.serve_request_model or "",
+        preserve_thinking=settings.preserve_thinking_request,
         use_semaphore=True,
     ),
     semaphore=_llm_semaphore,
@@ -215,10 +226,13 @@ worker_llm_client: LLMClient | None = create_role_client(
         ollama_top_p=settings.effective_worker_top_p,
         ollama_top_k=settings.effective_worker_top_k,
         ollama_repeat_penalty=settings.effective_worker_repeat_penalty,
+        ollama_min_p=settings.effective_worker_min_p,
+        ollama_presence_penalty=settings.effective_worker_presence_penalty,
         openai_model=settings.openai_worker_model or "",
         anthropic_model=settings.anthropic_worker_model or "",
         gemini_model=settings.gemini_worker_model or "",
         serve_model=settings.serve_worker_model or "",
+        preserve_thinking=settings.preserve_thinking_worker,
         use_semaphore=True,
     ),
     semaphore=_llm_semaphore,

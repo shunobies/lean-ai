@@ -37,6 +37,10 @@ class RoleConfig:
     ollama_top_p: float | None = None
     ollama_top_k: int | None = None
     ollama_repeat_penalty: float | None = None
+    # Optional sampling params — None means "omit from options dict" so
+    # models that don't support them aren't confused.
+    ollama_min_p: float | None = None
+    ollama_presence_penalty: float | None = None
 
     # OpenAI
     openai_model: str = ""
@@ -47,11 +51,16 @@ class RoleConfig:
     # Serve
     serve_model: str = ""
 
+    # Qwen3.6 / vLLM chat_template_kwargs — keeps the model's prior-turn
+    # chain-of-thought in the rendered prompt so tool loops don't re-derive
+    # the same reasoning each iteration.
+    preserve_thinking: bool = False
+
     use_semaphore: bool = False
 
 
 def _create_openai_provider(
-    model: str, enable_thinking: bool,
+    model: str, enable_thinking: bool, preserve_thinking: bool = False,
 ) -> LLMProvider:
     from lean_ai.llm.provider_openai import OpenAIProvider
     return OpenAIProvider(
@@ -62,12 +71,17 @@ def _create_openai_provider(
         context_window=settings.openai_context_window,
         max_tokens=settings.openai_max_tokens,
         enable_thinking=enable_thinking,
+        preserve_thinking=preserve_thinking,
     )
 
 
 def _create_anthropic_provider(
-    model: str, enable_thinking: bool,
+    model: str, enable_thinking: bool, preserve_thinking: bool = False,
 ) -> LLMProvider:
+    # Anthropic doesn't honor chat_template_kwargs — preserve_thinking is a
+    # no-op here.  Accept the arg for interface parity with the other
+    # factories so the caller can flag it uniformly.
+    _ = preserve_thinking
     from lean_ai.llm.provider_anthropic import AnthropicProvider
     return AnthropicProvider(
         api_key=settings.anthropic_api_key,
@@ -80,7 +94,7 @@ def _create_anthropic_provider(
 
 
 def _create_serve_provider(
-    model: str, enable_thinking: bool,
+    model: str, enable_thinking: bool, preserve_thinking: bool = False,
 ) -> LLMProvider:
     from lean_ai.llm.provider_openai import OpenAIProvider
     return OpenAIProvider(
@@ -91,12 +105,16 @@ def _create_serve_provider(
         context_window=settings.serve_context_window,
         max_tokens=settings.serve_max_tokens,
         enable_thinking=enable_thinking,
+        preserve_thinking=preserve_thinking,
     )
 
 
 def _create_gemini_provider(
-    model: str, enable_thinking: bool,
+    model: str, enable_thinking: bool, preserve_thinking: bool = False,
 ) -> LLMProvider:
+    # Gemini has its own thinking-preservation semantics; preserve_thinking
+    # is a no-op here.  Accept for interface parity.
+    _ = preserve_thinking
     from lean_ai.llm.provider_gemini import GeminiProvider
     return GeminiProvider(
         api_key=settings.gemini_api_key,
@@ -183,7 +201,9 @@ def create_role_client(
             return None
 
         try:
-            role_provider = factory(model, cfg.enable_thinking)
+            role_provider = factory(
+                model, cfg.enable_thinking, cfg.preserve_thinking,
+            )
             client = LLMClient(provider=role_provider, concurrency_semaphore=sem)
             logger.info(
                 "%s model enabled (%s): %s",
@@ -207,6 +227,7 @@ def create_role_client(
                 "context_window": cfg.ollama_context_window or settings.ollama_context_window,
                 "temperature": cfg.ollama_temperature,
                 "enable_thinking": cfg.enable_thinking,
+                "preserve_thinking": cfg.preserve_thinking,
             }
             if cfg.ollama_top_p is not None:
                 ollama_kw["top_p"] = cfg.ollama_top_p
@@ -214,6 +235,10 @@ def create_role_client(
                 ollama_kw["top_k"] = cfg.ollama_top_k
             if cfg.ollama_repeat_penalty is not None:
                 ollama_kw["repeat_penalty"] = cfg.ollama_repeat_penalty
+            if cfg.ollama_min_p is not None:
+                ollama_kw["min_p"] = cfg.ollama_min_p
+            if cfg.ollama_presence_penalty is not None:
+                ollama_kw["presence_penalty"] = cfg.ollama_presence_penalty
 
             role_provider = OllamaProvider(**ollama_kw)
             client = LLMClient(provider=role_provider, concurrency_semaphore=sem)
