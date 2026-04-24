@@ -55,6 +55,8 @@ import {
     convertDocx as _convertDocx,
     DocxOutputExistsError,
     type ConvertDocxResponse,
+    logApplied as _logApplied,
+    type LogAppliedResponse,
     listScaffolds as _listScaffolds,
     scaffold as _scaffold,
     getPrompts as _getPrompts,
@@ -83,7 +85,7 @@ import {
 } from "./backendWorkspaceClient";
 
 export { DocxOutputExistsError } from "./backendWorkspaceClient";
-export type { ConvertDocxResponse } from "./backendWorkspaceClient";
+export type { ConvertDocxResponse, LogAppliedResponse } from "./backendWorkspaceClient";
 
 export class BackendClient {
     private static instance: BackendClient | undefined;
@@ -615,6 +617,17 @@ export class BackendClient {
         overwrite = false,
     ) {
         return _convertDocx(this.baseUrl, repoRoot, sourcePath, outputFilename, overwrite);
+    }
+
+    logApplied(
+        repoRoot: string,
+        slug: string,
+        company: string,
+        role: string,
+        source = "other",
+        nextAction = "Follow up in 7 days",
+    ) {
+        return _logApplied(this.baseUrl, repoRoot, slug, company, role, source, nextAction);
     }
 
     listScaffolds() { return _listScaffolds(this.baseUrl); }

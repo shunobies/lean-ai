@@ -1134,6 +1134,87 @@ export async function handleBatchPrepCommand(
     await ctx.handleAgentMessage(`/request ${prompt}`);
 }
 
+// ── /log-applied — append tracker row + commit ──────────────────────
+
+export async function handleLogAppliedCommand(
+    ctx: SlashCommandContext,
+    args: string,
+): Promise<void> {
+    if (!(await ensureAgentIdleAndBackendHealthy(ctx))) return;
+
+    const slug = await resolveApplicationSlug(ctx, args.trim());
+    if (!slug) return;
+
+    const company = await vscode.window.showInputBox({
+        title: "Log applied — Company",
+        prompt: "Company name (shown in the tracker and commit message)",
+        placeHolder: "e.g. Acme Corp",
+        ignoreFocusOut: true,
+        validateInput: (v) => (v && v.trim() ? null : "Company is required."),
+    });
+    if (company === undefined) return;
+
+    const role = await vscode.window.showInputBox({
+        title: "Log applied — Role",
+        prompt: "Job title",
+        placeHolder: "e.g. Senior Software Engineer",
+        ignoreFocusOut: true,
+        validateInput: (v) => (v && v.trim() ? null : "Role is required."),
+    });
+    if (role === undefined) return;
+
+    const sourceChoice = await vscode.window.showQuickPick(
+        ["LinkedIn", "Company website", "Referral", "Recruiter", "Batch", "Other"],
+        {
+            title: "Log applied — Source",
+            placeHolder: "How did you find this role?",
+            ignoreFocusOut: true,
+        },
+    );
+    if (!sourceChoice) return;
+    const source = sourceChoice.toLowerCase();
+
+    ctx.postMessage({
+        type: "thinking",
+        show: true,
+        text: `Logging ${company.trim()} — ${role.trim()}...`,
+    });
+
+    try {
+        const result = await ctx.client.logApplied(
+            ctx.getRepoRoot(),
+            slug,
+            company.trim(),
+            role.trim(),
+            source,
+        );
+        ctx.postMessage({ type: "thinking", show: false });
+
+        const bits: string[] = [];
+        if (result.tracker_updated) {
+            bits.push("tracker updated");
+        } else if (result.tracker_path === null) {
+            bits.push("no applications.md found — tracker skipped");
+        }
+        if (result.commit_sha) {
+            const short = result.commit_sha.slice(0, 7);
+            bits.push(`committed \`${short}\``);
+        } else if (result.commit_error) {
+            bits.push(`commit skipped (${result.commit_error})`);
+        }
+
+        ctx.postMessage({
+            type: "reply",
+            text: `Logged application for \`applications/${slug}/\` — ${bits.join(", ")}.`,
+            cls: "msg-system",
+        });
+    } catch (e) {
+        ctx.postMessage({ type: "thinking", show: false });
+        const msg = e instanceof Error ? e.message : String(e);
+        ctx.postMessage({ type: "error", text: `Log applied failed: ${msg}` });
+    }
+}
+
 // ── /help — list registered commands grouped by theme ────────────────
 
 export async function handleHelpCommand(
@@ -1164,6 +1245,7 @@ export async function handleHelpCommand(
         "- `/recruiter-reply` — Draft a reply to a recruiter's cold outreach.",
         "- `/negotiate [slug]` — Research market comp and build a negotiation brief.",
         "- `/analyse-rejection [slug]` — Post-mortem a rejection with concrete takeaways for the next application.",
+        "- `/log-applied [slug]` — Append a tracker row and commit the application folder to git.",
         "",
         "**Notes + system**",
         "- `/note <text>` — Save a quick note.",

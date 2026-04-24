@@ -165,6 +165,47 @@ export async function convertDocx(
 }
 
 // ---------------------------------------------------------------------------
+// Application logging
+// ---------------------------------------------------------------------------
+
+export interface LogAppliedResponse {
+    success: boolean;
+    tracker_updated: boolean;
+    tracker_path: string | null;
+    commit_attempted: boolean;
+    commit_sha: string | null;
+    commit_error: string | null;
+}
+
+export async function logApplied(
+    baseUrl: string,
+    repoRoot: string,
+    slug: string,
+    company: string,
+    role: string,
+    source = "other",
+    nextAction = "Follow up in 7 days",
+): Promise<LogAppliedResponse> {
+    const resp = await fetch(`${baseUrl}/api/workspace/log-applied`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            repo_root: repoRoot,
+            slug,
+            company,
+            role,
+            source,
+            next_action: nextAction,
+        }),
+    });
+    if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        throw new Error(`log-applied failed (${resp.status}): ${body || resp.statusText}`);
+    }
+    return (await resp.json()) as LogAppliedResponse;
+}
+
+// ---------------------------------------------------------------------------
 // Scaffolding
 // ---------------------------------------------------------------------------
 

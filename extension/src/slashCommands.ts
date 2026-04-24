@@ -27,6 +27,7 @@ import {
     handleAnalyseRejectionCommand,
     handleAtsCheckCommand,
     handleBatchPrepCommand,
+    handleLogAppliedCommand,
     handleHelpCommand,
 } from "./slashCommandsWorkspace";
 
@@ -71,6 +72,7 @@ export function createSlashCommands(
     map.set("/analyse-rejection", (args) => handleAnalyseRejectionCommand(ctx, args));
     map.set("/ats-check", (args) => handleAtsCheckCommand(ctx, args));
     map.set("/batch-prep", (args) => handleBatchPrepCommand(ctx, args));
+    map.set("/log-applied", (args) => handleLogAppliedCommand(ctx, args));
     map.set("/help", (args) => handleHelpCommand(ctx, args));
     return map;
 }
