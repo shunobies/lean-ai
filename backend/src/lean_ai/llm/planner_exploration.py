@@ -772,6 +772,29 @@ async def _run_serial_exploration(
     ]
     phase2_tools.append(RECORD_FILE_OBSERVATION_TOOL)
 
+    # Hard-gate task_complete on at least one recorded observation.
+    # Phase 2's downstream contract is the observations file — prose
+    # alone reaches the synthesis pass with zero structured data and
+    # produces a near-empty FileSummary.  The validator fires from the
+    # facade AFTER any same-turn record_file_observation call has
+    # written to disk, so combined turns like
+    # [record_file_observation, task_complete] approve naturally.
+    def _phase2_task_complete_validator() -> str | None:
+        obs = read_observations(repo_root, session_id)
+        if obs:
+            return None
+        return (
+            "ERROR: Cannot call task_complete — zero file observations "
+            "have been recorded. Phase 2's output reaches downstream "
+            "phases through record_file_observation, not prose. Before "
+            "calling task_complete, call record_file_observation for "
+            "every relevant file you have read, with role "
+            "(modify / create / reference / missing), a one-line "
+            "reason, relevant_sections (line ranges), and key_snippets "
+            "(15-25 line excerpts). Continue exploring and recording "
+            "now."
+        )
+
     _tool_calls, file_identification = await explorer.chat_with_tools(
         messages=phase2_messages,
         tools=phase2_tools,
@@ -790,6 +813,7 @@ async def _run_serial_exploration(
             "repo_root": repo_root, "session_id": session_id,
             "phase": "planning.phase2", "role": "primary",
         },
+        task_complete_validator=_phase2_task_complete_validator,
     )
 
     return file_identification

@@ -351,6 +351,7 @@ class LLMClient:
         on_budget_interrupt: Callable | None = None,
         dispatcher: "WSMessageDispatcher | None" = None,
         telemetry_context: dict | None = None,
+        task_complete_validator: Callable | None = None,
     ) -> tuple[list[ToolCall], str]:
         """Multi-turn tool calling loop with unified turn supervisor.
 
@@ -549,13 +550,14 @@ class LLMClient:
                     assistant_msg["thinking"] = turn_thinking
                 messages.append(assistant_msg)
 
-                # Execute each tool call
+                # Execute each tool call.  task_complete is deferred until
+                # AFTER every other tool in this turn has run so that a
+                # task_complete_validator (if provided) sees the side
+                # effects of same-turn observation/scratchpad writes.
+                pending_complete_calls: list[ToolCallInfo] = []
                 for tc in tool_calls:
                     if tc.name == "task_complete":
-                        result_msgs = self._provider.format_tool_result_messages(
-                            tc, "Task marked complete.",
-                        )
-                        messages.extend(result_msgs)
+                        pending_complete_calls.append(tc)
                         continue
 
                     if on_tool_call:
@@ -638,6 +640,45 @@ class LLMClient:
                                 },
                             )
                             state.consecutive_same_tool = 0
+
+                # Emit deferred task_complete results AFTER every other
+                # tool in this turn has run.  When a
+                # task_complete_validator is supplied and returns a
+                # non-empty rejection string, we feed that back to the
+                # model as the task_complete tool result and clear
+                # ``completion_call`` so the loop continues instead of
+                # exiting.  This lets callers (e.g. Phase 2) gate
+                # completion on side effects like recorded observations.
+                if pending_complete_calls:
+                    rejection: str | None = None
+                    if task_complete_validator is not None:
+                        try:
+                            rejection_maybe = task_complete_validator()
+                            if asyncio.iscoroutine(rejection_maybe):
+                                rejection_maybe = await rejection_maybe
+                            if rejection_maybe:
+                                rejection = str(rejection_maybe)
+                        except Exception as exc:
+                            logger.warning(
+                                "chat_with_tools: task_complete_validator "
+                                "raised: %s", exc,
+                            )
+                    if rejection:
+                        completion_call = None
+                        result_text = rejection
+                        logger.info(
+                            "chat_with_tools: task_complete rejected by "
+                            "validator — continuing loop",
+                        )
+                    else:
+                        result_text = "Task marked complete."
+                    for tc in pending_complete_calls:
+                        result_msgs = (
+                            self._provider.format_tool_result_messages(
+                                tc, result_text,
+                            )
+                        )
+                        messages.extend(result_msgs)
 
             # Bound thinking history so long tool loops don't blow the
             # context window — the 3 most recent assistant turns keep their

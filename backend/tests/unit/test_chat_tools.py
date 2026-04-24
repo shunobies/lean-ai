@@ -307,3 +307,167 @@ async def test_chat_executor_grep_files(tmp_path):
     result = await executor("grep_files", {"pattern": "hello"})
 
     assert "hello" in result
+
+
+# ── task_complete_validator tests ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_task_complete_validator_approves_by_default():
+    """No validator passed → task_complete exits the loop immediately."""
+    async def executor(name, args):
+        return "result"
+
+    provider = FakeProvider([
+        _tool_response("task_complete", {}),
+    ])
+    client = LLMClient(provider)
+
+    executed, _ = await client.chat_with_tools(
+        messages=[{"role": "user", "content": "test"}],
+        tools=CHAT_TOOLS,
+        tool_executor_fn=executor,
+    )
+
+    assert provider.call_count == 1  # exited after task_complete
+
+
+@pytest.mark.asyncio
+async def test_task_complete_validator_rejects_and_continues():
+    """Validator returning a rejection string continues the loop with
+    the rejection as the task_complete tool result."""
+    async def executor(name, args):
+        return "result"
+
+    # Turn 1: task_complete (rejected, loop continues)
+    # Turn 2: text response (exits on text_only_exit_count=1)
+    provider = FakeProvider([
+        _tool_response("task_complete", {}),
+        _text_response("ok, continuing."),
+    ])
+    client = LLMClient(provider)
+
+    rejections: list[str] = []
+
+    def validator() -> str | None:
+        rejections.append("called")
+        return "ERROR: you must record observations first"
+
+    await client.chat_with_tools(
+        messages=[{"role": "user", "content": "test"}],
+        tools=CHAT_TOOLS,
+        tool_executor_fn=executor,
+        text_only_exit_count=1,
+        task_complete_validator=validator,
+    )
+
+    assert len(rejections) == 1
+    assert provider.call_count == 2  # loop continued past the rejection
+
+    # The rejection string should appear as the task_complete tool result
+    # in the messages given to the second provider call.
+    second_call_messages = provider.messages_at_each_call[1]
+    tool_result_contents = [
+        m.get("content") for m in second_call_messages
+        if m.get("role") in ("tool", "user")
+    ]
+    assert any(
+        isinstance(c, str) and "record observations first" in c
+        for c in tool_result_contents
+    )
+
+
+@pytest.mark.asyncio
+async def test_task_complete_validator_sees_same_turn_tool_writes():
+    """Validator runs AFTER other tools in the same turn, so a
+    record-then-complete combo approves on first call."""
+    writes: list[str] = []
+
+    async def executor(name, args):
+        if name == "record_file_observation":
+            writes.append(args.get("file_path", ""))
+            return "recorded"
+        return "result"
+
+    # Single turn with both calls: record + task_complete
+    provider = FakeProvider([
+        (
+            "",
+            [
+                ToolCallInfo(
+                    name="record_file_observation",
+                    arguments={"file_path": "a.py"},
+                ),
+                ToolCallInfo(name="task_complete", arguments={}),
+            ],
+            LLMMetrics(),
+        ),
+    ])
+    client = LLMClient(provider)
+
+    def validator() -> str | None:
+        # Approve iff at least one observation has been recorded this session
+        return None if writes else "no observations"
+
+    await client.chat_with_tools(
+        messages=[{"role": "user", "content": "test"}],
+        tools=CHAT_TOOLS,
+        tool_executor_fn=executor,
+        task_complete_validator=validator,
+    )
+
+    # Exactly one provider call — task_complete approved on first shot
+    assert provider.call_count == 1
+    assert writes == ["a.py"]
+
+
+@pytest.mark.asyncio
+async def test_task_complete_validator_exception_fails_open():
+    """Validator raising an exception is logged and treated as approval
+    so a broken validator never traps the loop."""
+    async def executor(name, args):
+        return "result"
+
+    provider = FakeProvider([
+        _tool_response("task_complete", {}),
+    ])
+    client = LLMClient(provider)
+
+    def validator() -> str | None:
+        raise RuntimeError("validator bug")
+
+    await client.chat_with_tools(
+        messages=[{"role": "user", "content": "test"}],
+        tools=CHAT_TOOLS,
+        tool_executor_fn=executor,
+        task_complete_validator=validator,
+    )
+
+    # Exited after the single task_complete call despite validator raising
+    assert provider.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_task_complete_validator_supports_async():
+    """Async validator coroutines are awaited."""
+    async def executor(name, args):
+        return "result"
+
+    provider = FakeProvider([
+        _tool_response("task_complete", {}),
+        _text_response("ok."),
+    ])
+    client = LLMClient(provider)
+
+    async def validator() -> str | None:
+        return "async rejection"
+
+    await client.chat_with_tools(
+        messages=[{"role": "user", "content": "test"}],
+        tools=CHAT_TOOLS,
+        tool_executor_fn=executor,
+        text_only_exit_count=1,
+        task_complete_validator=validator,
+    )
+
+    assert provider.call_count == 2
