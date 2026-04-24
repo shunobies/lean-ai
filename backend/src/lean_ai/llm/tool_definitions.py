@@ -84,7 +84,10 @@ IMPLEMENTATION_TOOLS: list[dict] = [
                 "Returns up to 500 lines by default. For large files, "
                 "use start_line and end_line to read specific sections. "
                 "Can read files outside the project (e.g. log files) "
-                "using absolute paths — requires user approval."
+                "using absolute paths — requires user approval. "
+                "Also supports .docx Word documents when python-docx is "
+                "installed (renders headings, paragraphs, and tables as "
+                "markdown)."
             ),
             "parameters": {
                 "type": "object",

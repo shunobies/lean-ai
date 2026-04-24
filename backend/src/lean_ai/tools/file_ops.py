@@ -153,10 +153,28 @@ async def read_file(
             ),
         )
 
-    try:
-        text = file_path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        return ToolResult(success=False, error=f"Cannot read binary file: {path}")
+    if file_path.suffix.lower() == ".docx":
+        try:
+            from lean_ai.reference.readers.docx import docx_to_markdown
+            text = docx_to_markdown(file_path)
+        except ImportError:
+            return ToolResult(
+                success=False,
+                error=(
+                    "Cannot read .docx: python-docx not installed. "
+                    "Install with: pip install 'lean-ai[reference]'"
+                ),
+            )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=f"Failed to parse .docx {path}: {e}",
+            )
+    else:
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return ToolResult(success=False, error=f"Cannot read binary file: {path}")
 
     lines = text.splitlines()
     total = len(lines)

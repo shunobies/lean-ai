@@ -22,6 +22,7 @@ from lean_ai.routers.sessions import sessions_router
 from lean_ai.routers.ui_verification import ui_verification_router
 from lean_ai.routers.voice import voice_router
 from lean_ai.routers.workflow import workflow_router
+from lean_ai.routers.workspace import workspace_router
 
 router = APIRouter()
 router.include_router(sessions_router)
@@ -39,3 +40,4 @@ router.include_router(ui_verification_router)
 router.include_router(integrations_router)
 router.include_router(diffs_router)
 router.include_router(export_router)
+router.include_router(workspace_router)
