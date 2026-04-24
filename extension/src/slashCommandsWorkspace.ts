@@ -21,9 +21,11 @@ import {
     analyseRejectionPrompt,
     atsCheckPrompt,
     batchPrepPrompt,
+    mockInterviewPrompt,
     parseBatchQueue,
     BATCH_QUEUE_TEMPLATE,
     type RecruiterReplyIntent,
+    type MockInterviewDifficulty,
 } from "./jobSearchPrompts";
 
 // ── /init — workspace indexing + project context ─────────────────────
@@ -1215,6 +1217,101 @@ export async function handleLogAppliedCommand(
     }
 }
 
+// ── /mock-interview — adaptive Q&A with rubric scoring ──────────────
+
+export async function handleMockInterviewCommand(
+    ctx: SlashCommandContext,
+    args: string,
+): Promise<void> {
+    if (!(await ensureAgentIdleAndBackendHealthy(ctx))) return;
+
+    const slug = await resolveApplicationSlug(ctx, args.trim());
+    if (!slug) return;
+
+    const repoRoot = ctx.getRepoRoot();
+    const resumeMd = path.join(repoRoot, "applications", slug, "resume.md");
+    const questionsMd = path.join(repoRoot, "applications", slug, "interview_questions.md");
+    const missing: string[] = [];
+    if (!fs.existsSync(resumeMd)) missing.push(`applications/${slug}/resume.md`);
+    if (!fs.existsSync(questionsMd)) missing.push(`applications/${slug}/interview_questions.md`);
+    if (missing.length > 0) {
+        ctx.postMessage({
+            type: "error",
+            text: (
+                `Missing required files for mock interview: ${missing.join(", ")}.\n\n` +
+                `Run \`/interview-prep\` first to populate the \`applications/${slug}/\` folder.`
+            ),
+        });
+        return;
+    }
+
+    const difficultyPick = await vscode.window.showQuickPick(
+        [
+            {
+                label: "Recruiter screening round",
+                description: "Broad fit-and-motivation questions",
+                id: "screening" as MockInterviewDifficulty,
+            },
+            {
+                label: "Hiring manager",
+                description: "Role fit, past projects, collaboration",
+                id: "hiring-manager" as MockInterviewDifficulty,
+            },
+            {
+                label: "Technical deep-dive",
+                description: "Implementation, trade-offs, architecture",
+                id: "technical" as MockInterviewDifficulty,
+            },
+            {
+                label: "Executive / final round",
+                description: "Strategy, leadership, vision",
+                id: "executive" as MockInterviewDifficulty,
+            },
+        ],
+        {
+            title: "Mock interview — Difficulty",
+            placeHolder: "Which round are you practicing?",
+            ignoreFocusOut: true,
+        },
+    );
+    if (!difficultyPick) return;
+
+    const countPick = await vscode.window.showQuickPick(
+        ["3", "5", "7", "10"],
+        {
+            title: "Mock interview — Question count",
+            placeHolder: "How many questions should I ask?",
+            ignoreFocusOut: true,
+        },
+    );
+    if (!countPick) return;
+    const questionCount = Number.parseInt(countPick, 10);
+
+    ctx.postMessage({
+        type: "reply",
+        text: (
+            `Starting mock interview for \`applications/${slug}/\` — ${difficultyPick.label}, ` +
+            `${questionCount} questions. Each of your answers will be scored on 5 dimensions ` +
+            `(Structure, Specificity, Relevance, Ownership, Impact) with a composite out of 10. ` +
+            `Reply to each question as you would in a real interview — no meta commentary, no ` +
+            `asking me for hints. Interrupt with any message to pause.`
+        ),
+        cls: "msg-system",
+    });
+
+    const prompt = mockInterviewPrompt({
+        slug,
+        difficulty: difficultyPick.id,
+        questionCount,
+    });
+
+    // Dispatch through the chat endpoint (NOT /request). The first turn
+    // reads multiple context files; extended_turns=40 gives headroom.
+    // Subsequent user answers go through the normal chat flow with the
+    // default 20-turn budget, which is plenty for "score + ask next".
+    await ctx.handleChatDispatch(prompt, { extendedTurns: 40 });
+}
+
 // ── /help — list registered commands grouped by theme ────────────────
 
 export async function handleHelpCommand(
@@ -1246,6 +1343,7 @@ export async function handleHelpCommand(
         "- `/negotiate [slug]` — Research market comp and build a negotiation brief.",
         "- `/analyse-rejection [slug]` — Post-mortem a rejection with concrete takeaways for the next application.",
         "- `/log-applied [slug]` — Append a tracker row and commit the application folder to git.",
+        "- `/mock-interview [slug]` — Interactive Q&A practice with 5-dimension rubric scoring (1-10 each, composite).",
         "",
         "**Notes + system**",
         "- `/note <text>` — Save a quick note.",

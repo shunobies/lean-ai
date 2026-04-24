@@ -28,6 +28,7 @@ import {
     handleAtsCheckCommand,
     handleBatchPrepCommand,
     handleLogAppliedCommand,
+    handleMockInterviewCommand,
     handleHelpCommand,
 } from "./slashCommandsWorkspace";
 
@@ -40,6 +41,7 @@ export interface SlashCommandContext {
     ensureSession(): Promise<string>;
     ensureWebSocket(sessionId: string): WebSocket;
     handleAgentMessage(text: string): Promise<void>;
+    handleChatDispatch(text: string, opts?: { extendedTurns?: number }): Promise<void>;
     getWs(): WebSocket | undefined;
     getLastCompletedSessionId(): string | undefined;
     setSessionId(id: string | undefined): void;
@@ -73,6 +75,7 @@ export function createSlashCommands(
     map.set("/ats-check", (args) => handleAtsCheckCommand(ctx, args));
     map.set("/batch-prep", (args) => handleBatchPrepCommand(ctx, args));
     map.set("/log-applied", (args) => handleLogAppliedCommand(ctx, args));
+    map.set("/mock-interview", (args) => handleMockInterviewCommand(ctx, args));
     map.set("/help", (args) => handleHelpCommand(ctx, args));
     return map;
 }

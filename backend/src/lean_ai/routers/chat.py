@@ -37,6 +37,18 @@ chat_router = APIRouter()
 
 # Max tool-calling turns for chat exploration
 _CHAT_MAX_TURNS = 20
+# Hard cap when ChatRequest.extended_turns is supplied (used by the
+# /mock-interview extension command for multi-round scored Q&A).
+_CHAT_EXTENDED_TURNS_MAX = 40
+
+
+def _resolve_max_turns(extended: int | None) -> int:
+    """Return the effective tool-turn budget for a chat request."""
+    if extended is None:
+        return _CHAT_MAX_TURNS
+    if extended <= _CHAT_MAX_TURNS:
+        return _CHAT_MAX_TURNS
+    return min(extended, _CHAT_EXTENDED_TURNS_MAX)
 
 
 def _get_chat_client():
@@ -462,7 +474,7 @@ async def _build_chat_messages(
         reference_context=reference_ctx,
         user_name=request.user_name,
         recent_sessions=recent_activity or None,
-        max_turns=_CHAT_MAX_TURNS,
+        max_turns=_resolve_max_turns(request.extended_turns),
     )
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
@@ -566,7 +578,7 @@ async def chat(request: ChatRequest):
             messages=messages,
             tools=tools,
             tool_executor_fn=executor,
-            max_turns=_CHAT_MAX_TURNS,
+            max_turns=_resolve_max_turns(request.extended_turns),
             max_tokens=_get_chat_max_tokens(),
             text_only_exit_count=1,
             telemetry_context=telemetry_context,
@@ -595,6 +607,7 @@ async def chat(request: ChatRequest):
 async def _stream_chat_with_tools(
     messages: list[dict],
     repo_root: str | None = None,
+    max_turns: int = _CHAT_MAX_TURNS,
 ) -> AsyncGenerator[str, None]:
     """Stream LLM response with tool exploration.
 
@@ -632,7 +645,7 @@ async def _stream_chat_with_tools(
                 messages=messages,
                 tools=tools,
                 tool_executor_fn=executor,
-                max_turns=_CHAT_MAX_TURNS,
+                max_turns=max_turns,
                 max_tokens=_get_chat_max_tokens(),
                 text_only_exit_count=1,
                 stream_content=True,
@@ -705,7 +718,8 @@ async def chat_stream_endpoint(request: ChatRequest):
                 else None
             )
 
-            async for sse_event in _stream_chat_with_tools(messages, repo_root):
+            max_turns = _resolve_max_turns(request.extended_turns)
+            async for sse_event in _stream_chat_with_tools(messages, repo_root, max_turns):
                 yield sse_event
 
         except Exception as e:

@@ -290,10 +290,20 @@ export async function handleUserMessage(
 
 // ── Chat mode: streaming LLM call with workspace context ─────────
 
+export interface HandleChatOptions {
+    /**
+     * Per-request chat turn budget override — used by /mock-interview so
+     * the initial file-reading + first question fits within one chat
+     * call. Backend caps at 40.
+     */
+    extendedTurns?: number;
+}
+
 export async function handleChatMessage(
     ctx: ChatContext,
     text: string,
     attachments?: Attachment[],
+    options?: HandleChatOptions,
 ): Promise<void> {
     const now = new Date().toISOString();
     const vCtx = ctx.voiceCtx();
@@ -353,7 +363,7 @@ export async function handleChatMessage(
             ctx.postMessage({ type: "chatToolActivity", name, description });
         }, (name, success) => {
             ctx.postMessage({ type: "chatToolResult", name, success });
-        }));
+        }, options?.extendedTurns));
     } finally {
         ctx.sessionTreeProvider?.resumeRefresh();
     }

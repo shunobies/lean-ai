@@ -706,11 +706,12 @@ export class BackendClient {
         onVisionDescription?: (desc: string) => void,
         onToolCall?: (name: string, description: string) => void,
         onToolResult?: (name: string, success: boolean) => void,
+        extendedTurns?: number,
     ) {
         return _chatStream(
             this.baseUrl, message, history, workspace, onToken,
             attachments, onThinking, userName, skipWebSearch,
-            onVisionDescription, onToolCall, onToolResult,
+            onVisionDescription, onToolCall, onToolResult, extendedTurns,
         );
     }
 

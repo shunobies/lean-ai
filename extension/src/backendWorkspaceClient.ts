@@ -592,6 +592,7 @@ export function chatStream(
     onVisionDescription?: (desc: string) => void,
     onToolCall?: (name: string, description: string) => void,
     onToolResult?: (name: string, success: boolean) => void,
+    extendedTurns?: number,
 ): Promise<{ receivedDone: boolean }> {
     return new Promise((resolve, reject) => {
         const fullUrl = new URL(`${baseUrl}/api/chat/stream`);
@@ -603,6 +604,9 @@ export function chatStream(
         if (attachments && attachments.length > 0) { body.attachments = attachments; }
         if (userName) { body.user_name = userName; }
         if (skipWebSearch) { body.skip_web_search = true; }
+        if (typeof extendedTurns === "number" && extendedTurns > 0) {
+            body.extended_turns = extendedTurns;
+        }
         const postData = JSON.stringify(body);
 
         const options: http.RequestOptions = {

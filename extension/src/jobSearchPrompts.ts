@@ -303,6 +303,117 @@ export function batchPrepPrompt(opts: {
 }
 
 // ---------------------------------------------------------------------------
+// /mock-interview
+// ---------------------------------------------------------------------------
+
+export type MockInterviewDifficulty =
+    | "screening"
+    | "hiring-manager"
+    | "technical"
+    | "executive";
+
+const DIFFICULTY_LABELS: Record<MockInterviewDifficulty, string> = {
+    "screening": "Recruiter screening round",
+    "hiring-manager": "Hiring manager interview",
+    "technical": "Technical deep-dive",
+    "executive": "Executive / final round",
+};
+
+const DIFFICULTY_GUIDANCE: Record<MockInterviewDifficulty, string> = {
+    "screening":
+        "Broad fit-and-motivation questions. Keep questions high-level — background, why this company, salary range, logistics.",
+    "hiring-manager":
+        "Role fit + collaboration. Mix of behavioural, past-project deep-dive, and scenario questions. Probe ownership and impact.",
+    "technical":
+        "Role-specific technical depth. Ask concrete implementation questions, trade-off questions, debugging scenarios, architecture decisions. Follow up on vague answers.",
+    "executive":
+        "Strategic / leadership / vision questions. Probe commercial awareness, long-term thinking, how the candidate frames hard trade-offs. Fewer questions, each with layered follow-ups.",
+};
+
+/**
+ * Build the opening chat message that seeds a mock-interview session.
+ *
+ * This message contains the full rubric + protocol and is sent as the
+ * first user turn via the chat endpoint (NOT /request). The chat
+ * endpoint reads the context files via tools and drives an adaptive
+ * Q&A. ``extended_turns`` on the chat request bumps the turn budget
+ * from the default 20 so all ``questionCount`` rounds can complete.
+ */
+export function mockInterviewPrompt(opts: {
+    slug: string;
+    difficulty: MockInterviewDifficulty;
+    questionCount: number;
+}): string {
+    const { slug, difficulty, questionCount } = opts;
+    return [
+        `Let's do a mock interview for my application at \`applications/${slug}/\`.`,
+        "",
+        "Mode: " + DIFFICULTY_LABELS[difficulty] + ".",
+        DIFFICULTY_GUIDANCE[difficulty],
+        `Number of questions: ${questionCount}.`,
+        "",
+        "Context files to read BEFORE asking the first question:",
+        `- \`applications/${slug}/resume.md\` — my tailored resume`,
+        `- \`applications/${slug}/research.md\` — company research and JD`,
+        `- \`applications/${slug}/interview_questions.md\` — question bank (use it to pick or adapt questions, don't just read them verbatim)`,
+        `- \`star_stories.md\` at the workspace root — my reusable STAR story bank, if present`,
+        "",
+        "=== RUBRIC ===",
+        "",
+        "Score every answer I give on five dimensions, 1-10 each. Composite = mean, rounded to 1 decimal.",
+        "",
+        "1. STRUCTURE — STAR (Situation/Task/Action/Result) or another coherent flow. Clear beginning, middle, end.",
+        "2. SPECIFICITY — concrete names, numbers, dates, technologies. Platitudes like 'I'm a team player' cap at 4.",
+        "3. RELEVANCE — addresses the specific question asked AND ties back to a real requirement from the JD or research.",
+        "4. OWNERSHIP — 'I' language where appropriate. Clear about what I personally contributed. 8+ requires first-person specifics ('I designed X', 'I decided Y').",
+        "5. IMPACT — for success-oriented questions, a quantified outcome (percent, revenue, count, time). For failure/weakness questions, substitute SELF-AWARENESS: reflection and a concrete follow-up action. 9-10 requires a quantified result OR a genuine learning statement.",
+        "",
+        "=== CALIBRATION GUARDRAILS — READ THESE CAREFULLY ===",
+        "",
+        "- A short non-answer (fewer than 20 words, no substance) scores 1-2 across ALL dimensions. Do NOT be generous.",
+        "- Platitudes without concrete examples cap at 4.",
+        "- You MUST cite the specific phrase from my answer that earned or lost points on each dimension. No hand-waving.",
+        "- Offer exactly ONE improvement suggestion per answer — the highest-leverage change. Not ten.",
+        "- Don't flatter me. Flattery doesn't help me iterate.",
+        "",
+        "=== PROTOCOL ===",
+        "",
+        "Step 1: Read all the context files listed above that exist. Use read_file. Do NOT skip this.",
+        "Step 2: Pick a question appropriate for " + DIFFICULTY_LABELS[difficulty] + ". Ask it in one or two sentences. Then STOP — don't answer your own question, don't pre-empt my reply.",
+        "Step 3: Wait for my answer.",
+        "Step 4: Score my answer using the rubric. Format the score block EXACTLY as:",
+        "",
+        "    **Score: X.X/10**",
+        "    - Structure: X/10 — \"cited phrase\"",
+        "    - Specificity: X/10 — \"cited phrase\"",
+        "    - Relevance: X/10 — \"cited phrase\"",
+        "    - Ownership: X/10 — \"cited phrase\"",
+        "    - Impact: X/10 — \"cited phrase\"",
+        "    ",
+        "    **One improvement:** [specific, actionable sentence]",
+        "",
+        "Step 5: Ask the next question. Adapt based on my previous answer:",
+        "   - If a dimension scored low, the next question should probe a related area so I can redeem it.",
+        "   - If a dimension scored high, the next question should go deeper on the same theme (push on the follow-up).",
+        "   - If the answer was very short, the next question should explicitly invite more detail.",
+        "   Then STOP.",
+        "Step 6: Repeat Steps 3-5 until I've answered " + questionCount + " questions.",
+        "Step 7: After the final scored answer, write a SESSION SUMMARY formatted as:",
+        "",
+        "    ### Session summary",
+        "    **Average score:** X.X/10 (across " + questionCount + " questions)",
+        "    **Strongest dimension:** [name] — [one-sentence why]",
+        "    **Weakest dimension:** [name] — [one-sentence why]",
+        "    **Three takeaways for future interviews:**",
+        "    1. [actionable]",
+        "    2. [actionable]",
+        "    3. [actionable]",
+        "",
+        "Begin now: read the files, then ask question 1.",
+    ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Helpers private to this module
 // ---------------------------------------------------------------------------
 
