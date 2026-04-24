@@ -21,6 +21,11 @@ import {
     handleFixCommand,
     handleRequestCommand,
     handleInterviewPrepCommand,
+    handleThankYouCommand,
+    handleRecruiterReplyCommand,
+    handleNegotiateCommand,
+    handleAnalyseRejectionCommand,
+    handleHelpCommand,
 } from "./slashCommandsWorkspace";
 
 // ── Context interface ────────────────────────────────────────────────
@@ -58,6 +63,11 @@ export function createSlashCommands(
     map.set("/resume",   (args) => handleResumeCommand(ctx, args));
     map.set("/note",     (args) => handleNoteCommand(ctx, args));
     map.set("/interview-prep", (args) => handleInterviewPrepCommand(ctx, args));
+    map.set("/thank-you", (args) => handleThankYouCommand(ctx, args));
+    map.set("/recruiter-reply", (args) => handleRecruiterReplyCommand(ctx, args));
+    map.set("/negotiate", (args) => handleNegotiateCommand(ctx, args));
+    map.set("/analyse-rejection", (args) => handleAnalyseRejectionCommand(ctx, args));
+    map.set("/help", (args) => handleHelpCommand(ctx, args));
     return map;
 }
 

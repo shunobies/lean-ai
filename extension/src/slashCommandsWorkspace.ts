@@ -11,6 +11,14 @@ import WebSocket from "ws";
 import { SlashCommandContext } from "./slashCommands";
 import { DocxOutputExistsError } from "./backendClient";
 import { slugify } from "./slugify";
+import {
+    pickApplicationSlug,
+    thankYouPrompt,
+    recruiterReplyPrompt,
+    negotiatePrompt,
+    analyseRejectionPrompt,
+    type RecruiterReplyIntent,
+} from "./jobSearchPrompts";
 
 // ── /init — workspace indexing + project context ─────────────────────
 
@@ -769,4 +777,273 @@ export async function handleInterviewPrepCommand(
     ].join("\n");
 
     await ctx.handleAgentMessage(`/request ${prompt}`);
+}
+
+// ── Shared guards for the job-search command family ──────────────────
+
+async function ensureAgentIdleAndBackendHealthy(
+    ctx: SlashCommandContext,
+): Promise<boolean> {
+    const ws = ctx.getWs();
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ctx.postMessage({
+            type: "error",
+            text: "An agent workflow is already running. Wait for it to complete, or start a new chat first.",
+        });
+        return false;
+    }
+    const healthy = await ctx.client.healthCheck();
+    if (!healthy) {
+        ctx.postMessage({
+            type: "error",
+            text: "Backend not available. Start the server:\ncd backend && uvicorn lean_ai.main:app --reload --port 8422",
+        });
+        return false;
+    }
+    return true;
+}
+
+async function resolveApplicationSlug(
+    ctx: SlashCommandContext,
+    argsSlug: string,
+): Promise<string | undefined> {
+    const result = await pickApplicationSlug(ctx.getRepoRoot(), argsSlug);
+    if (result === null) {
+        ctx.postMessage({
+            type: "error",
+            text: "No `applications/` directory or folders found. Run `/scaffold jobs <name>` to bootstrap a job-search workspace, then `/interview-prep` to create an application folder.",
+        });
+        return undefined;
+    }
+    return result ?? undefined;
+}
+
+// ── /thank-you — post-interview note ─────────────────────────────────
+
+export async function handleThankYouCommand(
+    ctx: SlashCommandContext,
+    args: string,
+): Promise<void> {
+    if (!(await ensureAgentIdleAndBackendHealthy(ctx))) return;
+
+    const slug = await resolveApplicationSlug(ctx, args.trim());
+    if (!slug) return;
+
+    const interviewers = await vscode.window.showInputBox({
+        title: "Thank-you note — Interviewer(s)",
+        prompt: "Who did you speak with? (name + role, comma-separated if multiple)",
+        placeHolder: "e.g. Jane Smith (Hiring Manager), Raj Patel (Engineering Lead)",
+        ignoreFocusOut: true,
+        validateInput: (v) => (v && v.trim() ? null : "At least one name is required."),
+    });
+    if (interviewers === undefined) return;
+
+    const notes = await vscode.window.showInputBox({
+        title: "Thank-you note — What stood out?",
+        prompt: "Topics discussed, their specific questions, anything you promised to follow up on",
+        placeHolder: "e.g. discussed migration to Django, they asked about Kafka throughput, I promised to share a blog link",
+        ignoreFocusOut: true,
+        validateInput: (v) => (v && v.trim() ? null : "Give at least one specific thing you discussed."),
+    });
+    if (notes === undefined) return;
+
+    const prompt = thankYouPrompt({
+        slug,
+        interviewers: interviewers.trim(),
+        discussionNotes: notes.trim(),
+    });
+
+    ctx.postMessage({
+        type: "reply",
+        text: `Drafting thank-you note for \`applications/${slug}/\`. Output will land at \`applications/${slug}/thank_you_sent.md\`.`,
+        cls: "msg-system",
+    });
+    await ctx.handleAgentMessage(`/request ${prompt}`);
+}
+
+// ── /recruiter-reply — response to cold recruiter outreach ───────────
+
+export async function handleRecruiterReplyCommand(
+    ctx: SlashCommandContext,
+    _args: string,
+): Promise<void> {
+    if (!(await ensureAgentIdleAndBackendHealthy(ctx))) return;
+
+    const recruiterMessage = await vscode.window.showInputBox({
+        title: "Recruiter reply — Paste their message",
+        prompt: "Paste the recruiter's message (newlines are preserved)",
+        placeHolder: "Hi [your name], I came across your profile...",
+        ignoreFocusOut: true,
+        validateInput: (v) => (v && v.trim().length > 30 ? null : "Paste the full message (at least 30 characters)."),
+    });
+    if (recruiterMessage === undefined) return;
+
+    const intentLabel = await vscode.window.showQuickPick(
+        [
+            {
+                label: "Interested — ask for more details",
+                description: "Ask about comp, stack, team, remote/hybrid",
+                id: "interested-details" as RecruiterReplyIntent,
+            },
+            {
+                label: "Interested — propose times",
+                description: "Offer 2-3 slots to talk",
+                id: "interested-times" as RecruiterReplyIntent,
+            },
+            {
+                label: "Not interested — polite decline",
+                description: "Short courteous no",
+                id: "decline-polite" as RecruiterReplyIntent,
+            },
+            {
+                label: "Not interested — stay in touch for later",
+                description: "Decline but leave the door open",
+                id: "decline-stay-in-touch" as RecruiterReplyIntent,
+            },
+        ],
+        {
+            title: "Recruiter reply — Intent",
+            placeHolder: "How should I respond?",
+            ignoreFocusOut: true,
+        },
+    );
+    if (!intentLabel) return;
+
+    const prompt = recruiterReplyPrompt({
+        recruiterMessage: recruiterMessage.trim(),
+        intent: intentLabel.id,
+    });
+
+    ctx.postMessage({
+        type: "reply",
+        text: "Drafting recruiter reply. Output will land under `recruiter_replies/` at the workspace root.",
+        cls: "msg-system",
+    });
+    await ctx.handleAgentMessage(`/request ${prompt}`);
+}
+
+// ── /negotiate — salary + negotiation prep ───────────────────────────
+
+export async function handleNegotiateCommand(
+    ctx: SlashCommandContext,
+    args: string,
+): Promise<void> {
+    if (!(await ensureAgentIdleAndBackendHealthy(ctx))) return;
+
+    const slug = await resolveApplicationSlug(ctx, args.trim());
+    if (!slug) return;
+
+    const location = await vscode.window.showInputBox({
+        title: "Negotiate — Location",
+        prompt: "Where will you be working from? (city + state/country)",
+        placeHolder: "e.g. Portland, OR or Remote (US)",
+        ignoreFocusOut: true,
+        validateInput: (v) => (v && v.trim() ? null : "Location is required for comp bands."),
+    });
+    if (location === undefined) return;
+
+    const currentComp = await vscode.window.showInputBox({
+        title: "Negotiate — Current or last comp (optional)",
+        prompt: "Total comp (base + bonus + equity) — leave blank to skip",
+        placeHolder: "e.g. $165k base + $30k bonus + $80k/yr equity",
+        ignoreFocusOut: true,
+    });
+    if (currentComp === undefined) return;
+
+    const currentOffer = await vscode.window.showInputBox({
+        title: "Negotiate — Their offer so far (optional)",
+        prompt: "If you have an offer already, paste the key numbers — leave blank for pre-offer prep",
+        placeHolder: "e.g. $180k base, $25k signing, 0.1% equity 4yr vest",
+        ignoreFocusOut: true,
+    });
+    if (currentOffer === undefined) return;
+
+    const prompt = negotiatePrompt({
+        slug,
+        location: location.trim(),
+        currentComp: currentComp.trim() || undefined,
+        currentOffer: currentOffer.trim() || undefined,
+    });
+
+    ctx.postMessage({
+        type: "reply",
+        text: `Researching market comp and building a negotiation brief for \`applications/${slug}/\`. Output will land at \`applications/${slug}/negotiation.md\`.`,
+        cls: "msg-system",
+    });
+    await ctx.handleAgentMessage(`/request ${prompt}`);
+}
+
+// ── /analyse-rejection — post-mortem ────────────────────────────────
+
+export async function handleAnalyseRejectionCommand(
+    ctx: SlashCommandContext,
+    args: string,
+): Promise<void> {
+    if (!(await ensureAgentIdleAndBackendHealthy(ctx))) return;
+
+    const slug = await resolveApplicationSlug(ctx, args.trim());
+    if (!slug) return;
+
+    const rejectionContext = await vscode.window.showInputBox({
+        title: "Analyse rejection — Outcome signal",
+        prompt: "Paste the rejection email text, or type 'ghosted' if you got no response",
+        placeHolder: "e.g. 'We've decided to move forward with other candidates...' or just 'ghosted after 4 weeks'",
+        ignoreFocusOut: true,
+        validateInput: (v) => (v && v.trim() ? null : "At least 'ghosted' is required."),
+    });
+    if (rejectionContext === undefined) return;
+
+    const prompt = analyseRejectionPrompt({
+        slug,
+        rejectionContext: rejectionContext.trim(),
+    });
+
+    ctx.postMessage({
+        type: "reply",
+        text: `Analysing rejection for \`applications/${slug}/\`. Output will land at \`applications/${slug}/post_mortem.md\`.`,
+        cls: "msg-system",
+    });
+    await ctx.handleAgentMessage(`/request ${prompt}`);
+}
+
+// ── /help — list registered commands grouped by theme ────────────────
+
+export async function handleHelpCommand(
+    ctx: SlashCommandContext,
+    _args: string,
+): Promise<void> {
+    const helpText = [
+        "### Lean AI slash commands",
+        "",
+        "**Workspace setup**",
+        "- `/init [--force]` — Index the workspace and generate project context.",
+        "- `/scaffold [name] [project] [parent]` — Bootstrap a project from a scaffold (use `/scaffold` alone to list recipes; `/scaffold jobs my-hunt` for a job-search workspace).",
+        "- `/style` — Generate a style guide for the current codebase.",
+        "",
+        "**Agent workflow**",
+        "- `/agent <task>` — Full plan → approve → execute workflow.",
+        "- `/fix <description>` — Skip planning, diagnose and fix directly.",
+        "- `/request <task>` — Skip planning, open-ended task with full tool access.",
+        "- `/approve` — Merge the agent branch into base after completion.",
+        "- `/reject` — Abandon the agent branch.",
+        "- `/resume [session_id]` — Resume a previous session.",
+        "",
+        "**Job search** (pair with `/scaffold jobs`)",
+        "- `/interview-prep` — Convert a .docx resume and tailor it for a specific role (creates `applications/{slug}/`).",
+        "- `/thank-you [slug]` — Draft a post-interview thank-you note.",
+        "- `/recruiter-reply` — Draft a reply to a recruiter's cold outreach.",
+        "- `/negotiate [slug]` — Research market comp and build a negotiation brief.",
+        "- `/analyse-rejection [slug]` — Post-mortem a rejection with concrete takeaways for the next application.",
+        "",
+        "**Notes + system**",
+        "- `/note <text>` — Save a quick note.",
+        "- `/reboot` — Restart the backend server.",
+        "- `/help` — Show this help.",
+    ].join("\n");
+
+    ctx.postMessage({
+        type: "reply",
+        text: helpText,
+        cls: "msg-system",
+    });
 }
