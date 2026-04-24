@@ -574,12 +574,14 @@ export async function handleRequestCommand(
  * Prompt the user for a docx resume, company, job title, and optional
  * job posting URL; convert the resume to markdown deterministically,
  * then kick off a ``/request`` session that researches the company,
- * asks clarifying questions, and writes a tailored resume + cover
- * letter alongside the converted copy.
+ * asks clarifying questions, and writes a tailored resume, cover
+ * letter, research notes, and a 20+ question interview prep file into
+ * ``applications/{slug}/``.
  *
- * Designed so a user can maintain a dedicated "job tracking" repo —
- * each application produces its own ``{company}_{job}_*.md`` trio in
- * the workspace root.
+ * Designed to pair with the ``job-search`` scaffold: each application
+ * becomes its own subfolder under ``applications/``, and the command
+ * appends a row to ``applications.md`` (the tracker) when that file
+ * exists at the workspace root.
  */
 export async function handleInterviewPrepCommand(
     ctx: SlashCommandContext,
@@ -657,9 +659,11 @@ export async function handleInterviewPrepCommand(
     }
 
     const slug = `${companySlug}_${jobSlug}`;
-    let resumeFile = `${slug}_resume.md`;
-    const coverFile = `${slug}_cover_letter.md`;
-    const researchFile = `${slug}_research.md`;
+    const appDir = `applications/${slug}`;
+    const resumeFile = `${appDir}/resume.md`;
+    const coverFile = `${appDir}/cover_letter.md`;
+    const researchFile = `${appDir}/research.md`;
+    const questionsFile = `${appDir}/interview_questions.md`;
 
     ctx.postMessage({
         type: "thinking",
@@ -674,10 +678,9 @@ export async function handleInterviewPrepCommand(
         if (e instanceof DocxOutputExistsError) {
             ctx.postMessage({ type: "thinking", show: false });
             const choice = await vscode.window.showWarningMessage(
-                `${resumeFile} already exists in the workspace. Overwrite, rename with today's date, or cancel?`,
+                `${resumeFile} already exists. Overwrite the existing markdown resume, or cancel?`,
                 { modal: true },
                 "Overwrite",
-                "Rename",
             );
             if (choice === "Overwrite") {
                 ctx.postMessage({
@@ -687,22 +690,6 @@ export async function handleInterviewPrepCommand(
                 });
                 try {
                     await ctx.client.convertDocx(repoRoot, resumePath, resumeFile, true);
-                } catch (err) {
-                    ctx.postMessage({ type: "thinking", show: false });
-                    const msg = err instanceof Error ? err.message : String(err);
-                    ctx.postMessage({ type: "error", text: `Resume conversion failed: ${msg}` });
-                    return;
-                }
-            } else if (choice === "Rename") {
-                const today = new Date().toISOString().slice(0, 10);
-                resumeFile = `${slug}_resume_${today}.md`;
-                ctx.postMessage({
-                    type: "thinking",
-                    show: true,
-                    text: `Writing to ${resumeFile}...`,
-                });
-                try {
-                    await ctx.client.convertDocx(repoRoot, resumePath, resumeFile, false);
                 } catch (err) {
                     ctx.postMessage({ type: "thinking", show: false });
                     const msg = err instanceof Error ? err.message : String(err);
@@ -731,39 +718,52 @@ export async function handleInterviewPrepCommand(
         type: "reply",
         text: (
             `Converted resume to [${resumeFile}](${resumeFile}). ` +
-            `Starting tailored research and cover letter workflow — watch this chat for ` +
-            `clarifying questions; reply to them in chat as you would any agent message.`
+            `Starting tailored research, cover letter, and interview prep workflow — ` +
+            `watch this chat for clarifying questions; reply to them in chat as you ` +
+            `would any agent message.`
         ),
         cls: "msg-system",
     });
+
+    const today = new Date().toISOString().slice(0, 10);
 
     const jobUrlLine = jobUrl.trim()
         ? `- Job posting: ${jobUrl.trim()} (fetch it with fetch_url before anything else).`
         : "- No job URL was provided — ask me to paste the job description before you begin research.";
 
     const jobStep2 = jobUrl.trim()
-        ? `2. Fetch the job posting at ${jobUrl.trim()} with fetch_url and note the key requirements.`
+        ? `2. Fetch the job posting at ${jobUrl.trim()} with fetch_url and note the key requirements and ATS-relevant keywords.`
         : "2. Ask me to paste the job description. Wait for my reply before moving on.";
 
     const prompt = [
         `I have an interview with ${company.trim()} for the ${jobTitle.trim()} role.`,
         "",
-        "Artifacts already in the workspace root:",
+        "Artifacts already in the workspace:",
         `- \`${resumeFile}\` — faithful markdown copy of my master resume. Treat it as the starting point; update it IN PLACE for THIS role.`,
+        "- `star_stories.md` (workspace root, optional) — if it exists, read it BEFORE writing the cover letter or interview questions; the stories there are reusable evidence for behavioural answers.",
+        "- `applications.md` (workspace root, optional) — the application tracker. If it exists, append one row for this application after you've created the per-application folder (see step 8).",
         jobUrlLine,
         "",
         "Please do the following:",
         "",
-        `1. Read \`${resumeFile}\` to understand my background.`,
+        `1. Read \`${resumeFile}\` to understand my background. If \`star_stories.md\` exists at the workspace root, read it too.`,
         jobStep2,
-        `3. Research ${company.trim()} using search_internet and fetch_url — mission, core products/services, recent news. Save a concise summary to \`${researchFile}\` (company overview, why it matters for THIS role, 3-5 talking points you would surface in the interview).`,
-        "4. Compare my resume against the job requirements. Identify gaps, strengths to emphasise, and opportunities to re-word.",
+        `3. Research ${company.trim()} using search_internet and fetch_url — mission, core products/services, recent news, culture signals. Save a concise summary to \`${researchFile}\` (company overview, why it matters for THIS role, 3-5 talking points you would surface in the interview, and any red flags you noticed).`,
+        "4. Compare my resume against the job requirements. Identify gaps, strengths to emphasise, and ATS-relevant keywords missing from my resume.",
         "5. WHERE YOU HAVE IDEAS BUT LACK REAL INFORMATION, ASK ME CLARIFYING QUESTIONS in your text response before writing anything to disk. Examples:",
         "   - \"Your resume mentions Python — did you use Django or Flask at Acme? The job description emphasises Django.\"",
         "   - \"I see five years of backend work but no leadership signal. Have you led any projects or mentored juniors?\"",
         "   Wait for my answers before updating the resume. My chat replies will be injected as normal messages.",
-        `6. Once you have enough real information, update \`${resumeFile}\` in place — keep every factual claim truthful (no invented experience), but re-order, re-word, and re-weight to emphasise what matters for this role.`,
-        `7. Write \`${coverFile}\` — a cover letter tied to the research and the clarifications I provided; use the STAR method where appropriate.`,
+        `6. Once you have enough real information, update \`${resumeFile}\` in place — keep every factual claim truthful (no invented experience), but re-order, re-word, and re-weight to emphasise what matters for this role. Work ATS-relevant keywords in naturally where they are honestly supported.`,
+        `7. Write \`${coverFile}\` — a cover letter tied to the research and the clarifications I provided; use the STAR method where appropriate and pull from \`star_stories.md\` if available.`,
+        `8. Write \`${questionsFile}\` — interview preparation with AT LEAST 20 questions total, grouped into sections:`,
+        "   - **Common role-specific questions** (minimum 5) — standard questions for this role.",
+        "   - **Behavioural / STAR questions** (minimum 5) — questions probing leadership, conflict, failure, ownership. If `star_stories.md` has matching stories, reference them by title.",
+        "   - **Technical or domain-specific questions** (minimum 5) — based on the job description's required skills. Include expected depth.",
+        "   - **Company-specific questions** (minimum 3) — grounded in the research from step 3.",
+        "   - **Questions I should ask THEM** (minimum 5) — substantive, specific, tied to the research. Avoid generic \"what's the culture like?\" questions.",
+        "   For each prep question, include a one-paragraph suggested answer outline (not a word-for-word script — just the key points and which experience from my resume to reach for).",
+        `9. If \`applications.md\` exists at the workspace root, append one row to its markdown table with today's date (${today}), the company, the role, source (LinkedIn / company website / referral / other — ask if unclear), status "applied", last contact "—", next action "Follow up in 7 days", and folder "\`${appDir}/\`". Preserve the existing table formatting.`,
         "",
         "DO NOT fabricate experience. If something is missing from my resume and I have not confirmed it in chat, leave it out. The goal is an honest, well-tailored application — not a creative-writing exercise.",
     ].join("\n");
