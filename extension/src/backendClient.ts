@@ -52,6 +52,9 @@ import {
     indexWorkspace as _indexWorkspace,
     generateProjectContext as _generateProjectContext,
     generateStyleGuide as _generateStyleGuide,
+    convertDocx as _convertDocx,
+    DocxOutputExistsError,
+    type ConvertDocxResponse,
     listScaffolds as _listScaffolds,
     scaffold as _scaffold,
     getPrompts as _getPrompts,
@@ -78,6 +81,9 @@ import {
     chatStream as _chatStream,
     predict as _predict,
 } from "./backendWorkspaceClient";
+
+export { DocxOutputExistsError } from "./backendWorkspaceClient";
+export type { ConvertDocxResponse } from "./backendWorkspaceClient";
 
 export class BackendClient {
     private static instance: BackendClient | undefined;
@@ -600,6 +606,15 @@ export class BackendClient {
             (p, b, cb) => this._postSseNoTimeout(p, b, cb),
             onThinking,
         );
+    }
+
+    convertDocx(
+        repoRoot: string,
+        sourcePath: string,
+        outputFilename: string,
+        overwrite = false,
+    ) {
+        return _convertDocx(this.baseUrl, repoRoot, sourcePath, outputFilename, overwrite);
     }
 
     listScaffolds() { return _listScaffolds(this.baseUrl); }

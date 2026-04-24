@@ -20,6 +20,7 @@ import {
     handleAgentCommand,
     handleFixCommand,
     handleRequestCommand,
+    handleInterviewPrepCommand,
 } from "./slashCommandsWorkspace";
 
 // ── Context interface ────────────────────────────────────────────────
@@ -56,6 +57,7 @@ export function createSlashCommands(
     map.set("/reject",   (args) => handleRejectCommand(ctx, args));
     map.set("/resume",   (args) => handleResumeCommand(ctx, args));
     map.set("/note",     (args) => handleNoteCommand(ctx, args));
+    map.set("/interview-prep", (args) => handleInterviewPrepCommand(ctx, args));
     return map;
 }
 

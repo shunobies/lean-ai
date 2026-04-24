@@ -103,6 +103,68 @@ export async function generateStyleGuide(
 }
 
 // ---------------------------------------------------------------------------
+// Word document conversion
+// ---------------------------------------------------------------------------
+
+export interface ConvertDocxResponse {
+    success: boolean;
+    output_path: string;
+    content_length: number;
+    line_count: number;
+}
+
+/**
+ * Error thrown when the backend rejects a convert-docx call because the
+ * output file already exists and ``overwrite`` was not set.  The caller
+ * can catch this specifically to prompt the user.
+ */
+export class DocxOutputExistsError extends Error {
+    readonly outputPath: string;
+    constructor(outputPath: string, message: string) {
+        super(message);
+        this.name = "DocxOutputExistsError";
+        this.outputPath = outputPath;
+    }
+}
+
+export async function convertDocx(
+    baseUrl: string,
+    repoRoot: string,
+    sourcePath: string,
+    outputFilename: string,
+    overwrite = false,
+): Promise<ConvertDocxResponse> {
+    const resp = await fetch(`${baseUrl}/api/workspace/convert-docx`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            repo_root: repoRoot,
+            source_path: sourcePath,
+            output_filename: outputFilename,
+            overwrite,
+        }),
+    });
+
+    if (resp.status === 409) {
+        const payload = (await resp.json().catch(() => ({}))) as {
+            detail?: { output_path?: string; message?: string };
+        };
+        const detail = payload.detail ?? {};
+        throw new DocxOutputExistsError(
+            detail.output_path ?? outputFilename,
+            detail.message ?? `${outputFilename} already exists.`,
+        );
+    }
+
+    if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        throw new Error(`convert-docx failed (${resp.status}): ${body || resp.statusText}`);
+    }
+
+    return (await resp.json()) as ConvertDocxResponse;
+}
+
+// ---------------------------------------------------------------------------
 // Scaffolding
 // ---------------------------------------------------------------------------
 

@@ -9,6 +9,8 @@
 import * as vscode from "vscode";
 import WebSocket from "ws";
 import { SlashCommandContext } from "./slashCommands";
+import { DocxOutputExistsError } from "./backendClient";
+import { slugify } from "./slugify";
 
 // ── /init — workspace indexing + project context ─────────────────────
 
@@ -563,5 +565,208 @@ export async function handleRequestCommand(
     ctx.postMessage({ type: "reply", text: prompt, cls: "msg-user" });
 
     // Send with /request prefix so the backend uses neutral prompt + search tools
+    await ctx.handleAgentMessage(`/request ${prompt}`);
+}
+
+// ── /interview-prep — tailored resume + cover letter workflow ────────
+
+/**
+ * Prompt the user for a docx resume, company, job title, and optional
+ * job posting URL; convert the resume to markdown deterministically,
+ * then kick off a ``/request`` session that researches the company,
+ * asks clarifying questions, and writes a tailored resume + cover
+ * letter alongside the converted copy.
+ *
+ * Designed so a user can maintain a dedicated "job tracking" repo —
+ * each application produces its own ``{company}_{job}_*.md`` trio in
+ * the workspace root.
+ */
+export async function handleInterviewPrepCommand(
+    ctx: SlashCommandContext,
+    _args: string,
+): Promise<void> {
+    const ws = ctx.getWs();
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ctx.postMessage({
+            type: "error",
+            text: "An agent workflow is already running. Wait for it to complete, or start a new chat first.",
+        });
+        return;
+    }
+
+    const healthy = await ctx.client.healthCheck();
+    if (!healthy) {
+        ctx.postMessage({
+            type: "error",
+            text: "Backend not available. Start the server:\ncd backend && uvicorn lean_ai.main:app --reload --port 8422",
+        });
+        return;
+    }
+
+    // Step 1: resume picker
+    const pick = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: false,
+        filters: { "Word documents": ["docx"] },
+        openLabel: "Select resume (.docx)",
+        title: "Interview Prep — Select your resume",
+    });
+    if (!pick || pick.length === 0) {
+        return;
+    }
+    const resumePath = pick[0].fsPath;
+
+    // Step 2: company
+    const company = await vscode.window.showInputBox({
+        title: "Interview Prep — Company",
+        prompt: "Company name",
+        placeHolder: "e.g. Acme Corp",
+        ignoreFocusOut: true,
+        validateInput: (v) => (v && v.trim() ? null : "Company name is required."),
+    });
+    if (company === undefined) return;
+
+    // Step 3: job title
+    const jobTitle = await vscode.window.showInputBox({
+        title: "Interview Prep — Job title",
+        prompt: "Job title",
+        placeHolder: "e.g. Senior Software Engineer",
+        ignoreFocusOut: true,
+        validateInput: (v) => (v && v.trim() ? null : "Job title is required."),
+    });
+    if (jobTitle === undefined) return;
+
+    // Step 4: optional job URL
+    const jobUrl = await vscode.window.showInputBox({
+        title: "Interview Prep — Job posting URL (optional)",
+        prompt: "Job posting URL (leave blank if you'd rather paste the description later)",
+        placeHolder: "https://...",
+        ignoreFocusOut: true,
+    });
+    if (jobUrl === undefined) return;
+
+    const companySlug = slugify(company);
+    const jobSlug = slugify(jobTitle);
+    if (!companySlug || !jobSlug) {
+        ctx.postMessage({
+            type: "error",
+            text: "Company and job title must contain at least one alphanumeric character.",
+        });
+        return;
+    }
+
+    const slug = `${companySlug}_${jobSlug}`;
+    let resumeFile = `${slug}_resume.md`;
+    const coverFile = `${slug}_cover_letter.md`;
+    const researchFile = `${slug}_research.md`;
+
+    ctx.postMessage({
+        type: "thinking",
+        show: true,
+        text: `Converting resume to markdown: ${resumeFile}...`,
+    });
+
+    const repoRoot = ctx.getRepoRoot();
+    try {
+        await ctx.client.convertDocx(repoRoot, resumePath, resumeFile, false);
+    } catch (e) {
+        if (e instanceof DocxOutputExistsError) {
+            ctx.postMessage({ type: "thinking", show: false });
+            const choice = await vscode.window.showWarningMessage(
+                `${resumeFile} already exists in the workspace. Overwrite, rename with today's date, or cancel?`,
+                { modal: true },
+                "Overwrite",
+                "Rename",
+            );
+            if (choice === "Overwrite") {
+                ctx.postMessage({
+                    type: "thinking",
+                    show: true,
+                    text: `Overwriting ${resumeFile}...`,
+                });
+                try {
+                    await ctx.client.convertDocx(repoRoot, resumePath, resumeFile, true);
+                } catch (err) {
+                    ctx.postMessage({ type: "thinking", show: false });
+                    const msg = err instanceof Error ? err.message : String(err);
+                    ctx.postMessage({ type: "error", text: `Resume conversion failed: ${msg}` });
+                    return;
+                }
+            } else if (choice === "Rename") {
+                const today = new Date().toISOString().slice(0, 10);
+                resumeFile = `${slug}_resume_${today}.md`;
+                ctx.postMessage({
+                    type: "thinking",
+                    show: true,
+                    text: `Writing to ${resumeFile}...`,
+                });
+                try {
+                    await ctx.client.convertDocx(repoRoot, resumePath, resumeFile, false);
+                } catch (err) {
+                    ctx.postMessage({ type: "thinking", show: false });
+                    const msg = err instanceof Error ? err.message : String(err);
+                    ctx.postMessage({ type: "error", text: `Resume conversion failed: ${msg}` });
+                    return;
+                }
+            } else {
+                return;
+            }
+        } else {
+            ctx.postMessage({ type: "thinking", show: false });
+            const msg = e instanceof Error ? e.message : String(e);
+            ctx.postMessage({
+                type: "error",
+                text: (
+                    `Resume conversion failed: ${msg}\n\n` +
+                    "If python-docx is missing, install with: pip install 'lean-ai[reference]'"
+                ),
+            });
+            return;
+        }
+    }
+
+    ctx.postMessage({ type: "thinking", show: false });
+    ctx.postMessage({
+        type: "reply",
+        text: (
+            `Converted resume to [${resumeFile}](${resumeFile}). ` +
+            `Starting tailored research and cover letter workflow — watch this chat for ` +
+            `clarifying questions; reply to them in chat as you would any agent message.`
+        ),
+        cls: "msg-system",
+    });
+
+    const jobUrlLine = jobUrl.trim()
+        ? `- Job posting: ${jobUrl.trim()} (fetch it with fetch_url before anything else).`
+        : "- No job URL was provided — ask me to paste the job description before you begin research.";
+
+    const jobStep2 = jobUrl.trim()
+        ? `2. Fetch the job posting at ${jobUrl.trim()} with fetch_url and note the key requirements.`
+        : "2. Ask me to paste the job description. Wait for my reply before moving on.";
+
+    const prompt = [
+        `I have an interview with ${company.trim()} for the ${jobTitle.trim()} role.`,
+        "",
+        "Artifacts already in the workspace root:",
+        `- \`${resumeFile}\` — faithful markdown copy of my master resume. Treat it as the starting point; update it IN PLACE for THIS role.`,
+        jobUrlLine,
+        "",
+        "Please do the following:",
+        "",
+        `1. Read \`${resumeFile}\` to understand my background.`,
+        jobStep2,
+        `3. Research ${company.trim()} using search_internet and fetch_url — mission, core products/services, recent news. Save a concise summary to \`${researchFile}\` (company overview, why it matters for THIS role, 3-5 talking points you would surface in the interview).`,
+        "4. Compare my resume against the job requirements. Identify gaps, strengths to emphasise, and opportunities to re-word.",
+        "5. WHERE YOU HAVE IDEAS BUT LACK REAL INFORMATION, ASK ME CLARIFYING QUESTIONS in your text response before writing anything to disk. Examples:",
+        "   - \"Your resume mentions Python — did you use Django or Flask at Acme? The job description emphasises Django.\"",
+        "   - \"I see five years of backend work but no leadership signal. Have you led any projects or mentored juniors?\"",
+        "   Wait for my answers before updating the resume. My chat replies will be injected as normal messages.",
+        `6. Once you have enough real information, update \`${resumeFile}\` in place — keep every factual claim truthful (no invented experience), but re-order, re-word, and re-weight to emphasise what matters for this role.`,
+        `7. Write \`${coverFile}\` — a cover letter tied to the research and the clarifications I provided; use the STAR method where appropriate.`,
+        "",
+        "DO NOT fabricate experience. If something is missing from my resume and I have not confirmed it in chat, leave it out. The goal is an honest, well-tailored application — not a creative-writing exercise.",
+    ].join("\n");
+
     await ctx.handleAgentMessage(`/request ${prompt}`);
 }
