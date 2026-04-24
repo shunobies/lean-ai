@@ -296,3 +296,23 @@ def test_convert_docx_endpoint_rejects_output_traversal(tmp_path: Path, client) 
     assert resp.status_code == 400
     detail = resp.json()["detail"].lower()
     assert "escape" in detail or "output_filename" in detail
+
+
+def test_convert_docx_endpoint_creates_nested_output_dir(tmp_path: Path, client) -> None:
+    """Output paths like ``applications/{slug}/resume.md`` auto-create parents."""
+    src = tmp_path / "master.docx"
+    _build_sample_docx(src)
+
+    resp = client.post(
+        "/api/workspace/convert-docx",
+        json={
+            "repo_root": str(tmp_path),
+            "source_path": str(src),
+            "output_filename": "applications/acme_corp_senior_engineer/resume.md",
+        },
+    )
+    assert resp.status_code == 200
+    out = Path(resp.json()["output_path"])
+    assert out.exists()
+    assert out.parent.name == "acme_corp_senior_engineer"
+    assert "# Jane Q Candidate" in out.read_text(encoding="utf-8")

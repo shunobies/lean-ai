@@ -1,0 +1,227 @@
+name: job-search
+display_name: Job Search Workspace
+description: Personal job-search workspace — application tracker, STAR stories, templates, and per-application folders for the /interview-prep flow
+language: markdown
+framework: null
+aliases:
+  - jobs
+  - job-hunt
+setup:
+  type: files
+  directories:
+    - "applications"
+    - "templates"
+  files:
+    - path: "README.md"
+      content: |
+        # {project_name}
+
+        A personal job-search workspace. Designed to pair with Lean AI's
+        `/interview-prep` command so every application gets its own folder
+        with a tailored resume, company research, cover letter, and
+        interview question prep.
+
+        ## How it works
+
+        1. Keep your master resume as a `.docx` anywhere on disk (your
+           Documents folder is fine — you'll browse to it from VS Code).
+        2. For each role you apply to, run `/interview-prep`:
+             - Pick the `.docx` resume.
+             - Type the company name + job title.
+             - Optionally paste the job posting URL.
+        3. Lean AI will create `applications/{{company}}_{{role}}/`
+           containing a tailored markdown resume, research notes, a cover
+           letter, and 20+ interview questions with suggested answers.
+        4. Log the application in `applications.md` (the /interview-prep
+           command appends a row automatically when the file exists).
+        5. Before the interview, review the per-application folder and
+           practice using `star_stories.md` as your answer bank.
+
+        ## Directory layout
+
+        ```
+        .
+        ├── README.md               — this file
+        ├── applications.md         — master tracker (markdown table)
+        ├── star_stories.md         — reusable STAR-method story bank
+        ├── applications/           — one subfolder per application
+        │   └── {{slug}}/
+        │       ├── resume.md       — tailored for the role
+        │       ├── research.md     — company research notes
+        │       ├── cover_letter.md — role-specific cover letter
+        │       └── interview_questions.md — 20+ prep questions
+        └── templates/              — reusable message templates
+            ├── thank_you.md
+            ├── networking_outreach.md
+            └── referral_request.md
+        ```
+
+        ## Tips for high-volume searches
+
+        - **Fill in `star_stories.md` once, reference forever.** Spend an
+          hour writing 15-20 career stories tagged by skill. The agent
+          will pull from them when prepping interview answers.
+        - **Commit after every application.** Git history becomes your
+          application log — you can see when, what, and how your resume
+          evolved for each role.
+        - **Don't skip thank-you notes.** 24-hour window after every
+          interview. Use `templates/thank_you.md`.
+        - **Use the tracker.** At 150+ applications per offer, you WILL
+          forget who you applied to. `applications.md` is cheap
+          insurance.
+
+    - path: "applications.md"
+      content: |
+        # Applications Tracker
+
+        One row per application. Oldest at the top. `/interview-prep`
+        appends a new row automatically when this file exists.
+
+        Status values: `applied`, `screening`, `interviewing`, `offer`,
+        `rejected`, `ghosted`, `withdrawn`.
+
+        | Date | Company | Role | Source | Status | Last Contact | Next Action | Folder |
+        |------|---------|------|--------|--------|--------------|-------------|--------|
+        | YYYY-MM-DD | Example Corp | Senior Engineer | LinkedIn | applied | — | Follow up in 7 days | `applications/example_corp_senior_engineer/` |
+
+    - path: "star_stories.md"
+      content: |
+        # STAR Story Bank
+
+        Reusable career stories for behavioral interview questions. Each
+        story follows the STAR method:
+
+        - **Situation** — the context.
+        - **Task** — what you needed to accomplish.
+        - **Action** — what YOU specifically did (not the team).
+        - **Result** — the measurable outcome.
+
+        Tag each story with the traits it demonstrates so the AI can pull
+        the best match for a given question. Aim for 15-20 stories
+        covering: leadership, conflict resolution, problem-solving,
+        technical depth, delivering under pressure, mentorship, owning
+        failure, influencing without authority, cross-functional work,
+        and a major "proudest" achievement.
+
+        ---
+
+        ## Story: [Short title]
+
+        **Tags:** leadership, cross-functional
+
+        **Situation:**
+
+        > [1-2 sentences of context. When? Where? What was the state of
+        > things?]
+
+        **Task:**
+
+        > [1 sentence: what needed to be achieved, and by whom.]
+
+        **Action:**
+
+        > [2-4 sentences: specifically what YOU did. Use "I" not "we".]
+
+        **Result:**
+
+        > [1-2 sentences: measurable outcome. Numbers where possible —
+        > percent improvement, revenue, time saved, headcount, scope.]
+
+        ---
+
+        ## Story: [Add more stories below using the same template]
+
+    - path: ".gitignore"
+      content: |
+        # Local scratch files
+        *.tmp
+        *.draft
+        .DS_Store
+        Thumbs.db
+
+        # Anything matching this pattern is a backup — commit the canonical
+        # file instead.
+        *.bak
+        *~
+
+    - path: "templates/thank_you.md"
+      content: |
+        # Thank-you note template
+
+        Send within 24 hours of every interview. Personalise by
+        referencing something specific the interviewer said.
+
+        ---
+
+        Subject: Thank you — {{role}} conversation
+
+        Hi {{first_name}},
+
+        Thank you for taking the time to talk with me today about the
+        {{role}} position at {{company}}. I especially enjoyed our
+        conversation about [something specific they brought up — a
+        project, a challenge, a team value].
+
+        [Optional: one sentence tying your experience back to that topic.]
+
+        I'm excited about the possibility of joining {{company}} and
+        contributing to [something specific — the migration, the rollout,
+        the new product]. Please let me know if there's anything else
+        you'd like me to share.
+
+        Best regards,
+        [Your name]
+
+    - path: "templates/networking_outreach.md"
+      content: |
+        # Networking outreach template
+
+        For reaching out cold to someone at a target company on LinkedIn,
+        email, or wherever they're reachable. Keep it under 100 words.
+
+        ---
+
+        Subject: {{your_role}} → {{their_company}} — quick question?
+
+        Hi {{first_name}},
+
+        I came across your profile while researching {{their_company}} —
+        I noticed you [specific thing: led the X migration / wrote the
+        blog post about Y / have been there N years]. I'm a
+        {{your_role}} currently exploring {{their_company}} for my next
+        role.
+
+        Would you be open to a 15-minute chat about your experience
+        there? Happy to work around your schedule.
+
+        Thanks either way,
+        [Your name]
+
+    - path: "templates/referral_request.md"
+      content: |
+        # Referral request template
+
+        Use when you know someone at the company well enough to ask for
+        a referral. Be specific about the role and why you're a fit.
+
+        ---
+
+        Subject: Referral for {{role}} at {{company}}?
+
+        Hi {{first_name}},
+
+        Hope you're doing well! I saw {{company}} is hiring for the
+        {{role}} position (link: {{job_url}}) and I'm planning to apply.
+        Given [specific overlap: I worked on X at Y, or we both worked
+        on Z], I think it's a strong fit.
+
+        Would you be willing to refer me? Happy to send you a tailored
+        resume and a short paragraph on why I'm interested if it helps.
+
+        Thanks for considering it!
+        [Your name]
+
+    - path: "applications/.gitkeep"
+      content: |
+        # This directory holds one subfolder per job application, created
+        # automatically by /interview-prep.
