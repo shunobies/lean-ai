@@ -216,13 +216,150 @@ export function analyseRejectionPrompt(opts: {
 }
 
 // ---------------------------------------------------------------------------
+// /ats-check
+// ---------------------------------------------------------------------------
+
+export function atsCheckPrompt(opts: { slug: string }): string {
+    const { slug } = opts;
+    return [
+        `Produce an ATS keyword gap report for the application at \`applications/${slug}/\`.`,
+        "",
+        "Context to read:",
+        `- \`applications/${slug}/resume.md\` — my tailored resume`,
+        `- \`applications/${slug}/research.md\` — company + role research (contains the job description text)`,
+        "",
+        "Task:",
+        `1. Read the two files above. Locate the job description inside \`research.md\`.`,
+        "2. Extract 15-25 ATS-relevant keywords from the job description. Cover:",
+        "   - Must-have technical skills (languages, frameworks, tools)",
+        "   - Required certifications or formal qualifications",
+        "   - Domain / industry terms the description uses repeatedly",
+        "   - Soft-skill buzzwords the company uses verbatim (leadership, ownership, mentorship, etc.)",
+        "3. For each keyword, classify its presence in my resume:",
+        "   - **Verbatim** — appears exactly as written",
+        "   - **Synonym** — present as a close equivalent (e.g. 'Postgres' vs 'PostgreSQL')",
+        "   - **Missing** — not present at all",
+        `4. Write \`applications/${slug}/ats_report.md\` containing:`,
+        "   - **Summary** — one paragraph: the biggest risks for getting past the ATS.",
+        "   - **Keyword table** — markdown table with columns: `Keyword | Status | Evidence`. Evidence is the line/phrase in my resume (or '—' if missing).",
+        "   - **Top 5 changes** — prioritised list. For each, quote the current resume line verbatim and propose a specific rewrite that works the keyword in naturally. DO NOT auto-apply the rewrites to resume.md.",
+        "5. Be honest: if a keyword is missing because I genuinely lack the experience, say so — don't suggest inserting terms I can't back up.",
+    ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// /batch-prep
+// ---------------------------------------------------------------------------
+
+export interface BatchJob {
+    company: string;
+    role: string;
+    url: string;
+}
+
+export function batchPrepPrompt(opts: {
+    resumePath: string;
+    jobs: BatchJob[];
+}): string {
+    const { resumePath, jobs } = opts;
+    const jobList = jobs
+        .map((j, i) => `${i + 1}. **${j.company}** — ${j.role} — ${j.url}`)
+        .join("\n");
+
+    const slugFor = (j: BatchJob) =>
+        `${_slug(j.company)}_${_slug(j.role)}`;
+
+    return [
+        `Batch interview-prep for ${jobs.length} applications. Process them SEQUENTIALLY — finish one completely before moving on to the next. Do not attempt parallel work.`,
+        "",
+        `Master resume (read with read_file — .docx is supported now): \`${resumePath}\``,
+        "",
+        "Workspace root artefacts to use if present:",
+        "- `star_stories.md` — reusable STAR story bank",
+        "- `applications.md` — master tracker; append a row for each job as you complete it",
+        "- `templates/` — outreach templates (don't modify, just aware they exist)",
+        "",
+        "Jobs to process:",
+        jobList,
+        "",
+        "For EACH job, in order:",
+        "",
+        `A. Create the folder \`applications/{slug}/\` where slug follows \`{company_snake}_{role_snake}\`. Example slugs: ${jobs.slice(0, Math.min(2, jobs.length)).map(slugFor).map(s => `\`${s}\``).join(", ")}.`,
+        "B. Fetch the job posting URL with fetch_url. Save the JD text + company research to `applications/{slug}/research.md` (company overview, why it matters for the role, 3-5 talking points, red flags).",
+        "C. Read my master resume with read_file. Compare against the JD. Identify gaps and ATS-relevant keywords.",
+        "D. Write `applications/{slug}/resume.md` — a tailored markdown version of my resume for THIS role. Preserve every factual claim from the master; re-order and re-weight sections to emphasise what matters for this role. Work in ATS keywords where honestly supported.",
+        "E. Write `applications/{slug}/cover_letter.md` — 200-300 words, uses the STAR method where fitting, pulls from `star_stories.md` if present.",
+        "F. Write `applications/{slug}/interview_questions.md` — at least 20 questions total: role-specific (5+), behavioural (5+), technical (5+), company-specific (3+), questions to ask them (5+). One-paragraph suggested-answer outline per question.",
+        "G. If `applications.md` exists, append a row: today's date, company, role, source 'batch', status 'applied', last contact '—', next action 'Follow up in 7 days', folder link.",
+        "",
+        "IMPORTANT constraints:",
+        "- DO NOT ask me clarifying questions in batch mode — work with what's in my resume.",
+        "- If the JD URL returns an error or anti-bot wall, skip that job with a WARNING note at the TOP of `applications/{slug}/research.md` saying you couldn't reach the posting — don't fabricate JD content.",
+        "- Announce progress before each job: 'Starting 3/10: Acme Corp — Senior Engineer'. This helps me track progress and interrupt if something's wrong.",
+        "- DO NOT fabricate any experience from the resume. If a gap exists, note it in the research file's talking points section as something to address later, not by inventing facts.",
+        "",
+        "When all jobs are done, post a final summary listing how many succeeded, any that were skipped, and the folder paths for each one.",
+    ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Helpers private to this module
 // ---------------------------------------------------------------------------
 
 function slugifyForFilename(input: string): string {
+    return _slug(input);
+}
+
+function _slug(input: string): string {
     return (input || "unknown")
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "_")
         .replace(/^_+|_+$/g, "")
         .slice(0, 40) || "unknown";
 }
+
+/**
+ * Parse a ``.job_queue.md`` file body into batch jobs.
+ *
+ * Each job is one non-comment, non-blank line with pipe-separated
+ * fields: ``company|role|url``. Returns ``{jobs, errors}`` — caller
+ * decides whether to proceed if errors is non-empty.
+ */
+export function parseBatchQueue(body: string): { jobs: BatchJob[]; errors: string[] } {
+    const jobs: BatchJob[] = [];
+    const errors: string[] = [];
+    const lines = body.split(/\r?\n/);
+    lines.forEach((raw, i) => {
+        const line = raw.trim();
+        if (!line || line.startsWith("#")) return;
+        const parts = line.split("|").map((p) => p.trim());
+        if (parts.length < 3) {
+            errors.push(`Line ${i + 1}: expected 'company|role|url', got '${line}'`);
+            return;
+        }
+        const [company, role, url] = parts;
+        if (!company || !role || !url) {
+            errors.push(`Line ${i + 1}: one of company/role/url is empty`);
+            return;
+        }
+        if (!/^https?:\/\//i.test(url)) {
+            errors.push(`Line ${i + 1}: url '${url}' doesn't look like an http(s) URL`);
+            return;
+        }
+        jobs.push({ company, role, url });
+    });
+    return { jobs, errors };
+}
+
+export const BATCH_QUEUE_TEMPLATE = `# Batch interview-prep queue
+#
+# One job per line, format:  company | role | url
+# Lines starting with '#' and blank lines are ignored.
+# Recommended: keep batches to 5 jobs or fewer for best output quality.
+#
+# Example:
+# Acme Corp | Senior Software Engineer | https://acme.example/careers/123
+# BigCo | Backend Engineer | https://bigco.example/jobs/456
+
+`;
+

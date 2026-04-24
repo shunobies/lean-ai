@@ -11,12 +11,18 @@ import WebSocket from "ws";
 import { SlashCommandContext } from "./slashCommands";
 import { DocxOutputExistsError } from "./backendClient";
 import { slugify } from "./slugify";
+import * as fs from "fs";
+import * as path from "path";
 import {
     pickApplicationSlug,
     thankYouPrompt,
     recruiterReplyPrompt,
     negotiatePrompt,
     analyseRejectionPrompt,
+    atsCheckPrompt,
+    batchPrepPrompt,
+    parseBatchQueue,
+    BATCH_QUEUE_TEMPLATE,
     type RecruiterReplyIntent,
 } from "./jobSearchPrompts";
 
@@ -1006,6 +1012,128 @@ export async function handleAnalyseRejectionCommand(
     await ctx.handleAgentMessage(`/request ${prompt}`);
 }
 
+// ── /ats-check — keyword gap report for an application ──────────────
+
+export async function handleAtsCheckCommand(
+    ctx: SlashCommandContext,
+    args: string,
+): Promise<void> {
+    if (!(await ensureAgentIdleAndBackendHealthy(ctx))) return;
+
+    const slug = await resolveApplicationSlug(ctx, args.trim());
+    if (!slug) return;
+
+    const repoRoot = ctx.getRepoRoot();
+    const resumeMd = path.join(repoRoot, "applications", slug, "resume.md");
+    const researchMd = path.join(repoRoot, "applications", slug, "research.md");
+    const missing: string[] = [];
+    if (!fs.existsSync(resumeMd)) missing.push(`applications/${slug}/resume.md`);
+    if (!fs.existsSync(researchMd)) missing.push(`applications/${slug}/research.md`);
+    if (missing.length > 0) {
+        ctx.postMessage({
+            type: "error",
+            text: (
+                `Missing required files for ATS check: ${missing.join(", ")}.\n\n` +
+                `Run \`/interview-prep\` first to populate the \`applications/${slug}/\` folder.`
+            ),
+        });
+        return;
+    }
+
+    const prompt = atsCheckPrompt({ slug });
+    ctx.postMessage({
+        type: "reply",
+        text: `Running ATS keyword gap check for \`applications/${slug}/\`. Output will land at \`applications/${slug}/ats_report.md\`.`,
+        cls: "msg-system",
+    });
+    await ctx.handleAgentMessage(`/request ${prompt}`);
+}
+
+// ── /batch-prep — sequential tailoring for many roles ───────────────
+
+export async function handleBatchPrepCommand(
+    ctx: SlashCommandContext,
+    _args: string,
+): Promise<void> {
+    if (!(await ensureAgentIdleAndBackendHealthy(ctx))) return;
+
+    // Step 1: master resume picker
+    const pick = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: false,
+        filters: { "Word documents": ["docx"] },
+        openLabel: "Select master resume (.docx)",
+        title: "Batch prep — Select your master resume",
+    });
+    if (!pick || pick.length === 0) return;
+    const resumePath = pick[0].fsPath;
+
+    // Step 2: open (or create) the queue file for the user to edit
+    const repoRoot = ctx.getRepoRoot();
+    const queuePath = path.join(repoRoot, ".job_queue.md");
+    if (!fs.existsSync(queuePath)) {
+        fs.writeFileSync(queuePath, BATCH_QUEUE_TEMPLATE, "utf-8");
+    }
+    const queueUri = vscode.Uri.file(queuePath);
+    const doc = await vscode.workspace.openTextDocument(queueUri);
+    await vscode.window.showTextDocument(doc, { preview: false });
+
+    const proceed = await vscode.window.showInformationMessage(
+        "Edit `.job_queue.md` with one job per line (format: company | role | url), save it, then click Process queue.",
+        { modal: true },
+        "Process queue",
+    );
+    if (proceed !== "Process queue") return;
+
+    // Re-read in case the user edited + saved.
+    const body = fs.readFileSync(queuePath, "utf-8");
+    const { jobs, errors } = parseBatchQueue(body);
+
+    if (errors.length > 0) {
+        ctx.postMessage({
+            type: "error",
+            text: (
+                `Queue file has ${errors.length} formatting issue${errors.length === 1 ? "" : "s"}:\n` +
+                errors.map((e) => `- ${e}`).join("\n") +
+                "\n\nFix `.job_queue.md` and run `/batch-prep` again."
+            ),
+        });
+        return;
+    }
+
+    if (jobs.length === 0) {
+        ctx.postMessage({
+            type: "error",
+            text: "Queue file has no valid job rows. Add `company | role | url` lines to `.job_queue.md` and try again.",
+        });
+        return;
+    }
+
+    if (jobs.length > 10) {
+        const ok = await vscode.window.showWarningMessage(
+            `Batch has ${jobs.length} jobs — large batches risk the request model running out of context or looping. Recommend 5 or fewer per run. Proceed anyway?`,
+            { modal: true },
+            "Proceed",
+        );
+        if (ok !== "Proceed") return;
+    }
+
+    const prompt = batchPrepPrompt({ resumePath, jobs });
+
+    ctx.postMessage({
+        type: "reply",
+        text: (
+            `Starting batch prep for ${jobs.length} application${jobs.length === 1 ? "" : "s"}. ` +
+            `Each one will get its own \`applications/{slug}/\` folder with resume, research, ` +
+            `cover letter, and interview questions. Watch this chat for per-job progress — ` +
+            `interrupt with \`/cancel\` if something goes off the rails.`
+        ),
+        cls: "msg-system",
+    });
+    await ctx.handleAgentMessage(`/request ${prompt}`);
+}
+
 // ── /help — list registered commands grouped by theme ────────────────
 
 export async function handleHelpCommand(
@@ -1030,6 +1158,8 @@ export async function handleHelpCommand(
         "",
         "**Job search** (pair with `/scaffold jobs`)",
         "- `/interview-prep` — Convert a .docx resume and tailor it for a specific role (creates `applications/{slug}/`).",
+        "- `/batch-prep` — Tailor resumes + cover letters for many roles in one run.",
+        "- `/ats-check [slug]` — Keyword gap report comparing resume to the job description.",
         "- `/thank-you [slug]` — Draft a post-interview thank-you note.",
         "- `/recruiter-reply` — Draft a reply to a recruiter's cold outreach.",
         "- `/negotiate [slug]` — Research market comp and build a negotiation brief.",

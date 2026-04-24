@@ -25,6 +25,8 @@ import {
     handleRecruiterReplyCommand,
     handleNegotiateCommand,
     handleAnalyseRejectionCommand,
+    handleAtsCheckCommand,
+    handleBatchPrepCommand,
     handleHelpCommand,
 } from "./slashCommandsWorkspace";
 
@@ -67,6 +69,8 @@ export function createSlashCommands(
     map.set("/recruiter-reply", (args) => handleRecruiterReplyCommand(ctx, args));
     map.set("/negotiate", (args) => handleNegotiateCommand(ctx, args));
     map.set("/analyse-rejection", (args) => handleAnalyseRejectionCommand(ctx, args));
+    map.set("/ats-check", (args) => handleAtsCheckCommand(ctx, args));
+    map.set("/batch-prep", (args) => handleBatchPrepCommand(ctx, args));
     map.set("/help", (args) => handleHelpCommand(ctx, args));
     return map;
 }
