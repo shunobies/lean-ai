@@ -218,8 +218,20 @@ Type these in the chat panel:
 | `/fix <task>` | Skip planning — the agent explores and fixes directly |
 | `/approve` | Merge the current session's branch |
 | `/reject` | Discard the current session's branch |
-| `/guide` | Regenerate framework guide |
 | `/style` | Generate style guide from CSS/template files |
+| `/request <task>` | Skip planning, open-ended task with full tool access |
+| `/resume [session_id]` | Resume a previous session |
+| `/help` | Show this help |
+| `/interview-prep` | Convert a .docx resume and tailor it for a specific role |
+| `/batch-prep` | Tailor resumes + cover letters for many roles in one run |
+| `/ats-check [slug]` | Keyword gap report comparing resume to the job description |
+| `/thank-you [slug]` | Draft a post-interview thank-you note |
+| `/recruiter-reply` | Draft a reply to a recruiter's cold outreach |
+| `/negotiate [slug]` | Research market comp and build a negotiation brief |
+| `/analyse-rejection [slug]` | Post-mortem a rejection with concrete takeaways |
+| `/log-applied [slug]` | Append a tracker row and commit the application folder to git |
+| `/mock-interview [slug]` | Interactive Q&A practice with rubric scoring |
+| `/note <text>` | Save a quick note |
 | `/scaffold <name>` | Bootstrap a new project from a recipe |
 | `/reboot` | Restart the backend server |
 

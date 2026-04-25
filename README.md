@@ -115,8 +115,19 @@ See [Architecture](docs/architecture.md) for the full breakdown.
 | `/fix` | Skip planning, fix directly with full tool access |
 | `/approve` | Merge the agent's branch |
 | `/reject` | Discard the agent's branch |
-| `/guide` | Regenerate framework guide |
 | `/style` | Generate style guide from CSS/templates |
+| `/request <task>` | Skip planning, open-ended task with full tool access |
+| `/resume [session_id]` | Resume a previous session |
+| `/help` | Show this help |
+| `/interview-prep` | Convert a .docx resume and tailor it for a specific role |
+| `/batch-prep` | Tailor resumes + cover letters for many roles in one run |
+| `/ats-check [slug]` | Keyword gap report comparing resume to the job description |
+| `/thank-you [slug]` | Draft a post-interview thank-you note |
+| `/recruiter-reply` | Draft a reply to a recruiter's cold outreach |
+| `/negotiate [slug]` | Research market comp and build a negotiation brief |
+| `/analyse-rejection [slug]` | Post-mortem a rejection with concrete takeaways |
+| `/log-applied [slug]` | Append a tracker row and commit the application folder to git |
+| `/mock-interview [slug]` | Interactive Q&A practice with rubric scoring |
 | `/note` | Save a note (auto-categorized by project) |
 | `/scaffold` | Bootstrap a new project |
 | `/reboot` | Restart the backend server |

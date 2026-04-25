@@ -52,11 +52,22 @@ If you prefer to manage the backend yourself, set `lean-ai.backendDir` or `lean-
 | `/init` | Index workspace and generate project context |
 | `/agent` | Full planning pipeline for features and refactors |
 | `/fix` | Skip planning, fix directly with full tool access |
-| `/request` | Open-ended tasks with internet search (guides, research) |
+| `/request <task>` | Skip planning, open-ended task with full tool access |
+| `/style` | Generate a style guide for the current codebase |
+| `/resume [session_id]` | Resume a previous session |
+| `/help` | Show this help |
+| `/interview-prep` | Convert a .docx resume and tailor it for a specific role |
+| `/batch-prep` | Tailor resumes + cover letters for many roles in one run |
+| `/ats-check [slug]` | Keyword gap report comparing resume to the job description |
+| `/thank-you [slug]` | Draft a post-interview thank-you note |
+| `/recruiter-reply` | Draft a reply to a recruiter's cold outreach |
+| `/negotiate [slug]` | Research market comp and build a negotiation brief |
+| `/analyse-rejection [slug]` | Post-mortem a rejection with concrete takeaways |
+| `/log-applied [slug]` | Append a tracker row and commit the application folder to git |
+| `/mock-interview [slug]` | Interactive Q&A practice with rubric scoring |
 | `/approve` | Merge the agent's branch |
 | `/reject` | Discard the agent's branch |
 | `/scaffold` | Bootstrap a new project from a recipe |
-| `/guide` | Regenerate framework guide |
 | `/note` | Save a note from the chat (auto-categorized by project) |
 | `/reboot` | Restart the backend server |
 
