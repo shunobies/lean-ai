@@ -82,12 +82,16 @@ async def auto_promote_memory(
     if similar is None:
         return None
     updated = await bump_seen_count(
-        db, similar["id"], promote_threshold=threshold,
+        db,
+        similar["id"],
+        promote_threshold=threshold,
     )
     if updated and updated.get("curation_status") != similar.get("curation_status"):
         logger.info(
             "Auto-promoted memory %s to %s (seen_count=%d)",
-            similar["id"], updated["curation_status"], updated["seen_count"],
+            similar["id"],
+            updated["curation_status"],
+            updated["seen_count"],
         )
     return updated
 
@@ -109,7 +113,8 @@ async def supersede_user_rejected(
     if similar.get("curation_status") == "user_rejected":
         # User already dismissed this lesson — don't re-introduce it
         logger.info(
-            "Skipping duplicate of user-rejected memory %s", similar["id"],
+            "Skipping duplicate of user-rejected memory %s",
+            similar["id"],
         )
         return True
     return False
@@ -134,11 +139,16 @@ async def bulk_invalidate_by_model(
     count = 0
     for row in rows:
         if await update_curation_status(
-            db, row[0], "superseded", confidence=0.0,
+            db,
+            row[0],
+            "superseded",
+            confidence=0.0,
         ):
             count += 1
     logger.info(
-        "Bulk-invalidated %d memories from model %s", count, model_name,
+        "Bulk-invalidated %d memories from model %s",
+        count,
+        model_name,
     )
     return count
 

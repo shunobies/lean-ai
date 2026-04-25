@@ -21,14 +21,18 @@ def _row(**overrides):
         "phase": "implementation",
         "model_name": "qwen3-coder:30b",
         "provider": "ollama",
-        "messages": json.dumps([
-            {"role": "user", "content": "hello"},
-        ]),
-        "assistant_output": json.dumps({
-            "content": "hi there",
-            "thinking": "",
-            "tool_calls": [],
-        }),
+        "messages": json.dumps(
+            [
+                {"role": "user", "content": "hello"},
+            ]
+        ),
+        "assistant_output": json.dumps(
+            {
+                "content": "hi there",
+                "thinking": "",
+                "tool_calls": [],
+            }
+        ),
         "outcome": "success",
         "pair_id": None,
         "preference": None,
@@ -68,9 +72,11 @@ def test_anonymize_row_strips_raw_path(tmp_path):
     row = {
         "id": 1,
         "session_id": "sess-abc",
-        "messages": json.dumps([
-            {"role": "user", "content": f"read file at {root}/secret/config.py"},
-        ]),
+        "messages": json.dumps(
+            [
+                {"role": "user", "content": f"read file at {root}/secret/config.py"},
+            ]
+        ),
     }
     out = anonymize_row(row, root)
     assert "id" not in out
@@ -108,11 +114,13 @@ def test_sft_preserves_thinking_when_enabled(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cfg, "capture_thinking", True)
     row = _row(
-        assistant_output=json.dumps({
-            "content": "answer",
-            "thinking": "step 1, step 2",
-            "tool_calls": [],
-        }),
+        assistant_output=json.dumps(
+            {
+                "content": "answer",
+                "thinking": "step 1, step 2",
+                "tool_calls": [],
+            }
+        ),
     )
     emitted = _consume(to_sft_jsonl([row], str(tmp_path)))
     assistant = emitted[0]["messages"][-1]
@@ -124,11 +132,13 @@ def test_sft_strips_thinking_when_disabled(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cfg, "capture_thinking", False)
     row = _row(
-        assistant_output=json.dumps({
-            "content": "answer",
-            "thinking": "internal monologue",
-            "tool_calls": [],
-        }),
+        assistant_output=json.dumps(
+            {
+                "content": "answer",
+                "thinking": "internal monologue",
+                "tool_calls": [],
+            }
+        ),
     )
     emitted = _consume(to_sft_jsonl([row], str(tmp_path)))
     assistant = emitted[0]["messages"][-1]
@@ -139,7 +149,7 @@ def test_kto_emits_binary_labels(tmp_path):
     rows = [
         _row(trace_uuid="chosen", preference=1),
         _row(trace_uuid="rejected", preference=-1),
-        _row(trace_uuid="neutral", preference=0),   # skipped
+        _row(trace_uuid="neutral", preference=0),  # skipped
         _row(trace_uuid="unknown", preference=None),  # skipped
     ]
     emitted = _consume(to_kto_jsonl(rows, str(tmp_path)))
@@ -151,17 +161,23 @@ def test_kto_emits_binary_labels(tmp_path):
 
 
 def test_dpo_emits_matched_pairs(tmp_path):
-    chosen_output = json.dumps({
-        "content": "good answer", "thinking": "", "tool_calls": [],
-    })
-    rejected_output = json.dumps({
-        "content": "bad answer", "thinking": "", "tool_calls": [],
-    })
+    chosen_output = json.dumps(
+        {
+            "content": "good answer",
+            "thinking": "",
+            "tool_calls": [],
+        }
+    )
+    rejected_output = json.dumps(
+        {
+            "content": "bad answer",
+            "thinking": "",
+            "tool_calls": [],
+        }
+    )
     rows = [
-        _row(trace_uuid="c1", pair_id="p-1", preference=1,
-             assistant_output=chosen_output),
-        _row(trace_uuid="r1", pair_id="p-1", preference=-1,
-             assistant_output=rejected_output),
+        _row(trace_uuid="c1", pair_id="p-1", preference=1, assistant_output=chosen_output),
+        _row(trace_uuid="r1", pair_id="p-1", preference=-1, assistant_output=rejected_output),
     ]
     emitted = _consume(to_dpo_jsonl(rows, str(tmp_path)))
     assert len(emitted) == 1

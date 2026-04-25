@@ -29,6 +29,7 @@ from lean_ai.context.generation import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def repo_root(tmp_path):
     """Create a minimal repo structure for testing."""
@@ -36,21 +37,15 @@ def repo_root(tmp_path):
     src.mkdir()
     (src / "__init__.py").write_text("")
     (src / "main.py").write_text(
-        'from src.utils import helper\n\n'
-        'def main():\n'
-        '    """Entry point."""\n'
-        '    print(helper())\n'
+        'from src.utils import helper\n\ndef main():\n    """Entry point."""\n    print(helper())\n'
     )
     (src / "utils.py").write_text(
-        'def helper():\n'
-        '    """Return a greeting."""\n'
-        '    return "hello"\n'
+        'def helper():\n    """Return a greeting."""\n    return "hello"\n'
     )
     return str(tmp_path)
 
 
-def _mock_chat_structured(messages, schema=None, max_tokens=None,
-                          thinking_callback=None, **kwargs):
+def _mock_chat_structured(messages, schema=None, max_tokens=None, thinking_callback=None, **kwargs):
     """Return schema-valid ``ContextExtractionResult`` based on the source file."""
     user_msg = messages[-1]["content"] if messages else ""
 
@@ -115,19 +110,22 @@ def mock_llm_client():
 # _extract_single_file
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_extract_single_file():
     client = AsyncMock()
-    client.chat_structured = AsyncMock(return_value=ContextExtractionResult(
-        entries=[
-            ContextExtractionEntry(
-                section="Architecture Overview",
-                symbol="main",
-                description="Fact 1",
-                file_path="src/main.py",
-            ),
-        ],
-    ))
+    client.chat_structured = AsyncMock(
+        return_value=ContextExtractionResult(
+            entries=[
+                ContextExtractionEntry(
+                    section="Architecture Overview",
+                    symbol="main",
+                    description="Fact 1",
+                    file_path="src/main.py",
+                ),
+            ],
+        )
+    )
     result = await _extract_single_file("src/main.py", "def main(): pass", client, 4096)
     assert len(result) == 1
     section, file_path, content, source = result[0]
@@ -151,16 +149,18 @@ async def test_extract_single_file_empty_response():
 async def test_extract_single_file_fallback_file_path():
     """Entry with empty file_path should fall back to the source file path."""
     client = AsyncMock()
-    client.chat_structured = AsyncMock(return_value=ContextExtractionResult(
-        entries=[
-            ContextExtractionEntry(
-                section="Module Map",
-                symbol="thing",
-                description="does stuff",
-                file_path="",
-            ),
-        ],
-    ))
+    client.chat_structured = AsyncMock(
+        return_value=ContextExtractionResult(
+            entries=[
+                ContextExtractionEntry(
+                    section="Module Map",
+                    symbol="thing",
+                    description="does stuff",
+                    file_path="",
+                ),
+            ],
+        )
+    )
     result = await _extract_single_file("src/real.py", "", client, 4096)
     assert len(result) == 1
     assert result[0][1] == "src/real.py"
@@ -171,6 +171,7 @@ async def test_extract_single_file_fallback_file_path():
 # _phase1_sequential
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_phase1_sequential(repo_root, mock_llm_client):
     candidates = [
@@ -180,7 +181,10 @@ async def test_phase1_sequential(repo_root, mock_llm_client):
     db = await get_context_db(repo_root)
     try:
         await _phase1_sequential(
-            candidates, mock_llm_client, 4096, db,
+            candidates,
+            mock_llm_client,
+            4096,
+            db,
         )
         rows = await query_entries(db, limit=100)
         assert len(rows) > 0
@@ -202,14 +206,16 @@ async def test_phase1_sequential_llm_failure(repo_root):
         call_count += 1
         if call_count == 1:
             raise RuntimeError("LLM unavailable")
-        return ContextExtractionResult(entries=[
-            ContextExtractionEntry(
-                section="Module Map",
-                symbol="utils.py",
-                description="utilities",
-                file_path="src/utils.py",
-            ),
-        ])
+        return ContextExtractionResult(
+            entries=[
+                ContextExtractionEntry(
+                    section="Module Map",
+                    symbol="utils.py",
+                    description="utilities",
+                    file_path="src/utils.py",
+                ),
+            ]
+        )
 
     client = AsyncMock()
     client.chat_structured = AsyncMock(side_effect=flaky_chat_structured)
@@ -232,6 +238,7 @@ async def test_phase1_sequential_llm_failure(repo_root):
 # _phase1_parallel
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_phase1_parallel(repo_root, mock_llm_client):
     candidates = [
@@ -239,7 +246,10 @@ async def test_phase1_parallel(repo_root, mock_llm_client):
         ("src/utils.py", "def helper(): return 42"),
     ]
     await _phase1_parallel(
-        candidates, mock_llm_client, 4096, repo_root,
+        candidates,
+        mock_llm_client,
+        4096,
+        repo_root,
     )
     # Verify entries were written by parallel connections.
     db = await get_context_db(repo_root)
@@ -253,6 +263,7 @@ async def test_phase1_parallel(repo_root, mock_llm_client):
 # ---------------------------------------------------------------------------
 # generate_project_context (full pipeline)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_generate_project_context_full_pipeline(repo_root, mock_llm_client):
@@ -308,7 +319,8 @@ async def test_generate_project_context_progress_callback(repo_root, mock_llm_cl
         events.append(event)
 
     await generate_project_context(
-        repo_root, mock_llm_client,
+        repo_root,
+        mock_llm_client,
         progress_callback=progress_cb,
     )
 
@@ -322,19 +334,22 @@ async def test_generate_project_context_progress_callback(repo_root, mock_llm_cl
 async def test_generate_project_context_worker_not_used_for_extraction(repo_root, mock_llm_client):
     """Worker model is too small for extraction — should NOT be used."""
     worker = AsyncMock()
-    worker.chat_structured = AsyncMock(return_value=ContextExtractionResult(
-        entries=[
-            ContextExtractionEntry(
-                section="Module Map",
-                symbol="worker",
-                description="worker extracted",
-                file_path="src/main.py",
-            ),
-        ],
-    ))
+    worker.chat_structured = AsyncMock(
+        return_value=ContextExtractionResult(
+            entries=[
+                ContextExtractionEntry(
+                    section="Module Map",
+                    symbol="worker",
+                    description="worker extracted",
+                    file_path="src/main.py",
+                ),
+            ],
+        )
+    )
 
     await generate_project_context(
-        repo_root, mock_llm_client,
+        repo_root,
+        mock_llm_client,
         worker_client=worker,
     )
 
@@ -348,28 +363,37 @@ async def test_generate_project_context_worker_not_used_for_extraction(repo_root
 async def test_generate_project_context_request_client_preferred_for_extraction(repo_root):
     """Request client should be preferred for extraction when available, primary is fallback."""
     primary = AsyncMock()
-    primary.chat_structured = AsyncMock(return_value=ContextExtractionResult(
-        entries=[
-            ContextExtractionEntry(
-                section="Module Map", symbol="primary", description="p",
-                file_path="src/main.py",
-            ),
-        ],
-    ))
+    primary.chat_structured = AsyncMock(
+        return_value=ContextExtractionResult(
+            entries=[
+                ContextExtractionEntry(
+                    section="Module Map",
+                    symbol="primary",
+                    description="p",
+                    file_path="src/main.py",
+                ),
+            ],
+        )
+    )
     primary.chat_raw = AsyncMock(return_value="## Architecture Overview\n- summary")
     request = AsyncMock()
-    request.chat_structured = AsyncMock(return_value=ContextExtractionResult(
-        entries=[
-            ContextExtractionEntry(
-                section="Module Map", symbol="request", description="r",
-                file_path="src/main.py",
-            ),
-        ],
-    ))
+    request.chat_structured = AsyncMock(
+        return_value=ContextExtractionResult(
+            entries=[
+                ContextExtractionEntry(
+                    section="Module Map",
+                    symbol="request",
+                    description="r",
+                    file_path="src/main.py",
+                ),
+            ],
+        )
+    )
     request.chat_raw = AsyncMock(return_value="## Architecture Overview\n- summary")
 
     await generate_project_context(
-        repo_root, primary,
+        repo_root,
+        primary,
         request_client=request,
     )
 
@@ -397,6 +421,7 @@ async def test_generate_project_context_db_entries(repo_root, mock_llm_client):
 # update_project_context
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_update_project_context_incremental(repo_root, mock_llm_client):
     # First, generate initial context.
@@ -409,7 +434,9 @@ async def test_update_project_context_incremental(repo_root, mock_llm_client):
 
     # Update incrementally.
     path = await update_project_context(
-        repo_root, ["src/utils.py"], mock_llm_client,
+        repo_root,
+        ["src/utils.py"],
+        mock_llm_client,
     )
     assert path is not None
 
@@ -430,6 +457,7 @@ async def test_update_project_context_no_existing_context(tmp_path):
 # ---------------------------------------------------------------------------
 # _condense
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_condense_skip_short_document():
@@ -460,6 +488,7 @@ async def test_condense_bad_ratio_keeps_original():
 # write_project_context
 # ---------------------------------------------------------------------------
 
+
 def test_write_project_context(tmp_path):
     content = "# Project Context\nTest content"
     path = write_project_context(str(tmp_path), content)
@@ -472,31 +501,35 @@ def test_write_project_context(tmp_path):
 # Structured extraction + DB roundtrip
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_extraction_to_db_roundtrip(repo_root):
     """Verify structured extraction → tuple conversion → DB insert → export."""
     client = AsyncMock()
-    client.chat_structured = AsyncMock(return_value=ContextExtractionResult(
-        entries=[
-            ContextExtractionEntry(
-                section="Architecture Overview",
-                symbol="main()",
-                description="entry point",
-                file_path="src/main.py",
-            ),
-            ContextExtractionEntry(
-                section="Module Map",
-                symbol="utils.py",
-                description="helpers",
-                file_path="src/utils.py",
-            ),
-        ],
-    ))
+    client.chat_structured = AsyncMock(
+        return_value=ContextExtractionResult(
+            entries=[
+                ContextExtractionEntry(
+                    section="Architecture Overview",
+                    symbol="main()",
+                    description="entry point",
+                    file_path="src/main.py",
+                ),
+                ContextExtractionEntry(
+                    section="Module Map",
+                    symbol="utils.py",
+                    description="helpers",
+                    file_path="src/utils.py",
+                ),
+            ],
+        )
+    )
 
     tuples = await _extract_single_file("src/main.py", "code", client, 4096)
     assert len(tuples) == 2
 
     from lean_ai.context.context_db import export_to_markdown, upsert_entries_batch
+
     db = await get_context_db(repo_root)
     try:
         count = await upsert_entries_batch(db, tuples)
@@ -526,6 +559,7 @@ async def test_skeleton_to_db_roundtrip(repo_root):
     assert len(parsed) >= 2
 
     from lean_ai.context.context_db import export_to_markdown, upsert_entries_batch
+
     db = await get_context_db(repo_root)
     try:
         count = await upsert_entries_batch(db, parsed)

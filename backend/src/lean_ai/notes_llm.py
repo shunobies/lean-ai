@@ -59,9 +59,7 @@ async def _categorization_worker() -> None:
     while True:
         item = await _queue.get()
         try:
-            await _categorize_note(
-                item.llm, item.note_id, item.content, item.source_workspace
-            )
+            await _categorize_note(item.llm, item.note_id, item.content, item.source_workspace)
         except Exception:
             logger.exception("Failed to categorize note %s", item.note_id)
         finally:
@@ -74,9 +72,7 @@ def _ensure_worker() -> None:
     if _queue is not None:
         return
     _queue = asyncio.Queue()
-    _worker_task = asyncio.create_task(
-        _categorization_worker(), name="note-categorization-worker"
-    )
+    _worker_task = asyncio.create_task(_categorization_worker(), name="note-categorization-worker")
 
 
 # ── Core categorization logic ──
@@ -168,7 +164,5 @@ def schedule_categorization(
     """
     _ensure_worker()
     assert _queue is not None
-    _queue.put_nowait(
-        _CategorizationItem(llm, note_id, content, source_workspace)
-    )
+    _queue.put_nowait(_CategorizationItem(llm, note_id, content, source_workspace))
     logger.debug("Queued categorization for note %s", note_id)

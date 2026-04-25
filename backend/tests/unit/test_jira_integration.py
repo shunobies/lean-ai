@@ -64,7 +64,6 @@ def _mock_response(status_code=200, json_data=None):
 
 
 class TestStatusMapping:
-
     def test_open_variants(self):
         assert _map_status("To Do") == TaskStatus.OPEN
         assert _map_status("Open") == TaskStatus.OPEN
@@ -93,7 +92,6 @@ class TestStatusMapping:
 
 
 class TestPriorityMapping:
-
     def test_critical(self):
         assert _map_priority("Highest") == TaskPriority.CRITICAL
         assert _map_priority("Critical") == TaskPriority.CRITICAL
@@ -116,7 +114,6 @@ class TestPriorityMapping:
 
 
 class TestAdfExtraction:
-
     def test_simple_text(self):
         node = {"type": "text", "text": "Hello"}
         assert _extract_adf_text(node) == "Hello"
@@ -154,7 +151,6 @@ class TestAdfExtraction:
 
 
 class TestParseIssue:
-
     def test_basic_fields(self):
         provider = _make_provider()
         issue = _make_issue_json()
@@ -185,10 +181,12 @@ class TestParseIssue:
         provider = _make_provider()
         adf_desc = {
             "type": "doc",
-            "content": [{
-                "type": "paragraph",
-                "content": [{"type": "text", "text": "Bug description here"}],
-            }],
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [{"type": "text", "text": "Bug description here"}],
+                }
+            ],
         }
         issue = _make_issue_json(description=adf_desc)
         task = provider._parse_issue(issue)
@@ -206,7 +204,6 @@ class TestParseIssue:
 
 
 class TestProperties:
-
     def test_name(self):
         provider = _make_provider()
         assert provider.name == "jira"
@@ -220,7 +217,6 @@ class TestProperties:
 
 
 class TestHealthCheck:
-
     @pytest.mark.asyncio
     async def test_health_ok(self):
         provider = _make_provider()
@@ -248,7 +244,6 @@ class TestHealthCheck:
 
 
 class TestListTasks:
-
     @pytest.mark.asyncio
     async def test_list_tasks_default(self):
         provider = _make_provider()
@@ -294,7 +289,6 @@ class TestListTasks:
 
 
 class TestGetTask:
-
     @pytest.mark.asyncio
     async def test_get_task_found(self):
         provider = _make_provider()
@@ -318,7 +312,6 @@ class TestGetTask:
 
 
 class TestSearchTasks:
-
     @pytest.mark.asyncio
     async def test_search_tasks(self):
         provider = _make_provider()
@@ -344,7 +337,6 @@ class TestSearchTasks:
 
 
 class TestPushSummary:
-
     @pytest.mark.asyncio
     async def test_push_summary_comment_and_worklog(self):
         provider = _make_provider()
@@ -403,7 +395,9 @@ class TestPushSummary:
         with patch.object(provider, "_request", new_callable=AsyncMock) as mock_req:
             mock_req.return_value = _mock_response(500)
             summary = SessionSummary(
-                session_id="s-1", task_description="test", status="completed",
+                session_id="s-1",
+                task_description="test",
+                status="completed",
             )
             result = await provider.push_session_summary("PROJ-1", summary)
             assert result is False
@@ -413,16 +407,18 @@ class TestPushSummary:
 
 
 class TestUpdateStatus:
-
     @pytest.mark.asyncio
     async def test_update_status_success(self):
         provider = _make_provider()
-        transitions_resp = _mock_response(200, {
-            "transitions": [
-                {"id": "31", "name": "Done", "to": {"name": "Done"}},
-                {"id": "21", "name": "In Progress", "to": {"name": "In Progress"}},
-            ],
-        })
+        transitions_resp = _mock_response(
+            200,
+            {
+                "transitions": [
+                    {"id": "31", "name": "Done", "to": {"name": "Done"}},
+                    {"id": "21", "name": "In Progress", "to": {"name": "In Progress"}},
+                ],
+            },
+        )
         post_resp = _mock_response(204)
 
         call_count = 0
@@ -442,11 +438,14 @@ class TestUpdateStatus:
     @pytest.mark.asyncio
     async def test_update_status_no_matching_transition(self):
         provider = _make_provider()
-        transitions_resp = _mock_response(200, {
-            "transitions": [
-                {"id": "21", "name": "Start", "to": {"name": "In Progress"}},
-            ],
-        })
+        transitions_resp = _mock_response(
+            200,
+            {
+                "transitions": [
+                    {"id": "21", "name": "Start", "to": {"name": "In Progress"}},
+                ],
+            },
+        )
         with patch.object(provider, "_request", new_callable=AsyncMock) as mock_req:
             mock_req.return_value = transitions_resp
             result = await provider.update_task_status("PROJ-1", TaskStatus.DONE)
@@ -465,7 +464,6 @@ class TestUpdateStatus:
 
 
 class TestWebhook:
-
     @pytest.mark.asyncio
     async def test_handle_webhook(self):
         provider = _make_provider()

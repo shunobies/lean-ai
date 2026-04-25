@@ -31,7 +31,9 @@ logger = logging.getLogger(__name__)
 
 
 async def _summarize_if_long(
-    text: str, llm_client: LLMClient, threshold: int = 3000,
+    text: str,
+    llm_client: LLMClient,
+    threshold: int = 3000,
 ) -> str:
     """Use LLM to summarize content exceeding threshold."""
     if len(text) <= threshold:
@@ -96,7 +98,8 @@ async def _search_searxng(query: str, max_results: int = 5) -> str:
         headers["Authorization"] = f"Bearer {settings.search_api_key}"
 
     async with httpx.AsyncClient(
-        timeout=settings.internet_timeout_seconds, follow_redirects=True,
+        timeout=settings.internet_timeout_seconds,
+        follow_redirects=True,
     ) as client:
         response = await client.get(f"{base_url}/search", params=params, headers=headers)
         response.raise_for_status()
@@ -175,7 +178,8 @@ async def _enforce_search_delay() -> None:
 
 
 async def search_internet(
-    query: str, llm_client: LLMClient | None = None,
+    query: str,
+    llm_client: LLMClient | None = None,
 ) -> ToolResult:
     """Search the web and return sanitized results."""
     global _last_search_time
@@ -200,7 +204,10 @@ async def search_internet(
     except Exception as e:
         _last_search_time = time.monotonic()
         logger.warning(
-            "Search [%s]: %r failed: %s", settings.search_provider, query, e,
+            "Search [%s]: %r failed: %s",
+            settings.search_provider,
+            query,
+            e,
         )
         return ToolResult(success=False, error=f"Search failed: {e}")
 
@@ -215,7 +222,9 @@ async def search_internet(
 
     logger.info(
         "Search [%s]: %r -> %d chars",
-        settings.search_provider, query, len(sanitized),
+        settings.search_provider,
+        query,
+        len(sanitized),
     )
     return ToolResult(success=True, output=sanitized)
 
@@ -235,7 +244,8 @@ async def fetch_url(
     logger.info("Fetch URL: %s", url)
     try:
         async with httpx.AsyncClient(
-            timeout=settings.internet_timeout_seconds, follow_redirects=True,
+            timeout=settings.internet_timeout_seconds,
+            follow_redirects=True,
         ) as client:
             response = await client.get(
                 url,

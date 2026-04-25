@@ -50,9 +50,7 @@ def _deep_copy_messages(messages: list[dict]) -> list[dict]:
         if i == last_user_idx:
             content = copy.get("content")
             if isinstance(content, list):
-                copy["content"] = [
-                    dict(b) if isinstance(b, dict) else b for b in content
-                ]
+                copy["content"] = [dict(b) if isinstance(b, dict) else b for b in content]
         out.append(copy)
     return out
 
@@ -118,9 +116,7 @@ def attach_image(
         CapabilityError: Provider is unknown or doesn't support image input.
     """
     if provider not in _IMAGE_PROVIDERS:
-        raise CapabilityError(
-            f"Provider {provider!r} does not support image input"
-        )
+        raise CapabilityError(f"Provider {provider!r} does not support image input")
 
     new_messages = _deep_copy_messages(messages)
     idx = _last_user_index(new_messages)
@@ -140,26 +136,32 @@ def attach_image(
 
     content = _ensure_content_list(msg)
     if provider in ("openai", "serve"):
-        content.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:{mime_type};base64,{image_b64}"},
-        })
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime_type};base64,{image_b64}"},
+            }
+        )
     elif provider == "anthropic":
-        content.append({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": mime_type,
-                "data": image_b64,
-            },
-        })
+        content.append(
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": mime_type,
+                    "data": image_b64,
+                },
+            }
+        )
     elif provider == "gemini":
         # Generic block; Gemini's _build_contents translates to Part.from_bytes.
-        content.append({
-            "type": "image",
-            "data": image_b64,
-            "mime_type": mime_type,
-        })
+        content.append(
+            {
+                "type": "image",
+                "data": image_b64,
+                "mime_type": mime_type,
+            }
+        )
     return new_messages
 
 
@@ -202,19 +204,23 @@ def attach_audio(
 
     content = _ensure_content_list(msg)
     if provider in ("openai", "serve"):
-        content.append({
-            "type": "input_audio",
-            "input_audio": {
-                "data": audio_b64,
-                "format": _openai_audio_format(mime_type),
-            },
-        })
+        content.append(
+            {
+                "type": "input_audio",
+                "input_audio": {
+                    "data": audio_b64,
+                    "format": _openai_audio_format(mime_type),
+                },
+            }
+        )
     elif provider == "gemini":
-        content.append({
-            "type": "audio",
-            "data": audio_b64,
-            "mime_type": mime_type,
-        })
+        content.append(
+            {
+                "type": "audio",
+                "data": audio_b64,
+                "mime_type": mime_type,
+            }
+        )
     return new_messages
 
 

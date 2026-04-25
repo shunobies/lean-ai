@@ -211,8 +211,14 @@ class FileSummary(BaseModel):
 # becomes a direct field on the object).
 
 NamingCategory = Literal[
-    "variables", "functions", "classes", "files",
-    "routes", "db_table", "db_column", "imports",
+    "variables",
+    "functions",
+    "classes",
+    "files",
+    "routes",
+    "db_table",
+    "db_column",
+    "imports",
 ]
 RiskSeverity = Literal["low", "medium", "high"]
 
@@ -384,8 +390,13 @@ class NameRegistryEntry(BaseModel):
 # format_code — only truly non-plan tools (list_directory, directory_tree,
 # grep_files, search_internet, etc.) are filtered out.
 IMPLEMENTATION_STEP_TOOLS = {
-    "create_file", "edit_file", "run_command", "read_file",
-    "run_tests", "run_lint", "format_code",
+    "create_file",
+    "edit_file",
+    "run_command",
+    "read_file",
+    "run_tests",
+    "run_lint",
+    "format_code",
 }
 
 # Alias — all tools that may appear in any PlanStep.
@@ -411,7 +422,8 @@ class PlanStep(BaseModel):
         if v not in ALL_VALID_STEP_TOOLS:
             logger.warning(
                 "PlanStep has non-standard tool '%s' — expected one of %s",
-                v, ALL_VALID_STEP_TOOLS,
+                v,
+                ALL_VALID_STEP_TOOLS,
             )
         return v
 
@@ -465,9 +477,9 @@ class PlanStep(BaseModel):
     def warn_missing_file_path(self) -> "PlanStep":
         if self.tool in self._FILE_TOOLS and not self.file_path.strip():
             logger.warning(
-                "PlanStep tool '%s' should have a file_path but got "
-                "empty string (step %d)",
-                self.tool, self.step_number,
+                "PlanStep tool '%s' should have a file_path but got empty string (step %d)",
+                self.tool,
+                self.step_number,
             )
         return self
 
@@ -588,38 +600,29 @@ def format_name_registry_for_prompt(
         if entry.route_endpoint:
             block.append(f"  route/endpoint: {entry.route_endpoint}")
         if entry.registered_in:
-            block.append(
-                f"  registered in: {', '.join(entry.registered_in)}"
-            )
+            block.append(f"  registered in: {', '.join(entry.registered_in)}")
         if entry.test_file:
             block.append(f"  test: {entry.test_file}")
         blocks.append("\n".join(block))
     return "\n\n".join(blocks)
 
 
-def _render_step(
-    parts: list[str], step: PlanStep, include_context: bool
-) -> None:
+def _render_step(parts: list[str], step: PlanStep, include_context: bool) -> None:
     """Render a single plan step as markdown lines."""
     tool_label = step.tool.upper().replace("_", " ")
     if step.file_path:
         parts.append(
-            f"{step.step_number}. **{tool_label}** `{step.file_path}`"
-            f" — {step.instruction}"
+            f"{step.step_number}. **{tool_label}** `{step.file_path}` — {step.instruction}"
         )
     else:
-        parts.append(
-            f"{step.step_number}. **{tool_label}** — {step.instruction}"
-        )
+        parts.append(f"{step.step_number}. **{tool_label}** — {step.instruction}")
     if step.reason:
         parts.append(f"   **Reason:** {step.reason}")
     if include_context and step.context:
         parts.append(f"   ```\n{step.context}\n   ```")
 
 
-def plan_to_markdown(
-    plan: ExecutionPlan, *, include_context: bool = False
-) -> str:
+def plan_to_markdown(plan: ExecutionPlan, *, include_context: bool = False) -> str:
     """Render an ExecutionPlan as human-readable markdown.
 
     Args:

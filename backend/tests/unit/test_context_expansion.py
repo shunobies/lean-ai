@@ -96,14 +96,7 @@ class TestDeduplicateSubsections:
         assert result.count("### app/Controllers/") == 2
 
     def test_preserves_doc_without_duplicates(self):
-        doc = (
-            "## Module Map\n"
-            "### src/api/\n"
-            "- API handlers\n"
-            "\n"
-            "### src/models/\n"
-            "- Models\n"
-        )
+        doc = "## Module Map\n### src/api/\n- API handlers\n\n### src/models/\n- Models\n"
         result = _deduplicate_subsections(doc)
         assert "### src/api/" in result
         assert "### src/models/" in result

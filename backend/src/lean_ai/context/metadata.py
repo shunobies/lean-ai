@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class _RepoMetadata:
     """All metadata extracted from the repository in a single pass."""
+
     files: dict[str, _FileMetadata] = field(default_factory=dict)
     fan_in: dict[str, int] = field(default_factory=dict)
 
@@ -220,6 +221,7 @@ def _extract_all_metadata(repo_root: str, entries=None) -> _RepoMetadata:
     if entries is None:
         try:
             from lean_ai.indexer.tree import list_repo_tree
+
             entries = list_repo_tree(repo_root)
         except Exception:
             return _RepoMetadata()
@@ -334,6 +336,7 @@ def extract_metadata_cached(repo_root: str, entries=None) -> _RepoMetadata:
     if entries is None:
         try:
             from lean_ai.indexer.tree import list_repo_tree
+
             entries = list_repo_tree(repo_root)
         except Exception:
             return _RepoMetadata()
@@ -367,7 +370,9 @@ def extract_metadata_cached(repo_root: str, entries=None) -> _RepoMetadata:
 
         logger.info(
             "Metadata cache PARTIAL: %d changed, %d deleted, %d cached",
-            len(changed_files), len(deleted_files), len(cached_files) - len(deleted_files),
+            len(changed_files),
+            len(deleted_files),
+            len(cached_files) - len(deleted_files),
         )
 
         root = Path(repo_root)

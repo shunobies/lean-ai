@@ -12,7 +12,8 @@ logger = logging.getLogger(__name__)
 
 
 async def build_session_summary(
-    repo_root: str, session_id: str,
+    repo_root: str,
+    session_id: str,
 ) -> SessionSummary | None:
     """Build a SessionSummary from existing session + tool_log + commit data."""
     from lean_ai.db import get_db
@@ -21,7 +22,8 @@ async def build_session_summary(
     try:
         # Fetch session
         cursor = await db.execute(
-            "SELECT * FROM sessions WHERE id = ?", (session_id,),
+            "SELECT * FROM sessions WHERE id = ?",
+            (session_id,),
         )
         session = await cursor.fetchone()
         if not session:
@@ -35,8 +37,7 @@ async def build_session_summary(
         )
         commit_rows = await cursor.fetchall()
         commits = [
-            {"sha": row["commit_sha"], "message": row.get("message", "")}
-            for row in commit_rows
+            {"sha": row["commit_sha"], "message": row.get("message", "")} for row in commit_rows
         ]
 
         # Calculate duration

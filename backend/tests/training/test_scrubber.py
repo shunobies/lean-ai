@@ -145,9 +145,7 @@ def test_scrub_value_descends_into_json_strings():
     args = clean["tool_call"]["arguments"]
     assert "sk-proj-abc123" not in args
     # Scrubber should either have redacted the Bearer header or the OpenAI key
-    assert (
-        "<REDACTED" in args
-    ), f"expected redaction, got: {args}"
+    assert "<REDACTED" in args, f"expected redaction, got: {args}"
 
 
 def test_scrub_payload_returns_new_dict():

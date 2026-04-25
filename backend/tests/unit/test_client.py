@@ -35,8 +35,9 @@ class FakeProvider(LLMProvider):
     async def chat_structured(self, messages, schema, temperature=None, max_tokens=None):
         raise NotImplementedError
 
-    async def chat_with_tools_single(self, messages, tools, max_tokens=None, *,
-                                         stream_callback=None, thinking_callback=None):
+    async def chat_with_tools_single(
+        self, messages, tools, max_tokens=None, *, stream_callback=None, thinking_callback=None
+    ):
         self.messages_at_each_call.append(list(messages))
         if self.call_count < len(self.responses):
             resp = self.responses[self.call_count]
@@ -53,7 +54,9 @@ class FakeProvider(LLMProvider):
 
 
 def _make_tool_call_response(
-    name: str, args: dict, content: str = "",
+    name: str,
+    args: dict,
+    content: str = "",
 ) -> tuple[str, list[ToolCallInfo], LLMMetrics]:
     """Build a fake provider response containing a tool call."""
     return (
@@ -248,7 +251,8 @@ async def test_callable_reminder_invoked_at_interval():
 
     responses = [
         _make_tool_call_response(
-            "edit_file", {"path": "f.py", "search": "a", "replace": "b"},
+            "edit_file",
+            {"path": "f.py", "search": "a", "replace": "b"},
         )
         for _ in range(12)
     ] + [_make_task_complete_response()]
@@ -272,8 +276,7 @@ async def test_callable_reminder_invoked_at_interval():
     assert call_count == 2
     # Each call should produce a distinct, fresh value
     reminder_msgs = [
-        m for m in messages
-        if m["role"] == "user" and "REMINDER #" in m.get("content", "")
+        m for m in messages if m["role"] == "user" and "REMINDER #" in m.get("content", "")
     ]
     assert len(reminder_msgs) == 2
     assert reminder_msgs[0]["content"] == "REMINDER #1"
@@ -307,8 +310,7 @@ async def test_loop_detection_triggers_at_threshold():
     )
 
     warnings = [
-        m for m in messages
-        if m["role"] == "user" and "Loop detected" in m.get("content", "")
+        m for m in messages if m["role"] == "user" and "Loop detected" in m.get("content", "")
     ]
     assert len(warnings) >= 1
     assert "edit_file" in warnings[0]["content"]
@@ -344,8 +346,7 @@ async def test_loop_detection_resets_on_different_call():
     )
 
     warnings = [
-        m for m in messages
-        if m["role"] == "user" and "Loop detected" in m.get("content", "")
+        m for m in messages if m["role"] == "user" and "Loop detected" in m.get("content", "")
     ]
     # Never hit 3 consecutive — no warning
     assert len(warnings) == 0
@@ -374,8 +375,7 @@ async def test_loop_detection_threshold_zero_disables():
     )
 
     warnings = [
-        m for m in messages
-        if m["role"] == "user" and "Loop detected" in m.get("content", "")
+        m for m in messages if m["role"] == "user" and "Loop detected" in m.get("content", "")
     ]
     assert len(warnings) == 0
 
@@ -424,12 +424,20 @@ async def test_task_complete_with_other_tools():
         (
             "",
             [
-                ToolCallInfo(name="edit_file", arguments={
-                    "path": "f.py", "search": "a", "replace": "b",
-                }),
-                ToolCallInfo(name="task_complete", arguments={
-                    "summary": "All done.",
-                }),
+                ToolCallInfo(
+                    name="edit_file",
+                    arguments={
+                        "path": "f.py",
+                        "search": "a",
+                        "replace": "b",
+                    },
+                ),
+                ToolCallInfo(
+                    name="task_complete",
+                    arguments={
+                        "summary": "All done.",
+                    },
+                ),
             ],
             LLMMetrics(),
         ),
@@ -547,7 +555,8 @@ async def test_nudge_removed():
 
     # No nudge message should exist in messages
     nudge_msgs = [
-        m for m in messages
+        m
+        for m in messages
         if m["role"] == "user" and "not complete" in m.get("content", "").lower()
     ]
     assert len(nudge_msgs) == 0
@@ -563,9 +572,13 @@ def test_sanitize_preserves_valid_messages():
     msgs = [
         {"role": "system", "content": "sys"},
         {"role": "user", "content": "do stuff"},
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"function": {"name": "read_file", "arguments": {"path": "f.py"}}},
-        ]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"function": {"name": "read_file", "arguments": {"path": "f.py"}}},
+            ],
+        },
         {"role": "tool", "content": "file contents"},
         {"role": "assistant", "content": "Done."},
     ]
@@ -579,10 +592,14 @@ def test_sanitize_removes_orphaned_tool_calls():
     """Assistant with 2 tool_calls but only 1 result → trimmed to 1."""
     msgs = [
         {"role": "system", "content": "sys"},
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"function": {"name": "read_file", "arguments": {"path": "a.py"}}},
-            {"function": {"name": "read_file", "arguments": {"path": "b.py"}}},
-        ]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"function": {"name": "read_file", "arguments": {"path": "a.py"}}},
+                {"function": {"name": "read_file", "arguments": {"path": "b.py"}}},
+            ],
+        },
         {"role": "tool", "content": "contents of a.py"},
         {"role": "user", "content": "next"},
     ]
@@ -597,9 +614,13 @@ def test_sanitize_removes_assistant_with_no_tool_results():
     """Assistant with tool_calls but zero results → removed."""
     msgs = [
         {"role": "system", "content": "sys"},
-        {"role": "assistant", "content": "I'll read the file", "tool_calls": [
-            {"function": {"name": "read_file", "arguments": {"path": "f.py"}}},
-        ]},
+        {
+            "role": "assistant",
+            "content": "I'll read the file",
+            "tool_calls": [
+                {"function": {"name": "read_file", "arguments": {"path": "f.py"}}},
+            ],
+        },
         {"role": "user", "content": "next"},
     ]
     result = _sanitize_messages(msgs)
@@ -634,6 +655,7 @@ def test_sanitize_handles_empty_list():
 def _dar_sample():
     """Build the DesignAndRisks schema lazily to keep imports cheap."""
     from lean_ai.llm.plan_schema import DesignAndRisks
+
     return DesignAndRisks
 
 
@@ -716,8 +738,11 @@ def test_inject_schema_covers_every_phase_schema():
 
     msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "u"}]
     for schema in (
-        ScopeDocument, FileSummary, DesignAndRisks,
-        ExecutionPlan, VerificationPlan,
+        ScopeDocument,
+        FileSummary,
+        DesignAndRisks,
+        ExecutionPlan,
+        VerificationPlan,
     ):
         out = _inject_schema_into_messages(msgs, schema)
         assert schema.__name__ in out[0]["content"], (
@@ -760,7 +785,9 @@ async def test_context_refresh_triggers_at_threshold():
     ]
 
     result = await client._maybe_refresh_context(
-        messages, threshold=0.7, on_context_refresh=on_refresh,
+        messages,
+        threshold=0.7,
+        on_context_refresh=on_refresh,
     )
 
     assert result is True
@@ -791,7 +818,9 @@ async def test_context_refresh_rebuilds_from_callback():
     ]
 
     result = await client._maybe_refresh_context(
-        messages, threshold=0.7, on_context_refresh=on_refresh,
+        messages,
+        threshold=0.7,
+        on_context_refresh=on_refresh,
     )
 
     assert result is True
@@ -821,7 +850,9 @@ async def test_context_refresh_skips_below_threshold():
     original_len = len(messages)
 
     result = await client._maybe_refresh_context(
-        messages, threshold=0.7, on_context_refresh=on_refresh,
+        messages,
+        threshold=0.7,
+        on_context_refresh=on_refresh,
     )
 
     assert result is False
@@ -844,7 +875,9 @@ async def test_context_refresh_no_callback_is_noop():
     original_len = len(messages)
 
     result = await client._maybe_refresh_context(
-        messages, threshold=0.7, on_context_refresh=None,
+        messages,
+        threshold=0.7,
+        on_context_refresh=None,
     )
 
     assert result is False
@@ -870,7 +903,9 @@ async def test_context_refresh_callback_exception_handled():
 
     # Should not raise
     result = await client._maybe_refresh_context(
-        messages, threshold=0.7, on_context_refresh=on_refresh,
+        messages,
+        threshold=0.7,
+        on_context_refresh=on_refresh,
     )
 
     assert result is False
@@ -903,10 +938,7 @@ async def test_custom_nudge_used_on_text_only():
         text_only_nudge=custom_nudge,
     )
 
-    nudge_msgs = [
-        m for m in messages
-        if m["role"] == "user" and m.get("content") == custom_nudge
-    ]
+    nudge_msgs = [m for m in messages if m["role"] == "user" and m.get("content") == custom_nudge]
     assert len(nudge_msgs) == 1
 
 
@@ -932,8 +964,7 @@ async def test_default_nudge_when_no_custom():
     )
 
     nudge_msgs = [
-        m for m in messages
-        if m["role"] == "user" and "task_complete" in m.get("content", "")
+        m for m in messages if m["role"] == "user" and "task_complete" in m.get("content", "")
     ]
     assert len(nudge_msgs) == 1
 
@@ -995,8 +1026,7 @@ async def test_truncated_response_injects_truncation_nudge():
     )
 
     truncation_nudges = [
-        m for m in messages
-        if m["role"] == "user" and "truncated" in m.get("content", "")
+        m for m in messages if m["role"] == "user" and "truncated" in m.get("content", "")
     ]
     assert len(truncation_nudges) == 1
     assert "ONLY the tool call" in truncation_nudges[0]["content"]
@@ -1034,8 +1064,7 @@ async def test_normal_text_only_still_exits_at_limit():
 async def test_consecutive_truncation_cap():
     """Repeated truncation should exit at the safety cap (5)."""
     responses = [
-        _make_text_response(f"Truncated {i}...", stop_reason="length")
-        for i in range(7)
+        _make_text_response(f"Truncated {i}...", stop_reason="length") for i in range(7)
     ] + [_make_task_complete_response("Done.")]
 
     client, fake = _build_client(responses)

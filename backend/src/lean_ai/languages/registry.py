@@ -75,7 +75,8 @@ class LanguageRegistry:
 
         logger.info(
             "Loaded %d language definitions (%d extensions)",
-            len(self._all), len(self._by_extension),
+            len(self._all),
+            len(self._by_extension),
         )
 
     def get_language(self, ext: str) -> LanguageDefinition | None:
@@ -136,4 +137,5 @@ class LanguageRegistry:
 def get_registry() -> LanguageRegistry:
     """Get or create the singleton language registry."""
     from lean_ai.config import settings
+
     return LanguageRegistry(settings.languages_dir)

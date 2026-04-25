@@ -65,11 +65,10 @@ def _format_analysis(analysis: UIAnalysis, screenshot_path: Path) -> str:
         if inv.components:
             lines.append("### Components")
             for c in inv.components:
-                label = f" \"{c.label_text}\"" if c.label_text else ""
+                label = f' "{c.label_text}"' if c.label_text else ""
                 style = f" — {c.styling_notes}" if c.styling_notes else ""
                 lines.append(
-                    f"- `{c.type}` @ {c.location}{label} "
-                    f"[{c.state}, conf={c.confidence}]{style}"
+                    f"- `{c.type}` @ {c.location}{label} [{c.state}, conf={c.confidence}]{style}"
                 )
         lines.append("")
 
@@ -131,9 +130,7 @@ async def verify_web_ui(
 
     effective_viewport = viewport or settings.ui_verification_viewport
     effective_wait = (
-        wait_seconds
-        if wait_seconds is not None
-        else settings.ui_verification_wait_seconds
+        wait_seconds if wait_seconds is not None else settings.ui_verification_wait_seconds
     )
 
     async def _run() -> str:
@@ -150,13 +147,16 @@ async def verify_web_ui(
             return f"ERROR: Web capture failed: {e}"
 
         analysis = await analyze_screenshot(
-            png, question, vision_timeout=settings.ui_verification_vision_timeout,
+            png,
+            question,
+            vision_timeout=settings.ui_verification_vision_timeout,
         )
         return _format_analysis(analysis, png)
 
     try:
         return await asyncio.wait_for(
-            _run(), timeout=settings.ui_verification_timeout,
+            _run(),
+            timeout=settings.ui_verification_timeout,
         )
     except asyncio.TimeoutError:
         return (
@@ -181,9 +181,7 @@ async def verify_desktop_ui(
         return _format_disabled_error()
 
     effective_wait = (
-        wait_seconds
-        if wait_seconds is not None
-        else settings.ui_verification_wait_seconds
+        wait_seconds if wait_seconds is not None else settings.ui_verification_wait_seconds
     )
     effective_window_timeout = window_timeout if window_timeout is not None else 30.0
 
@@ -200,13 +198,16 @@ async def verify_desktop_ui(
             return f"ERROR: Desktop capture failed: {e}"
 
         analysis = await analyze_screenshot(
-            png, question, vision_timeout=settings.ui_verification_vision_timeout,
+            png,
+            question,
+            vision_timeout=settings.ui_verification_vision_timeout,
         )
         return _format_analysis(analysis, png)
 
     try:
         return await asyncio.wait_for(
-            _run(), timeout=settings.ui_verification_timeout,
+            _run(),
+            timeout=settings.ui_verification_timeout,
         )
     except asyncio.TimeoutError:
         return (

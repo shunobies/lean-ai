@@ -79,7 +79,6 @@ class FakeIntegration(IntegrationProvider):
 
 
 class TestRegistry:
-
     def setup_method(self):
         """Clear registry state before each test."""
         _REGISTRY.clear()
@@ -161,7 +160,6 @@ class TestRegistry:
 
 
 class TestABC:
-
     def test_cannot_instantiate_abc(self):
         with pytest.raises(TypeError):
             IntegrationProvider()
@@ -170,6 +168,7 @@ class TestABC:
         """Default handle_webhook returns not_implemented."""
         provider = FakeIntegration()
         import asyncio
+
         result = asyncio.run(
             IntegrationProvider.handle_webhook(provider, WebhookEvent("test", "1", "src"))
         )
@@ -178,9 +177,8 @@ class TestABC:
     def test_search_default(self):
         """Default search_tasks returns empty list."""
         import asyncio
-        result = asyncio.run(
-            IntegrationProvider.search_tasks(MagicMock(), "query")
-        )
+
+        result = asyncio.run(IntegrationProvider.search_tasks(MagicMock(), "query"))
         assert result == []
 
 
@@ -188,7 +186,6 @@ class TestABC:
 
 
 class TestDataClasses:
-
     def test_external_task_defaults(self):
         task = ExternalTask(external_id="T-1", title="Test")
         assert task.status == TaskStatus.OPEN
@@ -225,7 +222,6 @@ class TestDataClasses:
 
 
 class TestDatabase:
-
     @pytest.fixture
     async def db(self, tmp_path):
         """Create an in-memory-like temp database."""
@@ -246,7 +242,9 @@ class TestDatabase:
         from lean_ai.integrations.db import link_task
 
         result = await link_task(
-            db, "jira", "PROJ-123",
+            db,
+            "jira",
+            "PROJ-123",
             session_id="sess-1",
             workspace="/home/user/project",
             title="Fix login bug",
@@ -326,8 +324,12 @@ class TestDatabase:
         link_id = result["id"]
 
         log_id = await log_sync_event(
-            db, link_id, "push", "session_summary",
-            payload={"key": "value"}, success=True,
+            db,
+            link_id,
+            "push",
+            "session_summary",
+            payload={"key": "value"},
+            success=True,
         )
         assert log_id > 0
 
@@ -336,7 +338,8 @@ class TestDatabase:
         from lean_ai.integrations.db import get_integration_config, save_integration_config
 
         await save_integration_config(
-            db, "jira",
+            db,
+            "jira",
             config={"url": "https://jira.example.com", "token": "xxx"},
             enabled=True,
         )
@@ -369,7 +372,6 @@ class TestDatabase:
 
 
 class TestSummaryBuilder:
-
     @pytest.mark.asyncio
     async def test_build_session_summary(self):
         """Test summary builder with mocked DB."""
@@ -380,18 +382,21 @@ class TestSummaryBuilder:
         # Use real dicts wrapped to support both dict() and [] access like aiosqlite.Row
         class FakeRow(dict):
             """Dict that also supports integer-index access like aiosqlite.Row."""
+
             def __getitem__(self, key):
                 if isinstance(key, int):
                     return list(self.values())[key]
                 return dict.__getitem__(self, key)
 
-        session_data = FakeRow({
-            "task": "Fix the login bug",
-            "status": "completed",
-            "branch_name": "fix/login",
-            "created_at": "2024-01-01T10:00:00",
-            "completed_at": "2024-01-01T10:30:00",
-        })
+        session_data = FakeRow(
+            {
+                "task": "Fix the login bug",
+                "status": "completed",
+                "branch_name": "fix/login",
+                "created_at": "2024-01-01T10:00:00",
+                "completed_at": "2024-01-01T10:30:00",
+            }
+        )
 
         commit_data = FakeRow({"commit_sha": "abc123", "message": "fix: login"})
         tool_count_data = FakeRow({"count": 15})
@@ -410,9 +415,14 @@ class TestSummaryBuilder:
         cursor_files = AsyncMock()
         cursor_files.fetchall.return_value = [file_data]
 
-        mock_db.execute = AsyncMock(side_effect=[
-            cursor_session, cursor_commits, cursor_tool_count, cursor_files,
-        ])
+        mock_db.execute = AsyncMock(
+            side_effect=[
+                cursor_session,
+                cursor_commits,
+                cursor_tool_count,
+                cursor_files,
+            ]
+        )
         mock_db.close = AsyncMock()
 
         with patch("lean_ai.db.get_db", return_value=mock_db):
@@ -449,7 +459,6 @@ class TestSummaryBuilder:
 
 
 class TestFakeIntegrationBehavior:
-
     @pytest.mark.asyncio
     async def test_list_tasks(self):
         provider = FakeIntegration()
@@ -475,7 +484,9 @@ class TestFakeIntegrationBehavior:
     async def test_push_session_summary(self):
         provider = FakeIntegration()
         summary = SessionSummary(
-            session_id="s-1", task_description="test", status="completed",
+            session_id="s-1",
+            task_description="test",
+            status="completed",
         )
         assert await provider.push_session_summary("FAKE-1", summary) is True
 

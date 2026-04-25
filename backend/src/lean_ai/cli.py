@@ -90,13 +90,14 @@ def _cmd_migrate_env(args: argparse.Namespace) -> None:
         env_key, env_val = match.group(1), match.group(2)
 
         # Strip quotes from value
-        if (env_val.startswith('"') and env_val.endswith('"')) or \
-           (env_val.startswith("'") and env_val.endswith("'")):
+        if (env_val.startswith('"') and env_val.endswith('"')) or (
+            env_val.startswith("'") and env_val.endswith("'")
+        ):
             env_val = env_val[1:-1]
 
         # Convert env var name to YAML field name
         if env_key.startswith(_ENV_PREFIX):
-            field_name = env_key[len(_ENV_PREFIX):].lower()
+            field_name = env_key[len(_ENV_PREFIX) :].lower()
         else:
             field_name = env_key.lower()
 

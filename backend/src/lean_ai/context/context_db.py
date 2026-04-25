@@ -148,8 +148,7 @@ async def export_to_markdown(db: aiosqlite.Connection) -> str:
 
     for section_name in _SECTION_ORDER:
         cursor = await db.execute(
-            "SELECT content FROM context_entries "
-            "WHERE section = ? ORDER BY source, file_path",
+            "SELECT content FROM context_entries WHERE section = ? ORDER BY source, file_path",
             (section_name,),
         )
         rows = await cursor.fetchall()
@@ -179,12 +178,9 @@ async def export_to_markdown(db: aiosqlite.Connection) -> str:
 async def get_stats(db: aiosqlite.Connection) -> dict:
     """Return summary statistics for the context DB."""
     cursor = await db.execute(
-        "SELECT section, COUNT(*) as cnt "
-        "FROM context_entries GROUP BY section",
+        "SELECT section, COUNT(*) as cnt FROM context_entries GROUP BY section",
     )
-    section_counts = {
-        row["section"]: row["cnt"] for row in await cursor.fetchall()
-    }
+    section_counts = {row["section"]: row["cnt"] for row in await cursor.fetchall()}
     cursor2 = await db.execute(
         "SELECT COUNT(DISTINCT file_path) as files FROM context_entries",
     )

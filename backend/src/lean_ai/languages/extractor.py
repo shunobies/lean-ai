@@ -72,7 +72,7 @@ def _query_matches(query: tree_sitter.Query, node: tree_sitter.Node) -> list[tup
 
 def _node_text(node: tree_sitter.Node, source: bytes) -> str:
     """Extract the text content of a tree-sitter node."""
-    return source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
+    return source[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
 
 
 def extract_file_metadata(text: str, lang: LanguageDefinition) -> FileMetadata:
@@ -112,7 +112,10 @@ def extract_file_metadata(text: str, lang: LanguageDefinition) -> FileMetadata:
 
 
 def _process_definition_match(
-    match: tuple, source: bytes, meta: FileMetadata, kind: str,
+    match: tuple,
+    source: bytes,
+    meta: FileMetadata,
+    kind: str,
 ) -> None:
     """Process a tree-sitter match for a class/function definition."""
     _, captures = match
@@ -139,7 +142,10 @@ def _process_definition_match(
 
 
 def _process_import_match(
-    match: tuple, source: bytes, meta: FileMetadata, lang: LanguageDefinition,
+    match: tuple,
+    source: bytes,
+    meta: FileMetadata,
+    lang: LanguageDefinition,
 ) -> None:
     """Process a tree-sitter match for an import statement."""
     _, captures = match
@@ -183,35 +189,52 @@ def get_definition_nodes(text: str, lang: LanguageDefinition) -> list[tuple[int,
                 if sub.type in ("identifier", "name", "property_identifier"):
                     name = _node_text(sub, source)
                     break
-            boundaries.append((
-                child.start_point.row + 1,  # 1-based
-                child.end_point.row + 1,
-                name or child.type,
-            ))
+            boundaries.append(
+                (
+                    child.start_point.row + 1,  # 1-based
+                    child.end_point.row + 1,
+                    name or child.type,
+                )
+            )
 
     return boundaries
 
 
 # Node types that represent top-level definitions across languages
-_DEFINITION_NODE_TYPES = frozenset({
-    # Python
-    "function_definition", "class_definition", "decorated_definition",
-    # JavaScript/TypeScript
-    "function_declaration", "class_declaration", "export_statement",
-    "lexical_declaration", "variable_declaration",
-    # Java/C#
-    "method_declaration", "interface_declaration",
-    "enum_declaration",
-    # Go
-    "type_declaration",
-    # Rust
-    "function_item", "struct_item", "impl_item", "enum_item", "trait_item",
-    "mod_item",
-    # Ruby
-    "method", "class", "module",
-    # C/C++
-    "struct_specifier", "class_specifier",
-    "declaration",
-    # PHP
-    "trait_declaration",
-})
+_DEFINITION_NODE_TYPES = frozenset(
+    {
+        # Python
+        "function_definition",
+        "class_definition",
+        "decorated_definition",
+        # JavaScript/TypeScript
+        "function_declaration",
+        "class_declaration",
+        "export_statement",
+        "lexical_declaration",
+        "variable_declaration",
+        # Java/C#
+        "method_declaration",
+        "interface_declaration",
+        "enum_declaration",
+        # Go
+        "type_declaration",
+        # Rust
+        "function_item",
+        "struct_item",
+        "impl_item",
+        "enum_item",
+        "trait_item",
+        "mod_item",
+        # Ruby
+        "method",
+        "class",
+        "module",
+        # C/C++
+        "struct_specifier",
+        "class_specifier",
+        "declaration",
+        # PHP
+        "trait_declaration",
+    }
+)

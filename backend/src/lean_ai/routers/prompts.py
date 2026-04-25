@@ -52,10 +52,13 @@ async def update_prompts(request: UpdatePromptsRequest) -> dict[str, str]:
             all_errors[key] = errors
 
     if all_errors:
-        raise HTTPException(status_code=422, detail={
-            "message": "Validation failed — missing required template variables",
-            "errors": all_errors,
-        })
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Validation failed — missing required template variables",
+                "errors": all_errors,
+            },
+        )
 
     registry.save_overrides(request.repo_root, request.overrides)
     return {"status": "saved"}

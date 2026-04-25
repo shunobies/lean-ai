@@ -107,10 +107,14 @@ async def _request_tool_approval(
     disconnected, or cancelled).
     """
     await send_tool_approval_required(
-        ws, tool=tool, command=command, reason=reason,
+        ws,
+        tool=tool,
+        command=command,
+        reason=reason,
     )
     if dispatcher:
         from lean_ai.workflow.ws_dispatcher import WorkflowCancelledError
+
         # Loop to skip unexpected message types (e.g. stale user_message)
         while True:
             try:
@@ -130,6 +134,7 @@ async def _request_tool_approval(
             )
     else:
         from lean_ai.workflow.ws_handler import safe_receive
+
         approval_msg = await safe_receive(ws)
         if approval_msg is None:
             return False
@@ -137,10 +142,17 @@ async def _request_tool_approval(
 
 
 # Tools eligible for worker-model compression
-_COMPRESSIBLE_TOOLS = frozenset({
-    "read_file", "grep_files", "run_tests", "run_lint",
-    "run_command", "search_internet", "fetch_url",
-})
+_COMPRESSIBLE_TOOLS = frozenset(
+    {
+        "read_file",
+        "grep_files",
+        "run_tests",
+        "run_lint",
+        "run_command",
+        "search_internet",
+        "fetch_url",
+    }
+)
 
 _COMPRESS_PROMPTS: dict[str, str] = {
     "read_file": (
@@ -183,16 +195,19 @@ async def _compress_tool_output(
     if len(output) <= threshold:
         return output
 
-    prompt = _COMPRESS_PROMPTS.get(tool_name, (
-        "Summarize this tool output concisely. Preserve key facts, "
-        "file paths, error messages, and actionable details."
-    ))
+    prompt = _COMPRESS_PROMPTS.get(
+        tool_name,
+        (
+            "Summarize this tool output concisely. Preserve key facts, "
+            "file paths, error messages, and actionable details."
+        ),
+    )
 
     try:
         compressed = await worker_client.chat_raw(
             messages=[
                 {"role": "system", "content": prompt},
-                {"role": "user", "content": output[:threshold * 3]},
+                {"role": "user", "content": output[: threshold * 3]},
             ],
             max_tokens=1024,
         )
@@ -200,7 +215,9 @@ async def _compress_tool_output(
             stripped = compressed.strip()
             logger.info(
                 "Compressed %s output: %d -> %d chars (%.0f%%)",
-                tool_name, len(output), len(stripped),
+                tool_name,
+                len(output),
+                len(stripped),
                 len(stripped) / len(output) * 100,
             )
             _fire_compression_capture(
@@ -214,7 +231,8 @@ async def _compress_tool_output(
     except Exception:
         logger.warning(
             "Worker model compression failed for %s, using truncation",
-            tool_name, exc_info=True,
+            tool_name,
+            exc_info=True,
         )
 
     # Fallback: truncate
@@ -257,7 +275,8 @@ def _fire_compression_capture(
             )
         except Exception:
             logger.debug(
-                "capture_tool_compression failed (non-fatal)", exc_info=True,
+                "capture_tool_compression failed (non-fatal)",
+                exc_info=True,
             )
 
     t = loop.create_task(_run())
@@ -308,7 +327,8 @@ def _fire_tool_execution_capture(
             )
         except Exception:
             logger.debug(
-                "capture_tool_execution failed (non-fatal)", exc_info=True,
+                "capture_tool_execution failed (non-fatal)",
+                exc_info=True,
             )
 
     t = loop.create_task(_run())
@@ -337,10 +357,12 @@ _REQUIRED_PARAMS: dict[str, list[str]] = {
 }
 
 # Parameters where empty string is valid
-_ALLOW_EMPTY: frozenset[tuple[str, str]] = frozenset({
-    ("create_file", "content"),   # empty file creation is valid
-    ("edit_file", "replace"),     # replacing with empty = deletion
-})
+_ALLOW_EMPTY: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("create_file", "content"),  # empty file creation is valid
+        ("edit_file", "replace"),  # replacing with empty = deletion
+    }
+)
 
 
 def _validate_required_params(name: str, arguments: dict) -> str | None:
@@ -390,10 +412,7 @@ def _format_reference_doc_listing(docs: list[dict], query: str) -> str:
         )
     example_path = shown[0]["doc_path"] if shown else "path/from/list_reference_documents"
     example_query = query.strip() or "your query"
-    lines.append(
-        f'Example: search_reference(query="{example_query}", '
-        f'document="{example_path}")'
-    )
+    lines.append(f'Example: search_reference(query="{example_query}", document="{example_path}")')
     return "\n".join(lines)
 
 
@@ -447,13 +466,13 @@ def make_tool_executor(
             result = await _execute_inner(name, arguments)
         except Exception as exc:
             logger.exception("Unhandled exception in tool %s", name)
-            result = (
-                f"ERROR: {name} failed: {exc}. "
-                f"You may retry or try a different approach."
-            )
+            result = f"ERROR: {name} failed: {exc}. You may retry or try a different approach."
         latency_ms = int((time.monotonic() - started) * 1000)
         success = not (
-            isinstance(result, str) and result.lstrip().upper().startswith(
+            isinstance(result, str)
+            and result.lstrip()
+            .upper()
+            .startswith(
                 ("ERROR:", "FAILED"),
             )
         )
@@ -490,6 +509,7 @@ def make_tool_executor(
         # TDD guard: block writes to test files during implementation
         if tdd_protect_tests and name in ("create_file", "edit_file"):
             from lean_ai.tools.test_file_utils import is_test_file_path
+
             target_path = arguments.get("path", "")
             if is_test_file_path(target_path):
                 return (
@@ -508,6 +528,7 @@ def make_tool_executor(
                 REGRESSION_GUARD_ERROR,
                 is_regression_test_path,
             )
+
             target_path = arguments.get("path", "")
             if (
                 is_regression_test_path(target_path)
@@ -519,17 +540,17 @@ def make_tool_executor(
         if name == "request_test_change":
             if on_test_dispute is not None:
                 return await on_test_dispute(arguments)
-            return (
-                "ERROR: request_test_change is not available in this "
-                "context."
-            )
+            return "ERROR: request_test_change is not available in this context."
 
         if name == "create_file":
             target_path = arguments["path"]
             external = _is_external_path(target_path, repo_root)
             if external:
                 approved = await _request_tool_approval(
-                    ws, dispatcher, "create_file", target_path,
+                    ws,
+                    dispatcher,
+                    "create_file",
+                    target_path,
                     "File is outside the project directory",
                 )
                 if not approved:
@@ -549,6 +570,7 @@ def make_tool_executor(
             # only) once the plan completes by discarding this set.
             if result.success:
                 from lean_ai.tools.regression_guard import is_regression_test_path
+
                 if is_regression_test_path(target_path):
                     session_created_regression_files.add(target_path)
             return result.output if result.success else f"ERROR: {result.error}"
@@ -558,7 +580,10 @@ def make_tool_executor(
             external = _is_external_path(target_path, repo_root)
             if external:
                 approved = await _request_tool_approval(
-                    ws, dispatcher, "edit_file", target_path,
+                    ws,
+                    dispatcher,
+                    "edit_file",
+                    target_path,
                     "File is outside the project directory",
                 )
                 if not approved:
@@ -580,7 +605,10 @@ def make_tool_executor(
             external = _is_external_path(target_path, repo_root)
             if external:
                 approved = await _request_tool_approval(
-                    ws, dispatcher, "read_file", target_path,
+                    ws,
+                    dispatcher,
+                    "read_file",
+                    target_path,
                     "File is outside the project directory",
                 )
                 if not approved:
@@ -601,7 +629,11 @@ def make_tool_executor(
                 return f"ERROR: Command blocked: {reason}"
             if risk == CommandRisk.REQUIRES_APPROVAL:
                 if not await _request_tool_approval(
-                    ws, dispatcher, name, command, reason,
+                    ws,
+                    dispatcher,
+                    name,
+                    command,
+                    reason,
                 ):
                     return "ERROR: Command not approved by user"
 
@@ -622,12 +654,9 @@ def make_tool_executor(
                 output = result.output or ""
             else:
                 prefix = (
-                    f"FAILED (exit code {result.exit_code})\n"
-                    if result.exit_code else "FAILED\n"
+                    f"FAILED (exit code {result.exit_code})\n" if result.exit_code else "FAILED\n"
                 )
-                output = prefix + (
-                    result.output or result.error or "No output"
-                )
+                output = prefix + (result.output or result.error or "No output")
 
             # Short output → return inline.
             # Long output → save to file so the LLM can page through
@@ -670,7 +699,11 @@ def make_tool_executor(
                 return f"ERROR: Command blocked: {reason}"
             if risk == CommandRisk.REQUIRES_APPROVAL:
                 if not await _request_tool_approval(
-                    ws, dispatcher, name, command, reason,
+                    ws,
+                    dispatcher,
+                    name,
+                    command,
+                    reason,
                 ):
                     return "ERROR: Command not approved by user"
 
@@ -683,12 +716,9 @@ def make_tool_executor(
                 output = result.output or ""
             else:
                 prefix = (
-                    f"FAILED (exit code {result.exit_code})\n"
-                    if result.exit_code else "FAILED\n"
+                    f"FAILED (exit code {result.exit_code})\n" if result.exit_code else "FAILED\n"
                 )
-                output = prefix + (
-                    result.output or result.error or "No output"
-                )
+                output = prefix + (result.output or result.error or "No output")
 
             if len(output) <= _INLINE_LIMIT:
                 return output
@@ -747,6 +777,7 @@ def make_tool_executor(
 
         elif name == "add_journal_entry":
             from lean_ai.tools.journal import add_journal_entry
+
             result = await add_journal_entry(
                 content=arguments["content"],
                 repo_root=repo_root,
@@ -756,6 +787,7 @@ def make_tool_executor(
 
         elif name == "directory_tree":
             from lean_ai.indexer.tree import list_repo_tree
+
             sub_path = arguments.get("path", "")
             tree_root = f"{repo_root}/{sub_path}" if sub_path else repo_root
             entries = list_repo_tree(tree_root)
@@ -796,12 +828,12 @@ def make_tool_executor(
                     )
 
                     cached = search_memories_with_threshold(
-                        repo_root, query,
+                        repo_root,
+                        query,
                     )
                     if cached:
                         lines = [
-                            "FROM WORKSPACE MEMORY "
-                            "(previous session findings):\n",
+                            "FROM WORKSPACE MEMORY (previous session findings):\n",
                         ]
                         for r in cached:
                             cat = r.get("category") or "general"
@@ -817,10 +849,12 @@ def make_tool_executor(
                         return "\n".join(lines)
                 except Exception:
                     logger.debug(
-                        "Pre-search memory check failed", exc_info=True,
+                        "Pre-search memory check failed",
+                        exc_info=True,
                     )
 
             from lean_ai.tools.internet import search_internet
+
             result = await search_internet(
                 query=query,
                 llm_client=llm_client,
@@ -829,6 +863,7 @@ def make_tool_executor(
 
         elif name == "fetch_url":
             from lean_ai.tools.internet import fetch_url
+
             result = await fetch_url(
                 url=arguments.get("url", ""),
                 repo_root=repo_root,
@@ -838,11 +873,13 @@ def make_tool_executor(
 
         elif name == "search_wiki":
             from lean_ai.tools.wiki import search_wiki
+
             result = await search_wiki(query=arguments.get("query", ""))
             return result.output if result.success else f"ERROR: {result.error}"
 
         elif name == "fetch_wiki_page":
             from lean_ai.tools.wiki import fetch_wiki_page
+
             result = await fetch_wiki_page(
                 title=arguments.get("title", ""),
                 repo_root=repo_root,
@@ -861,6 +898,7 @@ def make_tool_executor(
                 )
 
             from lean_ai.config import settings as _ref_settings
+
             query = arguments.get("query", "")
             limit = arguments.get("limit", _ref_settings.reference_search_default_limit)
             document = arguments.get("document") or None
@@ -960,6 +998,7 @@ def make_tool_executor(
 
         elif name == "query_project_context":
             from lean_ai.context.context_db import get_context_db, query_entries
+
             db = await get_context_db(repo_root)
             try:
                 results = await query_entries(
@@ -979,6 +1018,7 @@ def make_tool_executor(
 
         elif name == "verify_web_ui":
             from lean_ai.tools.ui_verification import verify_web_ui
+
             return await verify_web_ui(
                 url=arguments["url"],
                 question=arguments["question"],
@@ -991,6 +1031,7 @@ def make_tool_executor(
 
         elif name == "verify_desktop_ui":
             from lean_ai.tools.ui_verification import verify_desktop_ui
+
             launch_command = arguments.get("launch_command")
             if not isinstance(launch_command, list):
                 return (
@@ -1021,7 +1062,9 @@ def make_tool_executor(
             and not result.startswith("ERROR:")
         ):
             result = await _compress_tool_output(
-                result, name, worker_client,
+                result,
+                name,
+                worker_client,
                 telemetry_context=telemetry_context,
             )
         return result

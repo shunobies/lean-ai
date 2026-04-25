@@ -16,7 +16,9 @@ _MAX_READ_BYTES = 2 * 1024 * 1024
 
 
 def _safe_resolve(
-    path: str, repo_root: str, allow_external: bool = False,
+    path: str,
+    repo_root: str,
+    allow_external: bool = False,
 ) -> Path | None:
     """Resolve *path* under *repo_root* and verify it doesn't escape.
 
@@ -35,7 +37,10 @@ def _safe_resolve(
 
 
 async def create_file(
-    path: str, content: str, repo_root: str, allow_external: bool = False,
+    path: str,
+    content: str,
+    repo_root: str,
+    allow_external: bool = False,
 ) -> ToolResult:
     """Create a new file with the given content."""
     file_path = _safe_resolve(path, repo_root, allow_external=allow_external)
@@ -72,7 +77,10 @@ async def create_file(
 
 
 async def edit_file(
-    path: str, search: str, replace: str, repo_root: str,
+    path: str,
+    search: str,
+    replace: str,
+    repo_root: str,
     allow_external: bool = False,
 ) -> ToolResult:
     """Apply a targeted SEARCH/REPLACE edit to an existing file.
@@ -156,6 +164,7 @@ async def read_file(
     if file_path.suffix.lower() == ".docx":
         try:
             from lean_ai.reference.readers.docx import docx_to_markdown
+
             text = docx_to_markdown(file_path)
         except ImportError:
             return ToolResult(
@@ -204,7 +213,9 @@ async def read_file(
 
 
 def _fuzzy_search_replace(
-    original: str, search: str, replace: str,
+    original: str,
+    search: str,
+    replace: str,
 ) -> str | None:
     """Match search with whitespace normalization.
 
@@ -236,7 +247,9 @@ def _fuzzy_search_replace(
         if window == stripped_search:
             replace_lines = replace.split("\n")
             re_indented = _reindent_replacement(
-                orig_lines[i : i + len(search_lines)], search_lines, replace_lines,
+                orig_lines[i : i + len(search_lines)],
+                search_lines,
+                replace_lines,
             )
             result_lines = orig_lines[:i] + re_indented + orig_lines[i + len(search_lines) :]
             return "\n".join(result_lines)
@@ -245,7 +258,9 @@ def _fuzzy_search_replace(
 
 
 def _reindent_replacement(
-    orig_matched: list[str], search_lines: list[str], replace_lines: list[str],
+    orig_matched: list[str],
+    search_lines: list[str],
+    replace_lines: list[str],
 ) -> list[str]:
     """Re-indent replace_lines to match original file's indentation."""
 
@@ -340,8 +355,10 @@ def _generate_diff(original: str, modified: str, file_path: str) -> str:
     original_lines = original.splitlines(keepends=True)
     modified_lines = modified.splitlines(keepends=True)
     diff_lines = difflib.unified_diff(
-        original_lines, modified_lines,
-        fromfile=f"a/{file_path}", tofile=f"b/{file_path}",
+        original_lines,
+        modified_lines,
+        fromfile=f"a/{file_path}",
+        tofile=f"b/{file_path}",
     )
     return "".join(diff_lines)
 

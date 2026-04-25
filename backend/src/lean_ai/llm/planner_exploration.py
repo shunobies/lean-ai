@@ -67,7 +67,8 @@ def _fire_clarification_capture(
             )
         except Exception:
             logger.debug(
-                "capture_clarification failed (non-fatal)", exc_info=True,
+                "capture_clarification failed (non-fatal)",
+                exc_info=True,
             )
 
     t = loop.create_task(_run())
@@ -99,15 +100,18 @@ def _fire_phase2_synthesis_capture(
             await capture_phase2_synthesis(
                 repo_root,
                 session_id=session_id,
-                task=task, scope=scope,
+                task=task,
+                scope=scope,
                 observations=observations,
-                scratchpad=scratchpad, journal=journal,
+                scratchpad=scratchpad,
+                journal=journal,
                 exploration_output=exploration_output,
                 file_summary=file_summary,
             )
         except Exception:
             logger.debug(
-                "capture_phase2_synthesis failed (non-fatal)", exc_info=True,
+                "capture_phase2_synthesis failed (non-fatal)",
+                exc_info=True,
             )
 
     t = loop.create_task(_run())
@@ -142,18 +146,17 @@ def _make_read_only_executor(
             if external:
                 if ws is None:
                     return (
-                        "ERROR: Cannot read files outside the "
-                        "project without an active connection"
+                        "ERROR: Cannot read files outside the project without an active connection"
                     )
                 approved = await _request_tool_approval(
-                    ws, dispatcher, "read_file", target_path,
+                    ws,
+                    dispatcher,
+                    "read_file",
+                    target_path,
                     "File is outside the project directory",
                 )
                 if not approved:
-                    return (
-                        "ERROR: Access to external file not "
-                        "approved by user"
-                    )
+                    return "ERROR: Access to external file not approved by user"
             # At small windows, cap visible range to 200 lines
             end_line = arguments.get("end_line")
             if small_ctx and end_line is None:
@@ -166,9 +169,7 @@ def _make_read_only_executor(
                 end_line=end_line,
                 allow_external=external,
             )
-            output = (
-                result.output if result.success else result.error or "Error"
-            )
+            output = result.output if result.success else result.error or "Error"
             # Notify the LLM when a small-context cap truncated the file
             if (
                 small_ctx
@@ -188,9 +189,7 @@ def _make_read_only_executor(
                 file_glob=arguments.get("file_glob"),
                 max_results=30 if small_ctx else None,
             )
-            return (
-                result.output if result.success else result.error or "Error"
-            )
+            return result.output if result.success else result.error or "Error"
         elif name == "list_directory":
             target = Path(repo_root) / arguments.get("path", "")
             if not target.is_dir():
@@ -205,10 +204,9 @@ def _make_read_only_executor(
             return "\n".join(lines) or "(empty)"
         elif name == "directory_tree":
             from lean_ai.indexer.tree import list_repo_tree
+
             sub_path = arguments.get("path", "")
-            tree_root = (
-                f"{repo_root}/{sub_path}" if sub_path else repo_root
-            )
+            tree_root = f"{repo_root}/{sub_path}" if sub_path else repo_root
             entries = list_repo_tree(tree_root)
             max_depth = arguments.get("max_depth", 3)
             max_tree_entries = 100 if small_ctx else 200
@@ -221,48 +219,45 @@ def _make_read_only_executor(
             return "\n".join(lines) or "(empty)"
         elif name == "search_internet":
             from lean_ai.tools.internet import search_internet
+
             result = await search_internet(
                 query=arguments.get("query", ""),
                 llm_client=explorer,
             )
-            return (
-                result.output if result.success else result.error or "Error"
-            )
+            return result.output if result.success else result.error or "Error"
         elif name == "fetch_url":
             from lean_ai.tools.internet import fetch_url
+
             result = await fetch_url(
                 url=arguments.get("url", ""),
                 repo_root=repo_root,
                 llm_client=explorer,
             )
-            return (
-                result.output if result.success else result.error or "Error"
-            )
+            return result.output if result.success else result.error or "Error"
         elif name == "update_scratchpad":
             from lean_ai.tools.scratchpad import update_scratchpad
+
             result = await update_scratchpad(
                 content=arguments.get("content", ""),
                 repo_root=repo_root,
                 session_id=session_id,
             )
-            return (
-                result.output if result.success else result.error or "Error"
-            )
+            return result.output if result.success else result.error or "Error"
         elif name == "add_journal_entry":
             from lean_ai.tools.journal import add_journal_entry
+
             result = await add_journal_entry(
                 content=arguments.get("content", ""),
                 repo_root=repo_root,
                 session_id=session_id,
             )
-            return (
-                result.output if result.success else result.error or "Error"
-            )
+            return result.output if result.success else result.error or "Error"
         elif name == "query_project_context":
             from lean_ai.context.context_db import (
                 get_context_db,
                 query_entries,
             )
+
             db = await get_context_db(repo_root)
             try:
                 results = await query_entries(
@@ -281,6 +276,7 @@ def _make_read_only_executor(
                 await db.close()
         elif name == "record_file_observation":
             from lean_ai.tools.observations import record_observation
+
             result = await record_observation(
                 file_path=arguments.get("file_path", ""),
                 role=arguments.get("role", ""),
@@ -290,9 +286,7 @@ def _make_read_only_executor(
                 repo_root=repo_root,
                 session_id=session_id,
             )
-            return (
-                result.output if result.success else result.error or "Error"
-            )
+            return result.output if result.success else result.error or "Error"
         elif name == "task_complete":
             return "Exploration marked complete."
         elif name == "request_clarification":
@@ -305,14 +299,14 @@ def _make_read_only_executor(
 
             question = (arguments.get("question") or "").strip()
             if not question:
-                return (
-                    "ERROR: request_clarification requires a non-empty "
-                    "'question' string."
-                )
+                return "ERROR: request_clarification requires a non-empty 'question' string."
             if ws is None or dispatcher is None:
                 _fire_clarification_capture(
-                    repo_root, session_id,
-                    question=question, answer=None, outcome="error",
+                    repo_root,
+                    session_id,
+                    question=question,
+                    answer=None,
+                    outcome="error",
                 )
                 return (
                     "ERROR: no active user session — cannot request "
@@ -320,22 +314,28 @@ def _make_read_only_executor(
                     "and record it as an ASSUMPTION."
                 )
             await ws_send(
-                ws, "clarification_needed", {"questions": [question]},
+                ws,
+                "clarification_needed",
+                {"questions": [question]},
             )
             try:
                 msg = await dispatcher.wait_for_approval()
             except WorkflowCancelledError:
                 _fire_clarification_capture(
-                    repo_root, session_id,
-                    question=question, answer=None, outcome="cancelled",
+                    repo_root,
+                    session_id,
+                    question=question,
+                    answer=None,
+                    outcome="cancelled",
                 )
-                return (
-                    "ERROR: user cancelled while clarification was pending."
-                )
+                return "ERROR: user cancelled while clarification was pending."
             if msg is None:
                 _fire_clarification_capture(
-                    repo_root, session_id,
-                    question=question, answer=None, outcome="disconnected",
+                    repo_root,
+                    session_id,
+                    question=question,
+                    answer=None,
+                    outcome="disconnected",
                 )
                 return (
                     "ERROR: session disconnected before the user "
@@ -343,26 +343,32 @@ def _make_read_only_executor(
                 )
             if msg.get("type") != "user_message":
                 _fire_clarification_capture(
-                    repo_root, session_id,
-                    question=question, answer=None, outcome="error",
+                    repo_root,
+                    session_id,
+                    question=question,
+                    answer=None,
+                    outcome="error",
                 )
-                return (
-                    "ERROR: unexpected message type during clarification: "
-                    f"{msg.get('type')}"
-                )
+                return f"ERROR: unexpected message type during clarification: {msg.get('type')}"
             answer = (msg.get("content") or "").strip()
             if not answer:
                 _fire_clarification_capture(
-                    repo_root, session_id,
-                    question=question, answer="", outcome="empty",
+                    repo_root,
+                    session_id,
+                    question=question,
+                    answer="",
+                    outcome="empty",
                 )
                 return (
                     "User response was empty — proceed with a best-guess "
                     "interpretation and record it as an ASSUMPTION."
                 )
             _fire_clarification_capture(
-                repo_root, session_id,
-                question=question, answer=answer, outcome="answered",
+                repo_root,
+                session_id,
+                question=question,
+                answer=answer,
+                outcome="answered",
             )
             return f"User answered: {answer}"
         return f"Unknown tool: {name}"
@@ -400,7 +406,12 @@ async def run_phase2_exploration(
     small_ctx = settings._active_context_window <= 32768
 
     executor = _make_read_only_executor(
-        explorer, repo_root, session_id, ws, dispatcher, small_ctx,
+        explorer,
+        repo_root,
+        session_id,
+        ws,
+        dispatcher,
+        small_ctx,
     )
 
     phase2_messages = [
@@ -409,7 +420,9 @@ async def run_phase2_exploration(
             "role": "user",
             "content": registry.format(
                 "planning.exploration_user",
-                task=task, scope=scope, context=context,
+                task=task,
+                scope=scope,
+                context=context,
             ),
         },
     ]
@@ -484,10 +497,7 @@ async def run_phase2_exploration(
                     scratchpad_text = read_scratchpad(repo_root, session_id)
                 except Exception:
                     scratchpad_text = ""
-                journal_path = (
-                    Path(repo_root) / ".lean_ai" / "journals"
-                    / f"{session_id}.md"
-                )
+                journal_path = Path(repo_root) / ".lean_ai" / "journals" / f"{session_id}.md"
                 journal_text = ""
                 if journal_path.is_file():
                     try:
@@ -495,8 +505,10 @@ async def run_phase2_exploration(
                     except Exception:
                         journal_text = ""
                 _fire_phase2_synthesis_capture(
-                    repo_root, session_id,
-                    task=task, scope=scope,
+                    repo_root,
+                    session_id,
+                    task=task,
+                    scope=scope,
                     observations=observations,
                     scratchpad=scratchpad_text or None,
                     journal=journal_text or None,
@@ -534,9 +546,14 @@ async def _run_parallel_exploration(
     """Parallel Phase 2: fan-out scan then merge deep-dive reads."""
     # Phase 2a: broad scan — identify files without reading contents
     scan_tools = [
-        t for t in build_planning_tools()
-        if t["function"]["name"] in (
-            "list_directory", "directory_tree", "grep_files", "task_complete",
+        t
+        for t in build_planning_tools()
+        if t["function"]["name"]
+        in (
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "task_complete",
         )
     ]
     scan_messages = [
@@ -552,7 +569,9 @@ async def _run_parallel_exploration(
                 "Do NOT read file contents.\n\n"
                 + registry.format(
                     "planning.exploration_user",
-                    task=task, scope=scope, context=context,
+                    task=task,
+                    scope=scope,
+                    context=context,
                 )
             ),
         },
@@ -572,8 +591,11 @@ async def _run_parallel_exploration(
     )
 
     _save_debug_phase(
-        repo_root, session_id, "phase_2a_scan",
-        scan_output, time.monotonic() - t0,
+        repo_root,
+        session_id,
+        "phase_2a_scan",
+        scan_output,
+        time.monotonic() - t0,
     )
 
     # Parse file paths from scan output
@@ -605,9 +627,13 @@ async def _run_parallel_exploration(
             },
         ]
         read_tools = [
-            t for t in build_planning_tools()
-            if t["function"]["name"] in (
-                "read_file", "grep_files", "task_complete",
+            t
+            for t in build_planning_tools()
+            if t["function"]["name"]
+            in (
+                "read_file",
+                "grep_files",
+                "task_complete",
             )
         ]
         max_turns = max(10, 30 // n_workers)
@@ -622,9 +648,9 @@ async def _run_parallel_exploration(
 
     await _send_stage(
         ws,
-        f"Phase 2b: {n_workers} parallel workers reading "
-        f"{len(file_paths)} files...",
-        model=explorer.model_name, phase=2,
+        f"Phase 2b: {n_workers} parallel workers reading {len(file_paths)} files...",
+        model=explorer.model_name,
+        phase=2,
     )
 
     dive_results = await asyncio.gather(
@@ -638,7 +664,9 @@ async def _run_parallel_exploration(
         if isinstance(result, BaseException):
             logger.warning(
                 "Phase 2b worker %d/%d failed: %s",
-                i + 1, len(dive_results), result,
+                i + 1,
+                len(dive_results),
+                result,
             )
         elif isinstance(result, str):
             good_results.append(result)
@@ -646,10 +674,7 @@ async def _run_parallel_exploration(
     if not good_results:
         return scan_output
 
-    return (
-        scan_output + "\n\n"
-        + "\n\n".join(good_results)
-    )
+    return scan_output + "\n\n" + "\n\n".join(good_results)
 
 
 async def _run_serial_exploration(
@@ -684,21 +709,22 @@ async def _run_serial_exploration(
         existing_pad = scratchpad.read_scratchpad(repo_root, session_id)
         existing_journal = read_journal(repo_root, session_id)
         if existing_journal:
-            phase2_messages.append({
-                "role": "user",
-                "content": (
-                    "[JOURNAL FROM PREVIOUS EXPLORATION]\n\n"
-                    + existing_journal
-                ),
-            })
+            phase2_messages.append(
+                {
+                    "role": "user",
+                    "content": ("[JOURNAL FROM PREVIOUS EXPLORATION]\n\n" + existing_journal),
+                }
+            )
         if existing_pad:
-            phase2_messages.append({
-                "role": "user",
-                "content": (
-                    "[SCRATCHPAD FROM PREVIOUS EXPLORATION — "
-                    "resume from here]\n\n" + existing_pad
-                ),
-            })
+            phase2_messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "[SCRATCHPAD FROM PREVIOUS EXPLORATION — "
+                        "resume from here]\n\n" + existing_pad
+                    ),
+                }
+            )
 
     def _build_phase2_refresh(
         current_messages: list[dict],
@@ -713,7 +739,9 @@ async def _run_serial_exploration(
                 "role": "user",
                 "content": registry.format(
                     "planning.exploration_user",
-                    task=task, scope=scope, context=context,
+                    task=task,
+                    scope=scope,
+                    context=context,
                 ),
             },
         ]
@@ -724,40 +752,43 @@ async def _run_serial_exploration(
                 + _json.dumps(obs, indent=2, ensure_ascii=False)
             )
         if jrnl:
-            refresh_parts.append(
-                f"SESSION JOURNAL (permanent findings):\n{jrnl}"
-            )
+            refresh_parts.append(f"SESSION JOURNAL (permanent findings):\n{jrnl}")
         if pad:
-            refresh_parts.append(
-                f"SCRATCHPAD (current state):\n{pad}"
-            )
+            refresh_parts.append(f"SCRATCHPAD (current state):\n{pad}")
         if obs or pad or jrnl:
-            new_messages.append({
-                "role": "user",
-                "content": "\n\n".join(refresh_parts),
-            })
+            new_messages.append(
+                {
+                    "role": "user",
+                    "content": "\n\n".join(refresh_parts),
+                }
+            )
         else:
-            new_messages.append({
-                "role": "user",
-                "content": (
-                    "[CONTEXT REFRESHED]\n\n"
-                    "Continue exploring the codebase for this task."
-                ),
-            })
+            new_messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "[CONTEXT REFRESHED]\n\nContinue exploring the codebase for this task."
+                    ),
+                }
+            )
         if ws:
-            ws_send_nowait(ws, "context_refreshed", {
-                "message": "Phase 2 context refreshed.",
-            })
+            ws_send_nowait(
+                ws,
+                "context_refreshed",
+                {
+                    "message": "Phase 2 context refreshed.",
+                },
+            )
         return new_messages
 
     base_reminder = registry.format(
-        "planning.task_reminder", task=task,
+        "planning.task_reminder",
+        task=task,
     )
 
     def _phase2_reminder() -> str:
         return (
-            base_reminder
-            + "\n\nCall record_file_observation for every relevant file, "
+            base_reminder + "\n\nCall record_file_observation for every relevant file, "
             "update_scratchpad for volatile progress, and add_journal_entry "
             "for findings that must survive a context refresh."
         )
@@ -765,9 +796,12 @@ async def _run_serial_exploration(
     # Phase-2-specific tool filter: drop KB tools (not useful for file
     # identification), add record_file_observation for deterministic capture.
     phase2_tools = [
-        t for t in build_planning_tools_with_scratchpad()
-        if t["function"]["name"] not in (
-            "search_reference", "list_reference_documents",
+        t
+        for t in build_planning_tools_with_scratchpad()
+        if t["function"]["name"]
+        not in (
+            "search_reference",
+            "list_reference_documents",
         )
     ]
     phase2_tools.append(RECORD_FILE_OBSERVATION_TOOL)
@@ -810,8 +844,10 @@ async def _run_serial_exploration(
         on_metrics=on_metrics,
         on_context_refresh=_build_phase2_refresh,
         telemetry_context={
-            "repo_root": repo_root, "session_id": session_id,
-            "phase": "planning.phase2", "role": "primary",
+            "repo_root": repo_root,
+            "session_id": session_id,
+            "phase": "planning.phase2",
+            "role": "primary",
         },
         task_complete_validator=_phase2_task_complete_validator,
     )
@@ -862,7 +898,9 @@ async def _synthesize_file_summary(
         )
 
     observations_json = _json.dumps(
-        observations, indent=2, ensure_ascii=False,
+        observations,
+        indent=2,
+        ensure_ascii=False,
     )
 
     user_payload_parts = [
@@ -875,9 +913,7 @@ async def _synthesize_file_summary(
     if jrnl:
         user_payload_parts.append(f"EXPLORATION JOURNAL:\n{jrnl}")
     if exploration_output.strip():
-        user_payload_parts.append(
-            f"EXPLORATION PROSE (model narrative):\n{exploration_output}"
-        )
+        user_payload_parts.append(f"EXPLORATION PROSE (model narrative):\n{exploration_output}")
     user_payload_parts.append(
         "Produce a FileSummary merging every source above. Bucket "
         "observations by role, populate missing_infrastructure, "
@@ -900,15 +936,13 @@ async def _synthesize_file_summary(
         )
     except Exception:
         logger.warning(
-            "Phase 2 synthesis failed — falling back to raw exploration "
-            "output",
+            "Phase 2 synthesis failed — falling back to raw exploration output",
             exc_info=True,
         )
         return None, exploration_output
 
     logger.info(
-        "Phase 2 synthesis: modify=%d create=%d reference=%d missing=%d "
-        "refs=%d assumptions=%d",
+        "Phase 2 synthesis: modify=%d create=%d reference=%d missing=%d refs=%d assumptions=%d",
         len(summary.files_to_modify),
         len(summary.files_to_create),
         len(summary.files_read_for_context),
@@ -960,18 +994,14 @@ def _format_file_summary(summary: FileSummary) -> str:
     )
 
     if summary.missing_infrastructure:
-        lines.append(
-            "MISSING INFRASTRUCTURE (assumed by the task but not found):"
-        )
+        lines.append("MISSING INFRASTRUCTURE (assumed by the task but not found):")
         for i, m in enumerate(summary.missing_infrastructure, 1):
             blocking = " [BLOCKING]" if m.blocking else ""
             lines.append(f"{i}. {m.name} — {m.reason}{blocking}")
         lines.append("")
 
     if summary.verified_references:
-        lines.append(
-            "VERIFIED REFERENCES (from internet search):"
-        )
+        lines.append("VERIFIED REFERENCES (from internet search):")
         for i, r in enumerate(summary.verified_references, 1):
             entry = f"{i}. {r.dependency} — {r.docs_url}"
             if r.version:

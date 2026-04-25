@@ -95,6 +95,7 @@ def test_chat_template_kwargs_always_empty_on_ollama():
 # OllamaProvider._build_options is private; expose via a test hook so we
 # don't have to reach into the underscore.  Mini monkeypatch — once.
 
+
 def _build_options_hook(self, *, temperature=None, max_tokens=None):
     return self._build_options(temperature=temperature, max_tokens=max_tokens)
 

@@ -14,7 +14,9 @@ async def _run_git(args: list[str], cwd: str) -> ToolResult:
 
 
 async def git_commit(
-    message: str, files: list[str] | None = None, repo_root: str = ".",
+    message: str,
+    files: list[str] | None = None,
+    repo_root: str = ".",
 ) -> ToolResult:
     """Stage files and commit."""
     if files:
@@ -56,7 +58,9 @@ async def git_is_repo(repo_root: str = ".") -> bool:
 
 
 async def git_create_branch(
-    name: str, repo_root: str = ".", start_point: str | None = None,
+    name: str,
+    repo_root: str = ".",
+    start_point: str | None = None,
 ) -> ToolResult:
     """Create and checkout a new branch, optionally from a specific start point."""
     args = ["checkout", "-b", name]

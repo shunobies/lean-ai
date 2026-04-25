@@ -37,7 +37,7 @@ def _heading_level(style_name: str) -> int | None:
     """Return the heading depth for a Word paragraph style (1-6), else None."""
     if not style_name.startswith("Heading "):
         return None
-    suffix = style_name[len("Heading "):].strip()
+    suffix = style_name[len("Heading ") :].strip()
     if not suffix.isdigit():
         return None
     level = int(suffix)
@@ -59,8 +59,7 @@ def _render_markdown_table(rows: list[list[str]]) -> str:
     def _normalise(row: list[str]) -> list[str]:
         padded = list(row) + [_EMPTY_CELL] * (width - len(row))
         return [
-            (cell.replace("|", "\\|").replace("\n", " ").strip() or _EMPTY_CELL)
-            for cell in padded
+            (cell.replace("|", "\\|").replace("\n", " ").strip() or _EMPTY_CELL) for cell in padded
         ]
 
     header = _normalise(rows[0])
@@ -134,7 +133,8 @@ class DocxReader(DocumentReader):
             logger.warning(
                 "Cannot read Word document %s — missing optional dependency: %s. "
                 "Install with: pip install python-docx",
-                path, e,
+                path,
+                e,
             )
             return []
         except Exception as e:
@@ -172,14 +172,16 @@ class DocxReader(DocumentReader):
             for chunk_text in raw_chunks:
                 if not chunk_text.strip():
                     continue
-                chunks.append(ReferenceChunk(
-                    doc_path=rel_path,
-                    doc_title=doc_title,
-                    section=section_heading,
-                    content=chunk_text,
-                    chunk_index=chunk_index,
-                    format="docx",
-                ))
+                chunks.append(
+                    ReferenceChunk(
+                        doc_path=rel_path,
+                        doc_title=doc_title,
+                        section=section_heading,
+                        content=chunk_text,
+                        chunk_index=chunk_index,
+                        format="docx",
+                    )
+                )
                 chunk_index += 1
 
         return chunks

@@ -31,7 +31,9 @@ def journal_path(repo_root: str, session_id: str) -> Path:
 
 
 async def add_journal_entry(
-    content: str, repo_root: str, session_id: str,
+    content: str,
+    repo_root: str,
+    session_id: str,
 ) -> ToolResult:
     """Append a single entry to the session journal.
 
@@ -87,13 +89,15 @@ async def add_journal_entry(
     entry_count = new_content.count("\n- [")
     logger.info(
         "Journal entry added (%d entries, %d chars, limit %d) at %s",
-        entry_count, len(new_content), max_chars, path,
+        entry_count,
+        len(new_content),
+        max_chars,
+        path,
     )
     return ToolResult(
         success=True,
         output=(
-            f"Journal entry recorded ({entry_count} entries, "
-            f"{len(new_content)}/{max_chars} chars)."
+            f"Journal entry recorded ({entry_count} entries, {len(new_content)}/{max_chars} chars)."
         ),
     )
 

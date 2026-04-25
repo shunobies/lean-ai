@@ -357,11 +357,7 @@ def format_image_descriptions(results: list[VisionResult]) -> str:
     for i, result in enumerate(results, 1):
         label = f"Image {i}" if len(results) > 1 else "Attached Image"
         if result.success:
-            parts.append(
-                f"[{label} Description]\n"
-                f"{result.description}\n"
-                f"[End {label} Description]"
-            )
+            parts.append(f"[{label} Description]\n{result.description}\n[End {label} Description]")
         else:
             parts.append(f"[{label}: could not be described — {result.error}]")
 

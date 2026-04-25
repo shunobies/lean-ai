@@ -14,8 +14,16 @@ from lean_ai.llm.prompts import (
 # where applicable) biases the fix-mode prompt to demand a regression
 # test in the regression-file convention.
 _BUG_FIX_TOKENS: tuple[str, ...] = (
-    "bug", "regression", "broken", "failing", "reproduce",
-    "crash", "error", "issue #", "gh-", "fixes #",
+    "bug",
+    "regression",
+    "broken",
+    "failing",
+    "reproduce",
+    "crash",
+    "error",
+    "issue #",
+    "gh-",
+    "fixes #",
 )
 
 
@@ -169,7 +177,7 @@ def build_tdd_test_writing_prompt(
         "implementation exists: what would it be called, what inputs "
         "would it take, what would it return, what errors would it "
         "raise? That answer is your test. Passing the tests will "
-        "define what \"correct\" means for the implementor that runs "
+        'define what "correct" means for the implementor that runs '
         "after you.\n\n"
         "PUBLIC BEHAVIOUR vs. IMPLEMENTATION DETAILS:\n"
         "- Public (test these): return values, raised exceptions, "
@@ -186,25 +194,25 @@ def build_tdd_test_writing_prompt(
         "CONCRETE EXAMPLE:\n"
         "    # GOOD — tests the plan's contract:\n"
         "    def test_parse_version_splits_dotted_numeric():\n"
-        "        \"\"\"parse_version('1.2.3') returns (1, 2, 3) per "
-        "plan spec.\"\"\"\n"
-        "        result = parse_version(\"1.2.3\")\n"
-        "        assert result == (1, 2, 3), f\"expected (1,2,3), "
-        "got {result}\"\n\n"
+        '        """parse_version(\'1.2.3\') returns (1, 2, 3) per '
+        'plan spec."""\n'
+        '        result = parse_version("1.2.3")\n'
+        '        assert result == (1, 2, 3), f"expected (1,2,3), '
+        'got {result}"\n\n'
         "    def test_parse_version_rejects_non_numeric():\n"
-        "        \"\"\"parse_version raises ValueError on 'abc' per "
-        "plan spec.\"\"\"\n"
-        "        with pytest.raises(ValueError, match=\"not a "
-        "version\"):\n"
-        "            parse_version(\"abc\")\n\n"
+        '        """parse_version raises ValueError on \'abc\' per '
+        'plan spec."""\n'
+        '        with pytest.raises(ValueError, match="not a '
+        'version"):\n'
+        '            parse_version("abc")\n\n'
         "    # BAD — tests HOW it works, not WHAT it does:\n"
         "    def test_parse_version_uses_split():\n"
-        "        assert parse_version(\"1.2.3\")._parts == [\"1\", "
-        "\"2\", \"3\"]\n\n"
+        '        assert parse_version("1.2.3")._parts == ["1", '
+        '"2", "3"]\n\n'
         "    # BAD — inlines/stubs the implementation. Never do "
         "this:\n"
         "    def parse_version(s):\n"
-        "        return tuple(int(p) for p in s.split(\".\"))\n\n"
+        '        return tuple(int(p) for p in s.split("."))\n\n'
         "FAILURE MODES TO AVOID:\n"
         "1. Do NOT define or stub implementation code in the test "
         "file. Tests import from the implementation module; the "
@@ -212,7 +220,7 @@ def build_tdd_test_writing_prompt(
         "creates the module, and that is fine — the pipeline runs "
         "tests AFTER implementation.\n"
         "2. Do NOT test anything the plan does not explicitly "
-        "specify. If the plan does not say \"result must be sorted,\" "
+        'specify. If the plan does not say "result must be sorted," '
         "do not assert sortedness. Extra assertions over-constrain "
         "the implementor for no reason.\n"
         "3. Do NOT test private helpers or internals. If the plan "
@@ -297,7 +305,7 @@ def build_tdd_step_system_prompt(
         "- How to dispute: call request_test_change(test_file, "
         "test_function, reason). Your reason must be one short "
         "paragraph with the specific technical justification — "
-        "\"this test is wrong\" will be rejected. The expert evaluates "
+        '"this test is wrong" will be rejected. The expert evaluates '
         "and either edits the test or rejects the dispute with an "
         "implementation hint.\n"
         "- Regression tests are IMMUTABLE even via dispute. If a "
@@ -355,7 +363,7 @@ def build_tdd_review_prompt(
         "e.g. asserts a function returns a list when the plan says it "
         "returns a generator.\n"
         "- The assertion contradicts the plan — e.g. plan says "
-        "\"raises ValueError on empty input,\" test asserts `None` is "
+        '"raises ValueError on empty input," test asserts `None` is '
         "returned.\n"
         "- The test is missing docstrings or assertion messages that "
         "would tell the implementor what the contract is.\n\n"
@@ -399,9 +407,7 @@ def build_step_user_message(
     parts: list[str] = []
 
     # Progress header
-    parts.append(
-        f"STEP {step.step_number} OF {total_steps}"
-    )
+    parts.append(f"STEP {step.step_number} OF {total_steps}")
 
     if completed:
         parts.append("\nCompleted so far:")
@@ -422,23 +428,17 @@ def build_step_user_message(
         # At small context windows, truncate and instruct to read_file instead
         if settings._active_context_window <= 32768 and len(ctx_text) > 1000:
             ctx_text = ctx_text[:1000] + "\n... (truncated — call read_file before editing)"
-        parts.append(
-            "\nContext (file content from planner investigation):"
-            f"\n```\n{ctx_text}\n```"
-        )
+        parts.append(f"\nContext (file content from planner investigation):\n```\n{ctx_text}\n```")
 
     # Include relevant artifacts from previous steps
     if step_artifacts:
         relevant: dict[str, str] = {}
         searchable = (
-            (step.instruction or "")
-            + " " + (step.context or "")
-            + " " + (step.file_path or "")
+            (step.instruction or "") + " " + (step.context or "") + " " + (step.file_path or "")
         )
-        relevant.update({
-            path: content for path, content in step_artifacts.items()
-            if path in searchable
-        })
+        relevant.update(
+            {path: content for path, content in step_artifacts.items() if path in searchable}
+        )
 
         # Also include last 3 created files as fallback (catches
         # implicit dependencies like model ↔ migration)
@@ -448,21 +448,16 @@ def build_step_user_message(
                     relevant[path] = content
 
         if relevant:
-            parts.append(
-                "\nFiles from previous steps (use exact "
-                "names/structure for consistency):"
-            )
+            parts.append("\nFiles from previous steps (use exact names/structure for consistency):")
             for path, content in relevant.items():
-                truncated = content[:_artifact_per_file_limit()]
+                truncated = content[: _artifact_per_file_limit()]
                 if len(content) > _artifact_per_file_limit():
                     truncated += "\n... (truncated)"
                 parts.append(f"\n--- {path} ---\n```\n{truncated}\n```")
 
     # Explicit directive
     if step.tool in ("run_tests", "run_lint", "format_code", "run_command"):
-        parts.append(
-            f"\nCall {step.tool} with the command specified in the instruction."
-        )
+        parts.append(f"\nCall {step.tool} with the command specified in the instruction.")
     elif step.tool == "edit_file":
         parts.append(
             f"\nRead {step.file_path} first if the context above seems "

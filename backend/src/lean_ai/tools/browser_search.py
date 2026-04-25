@@ -54,8 +54,7 @@ def _get_browser():
             from selenium.webdriver.chrome.service import Service
         except ImportError as exc:
             raise ImportError(
-                "selenium is not installed. "
-                "Install with: pip install lean-ai[google]"
+                "selenium is not installed. Install with: pip install lean-ai[google]"
             ) from exc
 
         options = Options()
@@ -68,7 +67,8 @@ def _get_browser():
             "--disable-blink-features=AutomationControlled",
         )
         options.add_experimental_option(
-            "excludeSwitches", ["enable-automation"],
+            "excludeSwitches",
+            ["enable-automation"],
         )
         options.add_experimental_option("useAutomationExtension", False)
         options.add_argument(
@@ -85,8 +85,7 @@ def _get_browser():
                 "Page.addScriptToEvaluateOnNewDocument",
                 {
                     "source": (
-                        "Object.defineProperty(navigator, 'webdriver', "
-                        "{get: () => undefined})"
+                        "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
                     ),
                 },
             )
@@ -117,6 +116,7 @@ def close_browser() -> None:
 # ---------------------------------------------------------------------------
 # Cookie consent handler
 # ---------------------------------------------------------------------------
+
 
 def _dismiss_consent(browser) -> None:
     """Dismiss Google cookie consent dialog if present.
@@ -167,6 +167,7 @@ def _dismiss_consent(browser) -> None:
 # Google HTML result parser
 # ---------------------------------------------------------------------------
 
+
 def _parse_google_results(
     page_source: str,
     max_results: int = 10,
@@ -187,7 +188,9 @@ def _parse_google_results(
 
     search_div = soup.find("div", id="search") or soup
     result_divs = search_div.find_all(
-        "div", class_="g", limit=max_results + 5,
+        "div",
+        class_="g",
+        limit=max_results + 5,
     )
 
     for div in result_divs:
@@ -229,7 +232,7 @@ def _parse_google_results(
             # Last resort: all text minus the title
             all_text = div.get_text(separator=" ", strip=True)
             if all_text.startswith(title):
-                snippet = all_text[len(title):].strip()[:300]
+                snippet = all_text[len(title) :].strip()[:300]
 
         results.append({"title": title, "url": url, "snippet": snippet})
 
@@ -262,6 +265,7 @@ def _parse_google_results(
 # Bing HTML result parser
 # ---------------------------------------------------------------------------
 
+
 def _parse_bing_results(
     page_source: str,
     max_results: int = 10,
@@ -282,7 +286,9 @@ def _parse_bing_results(
 
     results_ol = soup.find("ol", id="b_results") or soup
     algo_items = results_ol.find_all(
-        "li", class_="b_algo", limit=max_results + 5,
+        "li",
+        class_="b_algo",
+        limit=max_results + 5,
     )
 
     for li in algo_items:
@@ -320,7 +326,7 @@ def _parse_bing_results(
             # Last resort: all text minus the title
             all_text = li.get_text(separator=" ", strip=True)
             if all_text.startswith(title):
-                snippet = all_text[len(title):].strip()[:300]
+                snippet = all_text[len(title) :].strip()[:300]
 
         results.append({"title": title, "url": url, "snippet": snippet})
 
@@ -352,6 +358,7 @@ def _parse_bing_results(
 # ---------------------------------------------------------------------------
 # Async search functions (match provider signature)
 # ---------------------------------------------------------------------------
+
 
 def _do_google_search(query: str, max_results: int = 10) -> str:
     """Synchronous Google search — runs in a thread pool.

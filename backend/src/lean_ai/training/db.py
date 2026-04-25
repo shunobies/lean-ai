@@ -239,6 +239,7 @@ async def _migrate(db: aiosqlite.Connection) -> None:
     ``ALTER TABLE``. Each migration here is guarded by a PRAGMA column
     check so re-running is a no-op.
     """
+
     async def _has_column(table: str, column: str) -> bool:
         cursor = await db.execute(f"PRAGMA table_info({table})")
         rows = await cursor.fetchall()
@@ -255,19 +256,13 @@ async def _migrate(db: aiosqlite.Connection) -> None:
     # Tier S/A — add role + turn_index to training_traces for older DBs.
     if not await _has_column("training_traces", "role"):
         await db.execute("ALTER TABLE training_traces ADD COLUMN role TEXT")
-        await db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_tt_role ON training_traces(role)"
-        )
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_tt_role ON training_traces(role)")
         await db.commit()
     if not await _has_column("training_traces", "turn_index"):
-        await db.execute(
-            "ALTER TABLE training_traces ADD COLUMN turn_index INTEGER"
-        )
+        await db.execute("ALTER TABLE training_traces ADD COLUMN turn_index INTEGER")
         await db.commit()
     if not await _has_column("workflow_events", "trace_uuid"):
-        await db.execute(
-            "ALTER TABLE workflow_events ADD COLUMN trace_uuid TEXT"
-        )
+        await db.execute("ALTER TABLE workflow_events ADD COLUMN trace_uuid TEXT")
         await db.commit()
 
 
@@ -327,11 +322,25 @@ async def insert_training_trace(
         "scrubbed, created_at"
         ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            trace_uuid, session_id, phase, role, turn_index, model_name,
-            provider, _json_dump(messages), _json_dump(assistant_output),
-            outcome, pair_id, preference, pair_kind, reward,
-            tokens_prompt, tokens_completion, latency_ms,
-            1 if scrubbed else 0, _now(),
+            trace_uuid,
+            session_id,
+            phase,
+            role,
+            turn_index,
+            model_name,
+            provider,
+            _json_dump(messages),
+            _json_dump(assistant_output),
+            outcome,
+            pair_id,
+            preference,
+            pair_kind,
+            reward,
+            tokens_prompt,
+            tokens_completion,
+            latency_ms,
+            1 if scrubbed else 0,
+            _now(),
         ),
     )
     await db.commit()
@@ -357,10 +366,16 @@ async def insert_plan_decision(
         "feedback, decision, trace_uuid, pair_trace_uuid, created_at"
         ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            session_id, revision_count, task,
+            session_id,
+            revision_count,
+            task,
             _json_dump(plan_before) if plan_before is not None else None,
             _json_dump(plan_after) if plan_after is not None else None,
-            feedback, decision, trace_uuid, pair_trace_uuid, _now(),
+            feedback,
+            decision,
+            trace_uuid,
+            pair_trace_uuid,
+            _now(),
         ),
     )
     await db.commit()
@@ -386,14 +401,16 @@ async def insert_validation_attempt(
         "failures_after, succeeded, regression_failure, trace_uuid, created_at"
         ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            session_id, attempt_num,
+            session_id,
+            attempt_num,
             _json_dump(failures_before) if failures_before is not None else None,
             diagnosis,
             _json_dump(fix_tool_calls) if fix_tool_calls is not None else None,
             _json_dump(failures_after) if failures_after is not None else None,
             1 if succeeded else 0,
             1 if regression_failure else 0,
-            trace_uuid, _now(),
+            trace_uuid,
+            _now(),
         ),
     )
     await db.commit()
@@ -413,9 +430,11 @@ async def insert_workflow_event(
         "session_id, event_type, payload, trace_uuid, created_at"
         ") VALUES (?, ?, ?, ?, ?)",
         (
-            session_id, event_type,
+            session_id,
+            event_type,
             _json_dump(payload) if payload is not None else None,
-            trace_uuid, _now(),
+            trace_uuid,
+            _now(),
         ),
     )
     await db.commit()
@@ -445,10 +464,19 @@ async def insert_tool_execution(
         "preference, created_at"
         ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            session_id, trace_uuid, phase, turn_index, tool_name,
+            session_id,
+            trace_uuid,
+            phase,
+            turn_index,
+            tool_name,
             _json_dump(arguments) if arguments is not None else None,
-            result_preview, result_length, 1 if success else 0, latency_ms,
-            pair_id, preference, _now(),
+            result_preview,
+            result_length,
+            1 if success else 0,
+            latency_ms,
+            pair_id,
+            preference,
+            _now(),
         ),
     )
     await db.commit()
@@ -477,9 +505,18 @@ async def insert_tool_compression(
         "worker_model, worker_provider, followup_progress, created_at"
         ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            session_id, phase, tool_name, raw_output, raw_len,
-            compressed_output, comp_len, ratio, worker_model, worker_provider,
-            followup_progress, _now(),
+            session_id,
+            phase,
+            tool_name,
+            raw_output,
+            raw_len,
+            compressed_output,
+            comp_len,
+            ratio,
+            worker_model,
+            worker_provider,
+            followup_progress,
+            _now(),
         ),
     )
     await db.commit()
@@ -527,11 +564,16 @@ async def insert_phase2_synthesis(
         "exploration_output, file_summary, trace_uuid, created_at"
         ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            session_id, task, scope,
+            session_id,
+            task,
+            scope,
             _json_dump(observations) if observations is not None else None,
-            scratchpad, journal, exploration_output,
+            scratchpad,
+            journal,
+            exploration_output,
             _json_dump(file_summary) if file_summary is not None else None,
-            trace_uuid, _now(),
+            trace_uuid,
+            _now(),
         ),
     )
     await db.commit()
@@ -554,8 +596,13 @@ async def insert_diff_decision(
         "created_at"
         ") VALUES (?, ?, ?, ?, ?, ?, ?)",
         (
-            session_id, file_path, 1 if accepted else 0, diff_hash, note,
-            trace_uuid, _now(),
+            session_id,
+            file_path,
+            1 if accepted else 0,
+            diff_hash,
+            note,
+            trace_uuid,
+            _now(),
         ),
     )
     await db.commit()
@@ -576,8 +623,7 @@ async def insert_redaction_audit(
         "source_table, source_id, pattern_name, replacement, match_preview, "
         "created_at"
         ") VALUES (?, ?, ?, ?, ?, ?)",
-        (source_table, source_id, pattern_name, replacement, match_preview,
-         _now()),
+        (source_table, source_id, pattern_name, replacement, match_preview, _now()),
     )
     await db.commit()
     return cursor.lastrowid or 0
@@ -597,22 +643,26 @@ async def prune_expired(
     when the DB is opened for write by Phase D automation — never from
     the hot path.
     """
-    days = (
-        retention_days if retention_days is not None
-        else settings.training_retention_days
-    )
+    days = retention_days if retention_days is not None else settings.training_retention_days
     if days <= 0:
         return {}
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     counts: dict[str, int] = {}
     for table in (
-        "training_traces", "plan_decisions", "validation_attempts",
-        "workflow_events", "redaction_audit",
-        "tool_executions", "tool_compressions", "clarifications",
-        "phase2_syntheses", "diff_decisions",
+        "training_traces",
+        "plan_decisions",
+        "validation_attempts",
+        "workflow_events",
+        "redaction_audit",
+        "tool_executions",
+        "tool_compressions",
+        "clarifications",
+        "phase2_syntheses",
+        "diff_decisions",
     ):
         cursor = await db.execute(
-            f"DELETE FROM {table} WHERE created_at < ?", (cutoff,),
+            f"DELETE FROM {table} WHERE created_at < ?",
+            (cutoff,),
         )
         counts[table] = cursor.rowcount or 0
     await db.commit()
@@ -620,7 +670,8 @@ async def prune_expired(
     if total:
         logger.info(
             "Training archive prune: deleted %d rows older than %s",
-            total, cutoff,
+            total,
+            cutoff,
         )
     return counts
 
@@ -677,9 +728,14 @@ async def manifest_counts(db: aiosqlite.Connection) -> dict:
         out["by_outcome"] = await _group("outcome")
 
     for table in (
-        "plan_decisions", "validation_attempts", "workflow_events",
-        "tool_executions", "tool_compressions", "clarifications",
-        "phase2_syntheses", "diff_decisions",
+        "plan_decisions",
+        "validation_attempts",
+        "workflow_events",
+        "tool_executions",
+        "tool_compressions",
+        "clarifications",
+        "phase2_syntheses",
+        "diff_decisions",
     ):
         (count,) = await _fetch_one(f"SELECT COUNT(*) FROM {table}") or (0,)
         out[table] = count or 0
@@ -687,8 +743,7 @@ async def manifest_counts(db: aiosqlite.Connection) -> dict:
     # By-role breakdown on training_traces (Tier S/A cross-cutting).
     if out["total_traces"]:
         cursor = await db.execute(
-            "SELECT role, COUNT(*) FROM training_traces "
-            "WHERE role IS NOT NULL GROUP BY role"
+            "SELECT role, COUNT(*) FROM training_traces WHERE role IS NOT NULL GROUP BY role"
         )
         rows = await cursor.fetchall()
         out["by_role"] = {row[0]: row[1] for row in rows}

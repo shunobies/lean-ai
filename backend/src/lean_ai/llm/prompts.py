@@ -87,16 +87,18 @@ def _compose(key: str) -> str:
             "policy.testing_environment_awareness",
         )
 
-    subs = _MissingKey({
-        "TOOL_POLICY": registry.get("policy.tool"),
-        "COMPLETION_CONTRACT": registry.get("policy.completion"),
-        "QUALITY_RULES": registry.get("policy.quality"),
-        "WEB_SEARCH_POLICY": web_search,
-        "SCRATCHPAD_POLICY": registry.get("policy.scratchpad"),
-        "STRICT_TEST_CONTRACT": strict_test_contract,
-        "TESTABILITY_REQUIREMENT": testability_requirement,
-        "TESTING_ENVIRONMENT_AWARENESS": testing_environment_awareness,
-    })
+    subs = _MissingKey(
+        {
+            "TOOL_POLICY": registry.get("policy.tool"),
+            "COMPLETION_CONTRACT": registry.get("policy.completion"),
+            "QUALITY_RULES": registry.get("policy.quality"),
+            "WEB_SEARCH_POLICY": web_search,
+            "SCRATCHPAD_POLICY": registry.get("policy.scratchpad"),
+            "STRICT_TEST_CONTRACT": strict_test_contract,
+            "TESTABILITY_REQUIREMENT": testability_requirement,
+            "TESTING_ENVIRONMENT_AWARENESS": testing_environment_awareness,
+        }
+    )
     try:
         return text.format_map(subs)
     except KeyError:

@@ -33,6 +33,7 @@ async def db(repo_root):
 # get_context_db
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_context_db_creates_file(repo_root):
     db = await get_context_db(repo_root)
@@ -57,6 +58,7 @@ async def test_get_context_db_wal_mode(repo_root):
 # ---------------------------------------------------------------------------
 # upsert_entries_batch
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_upsert_entries_batch_inserts(db):
@@ -108,6 +110,7 @@ async def test_upsert_entries_batch_different_content_same_section(db):
 # delete_entries_for_file
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_delete_entries_for_file(db):
     entries = [
@@ -142,6 +145,7 @@ async def test_delete_entries_for_file_with_source(db):
 # clear_all
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_clear_all(db):
     entries = [
@@ -158,6 +162,7 @@ async def test_clear_all(db):
 # ---------------------------------------------------------------------------
 # query_entries
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_query_entries_no_filter(db):
@@ -213,10 +218,7 @@ async def test_query_entries_keyword_filter(db):
 
 @pytest.mark.asyncio
 async def test_query_entries_limit(db):
-    entries = [
-        ("Architecture Overview", f"src/f{i}.py", f"Fact {i}", "llm")
-        for i in range(10)
-    ]
+    entries = [("Architecture Overview", f"src/f{i}.py", f"Fact {i}", "llm") for i in range(10)]
     await upsert_entries_batch(db, entries)
 
     rows = await query_entries(db, limit=3)
@@ -226,6 +228,7 @@ async def test_query_entries_limit(db):
 # ---------------------------------------------------------------------------
 # export_to_markdown
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_export_to_markdown(db):
@@ -286,6 +289,7 @@ async def test_export_to_markdown_preserves_bullet_prefix(db):
 # get_stats
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_stats(db):
     entries = [
@@ -306,6 +310,7 @@ async def test_get_stats(db):
 # WAL mode concurrent writes
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_wal_concurrent_writes(repo_root):
     """Multiple connections can write concurrently via WAL mode."""
@@ -317,8 +322,12 @@ async def test_wal_concurrent_writes(repo_root):
         db = await get_context_db(repo_root)
         try:
             entries = [
-                ("Architecture Overview", f"conn{connection_id}/f{i}.py",
-                 f"Fact {i} from connection {connection_id}", "llm")
+                (
+                    "Architecture Overview",
+                    f"conn{connection_id}/f{i}.py",
+                    f"Fact {i} from connection {connection_id}",
+                    "llm",
+                )
                 for i in range(5)
             ]
             await upsert_entries_batch(db, entries)

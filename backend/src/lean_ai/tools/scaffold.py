@@ -113,7 +113,10 @@ class ScaffoldRunner:
     """Executes scaffold recipes."""
 
     async def run(
-        self, template: ScaffoldTemplate, project_name: str, parent_dir: str,
+        self,
+        template: ScaffoldTemplate,
+        project_name: str,
+        parent_dir: str,
     ) -> ScaffoldResult:
         pkg = _package_name(project_name)
         if template.setup_type == "command":
@@ -136,8 +139,10 @@ class ScaffoldRunner:
         try:
             for cmd in steps:
                 proc = await asyncio.create_subprocess_exec(
-                    *cmd, cwd=str(project_dir),
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+                    *cmd,
+                    cwd=str(project_dir),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
                 )
                 await proc.communicate()
                 if proc.returncode != 0:
@@ -146,7 +151,11 @@ class ScaffoldRunner:
             logger.warning("git init skipped for %s: %s", project_dir, exc)
 
     async def _run_command(
-        self, template: ScaffoldTemplate, project_name: str, pkg: str, parent_dir: str,
+        self,
+        template: ScaffoldTemplate,
+        project_name: str,
+        pkg: str,
+        parent_dir: str,
     ) -> ScaffoldResult:
         setup = template.setup
         cmd = _substitute(setup["command"], project_name, pkg)
@@ -163,8 +172,10 @@ class ScaffoldRunner:
 
         try:
             proc = await asyncio.create_subprocess_shell(
-                cmd, cwd=str(cwd),
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+                cmd,
+                cwd=str(cwd),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
             )
             stdout_bytes, _ = await proc.communicate()
             output = stdout_bytes.decode(errors="replace") if stdout_bytes else ""
@@ -172,26 +183,43 @@ class ScaffoldRunner:
             if proc.returncode != 0:
                 if project_dir.exists() and any(project_dir.iterdir()):
                     return ScaffoldResult(
-                        scaffold_name=template.name, project_dir=str(project_dir),
-                        files_created=[], command_output=output, success=True,
+                        scaffold_name=template.name,
+                        project_dir=str(project_dir),
+                        files_created=[],
+                        command_output=output,
+                        success=True,
                     )
                 return ScaffoldResult(
-                    scaffold_name=template.name, project_dir=str(project_dir),
-                    files_created=[], command_output=output, success=False,
+                    scaffold_name=template.name,
+                    project_dir=str(project_dir),
+                    files_created=[],
+                    command_output=output,
+                    success=False,
                     error=f"Command exited with code {proc.returncode}",
                 )
             return ScaffoldResult(
-                scaffold_name=template.name, project_dir=str(project_dir),
-                files_created=[], command_output=output, success=True,
+                scaffold_name=template.name,
+                project_dir=str(project_dir),
+                files_created=[],
+                command_output=output,
+                success=True,
             )
         except Exception as exc:
             return ScaffoldResult(
-                scaffold_name=template.name, project_dir=str(Path(parent_dir) / project_name),
-                files_created=[], command_output="", success=False, error=str(exc),
+                scaffold_name=template.name,
+                project_dir=str(Path(parent_dir) / project_name),
+                files_created=[],
+                command_output="",
+                success=False,
+                error=str(exc),
             )
 
     async def _run_files(
-        self, template: ScaffoldTemplate, project_name: str, pkg: str, parent_dir: str,
+        self,
+        template: ScaffoldTemplate,
+        project_name: str,
+        pkg: str,
+        parent_dir: str,
     ) -> ScaffoldResult:
         setup = template.setup
         project_dir = Path(parent_dir) / project_name
@@ -210,8 +238,12 @@ class ScaffoldRunner:
                 created.append(rel_path)
         except Exception as exc:
             return ScaffoldResult(
-                scaffold_name=template.name, project_dir=str(project_dir),
-                files_created=created, command_output="", success=False, error=str(exc),
+                scaffold_name=template.name,
+                project_dir=str(project_dir),
+                files_created=created,
+                command_output="",
+                success=False,
+                error=str(exc),
             )
 
         # Run optional post-creation commands (e.g. venv setup, dependency install)
@@ -220,8 +252,10 @@ class ScaffoldRunner:
             cmd = _substitute(raw_cmd, project_name, pkg)
             try:
                 proc = await asyncio.create_subprocess_shell(
-                    cmd, cwd=str(project_dir),
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+                    cmd,
+                    cwd=str(project_dir),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
                 )
                 stdout_bytes, _ = await proc.communicate()
                 if stdout_bytes:
@@ -232,8 +266,11 @@ class ScaffoldRunner:
                 logger.warning("Post-command error for %s: %s", cmd, exc)
 
         return ScaffoldResult(
-            scaffold_name=template.name, project_dir=str(project_dir),
-            files_created=sorted(created), command_output=cmd_output, success=True,
+            scaffold_name=template.name,
+            project_dir=str(project_dir),
+            files_created=sorted(created),
+            command_output=cmd_output,
+            success=True,
         )
 
 

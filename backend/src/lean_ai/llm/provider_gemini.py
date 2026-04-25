@@ -37,11 +37,13 @@ def _convert_tools(tools: list[dict], types_mod) -> list:
     declarations = []
     for tool in tools:
         fn = tool.get("function", tool)
-        declarations.append({
-            "name": fn["name"],
-            "description": fn.get("description", ""),
-            "parameters": fn.get("parameters", {"type": "object", "properties": {}}),
-        })
+        declarations.append(
+            {
+                "name": fn["name"],
+                "description": fn.get("description", ""),
+                "parameters": fn.get("parameters", {"type": "object", "properties": {}}),
+            }
+        )
     return [types_mod.Tool(function_declarations=declarations)]
 
 
@@ -96,6 +98,7 @@ class GeminiProvider(LLMProvider):
 
     async def _retry_with_backoff(self, coro_factory, label: str = "Gemini call"):
         """Retry with exponential backoff for transient errors."""
+
         def _is_retryable(exc: Exception) -> bool:
             exc_name = type(exc).__name__
             return any(
@@ -133,13 +136,15 @@ class GeminiProvider(LLMProvider):
                 if text:
                     parts.append(types.Part(text=text))
                 for fc in gemini_fcs:
-                    parts.append(types.Part(
-                        function_call=types.FunctionCall(
-                            name=fc["name"],
-                            args=fc["args"],
-                            id=fc.get("id"),
+                    parts.append(
+                        types.Part(
+                            function_call=types.FunctionCall(
+                                name=fc["name"],
+                                args=fc["args"],
+                                id=fc.get("id"),
+                            )
                         )
-                    ))
+                    )
                 contents.append(types.Content(role="model", parts=parts))
                 continue
 
@@ -175,9 +180,7 @@ class GeminiProvider(LLMProvider):
                     elif btype in ("image", "audio"):
                         # Flush any pending text before the media part.
                         if text_buf:
-                            parts_built.append(
-                                types.Part(text="\n".join(text_buf))
-                            )
+                            parts_built.append(types.Part(text="\n".join(text_buf)))
                             text_buf = []
                         raw_b64 = block.get("data") or ""
                         mime = block.get("mime_type") or (
@@ -185,6 +188,7 @@ class GeminiProvider(LLMProvider):
                         )
                         if raw_b64:
                             import base64
+
                             try:
                                 raw_bytes = base64.b64decode(raw_b64)
                             except Exception:
@@ -195,7 +199,8 @@ class GeminiProvider(LLMProvider):
                                 continue
                             parts_built.append(
                                 types.Part.from_bytes(
-                                    data=raw_bytes, mime_type=mime,
+                                    data=raw_bytes,
+                                    mime_type=mime,
                                 )
                             )
 
@@ -203,21 +208,29 @@ class GeminiProvider(LLMProvider):
                     parts_built.append(types.Part(text="\n".join(text_buf)))
 
                 if parts_built:
-                    contents.append(types.Content(
-                        role=gemini_role, parts=parts_built,
-                    ))
+                    contents.append(
+                        types.Content(
+                            role=gemini_role,
+                            parts=parts_built,
+                        )
+                    )
                 continue
 
             if content:
-                contents.append(types.Content(
-                    role=gemini_role,
-                    parts=[types.Part(text=content)],
-                ))
+                contents.append(
+                    types.Content(
+                        role=gemini_role,
+                        parts=[types.Part(text=content)],
+                    )
+                )
 
         return contents
 
     def _extract_metrics(
-        self, response, *, stop_reason: str | None = None,
+        self,
+        response,
+        *,
+        stop_reason: str | None = None,
     ) -> LLMMetrics:
         """Extract metrics from a Gemini response."""
         usage = getattr(response, "usage_metadata", None)
@@ -255,13 +268,15 @@ class GeminiProvider(LLMProvider):
             return
         try:
             from lean_ai.config import reasoning_effort_to_gemini_budget
+
             budget = reasoning_effort_to_gemini_budget(self._reasoning_effort)
             config.thinking_config = self._types.ThinkingConfig(
                 thinking_budget=budget,
             )
         except Exception:
             logger.warning(
-                "ThinkingConfig not supported for %s, skipping", self._model,
+                "ThinkingConfig not supported for %s, skipping",
+                self._model,
             )
 
     @staticmethod
@@ -296,8 +311,12 @@ class GeminiProvider(LLMProvider):
         logger.info(
             "Gemini chat_raw: model=%s messages=%d temp=%.1f max_tokens=%d "
             "streaming=%s thinking=%s",
-            self._model, len(filtered_messages), temp, tokens,
-            bool(stream_callback or thinking_callback), self._enable_thinking,
+            self._model,
+            len(filtered_messages),
+            temp,
+            tokens,
+            bool(stream_callback or thinking_callback),
+            self._enable_thinking,
         )
 
         types = self._types
@@ -311,7 +330,10 @@ class GeminiProvider(LLMProvider):
         if self._enable_thinking and (stream_callback or thinking_callback):
             self._apply_thinking_config(config, tokens)
             return await self._chat_raw_streaming(
-                contents, config, stream_callback, thinking_callback,
+                contents,
+                config,
+                stream_callback,
+                thinking_callback,
             )
 
         if stream_callback:
@@ -333,6 +355,7 @@ class GeminiProvider(LLMProvider):
 
             text, final_response = await self._retry_with_backoff(_chat, label="chat_raw(stream)")
         else:
+
             async def _chat():
                 return await self._client.aio.models.generate_content(
                     model=self._model,
@@ -345,7 +368,8 @@ class GeminiProvider(LLMProvider):
             final_response = response
 
         metrics = self._extract_metrics(
-            final_response, stop_reason=self._get_finish_reason(final_response),
+            final_response,
+            stop_reason=self._get_finish_reason(final_response),
         )
         logger.info("Gemini chat_raw response (%d chars): %s", len(text), text[:200])
         return text, metrics
@@ -381,19 +405,23 @@ class GeminiProvider(LLMProvider):
             return final_response
 
         final_response = await self._retry_with_backoff(
-            _chat, label="chat_raw(thinking)",
+            _chat,
+            label="chat_raw(thinking)",
         )
 
         text = "".join(content_parts)
         thinking = "\n".join(thinking_parts) or None
         metrics = self._extract_metrics(
-            final_response, stop_reason=self._get_finish_reason(final_response),
+            final_response,
+            stop_reason=self._get_finish_reason(final_response),
         )
         metrics.thinking = thinking
 
         logger.info(
             "Gemini chat_raw response (%d chars, thinking=%d chars): %s",
-            len(text), len(thinking or ""), text[:200],
+            len(text),
+            len(thinking or ""),
+            text[:200],
         )
         return text, metrics
 
@@ -413,7 +441,9 @@ class GeminiProvider(LLMProvider):
 
         logger.info(
             "Gemini chat_structured: schema=%s model=%s thinking=%s",
-            schema.__name__, self._model, self._enable_thinking,
+            schema.__name__,
+            self._model,
+            self._enable_thinking,
         )
 
         types = self._types
@@ -434,10 +464,13 @@ class GeminiProvider(LLMProvider):
         for attempt in range(2):
             if use_thinking:
                 raw, response = await self._chat_structured_streaming(
-                    contents, config, thinking_callback,
+                    contents,
+                    config,
+                    thinking_callback,
                     label=f"structured({schema.__name__})",
                 )
             else:
+
                 async def _chat():
                     return await self._client.aio.models.generate_content(
                         model=self._model,
@@ -446,12 +479,14 @@ class GeminiProvider(LLMProvider):
                     )
 
                 response = await self._retry_with_backoff(
-                    _chat, label=f"structured({schema.__name__})",
+                    _chat,
+                    label=f"structured({schema.__name__})",
                 )
                 raw = getattr(response, "text", None) or ""
 
             metrics = self._extract_metrics(
-                response, stop_reason=self._get_finish_reason(response),
+                response,
+                stop_reason=self._get_finish_reason(response),
             )
 
             # Strip markdown code fences if present
@@ -471,12 +506,14 @@ class GeminiProvider(LLMProvider):
                 if attempt == 0:
                     logger.warning(
                         "Schema validation failed for %s, retrying: %s",
-                        schema.__name__, exc.errors(),
+                        schema.__name__,
+                        exc.errors(),
                     )
                     continue
                 logger.error(
                     "Schema validation failed after retry for %s. Raw: %s",
-                    schema.__name__, raw[:1000],
+                    schema.__name__,
+                    raw[:1000],
                 )
                 raise
         raise last_error  # type: ignore[misc]
@@ -535,6 +572,7 @@ class GeminiProvider(LLMProvider):
             config.system_instruction = system_prompt
 
         if stream_callback:
+
             async def _chat():
                 chunks_text: list[str] = []
                 final_response = None
@@ -551,9 +589,11 @@ class GeminiProvider(LLMProvider):
                 return "".join(chunks_text), final_response
 
             text, response = await self._retry_with_backoff(
-                _chat, label="chat_with_tools_single(stream)",
+                _chat,
+                label="chat_with_tools_single(stream)",
             )
         else:
+
             async def _chat():
                 return await self._client.aio.models.generate_content(
                     model=self._model,
@@ -562,12 +602,14 @@ class GeminiProvider(LLMProvider):
                 )
 
             response = await self._retry_with_backoff(
-                _chat, label="chat_with_tools_single",
+                _chat,
+                label="chat_with_tools_single",
             )
             text = ""
 
         metrics = self._extract_metrics(
-            response, stop_reason=self._get_finish_reason(response),
+            response,
+            stop_reason=self._get_finish_reason(response),
         )
 
         # Parse response content parts
@@ -582,11 +624,13 @@ class GeminiProvider(LLMProvider):
                     content_parts.append(part.text)
                 fc = getattr(part, "function_call", None)
                 if fc:
-                    tool_calls.append(ToolCallInfo(
-                        name=fc.name,
-                        arguments=dict(fc.args) if fc.args else {},
-                        id=getattr(fc, "id", None),
-                    ))
+                    tool_calls.append(
+                        ToolCallInfo(
+                            name=fc.name,
+                            arguments=dict(fc.args) if fc.args else {},
+                            id=getattr(fc, "id", None),
+                        )
+                    )
 
         content = "\n".join(content_parts) if content_parts else text
         return content, tool_calls, metrics
@@ -642,28 +686,33 @@ class GeminiProvider(LLMProvider):
     # ── Message formatting (Gemini-specific) ──
 
     def format_tool_result_messages(
-        self, tool_call: ToolCallInfo, content: str,
+        self,
+        tool_call: ToolCallInfo,
+        content: str,
     ) -> list[dict]:
         """Gemini uses FunctionResponse parts in user messages."""
-        return [{
-            "role": "user",
-            "content": content,
-            "_gemini_function_response": {
-                "name": tool_call.name,
-                "response": {"result": content},
-                "id": tool_call.id,
-            },
-        }]
+        return [
+            {
+                "role": "user",
+                "content": content,
+                "_gemini_function_response": {
+                    "name": tool_call.name,
+                    "response": {"result": content},
+                    "id": tool_call.id,
+                },
+            }
+        ]
 
     def format_assistant_tool_message(
-        self, content: str, tool_calls: list[ToolCallInfo],
+        self,
+        content: str,
+        tool_calls: list[ToolCallInfo],
     ) -> dict:
         """Gemini assistant messages contain FunctionCall parts."""
         return {
             "role": "assistant",
             "content": content,
             "_gemini_function_calls": [
-                {"name": tc.name, "args": tc.arguments, "id": tc.id}
-                for tc in tool_calls
+                {"name": tc.name, "args": tc.arguments, "id": tc.id} for tc in tool_calls
             ],
         }

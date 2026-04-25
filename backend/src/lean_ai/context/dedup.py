@@ -98,7 +98,8 @@ def reorganize_sections(doc: str, *, log_prefix: str = "Reorg") -> str:
     if merged_count:
         logger.info(
             "%s: merged %d duplicate section occurrence(s)",
-            log_prefix, merged_count,
+            log_prefix,
+            merged_count,
         )
 
     return "\n".join(cleaned)

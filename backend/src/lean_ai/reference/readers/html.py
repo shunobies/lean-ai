@@ -71,14 +71,16 @@ class HtmlReader(DocumentReader):
             for chunk_text in raw_chunks:
                 if not chunk_text.strip():
                     continue
-                chunks.append(ReferenceChunk(
-                    doc_path=rel_path,
-                    doc_title=doc_title,
-                    section=section_title,
-                    content=chunk_text,
-                    chunk_index=chunk_index,
-                    format="html",
-                ))
+                chunks.append(
+                    ReferenceChunk(
+                        doc_path=rel_path,
+                        doc_title=doc_title,
+                        section=section_title,
+                        content=chunk_text,
+                        chunk_index=chunk_index,
+                        format="html",
+                    )
+                )
                 chunk_index += 1
 
         return chunks
@@ -119,9 +121,13 @@ def _split_html_by_headings(root) -> list[tuple[str, str]]:
                 sections.extend(sub_sections)
         else:
             # Bare text nodes, spans, etc.
-            text = getattr(element, "get_text", lambda _el=element, **_: str(_el))(
-                separator=" ", strip=True
-            ) if hasattr(element, "get_text") else str(element).strip()
+            text = (
+                getattr(element, "get_text", lambda _el=element, **_: str(_el))(
+                    separator=" ", strip=True
+                )
+                if hasattr(element, "get_text")
+                else str(element).strip()
+            )
             if text:
                 current_paragraphs.append(text)
 

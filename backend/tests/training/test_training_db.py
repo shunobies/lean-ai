@@ -26,15 +26,15 @@ async def db(tmp_path):
 
 @pytest.mark.asyncio
 async def test_schema_creates_expected_tables(db):
-    cursor = await db.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' "
-        "ORDER BY name"
-    )
+    cursor = await db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
     rows = await cursor.fetchall()
     tables = {r[0] for r in rows}
     for expected in (
-        "training_traces", "plan_decisions", "validation_attempts",
-        "workflow_events", "redaction_audit",
+        "training_traces",
+        "plan_decisions",
+        "validation_attempts",
+        "workflow_events",
+        "redaction_audit",
     ):
         assert expected in tables, f"{expected} missing"
 
@@ -63,8 +63,7 @@ async def test_insert_training_trace_roundtrip(db):
     assert row_id > 0
 
     cursor = await db.execute(
-        "SELECT trace_uuid, phase, scrubbed, preference "
-        "FROM training_traces WHERE id = ?",
+        "SELECT trace_uuid, phase, scrubbed, preference FROM training_traces WHERE id = ?",
         (row_id,),
     )
     row = await cursor.fetchone()
@@ -77,16 +76,27 @@ async def test_insert_training_trace_roundtrip(db):
 @pytest.mark.asyncio
 async def test_insert_plan_decision_and_validation_attempt(db):
     pd = await insert_plan_decision(
-        db, session_id="sess1", revision_count=1, task="do X",
-        plan_before={"steps": [1]}, plan_after={"steps": [1, 2]},
-        feedback="add error handling", decision="approved",
-        trace_uuid="t-before", pair_trace_uuid="t-after",
+        db,
+        session_id="sess1",
+        revision_count=1,
+        task="do X",
+        plan_before={"steps": [1]},
+        plan_after={"steps": [1, 2]},
+        feedback="add error handling",
+        decision="approved",
+        trace_uuid="t-before",
+        pair_trace_uuid="t-after",
     )
     va = await insert_validation_attempt(
-        db, session_id="sess1", attempt_num=1,
-        failures_before={"test": "boom"}, diagnosis="PYTHONPATH",
+        db,
+        session_id="sess1",
+        attempt_num=1,
+        failures_before={"test": "boom"},
+        diagnosis="PYTHONPATH",
         fix_tool_calls=[{"tool": "edit_file"}],
-        failures_after={}, succeeded=True, trace_uuid="t-va",
+        failures_after={},
+        succeeded=True,
+        trace_uuid="t-va",
     )
     assert pd > 0 and va > 0
 
@@ -94,12 +104,17 @@ async def test_insert_plan_decision_and_validation_attempt(db):
 @pytest.mark.asyncio
 async def test_insert_workflow_event_and_redaction_audit(db):
     evt = await insert_workflow_event(
-        db, session_id="s", event_type="loop_detected",
+        db,
+        session_id="s",
+        event_type="loop_detected",
         payload={"tool_name": "grep_files", "count": 3},
     )
     red = await insert_redaction_audit(
-        db, source_table="training_traces", source_id="t-1",
-        pattern_name="openai_key", replacement="<REDACTED:openai-key>",
+        db,
+        source_table="training_traces",
+        source_id="t-1",
+        pattern_name="openai_key",
+        replacement="<REDACTED:openai-key>",
         match_preview="abc123def456",
     )
     assert evt > 0 and red > 0
@@ -108,18 +123,35 @@ async def test_insert_workflow_event_and_redaction_audit(db):
 @pytest.mark.asyncio
 async def test_manifest_counts_aggregates(db):
     await insert_training_trace(
-        db, trace_uuid=new_trace_uuid(), session_id="s1",
-        phase="implementation", model_name="m1", provider="ollama",
-        messages=[], assistant_output={}, outcome="success",
+        db,
+        trace_uuid=new_trace_uuid(),
+        session_id="s1",
+        phase="implementation",
+        model_name="m1",
+        provider="ollama",
+        messages=[],
+        assistant_output={},
+        outcome="success",
     )
     await insert_training_trace(
-        db, trace_uuid=new_trace_uuid(), session_id="s1",
-        phase="phase3", model_name="m2", provider="ollama",
-        messages=[], assistant_output={}, outcome="rejected",
+        db,
+        trace_uuid=new_trace_uuid(),
+        session_id="s1",
+        phase="phase3",
+        model_name="m2",
+        provider="ollama",
+        messages=[],
+        assistant_output={},
+        outcome="rejected",
     )
     await insert_plan_decision(
-        db, session_id="s1", revision_count=0, task="t",
-        plan_before=None, plan_after=None, feedback=None,
+        db,
+        session_id="s1",
+        revision_count=0,
+        task="t",
+        plan_before=None,
+        plan_after=None,
+        feedback=None,
         decision="approved",
     )
 
@@ -135,13 +167,25 @@ async def test_manifest_counts_aggregates(db):
 async def test_prune_expired_removes_old_rows(db):
     # Fresh row
     await insert_training_trace(
-        db, trace_uuid=new_trace_uuid(), session_id="s", phase="p",
-        model_name="m", provider="ollama", messages=[], assistant_output={},
+        db,
+        trace_uuid=new_trace_uuid(),
+        session_id="s",
+        phase="p",
+        model_name="m",
+        provider="ollama",
+        messages=[],
+        assistant_output={},
     )
     # Stale row — backdate via direct UPDATE
     old_id = await insert_training_trace(
-        db, trace_uuid=new_trace_uuid(), session_id="s", phase="p",
-        model_name="m", provider="ollama", messages=[], assistant_output={},
+        db,
+        trace_uuid=new_trace_uuid(),
+        session_id="s",
+        phase="p",
+        model_name="m",
+        provider="ollama",
+        messages=[],
+        assistant_output={},
     )
     past = (datetime.now(timezone.utc) - timedelta(days=400)).isoformat()
     await db.execute(
@@ -161,8 +205,14 @@ async def test_prune_expired_removes_old_rows(db):
 @pytest.mark.asyncio
 async def test_prune_zero_days_is_noop(db):
     await insert_training_trace(
-        db, trace_uuid=new_trace_uuid(), session_id="s", phase="p",
-        model_name="m", provider="ollama", messages=[], assistant_output={},
+        db,
+        trace_uuid=new_trace_uuid(),
+        session_id="s",
+        phase="p",
+        model_name="m",
+        provider="ollama",
+        messages=[],
+        assistant_output={},
     )
     counts = await prune_expired(db, retention_days=0)
     assert counts == {}

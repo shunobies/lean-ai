@@ -131,7 +131,10 @@ async def confirm_memory_endpoint(memory_id: str, req: ConfirmMemoryRequest):
     db = await get_db(req.repo_root)
     try:
         found = await update_curation_status(
-            db, memory_id, "user_confirmed", confidence=0.9,
+            db,
+            memory_id,
+            "user_confirmed",
+            confidence=0.9,
         )
         if not found:
             raise HTTPException(status_code=404, detail="Memory not found")
@@ -146,7 +149,10 @@ async def reject_memory_endpoint(memory_id: str, req: RejectMemoryRequest):
     db = await get_db(req.repo_root)
     try:
         found = await update_curation_status(
-            db, memory_id, "user_rejected", confidence=0.0,
+            db,
+            memory_id,
+            "user_rejected",
+            confidence=0.0,
         )
         if not found:
             raise HTTPException(status_code=404, detail="Memory not found")

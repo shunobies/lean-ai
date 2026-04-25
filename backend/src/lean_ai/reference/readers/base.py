@@ -9,12 +9,12 @@ from pathlib import Path
 class ReferenceChunk:
     """A single searchable chunk extracted from a reference document."""
 
-    doc_path: str     # relative path within the reference directory
-    doc_title: str    # human-readable document title
-    section: str      # chapter name, heading text, or "Page N"
-    content: str      # plain-text content of this chunk
+    doc_path: str  # relative path within the reference directory
+    doc_title: str  # human-readable document title
+    section: str  # chapter name, heading text, or "Page N"
+    content: str  # plain-text content of this chunk
     chunk_index: int  # sequential index within the document
-    format: str       # "epub" | "pdf" | "docx" | "md" | "html" | "txt" | "rst"
+    format: str  # "epub" | "pdf" | "docx" | "md" | "html" | "txt" | "rst"
 
 
 class DocumentReader(ABC):

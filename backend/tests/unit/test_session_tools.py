@@ -22,18 +22,26 @@ async def db(tmp_path):
         "INSERT INTO sessions (id, repo_root, task, status, "
         "branch_name, created_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
         (
-            "sess_001", str(tmp_path), "Add login feature",
-            "completed", "feat/login",
-            "2025-06-01T10:00:00", "2025-06-01T11:00:00",
+            "sess_001",
+            str(tmp_path),
+            "Add login feature",
+            "completed",
+            "feat/login",
+            "2025-06-01T10:00:00",
+            "2025-06-01T11:00:00",
         ),
     )
     await conn.execute(
         "INSERT INTO sessions (id, repo_root, task, status, "
         "branch_name, created_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
         (
-            "sess_002", str(tmp_path), "Fix database migration",
-            "failed", "fix/db-migration",
-            "2025-06-02T09:00:00", "2025-06-02T09:30:00",
+            "sess_002",
+            str(tmp_path),
+            "Fix database migration",
+            "failed",
+            "fix/db-migration",
+            "2025-06-02T09:00:00",
+            "2025-06-02T09:30:00",
         ),
     )
 
@@ -51,7 +59,7 @@ async def db(tmp_path):
     await conn.execute(
         "INSERT INTO tool_logs (session_id, tool_name, parameters, success, created_at) "
         "VALUES (?, ?, ?, ?, ?)",
-        ("sess_001", "run_tests", '{}', 0, "2025-06-01T10:20:00"),
+        ("sess_001", "run_tests", "{}", 0, "2025-06-01T10:20:00"),
     )
 
     await conn.commit()

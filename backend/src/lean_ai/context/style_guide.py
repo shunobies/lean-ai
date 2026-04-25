@@ -44,6 +44,7 @@ _MAX_FILE_CHARS = 5_000
 # File classification
 # ---------------------------------------------------------------------------
 
+
 def _classify_file(path: str) -> str | None:
     """Classify a file path into a style category, or *None* if irrelevant."""
     lower = path.lower()
@@ -110,6 +111,7 @@ def _classify_file(path: str) -> str | None:
 # Discovery
 # ---------------------------------------------------------------------------
 
+
 def _discover_style_files(repo_root: str) -> dict[str, list[str]]:
     """Discover style-relevant files grouped by category.
 
@@ -151,6 +153,7 @@ def _discover_style_files(repo_root: str) -> dict[str, list[str]]:
 # ---------------------------------------------------------------------------
 # Collection
 # ---------------------------------------------------------------------------
+
 
 def _detect_css_framework(
     categories: dict[str, list[str]],
@@ -343,6 +346,7 @@ truth — prioritize it above all other sources for colors, fonts, and spacing
 # Orchestrator
 # ---------------------------------------------------------------------------
 
+
 async def generate_style_guide(
     repo_root: str,
     llm_client,
@@ -374,13 +378,14 @@ async def generate_style_guide(
         project_tree=project_tree or "(not available)",
     )
     user_content = (
-        "Analyze the following project files and generate the style guide.\n\n"
-        f"{collected}"
+        f"Analyze the following project files and generate the style guide.\n\n{collected}"
     )[:40_000]
 
     logger.info(
         "Style guide: generating via LLM (%d files, %d-char prompt, framework=%s)",
-        total_files, len(user_content), css_framework,
+        total_files,
+        len(user_content),
+        css_framework,
     )
 
     try:

@@ -17,15 +17,17 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-_VALID_SECTIONS = frozenset({
-    "Architecture Overview",
-    "Module Map",
-    "Key Abstractions",
-    "API Surface",
-    "Integration Points",
-    "Data Flow",
-    "Conventions",
-})
+_VALID_SECTIONS = frozenset(
+    {
+        "Architecture Overview",
+        "Module Map",
+        "Key Abstractions",
+        "API Surface",
+        "Integration Points",
+        "Data Flow",
+        "Conventions",
+    }
+)
 
 
 SectionName = Literal[
@@ -47,8 +49,7 @@ class ContextExtractionEntry(BaseModel):
     )
     symbol: str = Field(
         description=(
-            "Exact symbol, module name, or identifier copied verbatim from "
-            "the source file."
+            "Exact symbol, module name, or identifier copied verbatim from the source file."
         ),
     )
     description: str = Field(

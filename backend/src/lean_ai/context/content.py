@@ -39,6 +39,7 @@ def _build_file_tree_summary(repo_root: str, entries=None) -> str:
     if entries is None:
         try:
             from lean_ai.indexer.tree import list_repo_tree
+
             entries = list_repo_tree(repo_root)
         except Exception:
             logger.debug("Failed to list repo tree for project context", exc_info=True)
@@ -62,10 +63,7 @@ def _build_file_tree_summary(repo_root: str, entries=None) -> str:
             lines.append(f"{dir_name}/: {', '.join(filenames)}")
         else:
             shown = filenames[:10]
-            lines.append(
-                f"{dir_name}/ ({count} files): {', '.join(shown)}, "
-                f"... +{count - 10} more"
-            )
+            lines.append(f"{dir_name}/ ({count} files): {', '.join(shown)}, ... +{count - 10} more")
 
     return "\n".join(lines)
 
@@ -136,11 +134,7 @@ def build_additive_expansion_prompt(
 
 def extract_section_headings(doc: str) -> list[str]:
     """Extract ``## `` headings from a Markdown document."""
-    return [
-        line.strip()
-        for line in doc.split("\n")
-        if line.strip().startswith("## ")
-    ]
+    return [line.strip() for line in doc.split("\n") if line.strip().startswith("## ")]
 
 
 def build_deterministic_skeleton(
@@ -161,6 +155,7 @@ def build_deterministic_skeleton(
 
     try:
         from lean_ai.indexer.tree import list_repo_tree
+
         entries = list_repo_tree(repo_root)
     except Exception:
         entries = None
@@ -189,14 +184,10 @@ def build_deterministic_skeleton(
     arch_lines = ["## Architecture Overview\n"]
     if found_entry_points:
         arch_lines.append(
-            "Entry points: "
-            + ", ".join(f"`{p}`" for p in sorted(found_entry_points))
+            "Entry points: " + ", ".join(f"`{p}`" for p in sorted(found_entry_points))
         )
     if found_key_files:
-        arch_lines.append(
-            "Key files: "
-            + ", ".join(f"`{p}`" for p in sorted(found_key_files))
-        )
+        arch_lines.append("Key files: " + ", ".join(f"`{p}`" for p in sorted(found_key_files)))
     if not found_entry_points and not found_key_files:
         arch_lines.append("No data extracted yet.")
     sections.append("\n".join(arch_lines))
@@ -220,9 +211,7 @@ def build_deterministic_skeleton(
                 # Show up to 5 defs per file to keep it compact.
                 shown = defs[:5]
                 suffix = f", ... +{len(defs) - 5} more" if len(defs) > 5 else ""
-                dir_block.append(
-                    f"- `{filename}` — {', '.join(f'`{d}`' for d in shown)}{suffix}"
-                )
+                dir_block.append(f"- `{filename}` — {', '.join(f'`{d}`' for d in shown)}{suffix}")
             else:
                 dir_block.append(f"- `{filename}`")
         block_text = "\n".join(dir_block)
@@ -399,12 +388,7 @@ def build_dedup_user_prompt(
     raw_extractions: str,
 ) -> str:
     """Format skeleton + raw extractions for Step 2 deduplication."""
-    return (
-        "=== SKELETON ===\n"
-        f"{skeleton}\n\n"
-        "=== RAW EXTRACTIONS ===\n"
-        f"{raw_extractions}"
-    )
+    return f"=== SKELETON ===\n{skeleton}\n\n=== RAW EXTRACTIONS ===\n{raw_extractions}"
 
 
 def build_condensation_user_prompt(
@@ -419,5 +403,3 @@ def build_condensation_user_prompt(
         "=== DOCUMENT ===\n"
         f"{document}"
     )
-
-

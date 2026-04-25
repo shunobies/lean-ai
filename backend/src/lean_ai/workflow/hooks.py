@@ -72,7 +72,8 @@ async def auto_push_integration(repo_root: str, session_id: str) -> None:
             if integration:
                 try:
                     await integration.push_session_summary(
-                        link["external_id"], summary,
+                        link["external_id"],
+                        summary,
                     )
                     logger.info(
                         "Auto-pushed session %s to %s/%s",
@@ -89,7 +90,8 @@ async def auto_push_integration(repo_root: str, session_id: str) -> None:
                     )
     except Exception:
         logger.debug(
-            "Auto-push integration failed (non-fatal)", exc_info=True,
+            "Auto-push integration failed (non-fatal)",
+            exc_info=True,
         )
 
 
@@ -136,17 +138,17 @@ async def auto_extract_session_memories(
                 (session_id,),
             )
             search_rows = await search_cursor.fetchall()
-            search_findings: list[tuple[str, str]] = [
-                (row[0], row[1]) for row in search_rows
-            ]
+            search_findings: list[tuple[str, str]] = [(row[0], row[1]) for row in search_rows]
         finally:
             await db.close()
 
         # Build summary for extraction
         plan_text = plan_to_markdown(plan) if plan else None
-        validation_passed = all(
-            r.get("success", True) for r in validation_results.values()
-        ) if validation_results else True
+        validation_passed = (
+            all(r.get("success", True) for r in validation_results.values())
+            if validation_results
+            else True
+        )
 
         session_summary = build_session_summary_for_extraction(
             task=task,
@@ -159,11 +161,16 @@ async def auto_extract_session_memories(
         )
 
         schedule_extraction(
-            extractor_llm, repo_root, session_id, session_summary, task,
+            extractor_llm,
+            repo_root,
+            session_id,
+            session_summary,
+            task,
         )
     except Exception:
         logger.debug(
-            "Session memory extraction failed (non-fatal)", exc_info=True,
+            "Session memory extraction failed (non-fatal)",
+            exc_info=True,
         )
 
 
@@ -208,7 +215,8 @@ async def on_plan_decision(
         )
     except Exception:
         logger.debug(
-            "Plan-decision training capture failed (non-fatal)", exc_info=True,
+            "Plan-decision training capture failed (non-fatal)",
+            exc_info=True,
         )
 
     # 2. Curated memory extraction — only on approval after rejection
@@ -232,11 +240,13 @@ async def on_plan_decision(
             on_memory_created=_make_memory_notifier(ws),
         )
         logger.info(
-            "Queued plan-rejection memory extraction for session %s", session_id,
+            "Queued plan-rejection memory extraction for session %s",
+            session_id,
         )
     except Exception:
         logger.debug(
-            "Plan-rejection memory hook failed (non-fatal)", exc_info=True,
+            "Plan-rejection memory hook failed (non-fatal)",
+            exc_info=True,
         )
 
 
@@ -272,9 +282,8 @@ async def on_validation_attempt_complete(
         from lean_ai.tools.regression_guard import (
             extract_regression_paths_from_text,
         )
-        regression_failure = bool(
-            extract_regression_paths_from_text(error_output or "")
-        )
+
+        regression_failure = bool(extract_regression_paths_from_text(error_output or ""))
     except Exception:
         regression_failure = False
 
@@ -321,15 +330,18 @@ async def on_validation_attempt_complete(
         )
         logger.info(
             "Queued fix-pattern memory extraction for session %s (attempt %d)",
-            session_id, attempt_num,
+            session_id,
+            attempt_num,
         )
     except Exception:
         logger.debug(
-            "Fix-pattern memory hook failed (non-fatal)", exc_info=True,
+            "Fix-pattern memory hook failed (non-fatal)",
+            exc_info=True,
         )
 
 
 # ── Workflow event hooks (loop, context refresh, cancellation, etc.) ──
+
 
 async def on_workflow_event(
     repo_root: str,
@@ -358,7 +370,8 @@ async def on_workflow_event(
     except Exception:
         logger.debug(
             "Workflow event capture failed (non-fatal, type=%s)",
-            event_type, exc_info=True,
+            event_type,
+            exc_info=True,
         )
 
 
@@ -383,10 +396,15 @@ def fire_workflow_event(
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    t = loop.create_task(on_workflow_event(
-        repo_root, session_id,
-        event_type=event_type, payload=payload, trace_uuid=trace_uuid,
-    ))
+    t = loop.create_task(
+        on_workflow_event(
+            repo_root,
+            session_id,
+            event_type=event_type,
+            payload=payload,
+            trace_uuid=trace_uuid,
+        )
+    )
     t.add_done_callback(log_task_exception)
 
 
@@ -406,12 +424,20 @@ def fire_plan_decision_hook(
     """Fire-and-forget wrapper for on_plan_decision."""
     from lean_ai.workflow.callbacks import log_task_exception
 
-    t = asyncio.create_task(on_plan_decision(
-        repo_root, session_id, llm_client,
-        task=task, plan_before=plan_before, feedback=feedback,
-        plan_after=plan_after, decision=decision,
-        revision_count=revision_count, ws=ws,
-    ))
+    t = asyncio.create_task(
+        on_plan_decision(
+            repo_root,
+            session_id,
+            llm_client,
+            task=task,
+            plan_before=plan_before,
+            feedback=feedback,
+            plan_after=plan_after,
+            decision=decision,
+            revision_count=revision_count,
+            ws=ws,
+        )
+    )
     t.add_done_callback(log_task_exception)
 
 
@@ -434,13 +460,21 @@ def fire_validation_attempt_hook(
     """Fire-and-forget wrapper for on_validation_attempt_complete."""
     from lean_ai.workflow.callbacks import log_task_exception
 
-    t = asyncio.create_task(on_validation_attempt_complete(
-        repo_root, session_id, llm_client,
-        task=task, attempt_num=attempt_num,
-        failing_commands=failing_commands, error_output=error_output,
-        diagnosis=diagnosis, fix_tool_calls=fix_tool_calls,
-        succeeded=succeeded,
-        failures_before=failures_before, failures_after=failures_after,
-        ws=ws,
-    ))
+    t = asyncio.create_task(
+        on_validation_attempt_complete(
+            repo_root,
+            session_id,
+            llm_client,
+            task=task,
+            attempt_num=attempt_num,
+            failing_commands=failing_commands,
+            error_output=error_output,
+            diagnosis=diagnosis,
+            fix_tool_calls=fix_tool_calls,
+            succeeded=succeeded,
+            failures_before=failures_before,
+            failures_after=failures_after,
+            ws=ws,
+        )
+    )
     t.add_done_callback(log_task_exception)

@@ -63,6 +63,7 @@ def pytest_unconfigure(config):
         return
     # Flush stdio so the summary is fully visible before the hard exit.
     import sys
+
     try:
         sys.stdout.flush()
         sys.stderr.flush()

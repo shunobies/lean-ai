@@ -43,14 +43,17 @@ class AudioManager:
 
         if is_stt_available():
             from lean_ai.voice.stt import STTService
+
             self.stt = STTService()
 
         if is_tts_available():
             from lean_ai.voice.tts import TTSService
+
             self.tts = TTSService()
 
         if is_wake_word_available():
             from lean_ai.voice.wake_word import WakeWordService
+
             self.wake_word = WakeWordService()
 
         logger.info(
@@ -61,7 +64,9 @@ class AudioManager:
         )
 
     async def start_stt(
-        self, auto_stop: bool = False, on_auto_stop: Callable | None = None,
+        self,
+        auto_stop: bool = False,
+        on_auto_stop: Callable | None = None,
     ) -> None:
         """Pause wake word, start STT recording."""
         async with self._lock:
@@ -76,7 +81,8 @@ class AudioManager:
                 self._wake_word_was_active = False
 
             await self.stt.start_recording(
-                auto_stop=auto_stop, on_auto_stop=on_auto_stop,
+                auto_stop=auto_stop,
+                on_auto_stop=on_auto_stop,
             )
 
     async def stop_stt(self) -> dict:
@@ -99,7 +105,9 @@ class AudioManager:
             return result
 
     async def start_wake_word(
-        self, callback: Callable, on_error: Callable | None = None,
+        self,
+        callback: Callable,
+        on_error: Callable | None = None,
     ) -> None:
         """Start wake word listener with the given detection callback."""
         async with self._lock:

@@ -92,7 +92,8 @@ async def _extraction_worker() -> None:
             await _extract_and_store(item)
         except Exception:
             logger.exception(
-                "Failed to extract memories for session %s", item.session_id,
+                "Failed to extract memories for session %s",
+                item.session_id,
             )
         finally:
             _queue.task_done()
@@ -105,7 +106,8 @@ def _ensure_worker() -> None:
         return
     _queue = asyncio.Queue()
     _worker_task = asyncio.create_task(
-        _extraction_worker(), name="memory-extraction-worker",
+        _extraction_worker(),
+        name="memory-extraction-worker",
     )
 
 
@@ -127,13 +129,16 @@ async def _extract_and_store(item: _ExtractionItem) -> list[dict]:
     if not result.memories:
         logger.info(
             "No memories extracted for session %s (phase=%s)",
-            item.session_id, item.source_phase,
+            item.session_id,
+            item.source_phase,
         )
         return []
 
     items = result.memories[: item.max_items]
     model_name = getattr(item.llm, "model_name", None) or getattr(
-        item.llm, "model", None,
+        item.llm,
+        "model",
+        None,
     )
 
     from lean_ai.db import get_db
@@ -149,12 +154,16 @@ async def _extract_and_store(item: _ExtractionItem) -> list[dict]:
         for mem_item in items:
             # Skip memories the user has already rejected (avoid re-introduction)
             if await supersede_user_rejected(
-                db, category=mem_item.category, content=mem_item.content,
+                db,
+                category=mem_item.category,
+                content=mem_item.content,
             ):
                 continue
             # Auto-promote if we've seen the same lesson before
             promoted = await auto_promote_memory(
-                db, category=mem_item.category, content=mem_item.content,
+                db,
+                category=mem_item.category,
+                content=mem_item.content,
             )
             if promoted is not None:
                 stored.append(promoted)
@@ -188,7 +197,8 @@ async def _extract_and_store(item: _ExtractionItem) -> list[dict]:
                     await item.on_memory_created(memory)
                 except Exception:
                     logger.debug(
-                        "on_memory_created callback failed", exc_info=True,
+                        "on_memory_created callback failed",
+                        exc_info=True,
                     )
 
         logger.info(
@@ -232,9 +242,7 @@ def build_session_summary_for_extraction(
     if failed_tools:
         parts.append(f"\nFAILED TOOLS: {', '.join(failed_tools)}")
 
-    parts.append(
-        f"\nVALIDATION: {'passed' if validation_passed else 'failed'}"
-    )
+    parts.append(f"\nVALIDATION: {'passed' if validation_passed else 'failed'}")
 
     if files_modified:
         parts.append("\nFILES MODIFIED:\n  " + "\n  ".join(files_modified))
@@ -249,9 +257,7 @@ def build_session_summary_for_extraction(
                 snippet += "..."
             entry = f"\n  [{label}] {snippet}"
             if budget_used + len(entry) > _SEARCH_FINDINGS_BUDGET:
-                findings_parts.append(
-                    "\n  ... (additional findings truncated)"
-                )
+                findings_parts.append("\n  ... (additional findings truncated)")
                 break
             findings_parts.append(entry)
             budget_used += len(entry)
@@ -397,7 +403,11 @@ def schedule_fix_success_extraction(
     _ensure_worker()
     assert _queue is not None
     summary = build_fix_success_summary(
-        task, failing_command, error_output, diagnosis, fix_tool_calls,
+        task,
+        failing_command,
+        error_output,
+        diagnosis,
+        fix_tool_calls,
     )
     _queue.put_nowait(
         _ExtractionItem(
@@ -430,7 +440,11 @@ def schedule_tdd_dispute_extraction(
     _ensure_worker()
     assert _queue is not None
     summary = build_tdd_dispute_summary(
-        task, test_file, reason, decision, explanation,
+        task,
+        test_file,
+        reason,
+        decision,
+        explanation,
     )
     _queue.put_nowait(
         _ExtractionItem(

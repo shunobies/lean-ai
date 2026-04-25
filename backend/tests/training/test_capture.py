@@ -137,8 +137,12 @@ async def test_capture_disabled_returns_none(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "enable_training_capture", False)
     result = await capture_turn(
         str(tmp_path),
-        session_id="s", phase="p", model_name="m", provider="ollama",
-        messages=[], assistant_output={},
+        session_id="s",
+        phase="p",
+        model_name="m",
+        provider="ollama",
+        messages=[],
+        assistant_output={},
     )
     assert result is None
 
@@ -153,9 +157,12 @@ async def test_capture_turn_records_role_and_turn_index(tmp_path):
     root = str(tmp_path)
     trace_uuid = await _cap(
         root,
-        session_id="s1", phase="planning.phase1",
-        role="primary", turn_index=3,
-        model_name="qwen3-coder:30b", provider="ollama",
+        session_id="s1",
+        phase="planning.phase1",
+        role="primary",
+        turn_index=3,
+        model_name="qwen3-coder:30b",
+        provider="ollama",
         messages=[{"role": "user", "content": "hi"}],
         assistant_output={"content": "hello", "tool_calls": []},
     )
@@ -164,8 +171,7 @@ async def test_capture_turn_records_role_and_turn_index(tmp_path):
     db = await get_training_db(root)
     try:
         cursor = await db.execute(
-            "SELECT role, turn_index, phase FROM training_traces "
-            "WHERE trace_uuid = ?",
+            "SELECT role, turn_index, phase FROM training_traces WHERE trace_uuid = ?",
             (trace_uuid,),
         )
         row = await cursor.fetchone()
@@ -196,8 +202,7 @@ async def test_capture_tool_execution(tmp_path):
     db = await get_training_db(root)
     try:
         cursor = await db.execute(
-            "SELECT tool_name, success, latency_ms, trace_uuid "
-            "FROM tool_executions WHERE id = ?",
+            "SELECT tool_name, success, latency_ms, trace_uuid FROM tool_executions WHERE id = ?",
             (row_id,),
         )
         row = await cursor.fetchone()
@@ -259,8 +264,7 @@ async def test_capture_clarification_outcome(tmp_path):
     db = await get_training_db(root)
     try:
         cursor = await db.execute(
-            "SELECT question, answer, outcome FROM clarifications "
-            "WHERE id = ?",
+            "SELECT question, answer, outcome FROM clarifications WHERE id = ?",
             (row_id,),
         )
         row = await cursor.fetchone()
@@ -318,8 +322,7 @@ async def test_capture_diff_decision_roundtrip(tmp_path):
     db = await get_training_db(root)
     try:
         cursor = await db.execute(
-            "SELECT file_path, accepted, diff_hash FROM diff_decisions "
-            "WHERE id = ?",
+            "SELECT file_path, accepted, diff_hash FROM diff_decisions WHERE id = ?",
             (row_id,),
         )
         row = await cursor.fetchone()
@@ -366,20 +369,36 @@ async def test_manifest_includes_new_tables(tmp_path):
 
     root = str(tmp_path)
     await capture_tool_execution(
-        root, session_id="s", tool_name="read_file",
-        arguments={}, result="ok", success=True, latency_ms=1,
+        root,
+        session_id="s",
+        tool_name="read_file",
+        arguments={},
+        result="ok",
+        success=True,
+        latency_ms=1,
     )
     await capture_tool_compression(
-        root, session_id="s", phase="planning.phase2",
-        tool_name="read_file", raw_output="x" * 500,
-        compressed_output="y", worker_model="w", worker_provider="ollama",
+        root,
+        session_id="s",
+        phase="planning.phase2",
+        tool_name="read_file",
+        raw_output="x" * 500,
+        compressed_output="y",
+        worker_model="w",
+        worker_provider="ollama",
     )
     await capture_clarification(
-        root, session_id="s", question="q", answer="a",
+        root,
+        session_id="s",
+        question="q",
+        answer="a",
         outcome="answered",
     )
     await capture_diff_decision(
-        root, session_id="s", file_path="a.py", accepted=True,
+        root,
+        session_id="s",
+        file_path="a.py",
+        accepted=True,
     )
 
     db = await get_training_db(root)

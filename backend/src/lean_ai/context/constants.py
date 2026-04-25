@@ -42,8 +42,11 @@ def _get_key_files() -> list[str]:
         lang_files = _get_registry().all_key_files()
     except Exception:
         lang_files = [
-            "pyproject.toml", "package.json", "requirements.txt",
-            "setup.py", "setup.cfg",
+            "pyproject.toml",
+            "package.json",
+            "requirements.txt",
+            "setup.py",
+            "setup.cfg",
         ]
     seen: set[str] = set()
     result: list[str] = []
@@ -68,9 +71,17 @@ def _get_entry_points() -> set[str]:
         return _get_registry().all_entry_points()
     except Exception:
         return {
-            "main.py", "app.py", "server.py",
-            "index.ts", "index.js", "main.ts", "main.js", "app.ts", "app.js",
+            "main.py",
+            "app.py",
+            "server.py",
+            "index.ts",
+            "index.js",
+            "main.ts",
+            "main.js",
+            "app.ts",
+            "app.js",
         }
+
 
 # ---------------------------------------------------------------------------
 # Section-size constants — 32K context-window baselines
@@ -261,9 +272,7 @@ architectural level.
 # Fixed token overhead for the per-file update LLM calls
 # ---------------------------------------------------------------------------
 
-_GENERATION_FIXED_OVERHEAD_TOKENS: int = int(
-    len(_SINGLE_FILE_UPDATE_PROMPT) / 4.2 * 1.2
-)
+_GENERATION_FIXED_OVERHEAD_TOKENS: int = int(len(_SINGLE_FILE_UPDATE_PROMPT) / 4.2 * 1.2)
 
 
 _CONTEXT_GENERATION_CAP_TOKENS: int = 65536
@@ -272,9 +281,7 @@ calculations.  Prevents oversized single-pass prompts on large-context models
 (e.g. 256k) by keeping generation input within a manageable size."""
 
 # Legacy: used by the old file-by-file loop (kept for backward compat).
-_ITERATIVE_INPUT_BUDGET_CHARS: int = int(
-    int(_CONTEXT_GENERATION_CAP_TOKENS * 0.70) * 3.3
-)
+_ITERATIVE_INPUT_BUDGET_CHARS: int = int(int(_CONTEXT_GENERATION_CAP_TOKENS * 0.70) * 3.3)
 
 # ---------------------------------------------------------------------------
 # 3-Step pipeline budget constants
@@ -334,11 +341,11 @@ def _scale_generation_caps(context_window: int, max_output_tokens: int) -> dict[
     scale = max(1.0, effective_window / baseline)
 
     return {
-        "index":              min(_MAX_INDEX_CHARS * 10,        int(input_budget_chars * 0.35)),
-        "import_graph":       min(_MAX_IMPORT_GRAPH_CHARS * 10, int(input_budget_chars * 0.10)),
-        "sample":             min(_MAX_SAMPLE_CHARS * 10,       int(input_budget_chars * 0.28)),
-        "api_endpoints":      min(80000,                        int(input_budget_chars * 0.11)),
-        "max_file_chars":     min(25000, max(3000, int(_MAX_FILE_CHARS     * scale))),
+        "index": min(_MAX_INDEX_CHARS * 10, int(input_budget_chars * 0.35)),
+        "import_graph": min(_MAX_IMPORT_GRAPH_CHARS * 10, int(input_budget_chars * 0.10)),
+        "sample": min(_MAX_SAMPLE_CHARS * 10, int(input_budget_chars * 0.28)),
+        "api_endpoints": min(80000, int(input_budget_chars * 0.11)),
+        "max_file_chars": min(25000, max(3000, int(_MAX_FILE_CHARS * scale))),
         "max_doc_file_chars": min(30000, max(3600, int(_MAX_DOC_FILE_CHARS * scale))),
-        "max_sampled_files":  min(25,    max(15,   int(15                  * scale))),
+        "max_sampled_files": min(25, max(15, int(15 * scale))),
     }

@@ -16,43 +16,105 @@ class FileEntry:
     extension: str
 
 
-SKIP_DIRS = frozenset({
-    ".git", "__pycache__", "node_modules", ".venv", "venv",
-    ".tox", ".mypy_cache", ".pytest_cache", ".ruff_cache",
-    ".lean_ai_index", ".lean_ai_reference_index", ".lean_ai",
-    "dist", "build", ".next", ".nuxt", "target",
-    ".idea", ".vscode",
-    # Framework cache / generated / vendor directories
-    "storage",       # Laravel (compiled views, cache, logs, sessions)
-    "var",           # Symfony (cache, logs)
-    "tmp",           # General temp / CakePHP
-    "cache",         # Generic cache directories
-    ".cache",        # Generic hidden cache
-    "coverage",      # Test coverage reports
-    ".turbo",        # Turborepo cache
-    ".parcel-cache", # Parcel bundler cache
-    ".angular",      # Angular CLI cache
-    ".svelte-kit",   # SvelteKit generated
-    ".output",       # Nuxt 3 output
-    "vendor",        # PHP Composer / Go vendor / Ruby bundler
-})
+SKIP_DIRS = frozenset(
+    {
+        ".git",
+        "__pycache__",
+        "node_modules",
+        ".venv",
+        "venv",
+        ".tox",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".lean_ai_index",
+        ".lean_ai_reference_index",
+        ".lean_ai",
+        "dist",
+        "build",
+        ".next",
+        ".nuxt",
+        "target",
+        ".idea",
+        ".vscode",
+        # Framework cache / generated / vendor directories
+        "storage",  # Laravel (compiled views, cache, logs, sessions)
+        "var",  # Symfony (cache, logs)
+        "tmp",  # General temp / CakePHP
+        "cache",  # Generic cache directories
+        ".cache",  # Generic hidden cache
+        "coverage",  # Test coverage reports
+        ".turbo",  # Turborepo cache
+        ".parcel-cache",  # Parcel bundler cache
+        ".angular",  # Angular CLI cache
+        ".svelte-kit",  # SvelteKit generated
+        ".output",  # Nuxt 3 output
+        "vendor",  # PHP Composer / Go vendor / Ruby bundler
+    }
+)
 
-BINARY_EXTENSIONS = frozenset({
-    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".svg", ".webp",
-    ".mp3", ".mp4", ".avi", ".mov", ".wav", ".flac",
-    ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar",
-    ".exe", ".dll", ".so", ".dylib", ".o", ".a",
-    ".pyc", ".pyo", ".class", ".wasm",
-    ".db", ".sqlite", ".sqlite3",
-    ".pdf", ".doc", ".docx", ".xls", ".xlsx",
-    ".ttf", ".otf", ".woff", ".woff2", ".eot",
-    ".bin", ".dat", ".pkl", ".npy", ".npz",
-    ".lock",
-})
+BINARY_EXTENSIONS = frozenset(
+    {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".bmp",
+        ".ico",
+        ".svg",
+        ".webp",
+        ".mp3",
+        ".mp4",
+        ".avi",
+        ".mov",
+        ".wav",
+        ".flac",
+        ".zip",
+        ".tar",
+        ".gz",
+        ".bz2",
+        ".xz",
+        ".7z",
+        ".rar",
+        ".exe",
+        ".dll",
+        ".so",
+        ".dylib",
+        ".o",
+        ".a",
+        ".pyc",
+        ".pyo",
+        ".class",
+        ".wasm",
+        ".db",
+        ".sqlite",
+        ".sqlite3",
+        ".pdf",
+        ".doc",
+        ".docx",
+        ".xls",
+        ".xlsx",
+        ".ttf",
+        ".otf",
+        ".woff",
+        ".woff2",
+        ".eot",
+        ".bin",
+        ".dat",
+        ".pkl",
+        ".npy",
+        ".npz",
+        ".lock",
+    }
+)
 
-SKIP_FILES = frozenset({
-    "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
-})
+SKIP_FILES = frozenset(
+    {
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+    }
+)
 
 
 _gitignore_cache: dict[str, tuple[float, pathspec.PathSpec | None]] = {}
@@ -74,7 +136,8 @@ def _load_gitignore(repo_root: Path) -> pathspec.PathSpec | None:
 
         try:
             spec = pathspec.PathSpec.from_lines(
-                "gitwildmatch", gitignore.read_text().splitlines(),
+                "gitwildmatch",
+                gitignore.read_text().splitlines(),
             )
             _gitignore_cache[root_str] = (mtime, spec)
             return spec

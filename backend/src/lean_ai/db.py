@@ -109,10 +109,8 @@ async def _ensure_columns(db: aiosqlite.Connection) -> None:
             pass  # Column already exists
 
     for index_sql in (
-        "CREATE INDEX IF NOT EXISTS idx_mem_status "
-        "ON session_memories(curation_status)",
-        "CREATE INDEX IF NOT EXISTS idx_mem_category "
-        "ON session_memories(category)",
+        "CREATE INDEX IF NOT EXISTS idx_mem_status ON session_memories(curation_status)",
+        "CREATE INDEX IF NOT EXISTS idx_mem_category ON session_memories(category)",
     ):
         try:
             await db.execute(index_sql)
@@ -340,10 +338,7 @@ async def get_commits_for_session(
         (session_id,),
     )
     rows = await cursor.fetchall()
-    return [
-        {"commit_sha": row[0], "message": row[1], "created_at": row[2]}
-        for row in rows
-    ]
+    return [{"commit_sha": row[0], "message": row[1], "created_at": row[2]} for row in rows]
 
 
 async def find_session_by_commit(
@@ -402,15 +397,15 @@ async def search_sessions(
 
         # Search conversation logs
         cursor = await db.execute(
-            "SELECT DISTINCT session_id FROM conversation_logs "
-            "WHERE content LIKE ? LIMIT 20",
+            "SELECT DISTINCT session_id FROM conversation_logs WHERE content LIKE ? LIMIT 20",
             (q,),
         )
         conv_session_ids = [row[0] for row in await cursor.fetchall()]
         for sid in conv_session_ids:
             if sid not in seen:
                 cursor2 = await db.execute(
-                    "SELECT * FROM sessions WHERE id = ?", (sid,),
+                    "SELECT * FROM sessions WHERE id = ?",
+                    (sid,),
                 )
                 row = await cursor2.fetchone()
                 if row:

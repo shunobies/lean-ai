@@ -40,13 +40,16 @@ MEMORY_CONTEXT_PERCENT = 0.02
 def _allowed_curation_statuses() -> set[str]:
     """Curation statuses allowed in retrieval, from settings."""
     raw = getattr(
-        settings, "memory_retrieval_statuses", "user_confirmed,high_confidence_auto",
+        settings,
+        "memory_retrieval_statuses",
+        "user_confirmed,high_confidence_auto",
     )
     return {s.strip() for s in str(raw).split(",") if s.strip()}
 
 
 async def _load_memory_rows(
-    repo_root: str, memory_ids: list[str],
+    repo_root: str,
+    memory_ids: list[str],
 ) -> dict[str, dict]:
     """Batch-load memory rows from the per-workspace DB."""
     if not memory_ids:
@@ -109,7 +112,8 @@ async def _retrieve_memories_for_phase(
             return ""
 
         rows = await _load_memory_rows(
-            repo_root, [h["memory_id"] for h in hits],
+            repo_root,
+            [h["memory_id"] for h in hits],
         )
         allowed = _allowed_curation_statuses()
         from datetime import datetime, timezone
@@ -135,23 +139,22 @@ async def _retrieve_memories_for_phase(
         if not filtered:
             return ""
 
-        budget = int(
-            settings._active_context_window * budget_percent * 3.5
-        )
-        header_text = header or (
-            f"\n\nWORKSPACE MEMORY ({phase_label}):"
-        )
+        budget = int(settings._active_context_window * budget_percent * 3.5)
+        header_text = header or (f"\n\nWORKSPACE MEMORY ({phase_label}):")
         text = _format_memory_lines(filtered, header_text, budget)
         if text:
             logger.info(
                 "Injected %d memories into %s (%d chars)",
-                len(filtered), phase_label, len(text),
+                len(filtered),
+                phase_label,
+                len(text),
             )
         return text
     except Exception:
         logger.debug(
             "Memory retrieval failed for %s (non-fatal)",
-            phase_label, exc_info=True,
+            phase_label,
+            exc_info=True,
         )
         return ""
 
@@ -173,7 +176,9 @@ async def _retrieve_session_memories(repo_root: str, task: str) -> str:
 async def retrieve_design_memories(repo_root: str, query: str) -> str:
     """Retrieve `gotcha`, `convention`, `rejection` memories for Phase 3."""
     budget = getattr(
-        settings, "phase3_memory_budget_percent", MEMORY_CONTEXT_PERCENT,
+        settings,
+        "phase3_memory_budget_percent",
+        MEMORY_CONTEXT_PERCENT,
     )
     return await _retrieve_memories_for_phase(
         repo_root,
@@ -189,7 +194,9 @@ async def retrieve_design_memories(repo_root: str, query: str) -> str:
 async def retrieve_fix_pattern_memories(repo_root: str, query: str) -> str:
     """Retrieve `fix_pattern` + `gotcha` memories for the validation fix loop."""
     budget = getattr(
-        settings, "fix_loop_memory_budget_percent", MEMORY_CONTEXT_PERCENT,
+        settings,
+        "fix_loop_memory_budget_percent",
+        MEMORY_CONTEXT_PERCENT,
     )
     return await _retrieve_memories_for_phase(
         repo_root,
@@ -216,7 +223,10 @@ def _save_debug_phase(
     debug_dir.mkdir(parents=True, exist_ok=True)
     (debug_dir / f"{phase_name}.md").write_text(content, encoding="utf-8")
     logger.info(
-        "Debug: saved %s (%d chars, %.1fs)", phase_name, len(content), elapsed,
+        "Debug: saved %s (%d chars, %.1fs)",
+        phase_name,
+        len(content),
+        elapsed,
     )
 
 
@@ -227,6 +237,7 @@ def _extract_file_paths(scan_output: str, repo_root: str) -> list[str]:
     and common extensions).  Validates that each path exists on disk.
     """
     import re
+
     path_pattern = re.compile(
         r'(?:^|[\s`"\'\-•])([a-zA-Z0-9_.][a-zA-Z0-9_./\-]*'
         r'\.[a-zA-Z]{1,10})(?:[\s`"\'\-:,]|$)',
@@ -252,7 +263,7 @@ def _split_list(items: list, n: int) -> list[list]:
     chunk_size = max(1, len(items) // n)
     chunks: list[list] = []
     for i in range(0, len(items), chunk_size):
-        chunks.append(items[i:i + chunk_size])
+        chunks.append(items[i : i + chunk_size])
     # Merge trailing runt into last real chunk
     while len(chunks) > n:
         chunks[-2].extend(chunks[-1])
@@ -270,8 +281,11 @@ async def _send_stage(
     if ws is None:
         return
     from lean_ai.workflow.ws_handler import ws_send
+
     payload: dict = {
-        "stage": "planning", "status": "running", "summary": summary,
+        "stage": "planning",
+        "status": "running",
+        "summary": summary,
     }
     if model:
         payload["model"] = model
@@ -290,8 +304,11 @@ async def _send_stage_done(
     if ws is None:
         return
     from lean_ai.workflow.ws_handler import ws_send
+
     payload: dict = {
-        "stage": "planning", "status": "done", "summary": summary,
+        "stage": "planning",
+        "status": "done",
+        "summary": summary,
     }
     if model:
         payload["model"] = model
@@ -308,6 +325,7 @@ async def _send_content_done(
     if ws is None:
         return
     from lean_ai.workflow.ws_handler import ws_send_nowait
+
     ws_send_nowait(ws, "assistant_content", {"content": text, "done": True})
 
 
@@ -328,7 +346,8 @@ async def _compact_file_summary(
 
     logger.info(
         "Compacting file_summary: %d chars -> target %d chars",
-        len(file_summary), budget,
+        len(file_summary),
+        budget,
     )
 
     try:
@@ -353,14 +372,15 @@ async def _compact_file_summary(
                         "Output the compressed version directly."
                     ),
                 },
-                {"role": "user", "content": file_summary[:budget * 3]},
+                {"role": "user", "content": file_summary[: budget * 3]},
             ],
             max_tokens=2048,
         )
         if compacted and len(compacted.strip()) > 200:
             logger.info(
                 "File summary compacted: %d -> %d chars (%.0f%%)",
-                len(file_summary), len(compacted),
+                len(file_summary),
+                len(compacted),
                 len(compacted) / len(file_summary) * 100,
             )
             return compacted.strip()
@@ -405,9 +425,7 @@ def format_scope_document(scope: ScopeDocument) -> str:
     lines.append("ASSUMPTIONS (with verification hints):")
     if scope.assumptions:
         for a in scope.assumptions:
-            lines.append(
-                f"- Assumption: {a.assumption} — verify: {a.verify_hint}"
-            )
+            lines.append(f"- Assumption: {a.assumption} — verify: {a.verify_hint}")
     else:
         lines.append("- (none identified)")
     lines.append("")
@@ -453,8 +471,7 @@ async def _synthesize_scope(
         base_payload_parts.append(f"PROJECT CONTEXT:\n{context_slice}")
     if exploration_prose.strip():
         base_payload_parts.append(
-            f"SCOPE ANALYSIS PROSE (from the Phase 1 tool loop):\n"
-            f"{exploration_prose}"
+            f"SCOPE ANALYSIS PROSE (from the Phase 1 tool loop):\n{exploration_prose}"
         )
     base_payload_parts.append(
         "Translate the inputs above into the ScopeDocument. Populate every "
@@ -479,13 +496,11 @@ async def _synthesize_scope(
         scope = await _attempt(base_payload)
     except Exception:
         logger.warning(
-            "Phase 1 scope synthesis attempt 1 failed — retrying with "
-            "corrective payload",
+            "Phase 1 scope synthesis attempt 1 failed — retrying with corrective payload",
             exc_info=True,
         )
         retry_payload = (
-            base_payload
-            + "\n\nCORRECTION: your previous output did not conform to "
+            base_payload + "\n\nCORRECTION: your previous output did not conform to "
             "the ScopeDocument schema. This is a pure translation task: "
             "take the task text and rewrite it into the 8 schema fields. "
             "Populate every field — when a detail is not spelled out, "
@@ -578,9 +593,7 @@ async def _revise_plan(
     """
     expert = expert_llm_client or llm_client
     expert_max_tokens = (
-        settings.effective_expert_max_tokens
-        if expert_llm_client
-        else settings.ollama_max_tokens
+        settings.effective_expert_max_tokens if expert_llm_client else settings.ollama_max_tokens
     )
     expert_ctx = (
         settings.effective_expert_context_window
@@ -592,7 +605,9 @@ async def _revise_plan(
         int(expert_ctx * PLAN_OUTPUT_PERCENT),
     )
     await _send_stage(
-        ws, "Revising plan based on feedback...", model=expert.model_name,
+        ws,
+        "Revising plan based on feedback...",
+        model=expert.model_name,
     )
     logger.info("Plan revision")
     plan = await expert.chat_structured(
@@ -616,24 +631,21 @@ async def _revise_plan(
         thinking_callback=on_thinking,
     )
     # Safety: strip non-implementation steps (same as Phase 4)
-    impl_steps = [
-        s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS
-    ]
+    impl_steps = [s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS]
     if len(impl_steps) < len(plan.steps):
         stripped_count = len(plan.steps) - len(impl_steps)
-        stripped_tools = [
-            s.tool for s in plan.steps
-            if s.tool not in IMPLEMENTATION_STEP_TOOLS
-        ]
+        stripped_tools = [s.tool for s in plan.steps if s.tool not in IMPLEMENTATION_STEP_TOOLS]
         logger.warning(
             "Stripped %d non-implementation steps from revised plan: %s",
-            stripped_count, stripped_tools,
+            stripped_count,
+            stripped_tools,
         )
         for i, step in enumerate(impl_steps, 1):
             step.step_number = i
         plan.steps = impl_steps
     logger.info(
         "Plan revised: %d steps, %d affected files",
-        len(plan.steps), len(plan.affected_files),
+        len(plan.steps),
+        len(plan.affected_files),
     )
     return plan

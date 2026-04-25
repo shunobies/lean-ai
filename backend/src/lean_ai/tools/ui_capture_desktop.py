@@ -125,13 +125,10 @@ def _validate_launch_command(launch_command: Any) -> list[str]:
     injection and surprises.  Returns the validated list."""
     if not isinstance(launch_command, list) or not launch_command:
         raise DesktopCaptureError(
-            "launch_command must be a non-empty list of strings "
-            "(no shell interpolation)"
+            "launch_command must be a non-empty list of strings (no shell interpolation)"
         )
     if not all(isinstance(arg, str) for arg in launch_command):
-        raise DesktopCaptureError(
-            "launch_command entries must all be strings"
-        )
+        raise DesktopCaptureError("launch_command entries must all be strings")
     return launch_command
 
 
@@ -147,6 +144,7 @@ async def _launch_subprocess(
     if sys.platform == "win32":
         # Create a new process group so we can send CTRL_BREAK to all descendants.
         import subprocess as _sp
+
         kwargs["creationflags"] = _sp.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
     else:
         kwargs["start_new_session"] = True
@@ -237,16 +235,14 @@ async def _capture_windows(
         import pygetwindow  # noqa: F401
     except ImportError as e:
         raise DesktopCaptureError(
-            "pygetwindow is not installed. "
-            'Run `pip install "lean-ai[ui-verification]"`'
+            'pygetwindow is not installed. Run `pip install "lean-ai[ui-verification]"`'
         ) from e
     try:
         import mss  # noqa: F401
         from PIL import Image  # noqa: F401
     except ImportError as e:
         raise DesktopCaptureError(
-            "mss and Pillow are required. "
-            'Run `pip install "lean-ai[ui-verification]"`'
+            'mss and Pillow are required. Run `pip install "lean-ai[ui-verification]"`'
         ) from e
 
     proc = await _launch_subprocess(launch_command)
@@ -277,7 +273,10 @@ async def _capture_windows(
         await asyncio.to_thread(_mss_capture_region, region, out_path)
         logger.info(
             "Captured Windows window %r (%dx%d) to %s",
-            window.title, region["width"], region["height"], out_path,
+            window.title,
+            region["width"],
+            region["height"],
+            out_path,
         )
         return out_path
     finally:
@@ -304,7 +303,8 @@ async def _wait_for_window_pygetwindow(
             if len(matches) > 1:
                 logger.warning(
                     "Multiple windows match %r, using first: %s",
-                    title, [w.title for w in matches[:5]],
+                    title,
+                    [w.title for w in matches[:5]],
                 )
             return matches[0]
         await asyncio.sleep(0.5)
@@ -333,8 +333,7 @@ async def _capture_macos(
         )
     except ImportError as e:
         raise DesktopCaptureError(
-            "pyobjc-framework-Quartz is not installed. "
-            'Run `pip install "lean-ai[ui-verification]"`'
+            'pyobjc-framework-Quartz is not installed. Run `pip install "lean-ai[ui-verification]"`'
         ) from e
 
     proc = await _launch_subprocess(launch_command)
@@ -396,9 +395,7 @@ async def _wait_for_window_quartz(
     title_lower = title.lower()
     while time.monotonic() < deadline:
         await _check_subprocess_alive(proc)
-        windows = CGWindowListCopyWindowInfo(
-            kCGWindowListOptionOnScreenOnly, kCGNullWindowID
-        ) or []
+        windows = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID) or []
         matches: list[tuple[int, str]] = []
         for w in windows:
             wtitle = w.get("kCGWindowName") or ""
@@ -408,14 +405,13 @@ async def _wait_for_window_quartz(
             if len(matches) > 1:
                 logger.warning(
                     "Multiple macOS windows match %r, using first: %s",
-                    title, [t for _, t in matches[:5]],
+                    title,
+                    [t for _, t in matches[:5]],
                 )
             return matches[0][0]
         await asyncio.sleep(0.5)
 
-    raise DesktopCaptureError(
-        f"No window matching {title!r} appeared within {timeout:.0f}s"
-    )
+    raise DesktopCaptureError(f"No window matching {title!r} appeared within {timeout:.0f}s")
 
 
 # ── Linux X11 adapter ──────────────────────────────────────────────────
@@ -441,8 +437,7 @@ async def _capture_x11(
         from PIL import Image  # noqa: F401
     except ImportError as e:
         raise DesktopCaptureError(
-            "mss and Pillow are required. "
-            'Run `pip install "lean-ai[ui-verification]"`'
+            'mss and Pillow are required. Run `pip install "lean-ai[ui-verification]"`'
         ) from e
 
     proc = await _launch_subprocess(launch_command)
@@ -455,7 +450,10 @@ async def _capture_x11(
         await asyncio.to_thread(_mss_capture_region, region, out_path)
         logger.info(
             "Captured X11 window id=%s (%dx%d) to %s",
-            window_id, region["width"], region["height"], out_path,
+            window_id,
+            region["width"],
+            region["height"],
+            out_path,
         )
         return out_path
     finally:
@@ -473,7 +471,8 @@ async def _wait_for_window_wmctrl(
         await _check_subprocess_alive(proc)
 
         wmctrl = await asyncio.create_subprocess_exec(
-            "wmctrl", "-l",
+            "wmctrl",
+            "-l",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -491,19 +490,21 @@ async def _wait_for_window_wmctrl(
             if len(matches) > 1:
                 logger.warning(
                     "Multiple X11 windows match %r, using first: %s",
-                    title, [t for _, t in matches[:5]],
+                    title,
+                    [t for _, t in matches[:5]],
                 )
             return matches[0][0]
         await asyncio.sleep(0.5)
 
-    raise DesktopCaptureError(
-        f"No X11 window matching {title!r} appeared within {timeout:.0f}s"
-    )
+    raise DesktopCaptureError(f"No X11 window matching {title!r} appeared within {timeout:.0f}s")
 
 
 async def _xdotool_geometry(window_id: str) -> dict[str, int]:
     xdo = await asyncio.create_subprocess_exec(
-        "xdotool", "getwindowgeometry", "--shell", window_id,
+        "xdotool",
+        "getwindowgeometry",
+        "--shell",
+        window_id,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -581,7 +582,8 @@ async def _capture_wayland_grim(
 
         out_path = _new_capture_path(repo_root)
         grim = await asyncio.create_subprocess_exec(
-            "grim", str(out_path),
+            "grim",
+            str(out_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -643,9 +645,12 @@ async def capture_desktop(
     impl = _BACKENDS.get(backend)
     if impl is None:
         raise DesktopCaptureError(
-            f"Unknown desktop capture backend: {backend!r}.  "
-            f"Known: {sorted(_BACKENDS)}"
+            f"Unknown desktop capture backend: {backend!r}.  Known: {sorted(_BACKENDS)}"
         )
     return await impl(
-        launch_command, window_title, repo_root, wait_seconds, window_timeout,
+        launch_command,
+        window_title,
+        repo_root,
+        wait_seconds,
+        window_timeout,
     )

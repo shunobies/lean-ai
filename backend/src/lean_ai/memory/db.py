@@ -74,22 +74,24 @@ async def create_memory(
         ),
     )
     await db.commit()
-    return _format_memory({
-        "id": memory_id,
-        "session_id": session_id,
-        "category": category,
-        "content": content,
-        "tags": json.dumps(tags) if tags else None,
-        "source_task": source_task,
-        "created_at": now,
-        "curation_status": curation_status,
-        "confidence": confidence,
-        "expires_at": expires_at,
-        "source_phase": source_phase,
-        "model_name": model_name,
-        "seen_count": 1,
-        "last_seen_at": now,
-    })
+    return _format_memory(
+        {
+            "id": memory_id,
+            "session_id": session_id,
+            "category": category,
+            "content": content,
+            "tags": json.dumps(tags) if tags else None,
+            "source_task": source_task,
+            "created_at": now,
+            "curation_status": curation_status,
+            "confidence": confidence,
+            "expires_at": expires_at,
+            "source_phase": source_phase,
+            "model_name": model_name,
+            "seen_count": 1,
+            "last_seen_at": now,
+        }
+    )
 
 
 async def list_memories(
@@ -107,11 +109,7 @@ async def list_memories(
         clauses.append("category = ?")
         params.append(category)
     if curation_status:
-        statuses = (
-            [curation_status]
-            if isinstance(curation_status, str)
-            else list(curation_status)
-        )
+        statuses = [curation_status] if isinstance(curation_status, str) else list(curation_status)
         placeholders = ",".join("?" for _ in statuses)
         clauses.append(f"curation_status IN ({placeholders})")
         params.extend(statuses)
@@ -121,20 +119,18 @@ async def list_memories(
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     params.append(limit)
     cursor = await db.execute(
-        f"SELECT * FROM session_memories {where} "
-        f"ORDER BY created_at DESC LIMIT ?",
+        f"SELECT * FROM session_memories {where} ORDER BY created_at DESC LIMIT ?",
         tuple(params),
     )
     rows = await cursor.fetchall()
     return [_format_memory(dict(r)) for r in rows]
 
 
-async def get_memory(
-    db: aiosqlite.Connection, memory_id: str
-) -> dict | None:
+async def get_memory(db: aiosqlite.Connection, memory_id: str) -> dict | None:
     """Fetch a single memory by id."""
     cursor = await db.execute(
-        "SELECT * FROM session_memories WHERE id = ?", (memory_id,),
+        "SELECT * FROM session_memories WHERE id = ?",
+        (memory_id,),
     )
     row = await cursor.fetchone()
     return _format_memory(dict(row)) if row else None
@@ -146,8 +142,7 @@ async def get_memories_for_session(
 ) -> list[dict]:
     """Get all memories extracted from a specific session."""
     cursor = await db.execute(
-        "SELECT * FROM session_memories WHERE session_id = ? "
-        "ORDER BY created_at ASC",
+        "SELECT * FROM session_memories WHERE session_id = ? ORDER BY created_at ASC",
         (session_id,),
     )
     rows = await cursor.fetchall()
@@ -165,14 +160,14 @@ async def update_curation_status(
     if status not in _VALID_STATUSES:
         raise ValueError(f"Invalid curation_status: {status}")
     cursor = await db.execute(
-        "SELECT id FROM session_memories WHERE id = ?", (memory_id,),
+        "SELECT id FROM session_memories WHERE id = ?",
+        (memory_id,),
     )
     if not await cursor.fetchone():
         return False
     if confidence is not None:
         await db.execute(
-            "UPDATE session_memories SET curation_status = ?, confidence = ? "
-            "WHERE id = ?",
+            "UPDATE session_memories SET curation_status = ?, confidence = ? WHERE id = ?",
             (status, confidence, memory_id),
         )
     else:
@@ -200,8 +195,7 @@ async def find_similar_memory(
         return None
     if category:
         cursor = await db.execute(
-            "SELECT * FROM session_memories WHERE category = ? "
-            "ORDER BY created_at DESC LIMIT 200",
+            "SELECT * FROM session_memories WHERE category = ? ORDER BY created_at DESC LIMIT 200",
             (category,),
         )
     else:
@@ -238,13 +232,11 @@ async def bump_seen_count(
             "UPDATE session_memories SET seen_count = ?, last_seen_at = ?, "
             "curation_status = 'high_confidence_auto', confidence = ? "
             "WHERE id = ?",
-            (new_count, now, min(0.85, (existing.get("confidence") or 0.5) + 0.2),
-             memory_id),
+            (new_count, now, min(0.85, (existing.get("confidence") or 0.5) + 0.2), memory_id),
         )
     else:
         await db.execute(
-            "UPDATE session_memories SET seen_count = ?, last_seen_at = ? "
-            "WHERE id = ?",
+            "UPDATE session_memories SET seen_count = ?, last_seen_at = ? WHERE id = ?",
             (new_count, now, memory_id),
         )
     await db.commit()
@@ -272,9 +264,7 @@ async def set_expiry_from_ttl(
 
 async def delete_memory(db: aiosqlite.Connection, memory_id: str) -> bool:
     """Delete a memory. Returns True if found."""
-    cursor = await db.execute(
-        "SELECT id FROM session_memories WHERE id = ?", (memory_id,)
-    )
+    cursor = await db.execute("SELECT id FROM session_memories WHERE id = ?", (memory_id,))
     if not await cursor.fetchone():
         return False
     await db.execute("DELETE FROM session_memories WHERE id = ?", (memory_id,))

@@ -38,11 +38,13 @@ def _convert_tools(tools: list[dict]) -> list[dict]:
     converted = []
     for tool in tools:
         fn = tool.get("function", tool)
-        converted.append({
-            "name": fn["name"],
-            "description": fn.get("description", ""),
-            "input_schema": fn.get("parameters", {"type": "object", "properties": {}}),
-        })
+        converted.append(
+            {
+                "name": fn["name"],
+                "description": fn.get("description", ""),
+                "input_schema": fn.get("parameters", {"type": "object", "properties": {}}),
+            }
+        )
     return converted
 
 
@@ -65,6 +67,7 @@ class AnthropicProvider(LLMProvider):
         reasoning_effort: str = "",
     ):
         import anthropic as anthropic_lib
+
         self._anthropic = anthropic_lib
 
         self._client = anthropic_lib.AsyncAnthropic(api_key=api_key)
@@ -109,7 +112,10 @@ class AnthropicProvider(LLMProvider):
         )
 
     def _extract_metrics(
-        self, response, *, stop_reason: str | None = None,
+        self,
+        response,
+        *,
+        stop_reason: str | None = None,
     ) -> LLMMetrics:
         """Extract metrics from an Anthropic response."""
         usage = getattr(response, "usage", None)
@@ -136,6 +142,7 @@ class AnthropicProvider(LLMProvider):
         if not self._enable_thinking:
             return
         from lean_ai.config import reasoning_effort_to_anthropic_budget
+
         mapped = reasoning_effort_to_anthropic_budget(self._reasoning_effort)
         if mapped is not None:
             budget = mapped
@@ -171,8 +178,12 @@ class AnthropicProvider(LLMProvider):
         logger.info(
             "Anthropic chat_raw: model=%s messages=%d temp=%.1f max_tokens=%d "
             "streaming=%s thinking=%s",
-            self._model, len(filtered_messages), temp, tokens,
-            bool(stream_callback or thinking_callback), self._enable_thinking,
+            self._model,
+            len(filtered_messages),
+            temp,
+            tokens,
+            bool(stream_callback or thinking_callback),
+            self._enable_thinking,
         )
 
         kwargs: dict = {
@@ -187,7 +198,9 @@ class AnthropicProvider(LLMProvider):
         if self._enable_thinking and (stream_callback or thinking_callback):
             self._apply_thinking_kwargs(kwargs, tokens)
             return await self._chat_raw_streaming(
-                kwargs, stream_callback, thinking_callback,
+                kwargs,
+                stream_callback,
+                thinking_callback,
             )
 
         # Non-thinking streaming path (content only)
@@ -204,7 +217,8 @@ class AnthropicProvider(LLMProvider):
 
         text, final_message = await self._retry_with_backoff(_chat, label="chat_raw")
         metrics = self._extract_metrics(
-            final_message, stop_reason=getattr(final_message, "stop_reason", None),
+            final_message,
+            stop_reason=getattr(final_message, "stop_reason", None),
         )
 
         logger.info("Anthropic chat_raw response (%d chars): %s", len(text), text[:200])
@@ -245,12 +259,14 @@ class AnthropicProvider(LLMProvider):
 
         try:
             final_message = await self._retry_with_backoff(
-                _chat, label="chat_raw(thinking)",
+                _chat,
+                label="chat_raw(thinking)",
             )
         except self._anthropic.BadRequestError as exc:
             logger.warning(
                 "Extended thinking not supported for %s, falling back: %s",
-                self._model, exc,
+                self._model,
+                exc,
             )
             # Remove thinking params and retry without
             kwargs.pop("thinking", None)
@@ -268,7 +284,8 @@ class AnthropicProvider(LLMProvider):
                 return "".join(chunks), final_msg
 
             text, final_message = await self._retry_with_backoff(
-                _fallback, label="chat_raw(fallback)",
+                _fallback,
+                label="chat_raw(fallback)",
             )
             metrics = self._extract_metrics(
                 final_message,
@@ -276,7 +293,8 @@ class AnthropicProvider(LLMProvider):
             )
             logger.info(
                 "Anthropic chat_raw response (%d chars, fallback): %s",
-                len(text), text[:200],
+                len(text),
+                text[:200],
             )
             return text, metrics
 
@@ -290,7 +308,9 @@ class AnthropicProvider(LLMProvider):
 
         logger.info(
             "Anthropic chat_raw response (%d chars, thinking=%d chars): %s",
-            len(text), len(thinking or ""), text[:200],
+            len(text),
+            len(thinking or ""),
+            text[:200],
         )
         return text, metrics
 
@@ -309,7 +329,9 @@ class AnthropicProvider(LLMProvider):
 
         logger.info(
             "Anthropic chat_structured: schema=%s model=%s thinking=%s",
-            schema.__name__, self._model, self._enable_thinking,
+            schema.__name__,
+            self._model,
+            self._enable_thinking,
         )
 
         # Inject JSON schema instruction into system prompt
@@ -338,7 +360,8 @@ class AnthropicProvider(LLMProvider):
         last_error = None
         for attempt in range(2):
             raw, final_message = await self._retry_with_backoff(
-                chat_fn, label=f"structured({schema.__name__})",
+                chat_fn,
+                label=f"structured({schema.__name__})",
             )
             metrics = self._extract_metrics(
                 final_message,
@@ -363,18 +386,21 @@ class AnthropicProvider(LLMProvider):
                 if attempt == 0:
                     logger.warning(
                         "Schema validation failed for %s, retrying: %s",
-                        schema.__name__, exc.errors(),
+                        schema.__name__,
+                        exc.errors(),
                     )
                     continue
                 logger.error(
                     "Schema validation failed after retry for %s. Raw: %s",
-                    schema.__name__, raw[:1000],
+                    schema.__name__,
+                    raw[:1000],
                 )
                 raise
         raise last_error  # type: ignore[misc]
 
     def _make_structured_chat(self, kwargs: dict):
         """Create a non-thinking structured chat coroutine factory."""
+
         async def _chat():
             chunks: list[str] = []
             async with self._client.messages.stream(**kwargs) as stream:
@@ -383,6 +409,7 @@ class AnthropicProvider(LLMProvider):
                         chunks.append(chunk)
                 final_message = await stream.get_final_message()
             return "".join(chunks), final_message
+
         return _chat
 
     def _make_structured_thinking_chat(self, kwargs: dict, thinking_callback):
@@ -412,8 +439,7 @@ class AnthropicProvider(LLMProvider):
                 return "".join(content_parts), final_message
             except anthropic_lib.BadRequestError:
                 logger.warning(
-                    "Extended thinking not supported for %s in structured mode, "
-                    "falling back",
+                    "Extended thinking not supported for %s in structured mode, falling back",
                     self._model,
                 )
                 kwargs.pop("thinking", None)
@@ -458,7 +484,8 @@ class AnthropicProvider(LLMProvider):
                     return await stream.get_final_message()
 
             response = await self._retry_with_backoff(
-                _chat, label="chat_with_tools_single",
+                _chat,
+                label="chat_with_tools_single",
             )
         else:
             # Streaming path — forward content tokens via callback
@@ -476,11 +503,13 @@ class AnthropicProvider(LLMProvider):
                     return await stream.get_final_message()
 
             response = await self._retry_with_backoff(
-                _chat_streaming, label="chat_with_tools_single(stream)",
+                _chat_streaming,
+                label="chat_with_tools_single(stream)",
             )
 
         metrics = self._extract_metrics(
-            response, stop_reason=getattr(response, "stop_reason", None),
+            response,
+            stop_reason=getattr(response, "stop_reason", None),
         )
 
         # Parse response content blocks
@@ -491,11 +520,13 @@ class AnthropicProvider(LLMProvider):
             if block.type == "text":
                 content_parts.append(block.text)
             elif block.type == "tool_use":
-                tool_calls.append(ToolCallInfo(
-                    name=block.name,
-                    arguments=dict(block.input) if isinstance(block.input, dict) else {},
-                    id=block.id,
-                ))
+                tool_calls.append(
+                    ToolCallInfo(
+                        name=block.name,
+                        arguments=dict(block.input) if isinstance(block.input, dict) else {},
+                        id=block.id,
+                    )
+                )
 
         content = "\n".join(content_parts)
         return content, tool_calls, metrics
@@ -546,34 +577,42 @@ class AnthropicProvider(LLMProvider):
     # ── Message formatting (Anthropic-specific) ──
 
     def format_tool_result_messages(
-        self, tool_call: ToolCallInfo, content: str,
+        self,
+        tool_call: ToolCallInfo,
+        content: str,
     ) -> list[dict]:
         """Anthropic requires tool results as user messages with tool_result blocks."""
-        return [{
-            "role": "user",
-            "content": [
-                {
-                    "type": "tool_result",
-                    "tool_use_id": tool_call.id or "",
-                    "content": content,
-                }
-            ],
-        }]
+        return [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_call.id or "",
+                        "content": content,
+                    }
+                ],
+            }
+        ]
 
     def format_assistant_tool_message(
-        self, content: str, tool_calls: list[ToolCallInfo],
+        self,
+        content: str,
+        tool_calls: list[ToolCallInfo],
     ) -> dict:
         """Anthropic assistant messages contain content blocks, not a tool_calls array."""
         blocks: list[dict] = []
         if content:
             blocks.append({"type": "text", "text": content})
         for tc in tool_calls:
-            blocks.append({
-                "type": "tool_use",
-                "id": tc.id or "",
-                "name": tc.name,
-                "input": tc.arguments,
-            })
+            blocks.append(
+                {
+                    "type": "tool_use",
+                    "id": tc.id or "",
+                    "name": tc.name,
+                    "input": tc.arguments,
+                }
+            )
         return {"role": "assistant", "content": blocks}
 
 

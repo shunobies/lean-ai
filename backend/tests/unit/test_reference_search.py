@@ -68,7 +68,9 @@ class TestNeighborExpansion:
     def test_window_zero_returns_point_hits(self, reference_index, monkeypatch):
         repo_root, _ = reference_index
         monkeypatch.setattr(
-            "lean_ai.config.settings.reference_neighbor_window", 0, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window",
+            0,
+            raising=False,
         )
         results = search_reference(repo_root, "keyword_alpha", limit=5)
         assert results
@@ -79,14 +81,16 @@ class TestNeighborExpansion:
     def test_single_hit_expands_to_2w_plus_1(self, reference_index, monkeypatch):
         repo_root, _ = reference_index
         monkeypatch.setattr(
-            "lean_ai.config.settings.reference_neighbor_window", 2, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window",
+            2,
+            raising=False,
         )
         results = search_reference(repo_root, "keyword_alpha", limit=5)
         assert len(results) == 1
         passage = results[0]
         assert passage["doc_path"] == "book.epub"
         assert passage["chunk_index_start"] == 2  # 4 - 2
-        assert passage["chunk_index_end"] == 6    # 4 + 2
+        assert passage["chunk_index_end"] == 6  # 4 + 2
         # The joined content must contain the hit chunk and its neighbors.
         for i in range(2, 7):
             assert f"BookChunk{i}" in passage["content"]
@@ -110,7 +114,9 @@ class TestNeighborExpansion:
         writer.commit()
 
         monkeypatch.setattr(
-            "lean_ai.config.settings.reference_neighbor_window", 3, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window",
+            3,
+            raising=False,
         )
         results = search_reference(repo_root, "unique_edge_marker", limit=5)
         assert len(results) == 1
@@ -137,7 +143,9 @@ class TestNeighborExpansion:
         writer.commit()
 
         monkeypatch.setattr(
-            "lean_ai.config.settings.reference_neighbor_window", 2, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window",
+            2,
+            raising=False,
         )
         results = search_reference(repo_root, "joint_merge_keyword", limit=5)
         # Windows [1..5] and [3..7] overlap → single merged passage 1..7.
@@ -177,7 +185,9 @@ class TestNeighborExpansion:
         writer.commit()
 
         monkeypatch.setattr(
-            "lean_ai.config.settings.reference_neighbor_window", 1, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window",
+            1,
+            raising=False,
         )
         results = search_reference(repo_root, "cross_doc_token", limit=5)
         assert len(results) == 2
@@ -187,10 +197,15 @@ class TestNeighborExpansion:
     def test_expand_false_bypasses_merging(self, reference_index, monkeypatch):
         repo_root, _ = reference_index
         monkeypatch.setattr(
-            "lean_ai.config.settings.reference_neighbor_window", 2, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window",
+            2,
+            raising=False,
         )
         results = search_reference(
-            repo_root, "keyword_alpha", limit=5, expand=False,
+            repo_root,
+            "keyword_alpha",
+            limit=5,
+            expand=False,
         )
         assert results
         assert "chunk_index" in results[0]
@@ -200,7 +215,9 @@ class TestNeighborExpansion:
         """Direct unit check of the merge algorithm bypassing search."""
         _, idx_path = reference_index
         monkeypatch.setattr(
-            "lean_ai.config.settings.reference_neighbor_window", 2, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window",
+            2,
+            raising=False,
         )
         fake_hits = [
             {
@@ -289,7 +306,9 @@ class TestDocumentFilteredSearch:
         writer.commit()
 
         monkeypatch.setattr(
-            "lean_ai.config.settings.reference_neighbor_window", 0, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window",
+            0,
+            raising=False,
         )
 
         # Without filter — both docs hit.
@@ -298,7 +317,10 @@ class TestDocumentFilteredSearch:
 
         # With doc_path filter — only the manual.
         filtered = search_reference(
-            repo_root, "shared_filter_token", limit=5, document="manual.pdf",
+            repo_root,
+            "shared_filter_token",
+            limit=5,
+            document="manual.pdf",
         )
         assert filtered
         assert {r["doc_path"] for r in filtered} == {"manual.pdf"}
@@ -331,12 +353,17 @@ class TestDocumentFilteredSearch:
         writer.commit()
 
         monkeypatch.setattr(
-            "lean_ai.config.settings.reference_neighbor_window", 0, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window",
+            0,
+            raising=False,
         )
 
         # Title substring — "Book" matches "My Book".
         filtered = search_reference(
-            repo_root, "title_filter_token", limit=5, document="Book",
+            repo_root,
+            "title_filter_token",
+            limit=5,
+            document="Book",
         )
         assert filtered
         assert {r["doc_path"] for r in filtered} == {"book.epub"}
@@ -345,11 +372,16 @@ class TestDocumentFilteredSearch:
         """Filter that matches no document yields empty results, not all hits."""
         repo_root, _ = reference_index
         monkeypatch.setattr(
-            "lean_ai.config.settings.reference_neighbor_window", 0, raising=False,
+            "lean_ai.config.settings.reference_neighbor_window",
+            0,
+            raising=False,
         )
         # 'keyword_alpha' would normally hit; restrict to a doc that doesn't exist.
         results = search_reference(
-            repo_root, "keyword_alpha", limit=5, document="nonexistent.pdf",
+            repo_root,
+            "keyword_alpha",
+            limit=5,
+            document="nonexistent.pdf",
         )
         assert results == []
 
@@ -382,7 +414,9 @@ class TestChunkConfigSentinel:
             f.write('{"reference_chunk_chars": 9999, "schema_version": 1}')
 
         monkeypatch.setattr(
-            "lean_ai.config.settings.reference_chunk_chars", 1800, raising=False,
+            "lean_ai.config.settings.reference_chunk_chars",
+            1800,
+            raising=False,
         )
         assert is_chunk_config_stale(repo_root) is True
         assert requires_reference_rebuild(repo_root)["reason"] == "config_changed"
@@ -391,7 +425,9 @@ class TestChunkConfigSentinel:
         repo_root, idx_path = reference_index
         sentinel = os.path.join(idx_path, "chunk_config.json")
         monkeypatch.setattr(
-            "lean_ai.config.settings.reference_chunk_chars", 1800, raising=False,
+            "lean_ai.config.settings.reference_chunk_chars",
+            1800,
+            raising=False,
         )
         with open(sentinel, "w") as f:
             f.write('{"reference_chunk_chars": 1800, "schema_version": 1}')

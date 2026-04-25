@@ -126,7 +126,8 @@ class EmbeddingStore:
         with self._lock:
             t_lock = time.perf_counter()
             logger.info(
-                "[embed store] compact: lock acquired in %.2fs", t_lock - t0,
+                "[embed store] compact: lock acquired in %.2fs",
+                t_lock - t0,
             )
             index = self._load_index()
             if not index or not self._bin_path.exists():
@@ -136,8 +137,10 @@ class EmbeddingStore:
             old_size = self._bin_path.stat().st_size
             tmp_path = self._bin_path.with_suffix(".bin.tmp")
             logger.info(
-                "[embed store] compact: rewriting %d entries (%d bytes) "
-                "→ %s", len(index), old_size, tmp_path,
+                "[embed store] compact: rewriting %d entries (%d bytes) → %s",
+                len(index),
+                old_size,
+                tmp_path,
             )
 
             try:
@@ -163,7 +166,8 @@ class EmbeddingStore:
                 self.flush_index()
                 logger.info(
                     "[embed store] compact: done in %.2fs, saved %d bytes",
-                    t_done - t_lock, saved,
+                    t_done - t_lock,
+                    saved,
                 )
             else:
                 logger.info(

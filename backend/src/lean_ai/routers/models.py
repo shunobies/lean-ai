@@ -159,10 +159,10 @@ class GenerateStyleGuideResponse(BaseModel):
 
 
 class ModelInfo(BaseModel):
-    provider: str       # "ollama", "openai", "anthropic"
-    model: str          # e.g. "qwen3-coder:30b", "gpt-4o"
-    display_name: str   # Human-readable: "Ollama: qwen3-coder:30b"
-    is_default: bool    # True for the server's primary configured model
+    provider: str  # "ollama", "openai", "anthropic"
+    model: str  # e.g. "qwen3-coder:30b", "gpt-4o"
+    display_name: str  # Human-readable: "Ollama: qwen3-coder:30b"
+    is_default: bool  # True for the server's primary configured model
 
 
 class ModelsResponse(BaseModel):

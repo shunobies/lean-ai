@@ -31,18 +31,14 @@ def _seed_application(repo_root: Path, slug: str) -> None:
 def _seed_tracker(repo_root: Path) -> Path:
     """Write a minimal ``applications.md`` with the expected table header."""
     tracker = repo_root / "applications.md"
-    header = (
-        "| Date | Company | Role | Source | Status | Last Contact | "
-        "Next Action | Folder |"
-    )
+    header = "| Date | Company | Role | Source | Status | Last Contact | Next Action | Folder |"
     sep = "|------|---------|------|--------|--------|--------------|-------------|--------|"
     seed_row = (
         "| 2026-04-01 | Example Corp | Senior Engineer | LinkedIn | applied | — | — | "
         "`applications/example_corp_senior_engineer/` |"
     )
     tracker.write_text(
-        "# Applications Tracker\n\n"
-        f"{header}\n{sep}\n{seed_row}\n",
+        f"# Applications Tracker\n\n{header}\n{sep}\n{seed_row}\n",
         encoding="utf-8",
     )
     return tracker
@@ -52,25 +48,30 @@ def _init_git_repo(repo_root: Path) -> None:
     """Initialise a git repo inside *repo_root* with an initial commit."""
     subprocess.run(
         ["git", "-C", str(repo_root), "init", "-q", "-b", "main"],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_root), "config", "user.email", "test@example.com"],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_root), "config", "user.name", "Test"],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
     # Seed a commit so HEAD exists.
     (repo_root / "README.md").write_text("# seed\n", encoding="utf-8")
     subprocess.run(
         ["git", "-C", str(repo_root), "add", "README.md"],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_root), "commit", "-q", "-m", "seed"],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
 
 
@@ -78,7 +79,8 @@ def _init_git_repo(repo_root: Path) -> None:
 
 
 def test_log_applied_updates_tracker_and_commits_in_git_repo(
-    tmp_path: Path, client,
+    tmp_path: Path,
+    client,
 ) -> None:
     _seed_application(tmp_path, "acme_corp_senior_engineer")
     _seed_tracker(tmp_path)
@@ -109,13 +111,16 @@ def test_log_applied_updates_tracker_and_commits_in_git_repo(
     # The commit message should name the company/role.
     log = subprocess.run(
         ["git", "-C", str(tmp_path), "log", "-1", "--pretty=%s"],
-        check=True, capture_output=True, text=True,
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     assert log == "Applied: Acme Corp — Senior Engineer"
 
 
 def test_log_applied_without_git_still_updates_tracker(
-    tmp_path: Path, client,
+    tmp_path: Path,
+    client,
 ) -> None:
     _seed_application(tmp_path, "slug1")
     _seed_tracker(tmp_path)
@@ -141,7 +146,8 @@ def test_log_applied_without_git_still_updates_tracker(
 
 
 def test_log_applied_without_tracker_skips_tracker_update(
-    tmp_path: Path, client,
+    tmp_path: Path,
+    client,
 ) -> None:
     _seed_application(tmp_path, "slug2")
     _init_git_repo(tmp_path)
@@ -165,7 +171,8 @@ def test_log_applied_without_tracker_skips_tracker_update(
 
 
 def test_log_applied_appends_row_after_last_existing_row(
-    tmp_path: Path, client,
+    tmp_path: Path,
+    client,
 ) -> None:
     """Rows land after the last table row, not after trailing prose."""
     _seed_application(tmp_path, "slug3")

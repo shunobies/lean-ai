@@ -15,6 +15,7 @@ import pytest
 
 try:
     from docx import Document
+
     HAS_DOCX = True
 except ImportError:  # pragma: no cover — environmental skip
     HAS_DOCX = False
@@ -77,7 +78,8 @@ def test_docx_to_markdown_renders_proper_markdown_table(tmp_path: Path) -> None:
 
 
 def test_docx_to_markdown_raises_import_error_when_docx_missing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Caller is responsible for catching ImportError — verify it propagates."""
     import builtins

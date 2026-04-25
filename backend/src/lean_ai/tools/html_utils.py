@@ -21,7 +21,10 @@ def strip_html(raw: str) -> str:
 
 
 def save_and_paginate(
-    text: str, identifier: str, repo_root: str, max_lines: int = 500,
+    text: str,
+    identifier: str,
+    repo_root: str,
+    max_lines: int = 500,
 ) -> str:
     """Save long content to a file and return the first page.
 

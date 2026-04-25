@@ -235,7 +235,7 @@ export async function handleUserMessage(
 ): Promise<void> {
     // --- Slash command interception (before chat/agent routing) ---
     const trimmed = text.trim();
-    const slashMatch = trimmed.match(/^(\/\w+)(?:\s+(.*))?$/s);
+    const slashMatch = trimmed.match(/^(\/\w[-\w]*)(?:\s+(.*))?$/s);
     if (slashMatch) {
         const command = slashMatch[1].toLowerCase();
         const args = slashMatch[2] || "";

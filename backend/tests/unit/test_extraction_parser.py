@@ -16,18 +16,21 @@ from lean_ai.context.extraction_parser import (
 # ContextExtractionResult schema
 # ---------------------------------------------------------------------------
 
+
 class TestContextExtractionSchema:
     def test_valid_entry_roundtrip(self):
-        result = ContextExtractionResult.model_validate({
-            "entries": [
-                {
-                    "section": "Architecture Overview",
-                    "symbol": "main",
-                    "description": "Application entry point.",
-                    "file_path": "src/main.py",
-                },
-            ],
-        })
+        result = ContextExtractionResult.model_validate(
+            {
+                "entries": [
+                    {
+                        "section": "Architecture Overview",
+                        "symbol": "main",
+                        "description": "Application entry point.",
+                        "file_path": "src/main.py",
+                    },
+                ],
+            }
+        )
         assert len(result.entries) == 1
         assert result.entries[0].section == "Architecture Overview"
         assert result.entries[0].symbol == "main"
@@ -38,16 +41,18 @@ class TestContextExtractionSchema:
 
     def test_hallucinated_section_rejected(self):
         with pytest.raises(ValidationError):
-            ContextExtractionResult.model_validate({
-                "entries": [
-                    {
-                        "section": "Made Up Section",
-                        "symbol": "x",
-                        "description": "y",
-                        "file_path": "z.py",
-                    },
-                ],
-            })
+            ContextExtractionResult.model_validate(
+                {
+                    "entries": [
+                        {
+                            "section": "Made Up Section",
+                            "symbol": "x",
+                            "description": "y",
+                            "file_path": "z.py",
+                        },
+                    ],
+                }
+            )
 
     def test_all_seven_sections_accepted(self):
         sections = [
@@ -72,6 +77,7 @@ class TestContextExtractionSchema:
 # ---------------------------------------------------------------------------
 # parse_skeleton_output
 # ---------------------------------------------------------------------------
+
 
 class TestParseSkeletonOutput:
     def test_basic(self):
@@ -159,6 +165,7 @@ Entry points: `main.py`, `app.py`
 # _normalize_heading
 # ---------------------------------------------------------------------------
 
+
 class TestNormalizeHeading:
     def test_no_qualifier(self):
         assert _normalize_heading("Key Abstractions") == "Key Abstractions"
@@ -174,6 +181,7 @@ class TestNormalizeHeading:
 # ---------------------------------------------------------------------------
 # _extract_file_path (used by skeleton parser only)
 # ---------------------------------------------------------------------------
+
 
 class TestExtractFilePath:
     def test_path_in_parens(self):
@@ -198,6 +206,7 @@ class TestExtractFilePath:
 # ---------------------------------------------------------------------------
 # _looks_like_path
 # ---------------------------------------------------------------------------
+
 
 class TestLooksLikePath:
     def test_valid_path(self):

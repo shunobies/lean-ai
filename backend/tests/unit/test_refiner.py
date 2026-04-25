@@ -117,7 +117,8 @@ async def test_refine_chat_message_with_reference():
         ),
     ):
         result = await refiner.refine_chat_message(
-            "add auth", repo_root="/tmp/project",
+            "add auth",
+            repo_root="/tmp/project",
         )
 
     assert result.was_refined
@@ -143,7 +144,8 @@ async def test_refine_chat_message_no_reference():
         return_value=False,
     ):
         result = await refiner.refine_chat_message(
-            "add auth", repo_root="/tmp/project",
+            "add auth",
+            repo_root="/tmp/project",
         )
 
     assert result.was_refined
@@ -250,6 +252,7 @@ async def test_refiner_timeout_returns_original():
 
     async def slow_chat_raw(*args, **kwargs):
         import asyncio
+
         await asyncio.sleep(10)
         return "refined", LLMMetrics()
 

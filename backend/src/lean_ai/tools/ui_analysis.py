@@ -128,10 +128,7 @@ def availability_reason() -> str | None:
         import numpy  # noqa: F401
         import PIL  # noqa: F401
     except ImportError:
-        return (
-            "Pillow and numpy are not installed. "
-            'Run `pip install "lean-ai[ui-verification]"`'
-        )
+        return 'Pillow and numpy are not installed. Run `pip install "lean-ai[ui-verification]"`'
     return None
 
 
@@ -180,9 +177,7 @@ def sample_colors(png_path: Path, n_samples: int = 5) -> dict[str, Any]:
 
     assignments = np.zeros(len(pixels), dtype=np.int32)
     for _ in range(10):
-        distances = np.linalg.norm(
-            pixels[:, np.newaxis, :] - centroids[np.newaxis, :, :], axis=2
-        )
+        distances = np.linalg.norm(pixels[:, np.newaxis, :] - centroids[np.newaxis, :, :], axis=2)
         assignments = np.argmin(distances, axis=1)
         new_centroids = centroids.copy()
         for i in range(k):
@@ -228,9 +223,7 @@ async def analyze_screenshot(
         callers always get a structured result.
     """
     timeout = (
-        vision_timeout
-        if vision_timeout is not None
-        else settings.ui_verification_vision_timeout
+        vision_timeout if vision_timeout is not None else settings.ui_verification_vision_timeout
     )
 
     warnings: list[str] = []
@@ -244,8 +237,11 @@ async def analyze_screenshot(
     if reason is not None:
         warnings.append(reason)
         return UIAnalysis(
-            inventory=inventory, text=text, colors=colors,
-            answer=f"Analysis unavailable: {reason}", warnings=warnings,
+            inventory=inventory,
+            text=text,
+            colors=colors,
+            answer=f"Analysis unavailable: {reason}",
+            warnings=warnings,
         )
 
     # Load image.
@@ -254,7 +250,9 @@ async def analyze_screenshot(
     except Exception as e:
         warnings.append(f"image load failed: {e}")
         return UIAnalysis(
-            inventory=inventory, text=text, colors=colors,
+            inventory=inventory,
+            text=text,
+            colors=colors,
             answer=f"Failed to load screenshot at {png_path}: {e}",
             warnings=warnings,
         )
@@ -296,8 +294,7 @@ async def analyze_screenshot(
         )
     except ImportError:
         warnings.append(
-            "color sampling skipped: install lean-ai[ui-verification] "
-            "for Pillow and numpy"
+            "color sampling skipped: install lean-ai[ui-verification] for Pillow and numpy"
         )
     except Exception as e:
         logger.exception("UI analysis: color sampling failed")

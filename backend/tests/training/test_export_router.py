@@ -96,7 +96,10 @@ async def test_manifest_counts_traces_and_memories(tmp_path):
     main_db = await get_db(str(tmp_path))
     try:
         await create_memory(
-            main_db, session_id="s1", category="gotcha", content="test",
+            main_db,
+            session_id="s1",
+            category="gotcha",
+            content="test",
             curation_status="user_confirmed",
         )
     finally:
@@ -105,6 +108,7 @@ async def test_manifest_counts_traces_and_memories(tmp_path):
 
 def test_manifest_aggregates(client, tmp_path, auth_headers):
     import asyncio
+
     asyncio.run(test_manifest_counts_traces_and_memories(tmp_path))
 
     resp = client.get(
@@ -123,9 +127,7 @@ def test_manifest_aggregates(client, tmp_path, auth_headers):
 
 
 def _jsonl(resp) -> list[dict]:
-    return [
-        json.loads(line) for line in resp.text.splitlines() if line.strip()
-    ]
+    return [json.loads(line) for line in resp.text.splitlines() if line.strip()]
 
 
 @pytest.mark.asyncio
@@ -161,6 +163,7 @@ async def _seed_traces_with_pair(tmp_path):
 
 def test_traces_raw_returns_both_rows(client, tmp_path, auth_headers):
     import asyncio
+
     asyncio.run(_seed_traces_with_pair(tmp_path))
 
     resp = client.get(
@@ -178,6 +181,7 @@ def test_traces_raw_returns_both_rows(client, tmp_path, auth_headers):
 
 def test_traces_sft_only_success(client, tmp_path, auth_headers):
     import asyncio
+
     asyncio.run(_seed_traces_with_pair(tmp_path))
 
     resp = client.get(
@@ -193,6 +197,7 @@ def test_traces_sft_only_success(client, tmp_path, auth_headers):
 
 def test_traces_dpo_pairs(client, tmp_path, auth_headers):
     import asyncio
+
     asyncio.run(_seed_traces_with_pair(tmp_path))
 
     resp = client.get(
@@ -226,6 +231,7 @@ def test_traces_rejects_excessive_limit(client, tmp_path, auth_headers):
 
 def test_traces_filter_by_model(client, tmp_path, auth_headers):
     import asyncio
+
     asyncio.run(_seed_traces_with_pair(tmp_path))
 
     resp = client.get(
@@ -246,8 +252,12 @@ async def _seed_memory(tmp_path, *, content, status="user_confirmed"):
     db = await get_db(str(tmp_path))
     try:
         await create_memory(
-            db, session_id="s1", category="gotcha", content=content,
-            curation_status=status, tags=["test"],
+            db,
+            session_id="s1",
+            category="gotcha",
+            content=content,
+            curation_status=status,
+            tags=["test"],
         )
     finally:
         await db.close()
@@ -255,10 +265,13 @@ async def _seed_memory(tmp_path, *, content, status="user_confirmed"):
 
 def test_memories_stream_anonymized(client, tmp_path, auth_headers):
     import asyncio
-    asyncio.run(_seed_memory(
-        tmp_path,
-        content="Generic note about async tests — use pytest.mark.asyncio.",
-    ))
+
+    asyncio.run(
+        _seed_memory(
+            tmp_path,
+            content="Generic note about async tests — use pytest.mark.asyncio.",
+        )
+    )
 
     resp = client.get(
         f"/api/export/memories?repo_root={tmp_path}",
@@ -274,6 +287,7 @@ def test_memories_stream_anonymized(client, tmp_path, auth_headers):
 
 def test_memories_filters_auto_out_by_default(client, tmp_path, auth_headers):
     import asyncio
+
     asyncio.run(_seed_memory(tmp_path, content="auto memory", status="auto"))
 
     resp = client.get(
@@ -292,13 +306,16 @@ async def _seed_event(tmp_path):
     from lean_ai.training.capture import capture_workflow_event
 
     await capture_workflow_event(
-        str(tmp_path), session_id="s1",
-        event_type="cancellation", payload={"task": "x"},
+        str(tmp_path),
+        session_id="s1",
+        event_type="cancellation",
+        payload={"task": "x"},
     )
 
 
 def test_events_streamed(client, tmp_path, auth_headers):
     import asyncio
+
     asyncio.run(_seed_event(tmp_path))
 
     resp = client.get(
@@ -315,6 +332,7 @@ def test_events_streamed(client, tmp_path, auth_headers):
 
 def test_events_filter_by_type(client, tmp_path, auth_headers):
     import asyncio
+
     asyncio.run(_seed_event(tmp_path))
 
     resp = client.get(
@@ -346,6 +364,7 @@ async def _seed_plan_decision(tmp_path):
 
 def test_plan_decisions_included_in_manifest(client, tmp_path, auth_headers):
     import asyncio
+
     asyncio.run(_seed_plan_decision(tmp_path))
 
     resp = client.get(
@@ -365,19 +384,28 @@ async def _seed_tool_executions(repo_root):
     # Pair of identical tool, first failed, then succeeded — generates
     # a DPO pair under format=dpo_pairs.
     await capture_tool_execution(
-        str(repo_root), session_id="s1", tool_name="edit_file",
+        str(repo_root),
+        session_id="s1",
+        tool_name="edit_file",
         arguments={"path": "foo.py", "search": "old", "replace": "new"},
-        result="ERROR: string 'old' not found", success=False, latency_ms=20,
+        result="ERROR: string 'old' not found",
+        success=False,
+        latency_ms=20,
     )
     await capture_tool_execution(
-        str(repo_root), session_id="s1", tool_name="edit_file",
+        str(repo_root),
+        session_id="s1",
+        tool_name="edit_file",
         arguments={"path": "foo.py", "search": "oldvalue", "replace": "newvalue"},
-        result="Modified foo.py", success=True, latency_ms=15,
+        result="Modified foo.py",
+        success=True,
+        latency_ms=15,
     )
 
 
 def test_export_tool_executions_raw(client, tmp_path, auth_headers):
     import asyncio
+
     asyncio.run(_seed_tool_executions(tmp_path))
 
     resp = client.get(
@@ -385,24 +413,21 @@ def test_export_tool_executions_raw(client, tmp_path, auth_headers):
         headers=auth_headers,
     )
     assert resp.status_code == 200
-    lines = [
-        ln for ln in resp.text.strip().split("\n") if ln
-    ]
+    lines = [ln for ln in resp.text.strip().split("\n") if ln]
     assert len(lines) == 2
     parsed = [json.loads(ln) for ln in lines]
-    assert all("tool_name" in p and p["tool_name"] == "edit_file"
-               for p in parsed)
+    assert all("tool_name" in p and p["tool_name"] == "edit_file" for p in parsed)
     # Anonymization should apply — session_id gets hashed.
     assert all(p["session_id"] != "s1" for p in parsed)
 
 
 def test_export_tool_executions_dpo_pairs(client, tmp_path, auth_headers):
     import asyncio
+
     asyncio.run(_seed_tool_executions(tmp_path))
 
     resp = client.get(
-        f"/api/export/tool-executions?repo_root={tmp_path}"
-        f"&format=dpo_pairs",
+        f"/api/export/tool-executions?repo_root={tmp_path}&format=dpo_pairs",
         headers=auth_headers,
     )
     assert resp.status_code == 200
@@ -416,7 +441,9 @@ def test_export_tool_executions_dpo_pairs(client, tmp_path, auth_headers):
 
 
 def test_export_tool_executions_rejects_unknown_format(
-    client, tmp_path, auth_headers,
+    client,
+    tmp_path,
+    auth_headers,
 ):
     resp = client.get(
         f"/api/export/tool-executions?repo_root={tmp_path}&format=bogus",
@@ -429,10 +456,13 @@ async def _seed_phase2_synthesis(repo_root):
     from lean_ai.training.capture import capture_phase2_synthesis
 
     await capture_phase2_synthesis(
-        str(repo_root), session_id="s1",
-        task="add audit log", scope="problem\n-\n...",
+        str(repo_root),
+        session_id="s1",
+        task="add audit log",
+        scope="problem\n-\n...",
         observations=[{"file_path": "a.py", "role": "modify", "reason": "x"}],
-        scratchpad="notes", journal="journal",
+        scratchpad="notes",
+        journal="journal",
         exploration_output="prose",
         file_summary={"files_to_modify": ["a.py"]},
     )
@@ -440,6 +470,7 @@ async def _seed_phase2_synthesis(repo_root):
 
 def test_export_phase2_syntheses(client, tmp_path, auth_headers):
     import asyncio
+
     asyncio.run(_seed_phase2_synthesis(tmp_path))
 
     resp = client.get(
@@ -458,18 +489,21 @@ async def _seed_clarification(repo_root):
     from lean_ai.training.capture import capture_clarification
 
     await capture_clarification(
-        str(repo_root), session_id="s1",
-        question="which engine?", answer="postgres", outcome="answered",
+        str(repo_root),
+        session_id="s1",
+        question="which engine?",
+        answer="postgres",
+        outcome="answered",
     )
 
 
 def test_export_clarifications_filter(client, tmp_path, auth_headers):
     import asyncio
+
     asyncio.run(_seed_clarification(tmp_path))
 
     resp = client.get(
-        f"/api/export/clarifications?repo_root={tmp_path}"
-        f"&outcome=answered",
+        f"/api/export/clarifications?repo_root={tmp_path}&outcome=answered",
         headers=auth_headers,
     )
     assert resp.status_code == 200
@@ -479,8 +513,7 @@ def test_export_clarifications_filter(client, tmp_path, auth_headers):
 
     # Filter that matches nothing returns empty body.
     resp_empty = client.get(
-        f"/api/export/clarifications?repo_root={tmp_path}"
-        f"&outcome=cancelled",
+        f"/api/export/clarifications?repo_root={tmp_path}&outcome=cancelled",
         headers=auth_headers,
     )
     assert resp_empty.status_code == 200
@@ -491,14 +524,18 @@ async def _seed_diff_decision(repo_root):
     from lean_ai.training.capture import capture_diff_decision
 
     await capture_diff_decision(
-        str(repo_root), session_id="s1",
-        file_path="src/foo.py", accepted=False,
-        diff_hash="abc", note="introduces regression",
+        str(repo_root),
+        session_id="s1",
+        file_path="src/foo.py",
+        accepted=False,
+        diff_hash="abc",
+        note="introduces regression",
     )
 
 
 def test_export_diff_decisions(client, tmp_path, auth_headers):
     import asyncio
+
     asyncio.run(_seed_diff_decision(tmp_path))
 
     resp = client.get(

@@ -46,20 +46,22 @@ class WakeWordService:
         available = list(self._model.models.keys())
         if WAKE_WORD_MODEL not in available:
             raise RuntimeError(
-                f"Wake word model '{WAKE_WORD_MODEL}' not found. "
-                f"Available: {available}"
+                f"Wake word model '{WAKE_WORD_MODEL}' not found. Available: {available}"
             )
         logger.info(
             "Wake word: loaded model '%s' (available: %s)",
-            WAKE_WORD_MODEL, available,
+            WAKE_WORD_MODEL,
+            available,
         )
 
     def _ensure_pyaudio(self) -> None:
         """Create PyAudio instance if needed."""
         if self._pa is None:
             from lean_ai.voice.alsa_suppression import suppress_alsa_errors
+
             suppress_alsa_errors()
             import pyaudio
+
             self._pa = pyaudio.PyAudio()
 
     def _fire_error(self, message: str) -> None:
@@ -67,7 +69,8 @@ class WakeWordService:
         if self._on_error and self._loop:
             try:
                 asyncio.run_coroutine_threadsafe(
-                    self._on_error(message), self._loop,
+                    self._on_error(message),
+                    self._loop,
                 )
             except Exception:
                 pass
@@ -121,12 +124,14 @@ class WakeWordService:
                 if score > CONFIDENCE_THRESHOLD:
                     logger.info(
                         "Wake word: detected '%s' (score=%.3f)",
-                        WAKE_WORD_MODEL, score,
+                        WAKE_WORD_MODEL,
+                        score,
                     )
                     self._model.reset()
                     if self._on_detected and self._loop:
                         asyncio.run_coroutine_threadsafe(
-                            self._on_detected(), self._loop,
+                            self._on_detected(),
+                            self._loop,
                         )
 
         except Exception as exc:
@@ -138,7 +143,9 @@ class WakeWordService:
             stream.close()
 
     async def start(
-        self, on_detected: Callable, on_error: Callable | None = None,
+        self,
+        on_detected: Callable,
+        on_error: Callable | None = None,
     ) -> None:
         """Start listening for the wake word in a background task."""
         if self._running:
@@ -149,7 +156,8 @@ class WakeWordService:
         self._running = True
         self._loop = asyncio.get_event_loop()
         self._listener_task = asyncio.get_event_loop().run_in_executor(
-            None, self._listener_loop,
+            None,
+            self._listener_loop,
         )
         logger.info("Wake word: background listener started")
 
@@ -163,7 +171,8 @@ class WakeWordService:
         if self._listener_task is not None:
             try:
                 await asyncio.wait_for(
-                    asyncio.shield(self._listener_task), timeout=3.0,
+                    asyncio.shield(self._listener_task),
+                    timeout=3.0,
                 )
             except (asyncio.TimeoutError, Exception):
                 pass

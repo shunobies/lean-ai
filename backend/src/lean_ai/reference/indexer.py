@@ -77,7 +77,8 @@ def migrate_legacy_paths(repo_root: str) -> None:
             logger.info(
                 "Legacy path %s found but %s already exists — leaving legacy "
                 "in place; delete it manually to silence this notice",
-                legacy, current,
+                legacy,
+                current,
             )
             continue
         try:
@@ -93,12 +94,12 @@ def migrate_legacy_paths(repo_root: str) -> None:
 # queries like "chapter 3 configuration" or "ACME product spec" surface
 # the right sections without requiring exact content match.
 REFERENCE_SCHEMA = Schema(
-    chunk_id=ID(stored=True, unique=True),      # "rel_path:chunk_index"
-    doc_path=ID(stored=True),                    # relative path in reference dir
-    doc_title=TEXT(stored=True),                 # document title
-    section=TEXT(stored=True),                   # chapter / heading / "Page N"
-    content=TEXT(stored=True),                   # plain-text content
-    format=ID(stored=True),                      # epub|pdf|docx|md|html|txt|rst
+    chunk_id=ID(stored=True, unique=True),  # "rel_path:chunk_index"
+    doc_path=ID(stored=True),  # relative path in reference dir
+    doc_title=TEXT(stored=True),  # document title
+    section=TEXT(stored=True),  # chapter / heading / "Page N"
+    content=TEXT(stored=True),  # plain-text content
+    format=ID(stored=True),  # epub|pdf|docx|md|html|txt|rst
     chunk_index=NUMERIC(stored=True),
 )
 
@@ -195,7 +196,8 @@ def _reset_for_rebuild(idx_path: str, reason: str) -> None:
     """Wipe the Whoosh index, embedding store, and manifest to force a full rebuild."""
     logger.info(
         "Reference index rebuild required (%s) — wiping %s",
-        reason, idx_path,
+        reason,
+        idx_path,
     )
     # Remove the whole index directory — the Whoosh files, the manifest
     # (written by lean_ai.indexer.manifest), the embedding store, and the
@@ -271,16 +273,23 @@ def index_reference(repo_root: str) -> dict:
         all_files = [p for p in kdir.rglob("*") if p.is_file()]
         if all_files:
             from lean_ai.reference.readers.registry import supported_extensions
+
             exts = set(supported_extensions())
-            unsupported = sorted({
-                p.suffix.lower() for p in all_files
-                if p.suffix.lower() and p.suffix.lower() not in exts
-            })
+            unsupported = sorted(
+                {
+                    p.suffix.lower()
+                    for p in all_files
+                    if p.suffix.lower() and p.suffix.lower() not in exts
+                }
+            )
             logger.warning(
                 "Reference dir %s has %d file(s) but none match supported "
                 "extensions %s. Found extensions: %s. "
                 "Install optional deps: pip install 'lean-ai[reference]'",
-                kdir, len(all_files), sorted(exts), unsupported,
+                kdir,
+                len(all_files),
+                sorted(exts),
+                unsupported,
             )
             return {
                 "status": "unsupported_files",
@@ -338,6 +347,7 @@ def index_reference(repo_root: str) -> dict:
 def _read_and_chunk(kdir: Path, rel_path: str, full_path: Path) -> list:
     """Read a document and return its ReferenceChunks (or empty list)."""
     from lean_ai.reference.readers.registry import read_document
+
     return read_document(full_path, rel_path)
 
 
@@ -411,7 +421,9 @@ def _full_reference_index(
     }
     logger.info(
         "Reference full index: %d docs (%d chunks) in %s",
-        len(files), total_chunks, kdir,
+        len(files),
+        total_chunks,
+        kdir,
     )
     return stats
 
@@ -540,8 +552,10 @@ def _incremental_reference_index(
     }
     logger.info(
         "Reference incremental index: +%d ~%d -%d =%d in %s",
-        len(diff.added), len(diff.modified),
-        len(diff.deleted), len(diff.unchanged),
+        len(diff.added),
+        len(diff.modified),
+        len(diff.deleted),
+        len(diff.unchanged),
         kdir,
     )
     return stats
@@ -574,7 +588,9 @@ async def generate_reference_embeddings(
 
     with busy("embeddings.reference"):
         return await _generate_reference_embeddings_inner(
-            repo_root, llm_client, batch_size,
+            repo_root,
+            llm_client,
+            batch_size,
         )
 
 
@@ -615,7 +631,8 @@ async def _generate_reference_embeddings_inner(
         t1 = time.perf_counter()
         logger.info(
             "[reference embed] loaded existing-index (%d entries) in %.2fs",
-            len(existing), t1 - t0,
+            len(existing),
+            t1 - t0,
         )
 
         ix = open_dir(idx_path)
@@ -636,7 +653,8 @@ async def _generate_reference_embeddings_inner(
         t2 = time.perf_counter()
         logger.info(
             "[reference embed] read %d Whoosh chunks in %.2fs",
-            len(chunks), t2 - t1,
+            len(chunks),
+            t2 - t1,
         )
         return chunks, existing, store
 
@@ -661,9 +679,11 @@ async def _generate_reference_embeddings_inner(
             to_embed_local.append((chunk_id, text, content_hash))
         t1 = time.perf_counter()
         logger.info(
-            "[reference embed] hashed+diffed %d chunks in %.2fs "
-            "(%d need embedding, %d orphans)",
-            len(all_chunks), t1 - t0, len(to_embed_local), len(orphans),
+            "[reference embed] hashed+diffed %d chunks in %.2fs (%d need embedding, %d orphans)",
+            len(all_chunks),
+            t1 - t0,
+            len(to_embed_local),
+            len(orphans),
         )
         return to_embed_local, orphans, len(all_chunks)
 
@@ -688,9 +708,9 @@ async def _generate_reference_embeddings_inner(
     if not to_embed:
         await asyncio.to_thread(store.flush_index)
         logger.info(
-            "[reference embed] up to date — %d unchanged, %d orphans removed "
-            "(no embed calls made)",
-            stats.unchanged, stats.orphaned_removed,
+            "[reference embed] up to date — %d unchanged, %d orphans removed (no embed calls made)",
+            stats.unchanged,
+            stats.orphaned_removed,
         )
         return stats
 
@@ -704,7 +724,10 @@ async def _generate_reference_embeddings_inner(
     logger.info(
         "[reference embed] calling Ollama: %d chunks, batch_size=%d, "
         "%d unchanged, %d orphans removed",
-        total_to_embed, batch_size, stats.unchanged, stats.orphaned_removed,
+        total_to_embed,
+        batch_size,
+        stats.unchanged,
+        stats.orphaned_removed,
     )
 
     # Producer-consumer: overlap Ollama compute with disk I/O.
@@ -725,14 +748,17 @@ async def _generate_reference_embeddings_inner(
             t0 = time.perf_counter()
             logger.info(
                 "[reference embed] batch %d/%d → Ollama (%d texts)",
-                batch_num + 1, stats.total_batches, len(batch_texts),
+                batch_num + 1,
+                stats.total_batches,
+                len(batch_texts),
             )
             try:
                 embeddings = await llm_client.embed(batch_texts)
                 t1 = time.perf_counter()
                 logger.info(
                     "[reference embed] batch %d returned in %.1fs",
-                    batch_num + 1, t1 - t0,
+                    batch_num + 1,
+                    t1 - t0,
                 )
                 await queue.put((batch_ids, embeddings, batch_hashes))
             except Exception as e:
@@ -740,7 +766,9 @@ async def _generate_reference_embeddings_inner(
                 t1 = time.perf_counter()
                 logger.warning(
                     "[reference embed] batch %d FAILED after %.1fs: %s",
-                    batch_num + 1, t1 - t0, e,
+                    batch_num + 1,
+                    t1 - t0,
+                    e,
                 )
         await queue.put(None)  # sentinel
 
@@ -752,12 +780,17 @@ async def _generate_reference_embeddings_inner(
                 break
             batch_ids, embeddings, batch_hashes = item
             await asyncio.to_thread(
-                store.save_batch, batch_ids, embeddings, batch_hashes,
+                store.save_batch,
+                batch_ids,
+                embeddings,
+                batch_hashes,
             )
             total += len(embeddings)
             logger.info(
                 "Embedding progress: %d/%d reference chunks (%.0f%%)",
-                total, total_to_embed, (total / total_to_embed) * 100,
+                total,
+                total_to_embed,
+                (total / total_to_embed) * 100,
             )
 
     producer_task = asyncio.create_task(_producer())
@@ -769,8 +802,11 @@ async def _generate_reference_embeddings_inner(
     logger.info(
         "Generated %d reference embeddings "
         "(%d unchanged, %d orphaned removed, %d/%d batches failed)",
-        stats.embedded, stats.unchanged, stats.orphaned_removed,
-        stats.failed_batches, stats.total_batches,
+        stats.embedded,
+        stats.unchanged,
+        stats.orphaned_removed,
+        stats.failed_batches,
+        stats.total_batches,
     )
     return stats
 
@@ -850,16 +886,18 @@ def search_reference(
             else:
                 hits = searcher.search(parsed, limit=limit)
             for hit in hits:
-                results.append({
-                    "chunk_id": hit["chunk_id"],
-                    "doc_path": hit["doc_path"],
-                    "doc_title": hit["doc_title"],
-                    "section": hit["section"],
-                    "content": hit["content"],
-                    "format": hit["format"],
-                    "chunk_index": hit["chunk_index"],
-                    "score": hit.score,
-                })
+                results.append(
+                    {
+                        "chunk_id": hit["chunk_id"],
+                        "doc_path": hit["doc_path"],
+                        "doc_title": hit["doc_title"],
+                        "section": hit["section"],
+                        "content": hit["content"],
+                        "format": hit["format"],
+                        "chunk_index": hit["chunk_index"],
+                        "score": hit.score,
+                    }
+                )
     except Exception as e:
         logger.warning("Reference search failed for %r: %s", query, e)
 
@@ -867,6 +905,7 @@ def search_reference(
     if query_embedding and results:
         try:
             from lean_ai.indexer.embeddings import EmbeddingStore, semantic_rerank
+
             store = EmbeddingStore(idx_path)
             if store.get_all_embeddings():
                 results = semantic_rerank(results, query_embedding, store)
@@ -882,7 +921,8 @@ def search_reference(
         except Exception as e:
             logger.warning(
                 "Neighbor expansion failed for %r: %s — returning raw hits",
-                query, e,
+                query,
+                e,
             )
 
     return results
@@ -939,20 +979,24 @@ def _expand_with_neighbors(
 
                 # Fetch chunks for each merged range.
                 for lo, hi, score, hit_idx in merged:
-                    q = And([
-                        Term("doc_path", doc_path),
-                        NumericRange("chunk_index", lo, hi),
-                    ])
+                    q = And(
+                        [
+                            Term("doc_path", doc_path),
+                            NumericRange("chunk_index", lo, hi),
+                        ]
+                    )
                     range_hits = searcher.search(q, limit=None)
                     fetched: list[dict] = []
                     for rh in range_hits:
-                        fetched.append({
-                            "chunk_index": int(rh["chunk_index"]),
-                            "section": rh.get("section", "") or "",
-                            "content": rh.get("content", "") or "",
-                            "doc_title": rh.get("doc_title", "") or "",
-                            "format": rh.get("format", "") or "",
-                        })
+                        fetched.append(
+                            {
+                                "chunk_index": int(rh["chunk_index"]),
+                                "section": rh.get("section", "") or "",
+                                "content": rh.get("content", "") or "",
+                                "doc_title": rh.get("doc_title", "") or "",
+                                "format": rh.get("format", "") or "",
+                            }
+                        )
                     if not fetched:
                         continue
                     fetched.sort(key=lambda c: c["chunk_index"])
@@ -972,18 +1016,20 @@ def _expand_with_neighbors(
                             seen_sections.add(sec)
                             sections_ordered.append(sec)
 
-                    passages.append({
-                        "doc_path": doc_path,
-                        "doc_title": fetched[0]["doc_title"],
-                        "format": fetched[0]["format"],
-                        "section": sections_ordered[0] if sections_ordered else "",
-                        "sections": sections_ordered,
-                        "chunk_index_start": start_idx,
-                        "chunk_index_end": end_idx,
-                        "content": joined,
-                        "score": float(score),
-                        "hit_chunk_indices": sorted(hit_idx),
-                    })
+                    passages.append(
+                        {
+                            "doc_path": doc_path,
+                            "doc_title": fetched[0]["doc_title"],
+                            "format": fetched[0]["format"],
+                            "section": sections_ordered[0] if sections_ordered else "",
+                            "sections": sections_ordered,
+                            "chunk_index_start": start_idx,
+                            "chunk_index_end": end_idx,
+                            "content": joined,
+                            "score": float(score),
+                            "hit_chunk_indices": sorted(hit_idx),
+                        }
+                    )
     finally:
         ix.close()
 
@@ -1030,6 +1076,7 @@ def _build_document_filter(ix, document: str):
                 if len(paths) == 1:
                     return Term("doc_path", paths[0])
                 from whoosh.query import Or
+
                 return Or([Term("doc_path", p) for p in paths])
 
     return None

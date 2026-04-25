@@ -35,7 +35,8 @@ class PdfReader(DocumentReader):
             logger.warning(
                 "Cannot read PDF %s — missing optional dependency: %s. "
                 "Install with: pip install pypdf",
-                path, e,
+                path,
+                e,
             )
             return []
 
@@ -72,14 +73,16 @@ class PdfReader(DocumentReader):
             for chunk_text in raw_chunks:
                 if not chunk_text.strip():
                     continue
-                chunks.append(ReferenceChunk(
-                    doc_path=rel_path,
-                    doc_title=doc_title,
-                    section=section,
-                    content=chunk_text,
-                    chunk_index=chunk_index,
-                    format="pdf",
-                ))
+                chunks.append(
+                    ReferenceChunk(
+                        doc_path=rel_path,
+                        doc_title=doc_title,
+                        section=section,
+                        content=chunk_text,
+                        chunk_index=chunk_index,
+                        format="pdf",
+                    )
+                )
                 chunk_index += 1
 
         return chunks

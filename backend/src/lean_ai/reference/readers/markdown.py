@@ -47,14 +47,16 @@ class MarkdownReader(DocumentReader):
         for section_title, section_text in sections:
             raw_chunks = chunk_prose_configured(section_text)
             for chunk_text in raw_chunks:
-                chunks.append(ReferenceChunk(
-                    doc_path=rel_path,
-                    doc_title=doc_title,
-                    section=section_title,
-                    content=chunk_text,
-                    chunk_index=chunk_index,
-                    format="md",
-                ))
+                chunks.append(
+                    ReferenceChunk(
+                        doc_path=rel_path,
+                        doc_title=doc_title,
+                        section=section_title,
+                        content=chunk_text,
+                        chunk_index=chunk_index,
+                        format="md",
+                    )
+                )
                 chunk_index += 1
 
         return chunks

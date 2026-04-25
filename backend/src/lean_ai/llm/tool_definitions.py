@@ -668,8 +668,7 @@ VERIFY_WEB_UI_TOOL: dict = {
                 "question": {
                     "type": "string",
                     "description": (
-                        "Specific question to answer about the UI. "
-                        "Drives the final focused pass."
+                        "Specific question to answer about the UI. Drives the final focused pass."
                     ),
                 },
                 "viewport": {
@@ -692,8 +691,7 @@ VERIFY_WEB_UI_TOOL: dict = {
                 "wait_seconds": {
                     "type": "number",
                     "description": (
-                        "Post-render settling time in seconds before "
-                        "capture. Default 3.0."
+                        "Post-render settling time in seconds before capture. Default 3.0."
                     ),
                 },
                 "full_page": {
@@ -756,8 +754,7 @@ VERIFY_DESKTOP_UI_TOOL: dict = {
                 "question": {
                     "type": "string",
                     "description": (
-                        "Specific question to answer about the UI. "
-                        "Drives the final focused pass."
+                        "Specific question to answer about the UI. Drives the final focused pass."
                     ),
                 },
                 "wait_seconds": {
@@ -770,8 +767,7 @@ VERIFY_DESKTOP_UI_TOOL: dict = {
                 "window_timeout": {
                     "type": "number",
                     "description": (
-                        "How long to wait for the window to appear, "
-                        "in seconds. Default 30.0."
+                        "How long to wait for the window to appear, in seconds. Default 30.0."
                     ),
                 },
             },
@@ -808,8 +804,7 @@ QUERY_CONTEXT_TOOL: dict = {
                 "file_path": {
                     "type": "string",
                     "description": (
-                        "Filter by file path (partial match). "
-                        "Example: 'routers/chat.py'"
+                        "Filter by file path (partial match). Example: 'routers/chat.py'"
                     ),
                 },
                 "section": {
@@ -824,8 +819,7 @@ QUERY_CONTEXT_TOOL: dict = {
                 "keyword": {
                     "type": "string",
                     "description": (
-                        "Search for a keyword in entry content "
-                        "(case-insensitive substring match)"
+                        "Search for a keyword in entry content (case-insensitive substring match)"
                     ),
                 },
             },
@@ -890,14 +884,16 @@ RECORD_FILE_OBSERVATION_TOOL: dict = {
                 "file_path": {
                     "type": "string",
                     "description": (
-                        "Path relative to the repository root "
-                        "(e.g. 'src/models/user.py')."
+                        "Path relative to the repository root (e.g. 'src/models/user.py')."
                     ),
                 },
                 "role": {
                     "type": "string",
                     "enum": [
-                        "modify", "create", "reference", "missing",
+                        "modify",
+                        "create",
+                        "reference",
+                        "missing",
                     ],
                     "description": (
                         "modify = existing file that will change; "
@@ -909,9 +905,7 @@ RECORD_FILE_OBSERVATION_TOOL: dict = {
                 },
                 "reason": {
                     "type": "string",
-                    "description": (
-                        "One-line reason this file is relevant to the task."
-                    ),
+                    "description": ("One-line reason this file is relevant to the task."),
                 },
                 "relevant_sections": {
                     "type": "string",
@@ -942,8 +936,13 @@ RECORD_FILE_OBSERVATION_TOOL: dict = {
 PLANNING_TOOLS: list[dict] = [
     tool
     for tool in IMPLEMENTATION_TOOLS
-    if tool["function"]["name"] in (
-        "read_file", "list_directory", "directory_tree", "grep_files", "task_complete",
+    if tool["function"]["name"]
+    in (
+        "read_file",
+        "list_directory",
+        "directory_tree",
+        "grep_files",
+        "task_complete",
     )
 ]
 
@@ -956,8 +955,11 @@ def build_planning_tools() -> list[dict]:
         if tool["function"]["name"] in ("search_internet", "fetch_url")
     ]
     return (
-        PLANNING_TOOLS + search_tools + [QUERY_CONTEXT_TOOL]
-        + REFERENCE_TOOLS + _maybe_wiki_tools()
+        PLANNING_TOOLS
+        + search_tools
+        + [QUERY_CONTEXT_TOOL]
+        + REFERENCE_TOOLS
+        + _maybe_wiki_tools()
         + _maybe_ui_verification_tools()
     )
 
@@ -965,7 +967,8 @@ def build_planning_tools() -> list[dict]:
 def build_planning_tools_with_scratchpad() -> list[dict]:
     """Planning tools + update_scratchpad + add_journal_entry for long serial explorations."""
     memory_tools = [
-        t for t in IMPLEMENTATION_TOOLS
+        t
+        for t in IMPLEMENTATION_TOOLS
         if t["function"]["name"] in ("update_scratchpad", "add_journal_entry")
     ]
     return build_planning_tools() + memory_tools
@@ -981,19 +984,21 @@ DESIGN_TOOLS: list[dict] = [
 
 def build_design_tools() -> list[dict]:
     """Search + task_complete + reference + wiki + UI verification tools for Phase 3."""
-    return (
-        DESIGN_TOOLS + REFERENCE_TOOLS + _maybe_wiki_tools()
-        + _maybe_ui_verification_tools()
-    )
+    return DESIGN_TOOLS + REFERENCE_TOOLS + _maybe_wiki_tools() + _maybe_ui_verification_tools()
 
 
 # Read-only tools for chat exploration (no task_complete — text exit)
 CHAT_TOOLS: list[dict] = [
     tool
     for tool in IMPLEMENTATION_TOOLS
-    if tool["function"]["name"] in (
-        "read_file", "list_directory", "directory_tree", "grep_files",
-        "search_internet", "fetch_url",
+    if tool["function"]["name"]
+    in (
+        "read_file",
+        "list_directory",
+        "directory_tree",
+        "grep_files",
+        "search_internet",
+        "fetch_url",
     )
 ] + [
     {
@@ -1030,8 +1035,7 @@ CHAT_TOOLS: list[dict] = [
                     "project": {
                         "type": "string",
                         "description": (
-                            "Project name to filter by. "
-                            "Leave empty to use the current workspace."
+                            "Project name to filter by. Leave empty to use the current workspace."
                         ),
                     },
                 },
@@ -1103,6 +1107,7 @@ CHAT_TOOLS: list[dict] = [
     },
 ]
 
+
 def build_chat_tools() -> list[dict]:
     """CHAT_TOOLS + context query + reference + wiki + UI verification tools."""
     return [
@@ -1118,18 +1123,23 @@ def build_chat_tools() -> list[dict]:
 INVESTIGATION_TOOLS: list[dict] = [
     tool
     for tool in IMPLEMENTATION_TOOLS
-    if tool["function"]["name"] in (
-        "read_file", "list_directory", "directory_tree", "grep_files",
-        "run_tests", "run_lint",
-        "search_internet", "fetch_url",
-        "update_scratchpad", "add_journal_entry", "task_complete",
+    if tool["function"]["name"]
+    in (
+        "read_file",
+        "list_directory",
+        "directory_tree",
+        "grep_files",
+        "run_tests",
+        "run_lint",
+        "search_internet",
+        "fetch_url",
+        "update_scratchpad",
+        "add_journal_entry",
+        "task_complete",
     )
 ]
 
 
 def build_investigation_tools() -> list[dict]:
     """INVESTIGATION_TOOLS + wiki + UI verification tools when configured."""
-    return (
-        INVESTIGATION_TOOLS + _maybe_wiki_tools()
-        + _maybe_ui_verification_tools()
-    )
+    return INVESTIGATION_TOOLS + _maybe_wiki_tools() + _maybe_ui_verification_tools()

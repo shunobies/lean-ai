@@ -22,14 +22,10 @@ KOKORO_SAMPLE_RATE = 24000
 
 KOKORO_VOICES_FILENAME = "voices-v1.0.bin"
 KOKORO_VOICES_URL = (
-    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/"
-    "model-files-v1.0/voices-v1.0.bin"
+    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
 )
 
-_RELEASE_BASE = (
-    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/"
-    "model-files-v1.0/"
-)
+_RELEASE_BASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
 MODEL_VARIANTS: dict[str, tuple[str, str]] = {
     "fp32": ("kokoro-v1.0.onnx", _RELEASE_BASE + "kokoro-v1.0.onnx"),
     "fp16": ("kokoro-v1.0.fp16.onnx", _RELEASE_BASE + "kokoro-v1.0.fp16.onnx"),
@@ -67,6 +63,7 @@ VOICE_LANG_CODE_MAP = {
 
 # ── Model file helpers ────────────────────────────────────────────────────────
 
+
 def _kokoro_cache_dir() -> str:
     """Return the cache directory for Kokoro model files.
 
@@ -78,7 +75,8 @@ def _kokoro_cache_dir() -> str:
         base = os.path.expanduser("~/Library/Caches")
     else:
         base = os.environ.get(
-            "XDG_CACHE_HOME", os.path.expanduser("~/.cache"),
+            "XDG_CACHE_HOME",
+            os.path.expanduser("~/.cache"),
         )
     return os.path.join(base, "lean_ai", "kokoro")
 
@@ -88,7 +86,8 @@ def _model_variant() -> tuple[str, str]:
     quality = settings.tts_model_quality.lower()
     if quality not in MODEL_VARIANTS:
         logger.warning(
-            "TTS: unknown quality %r, falling back to fp16", quality,
+            "TTS: unknown quality %r, falling back to fp16",
+            quality,
         )
         quality = "fp16"
     return MODEL_VARIANTS[quality]
@@ -117,9 +116,13 @@ async def _download_file(url: str, dest: str) -> None:
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     tmp = dest + ".tmp"
     logger.info("TTS: downloading %s -> %s", url, dest)
-    async with httpx.AsyncClient(
-        follow_redirects=True, timeout=300.0,
-    ) as client, client.stream("GET", url) as response:
+    async with (
+        httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=300.0,
+        ) as client,
+        client.stream("GET", url) as response,
+    ):
         response.raise_for_status()
         total = int(response.headers.get("content-length", 0))
         downloaded = 0
@@ -135,7 +138,8 @@ async def _download_file(url: str, dest: str) -> None:
     os.rename(tmp, dest)
     logger.info(
         "TTS: downloaded %s (%d bytes)",
-        os.path.basename(dest), downloaded,
+        os.path.basename(dest),
+        downloaded,
     )
 
 
@@ -151,6 +155,7 @@ async def ensure_models_downloaded() -> tuple[str, str]:
 
 
 # ── TTS Service ───────────────────────────────────────────────────────────────
+
 
 class TTSService:
     """Generates speech audio from text using kokoro-onnx."""
@@ -168,13 +173,10 @@ class TTSService:
 
         # Optimized ONNX session — graph optimization + threading
         sess_opts = ort.SessionOptions()
-        sess_opts.graph_optimization_level = (
-            ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        )
+        sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         auto_threads = min(os.cpu_count() or 4, 8)
         sess_opts.intra_op_num_threads = (
-            settings.tts_cpu_threads if settings.tts_cpu_threads > 0
-            else auto_threads
+            settings.tts_cpu_threads if settings.tts_cpu_threads > 0 else auto_threads
         )
         sess_opts.inter_op_num_threads = 1
         session = ort.InferenceSession(
@@ -189,7 +191,10 @@ class TTSService:
         # Warmup — first inference triggers ONNX JIT optimizations
         await asyncio.to_thread(
             self._kokoro.create,
-            "warmup", voice="af_heart", speed=1.0, lang="en-us",
+            "warmup",
+            voice="af_heart",
+            speed=1.0,
+            lang="en-us",
         )
         logger.info("TTS: warmup complete")
 
@@ -256,7 +261,8 @@ class TTSService:
 
     @staticmethod
     def _audio_to_base64_wav(
-        audio_array, sample_rate: int = KOKORO_SAMPLE_RATE,
+        audio_array,
+        sample_rate: int = KOKORO_SAMPLE_RATE,
     ) -> str:
         """Encode a numpy audio array as a base64 WAV string."""
         import soundfile as sf
@@ -299,7 +305,10 @@ class TTSService:
 
         await self._ensure_loaded()
         result = await asyncio.to_thread(
-            self._synthesize_sync, text, voice, speed,
+            self._synthesize_sync,
+            text,
+            voice,
+            speed,
         )
         return result
 
@@ -314,7 +323,10 @@ class TTSService:
         for chunk_text in self._split_for_tts(text):
             try:
                 samples, sample_rate = self._kokoro.create(
-                    chunk_text, voice=voice, speed=speed, lang=lang,
+                    chunk_text,
+                    voice=voice,
+                    speed=speed,
+                    lang=lang,
                 )
                 if samples is not None and len(samples) > 0:
                     all_samples.append(samples)
@@ -333,7 +345,9 @@ class TTSService:
         audio_b64 = self._audio_to_base64_wav(combined, rate)
 
         logger.info(
-            "TTS: synthesized %.1fs audio (%d chars)", duration, len(text),
+            "TTS: synthesized %.1fs audio (%d chars)",
+            duration,
+            len(text),
         )
         return {
             "audio_base64": audio_b64,
@@ -363,12 +377,16 @@ class TTSService:
         for chunk_text in self._split_for_tts(text):
             try:
                 async for samples, sample_rate in self._kokoro.create_stream(
-                    chunk_text, voice=voice, speed=speed, lang=lang,
+                    chunk_text,
+                    voice=voice,
+                    speed=speed,
+                    lang=lang,
                 ):
                     if samples is not None and len(samples) > 0:
                         duration = len(samples) / sample_rate
                         audio_b64 = self._audio_to_base64_wav(
-                            samples, sample_rate,
+                            samples,
+                            sample_rate,
                         )
                         yield {
                             "audio_base64": audio_b64,
@@ -409,7 +427,10 @@ class TTSService:
             for chunk_text in chunks:
                 try:
                     async for samples, sample_rate in self._kokoro.create_stream(
-                        chunk_text, voice=voice, speed=speed, lang=lang,
+                        chunk_text,
+                        voice=voice,
+                        speed=speed,
+                        lang=lang,
                     ):
                         if samples is not None and len(samples) > 0:
                             await output_queue.put((samples, sample_rate))
@@ -446,34 +467,57 @@ class TTSService:
                 for vid in self._kokoro.get_voices():
                     prefix = vid[0].lower() if vid else ""
                     lang_name = VOICE_LANG_MAP.get(prefix, "Unknown")
-                    gender = (
-                        "female" if len(vid) > 1 and vid[1] == "f"
-                        else "male"
+                    gender = "female" if len(vid) > 1 and vid[1] == "f" else "male"
+                    voices.append(
+                        {
+                            "id": vid,
+                            "name": vid,
+                            "language": lang_name,
+                            "gender": gender,
+                        }
                     )
-                    voices.append({
-                        "id": vid,
-                        "name": vid,
-                        "language": lang_name,
-                        "gender": gender,
-                    })
         except Exception:
             pass
 
         if not voices:
             # Fallback: provide known default voices
             voices = [
-                {"id": "af_heart", "name": "af_heart",
-                 "language": "American English", "gender": "female"},
-                {"id": "af_bella", "name": "af_bella",
-                 "language": "American English", "gender": "female"},
-                {"id": "am_adam", "name": "am_adam",
-                 "language": "American English", "gender": "male"},
-                {"id": "am_michael", "name": "am_michael",
-                 "language": "American English", "gender": "male"},
-                {"id": "bf_emma", "name": "bf_emma",
-                 "language": "British English", "gender": "female"},
-                {"id": "bm_george", "name": "bm_george",
-                 "language": "British English", "gender": "male"},
+                {
+                    "id": "af_heart",
+                    "name": "af_heart",
+                    "language": "American English",
+                    "gender": "female",
+                },
+                {
+                    "id": "af_bella",
+                    "name": "af_bella",
+                    "language": "American English",
+                    "gender": "female",
+                },
+                {
+                    "id": "am_adam",
+                    "name": "am_adam",
+                    "language": "American English",
+                    "gender": "male",
+                },
+                {
+                    "id": "am_michael",
+                    "name": "am_michael",
+                    "language": "American English",
+                    "gender": "male",
+                },
+                {
+                    "id": "bf_emma",
+                    "name": "bf_emma",
+                    "language": "British English",
+                    "gender": "female",
+                },
+                {
+                    "id": "bm_george",
+                    "name": "bm_george",
+                    "language": "British English",
+                    "gender": "male",
+                },
             ]
 
         return voices

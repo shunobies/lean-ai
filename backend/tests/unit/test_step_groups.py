@@ -4,8 +4,9 @@ from lean_ai.llm.plan_schema import PlanStep
 from lean_ai.workflow.executor import _build_step_groups, _path_mentioned_in
 
 
-def _step(num: int, tool: str = "edit_file", file_path: str = "",
-          instruction: str = "") -> PlanStep:
+def _step(
+    num: int, tool: str = "edit_file", file_path: str = "", instruction: str = ""
+) -> PlanStep:
     return PlanStep(
         step_number=num,
         tool=tool,
@@ -74,8 +75,7 @@ class TestBuildStepGroups:
         """Step B mentioning step A's file_path -> sequential."""
         steps = [
             _step(1, file_path="src/models.py", instruction="add model"),
-            _step(2, file_path="src/views.py",
-                  instruction="import from src/models.py"),
+            _step(2, file_path="src/views.py", instruction="import from src/models.py"),
         ]
         groups = _build_step_groups(steps)
         assert len(groups) == 2

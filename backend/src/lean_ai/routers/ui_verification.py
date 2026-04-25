@@ -41,7 +41,8 @@ from lean_ai.tools.ui_capture_web import (
 logger = logging.getLogger(__name__)
 
 ui_verification_router = APIRouter(
-    prefix="/ui-verification", tags=["ui-verification"],
+    prefix="/ui-verification",
+    tags=["ui-verification"],
 )
 
 
@@ -97,6 +98,7 @@ def _platform_label() -> str:
         return "darwin"
     # Linux — distinguish Wayland from X11
     import os
+
     if os.environ.get("WAYLAND_DISPLAY"):
         return "linux-wayland"
     return "linux-x11"
@@ -131,8 +133,8 @@ async def get_status(repo_root: str = "") -> UIVerificationStatus:
         chromium_path = _chromium_path(repo_root)
 
     system_channel = detect_system_browser_channel()
-    web_capture_available = (
-        is_playwright_installed() and (chromium_installed or system_channel is not None)
+    web_capture_available = is_playwright_installed() and (
+        chromium_installed or system_channel is not None
     )
 
     return UIVerificationStatus(
@@ -169,7 +171,8 @@ async def post_install(request: InstallChromiumRequest) -> InstallChromiumRespon
     repo_path = Path(request.repo_root)
     if not repo_path.is_dir():
         raise HTTPException(
-            400, f"repo_root does not exist or is not a directory: {request.repo_root}",
+            400,
+            f"repo_root does not exist or is not a directory: {request.repo_root}",
         )
 
     if not is_playwright_installed():
@@ -231,7 +234,9 @@ async def post_test(request: TestCaptureRequest) -> TestCaptureResponse:
     # as error + success=False so the extension can render them clearly.
     if report.startswith("ERROR:"):
         return TestCaptureResponse(
-            success=False, report="", error=report.removeprefix("ERROR:").strip(),
+            success=False,
+            report="",
+            error=report.removeprefix("ERROR:").strip(),
         )
 
     # Extract the captured screenshot path from the "Saved to `...`" line so
@@ -239,7 +244,7 @@ async def post_test(request: TestCaptureRequest) -> TestCaptureResponse:
     screenshot_path: str | None = None
     for line in report.splitlines():
         if line.startswith("Saved to `") and line.endswith("`"):
-            screenshot_path = line[len("Saved to `"):-1]
+            screenshot_path = line[len("Saved to `") : -1]
             break
 
     return TestCaptureResponse(

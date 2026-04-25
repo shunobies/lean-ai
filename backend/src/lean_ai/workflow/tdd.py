@@ -52,11 +52,15 @@ async def evaluate_test_dispute(
     from lean_ai.workflow.tool_executor import make_tool_executor
 
     dispute_telemetry = {
-        "repo_root": repo_root, "session_id": session_id,
-        "phase": "tdd.dispute", "role": "expert",
+        "repo_root": repo_root,
+        "session_id": session_id,
+        "phase": "tdd.dispute",
+        "role": "expert",
     }
     tool_executor = make_tool_executor(
-        repo_root, ws, session_id,
+        repo_root,
+        ws,
+        session_id,
         llm_client=expert_client,
         dispatcher=dispatcher,
         telemetry_context=dispute_telemetry,
@@ -71,9 +75,8 @@ async def evaluate_test_dispute(
                 truncated = content[:4000]
                 relevant_parts.append(f"--- {path} ---\n{truncated}")
         if relevant_parts:
-            artifact_context = (
-                "\n\nImplementation files created so far:\n"
-                + "\n".join(relevant_parts)
+            artifact_context = "\n\nImplementation files created so far:\n" + "\n".join(
+                relevant_parts
             )
 
     messages = [
@@ -134,7 +137,9 @@ async def evaluate_test_dispute(
 
     if decision == "accepted":
         logger.info(
-            "TDD dispute ACCEPTED for %s::%s", test_file, test_function,
+            "TDD dispute ACCEPTED for %s::%s",
+            test_file,
+            test_function,
         )
         return (
             f"DISPUTE ACCEPTED — The expert agreed and fixed the test.\n"
@@ -143,7 +148,9 @@ async def evaluate_test_dispute(
         )
     else:
         logger.info(
-            "TDD dispute REJECTED for %s::%s", test_file, test_function,
+            "TDD dispute REJECTED for %s::%s",
+            test_file,
+            test_function,
         )
         return (
             f"DISPUTE REJECTED — The test is correct as written.\n"

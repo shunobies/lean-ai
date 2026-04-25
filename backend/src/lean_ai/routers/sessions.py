@@ -155,6 +155,7 @@ async def resume_session(session_id: str, request: ResumeSessionRequest):
         await update_session(db, session_id, status="active")
 
         from lean_ai.tools.scratchpad import scratchpad_path
+
         pad_exists = scratchpad_path(repo_root, session_id).is_file()
 
         return {

@@ -107,7 +107,9 @@ def test_attach_audio_serve_uses_openai_shape():
 def test_attach_audio_gemini_uses_generic_shape():
     out = attach_audio(_text_only_messages(), "ZZZ", "audio/wav", provider="gemini")
     assert out[-1]["content"][1] == {
-        "type": "audio", "data": "ZZZ", "mime_type": "audio/wav",
+        "type": "audio",
+        "data": "ZZZ",
+        "mime_type": "audio/wav",
     }
 
 

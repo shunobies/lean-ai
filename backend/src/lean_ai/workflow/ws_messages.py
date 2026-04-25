@@ -348,13 +348,23 @@ async def send_diff(ws: WebSocket, *, file: str, diff: str) -> None:
     import hashlib
 
     diff_hash = hashlib.sha256((diff or "").encode("utf-8")).hexdigest()[:16]
-    await ws_send(ws, "diff", {
-        "file": file, "diff": diff, "diff_hash": diff_hash,
-    })
+    await ws_send(
+        ws,
+        "diff",
+        {
+            "file": file,
+            "diff": diff,
+            "diff_hash": diff_hash,
+        },
+    )
 
 
 async def send_test_result(
-    ws: WebSocket, *, passed: bool, output: str, command: str | None = None,
+    ws: WebSocket,
+    *,
+    passed: bool,
+    output: str,
+    command: str | None = None,
 ) -> None:
     data: dict = {"passed": passed, "output": output}
     if command is not None:
@@ -363,19 +373,36 @@ async def send_test_result(
 
 
 async def send_tool_approval_required(
-    ws: WebSocket, *, tool: str, command: str, reason: str,
+    ws: WebSocket,
+    *,
+    tool: str,
+    command: str,
+    reason: str,
 ) -> None:
-    await ws_send(ws, "tool_approval_required", {
-        "tool": tool, "command": command, "reason": reason,
-    })
+    await ws_send(
+        ws,
+        "tool_approval_required",
+        {
+            "tool": tool,
+            "command": command,
+            "reason": reason,
+        },
+    )
 
 
 async def send_checkpoint(
-    ws: WebSocket, *, step: int, total: int, tool: str,
-    file_path: str = "", description: str = "",
+    ws: WebSocket,
+    *,
+    step: int,
+    total: int,
+    tool: str,
+    file_path: str = "",
+    description: str = "",
 ) -> None:
     data: dict = {
-        "step": step, "total": total, "tool": tool,
+        "step": step,
+        "total": total,
+        "tool": tool,
     }
     if file_path:
         data["file_path"] = file_path
@@ -389,7 +416,11 @@ async def send_complete(ws: WebSocket, **data: object) -> None:
 
 
 def fire_tool_progress(
-    ws: WebSocket, *, tool: str, status: str, description: str,
+    ws: WebSocket,
+    *,
+    tool: str,
+    status: str,
+    description: str,
     output: str | None = None,
 ) -> None:
     """Fire-and-forget tool progress (non-blocking)."""
@@ -400,7 +431,10 @@ def fire_tool_progress(
 
 
 def fire_assistant_content(
-    ws: WebSocket, *, content: str, done: bool = False,
+    ws: WebSocket,
+    *,
+    content: str,
+    done: bool = False,
     streaming: bool = False,
 ) -> None:
     """Fire-and-forget assistant content (non-blocking)."""
@@ -434,7 +468,10 @@ def fire_thinking_content(
 
 
 def fire_context_refreshed(
-    ws: WebSocket, *, dropped_messages: int, reason: str = "",
+    ws: WebSocket,
+    *,
+    dropped_messages: int,
+    reason: str = "",
 ) -> None:
     """Fire-and-forget context refresh notification (non-blocking)."""
     data: dict = {"dropped_messages": dropped_messages}
@@ -444,15 +481,22 @@ def fire_context_refreshed(
 
 
 def fire_metrics_update(
-    ws: WebSocket, *, prompt_tokens: int, context_window: int,
+    ws: WebSocket,
+    *,
+    prompt_tokens: int,
+    context_window: int,
     context_percent: int,
 ) -> None:
     """Fire-and-forget metrics update (non-blocking)."""
-    ws_send_nowait(ws, "metrics_update", {
-        "prompt_tokens": prompt_tokens,
-        "context_window": context_window,
-        "context_percent": context_percent,
-    })
+    ws_send_nowait(
+        ws,
+        "metrics_update",
+        {
+            "prompt_tokens": prompt_tokens,
+            "context_window": context_window,
+            "context_percent": context_percent,
+        },
+    )
 
 
 def fire_memory_suggested(ws: WebSocket, *, memory: dict) -> None:

@@ -206,7 +206,10 @@ def _append_tracker_row(tracker: Path, row: str) -> None:
 
 
 def _git_commit_application(
-    repo_root: Path, slug: str, company: str, role: str,
+    repo_root: Path,
+    slug: str,
+    company: str,
+    role: str,
 ) -> tuple[str | None, str | None]:
     """Stage the application folder + tracker, commit, return (sha, error).
 
@@ -229,7 +232,9 @@ def _git_commit_application(
     try:
         subprocess.run(
             ["git", "-C", str(repo_root), "add", *paths_to_add],
-            check=True, capture_output=True, timeout=15,
+            check=True,
+            capture_output=True,
+            timeout=15,
         )
         result = subprocess.run(
             ["git", "-C", str(repo_root), "diff", "--cached", "--quiet"],
@@ -240,14 +245,23 @@ def _git_commit_application(
 
         subprocess.run(
             [
-                "git", "-C", str(repo_root), "commit",
-                "-m", f"Applied: {company} — {role}",
+                "git",
+                "-C",
+                str(repo_root),
+                "commit",
+                "-m",
+                f"Applied: {company} — {role}",
             ],
-            check=True, capture_output=True, timeout=15,
+            check=True,
+            capture_output=True,
+            timeout=15,
         )
         sha = subprocess.run(
             ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
-            check=True, capture_output=True, timeout=15, text=True,
+            check=True,
+            capture_output=True,
+            timeout=15,
+            text=True,
         ).stdout.strip()
         return sha, None
     except subprocess.CalledProcessError as e:
@@ -307,7 +321,10 @@ async def log_applied(req: LogAppliedRequest) -> LogAppliedResponse:
             logger.warning("Failed to append tracker row: %s", e)
 
     commit_sha, commit_error = _git_commit_application(
-        repo_root, slug, req.company, req.role,
+        repo_root,
+        slug,
+        req.company,
+        req.role,
     )
 
     return LogAppliedResponse(

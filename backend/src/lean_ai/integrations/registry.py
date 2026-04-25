@@ -42,11 +42,13 @@ def list_integrations() -> list[dict]:
     result = []
     for name, cls in _REGISTRY.items():
         display = getattr(cls, "DISPLAY_NAME", name)
-        result.append({
-            "name": name,
-            "display_name": display,
-            "active": name in _ACTIVE,
-        })
+        result.append(
+            {
+                "name": name,
+                "display_name": display,
+                "active": name in _ACTIVE,
+            }
+        )
     return result
 
 

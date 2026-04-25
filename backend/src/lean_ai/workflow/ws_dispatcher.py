@@ -82,8 +82,7 @@ class WSMessageDispatcher:
             queue.put_nowait(data)
         except asyncio.QueueFull:
             logger.warning(
-                "WSMessageDispatcher: queue full (size=%d), "
-                "dropping oldest message to make room",
+                "WSMessageDispatcher: queue full (size=%d), dropping oldest message to make room",
                 queue.maxsize,
             )
             try:
@@ -94,8 +93,7 @@ class WSMessageDispatcher:
                 queue.put_nowait(data)
             except asyncio.QueueFull:
                 logger.error(
-                    "WSMessageDispatcher: still full after drop, "
-                    "message lost: %s",
+                    "WSMessageDispatcher: still full after drop, message lost: %s",
                     data.get("type", "?"),
                 )
 

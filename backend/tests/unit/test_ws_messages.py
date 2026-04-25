@@ -82,8 +82,12 @@ class TestTypedSendHelpers:
     async def test_send_stage_status(self):
         ws = FakeWebSocket()
         await send_stage_status(
-            ws, stage="PLANNING", status="running",
-            summary="Phase 1", model="qwen3", phase=1,
+            ws,
+            stage="PLANNING",
+            status="running",
+            summary="Phase 1",
+            model="qwen3",
+            phase=1,
         )
         msg = ws.sent[-1]
         assert msg["type"] == "stage_status"
@@ -95,7 +99,10 @@ class TestTypedSendHelpers:
     async def test_send_stage_status_minimal(self):
         ws = FakeWebSocket()
         await send_stage_status(
-            ws, stage="EXEC", status="done", summary="Done",
+            ws,
+            stage="EXEC",
+            status="done",
+            summary="Done",
         )
         msg = ws.sent[-1]
         assert "model" not in msg
@@ -132,7 +139,10 @@ class TestTypedSendHelpers:
     async def test_send_tool_approval_required(self):
         ws = FakeWebSocket()
         await send_tool_approval_required(
-            ws, tool="run_command", command="rm foo", reason="destructive",
+            ws,
+            tool="run_command",
+            command="rm foo",
+            reason="destructive",
         )
         msg = ws.sent[-1]
         assert msg["type"] == "tool_approval_required"
@@ -144,7 +154,9 @@ class TestFireAndForgetHelpers:
     async def test_fire_tool_progress(self):
         ws = FakeWebSocket()
         fire_tool_progress(
-            ws, tool="read_file", status="running",
+            ws,
+            tool="read_file",
+            status="running",
             description="Reading file.py",
         )
         # fire-and-forget uses create_task — give the event loop a tick
@@ -178,6 +190,7 @@ class TestTypeLiteralCoverage:
         """Sanity check that the type alias resolves."""
         # ServerMessageType is a Literal union — we can check its args
         from typing import get_args
+
         args = get_args(ServerMessageType)
         assert "stage_change" in args
         assert "complete" in args
@@ -186,6 +199,7 @@ class TestTypeLiteralCoverage:
 
     def test_client_message_type_is_literal(self):
         from typing import get_args
+
         args = get_args(ClientMessageType)
         assert "user_message" in args
         assert "cancel" in args

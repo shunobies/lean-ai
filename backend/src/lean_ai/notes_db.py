@@ -131,9 +131,7 @@ async def update_note(
     values.append(now)
     values.append(note_id)
 
-    await db.execute(
-        f"UPDATE notes SET {', '.join(parts)} WHERE id = ?", values
-    )
+    await db.execute(f"UPDATE notes SET {', '.join(parts)} WHERE id = ?", values)
     await db.commit()
     return await get_note(db, note_id)
 
@@ -171,9 +169,7 @@ async def list_notes(
             (project,),
         )
     else:
-        cursor = await db.execute(
-            "SELECT * FROM notes ORDER BY updated_at DESC"
-        )
+        cursor = await db.execute("SELECT * FROM notes ORDER BY updated_at DESC")
     rows = await cursor.fetchall()
     results = []
     for r in rows:
@@ -186,8 +182,7 @@ async def list_notes(
 async def list_projects(db: aiosqlite.Connection) -> list[str]:
     """List distinct project categories."""
     cursor = await db.execute(
-        "SELECT DISTINCT project FROM notes WHERE project IS NOT NULL "
-        "ORDER BY project"
+        "SELECT DISTINCT project FROM notes WHERE project IS NOT NULL ORDER BY project"
     )
     rows = await cursor.fetchall()
     return [row[0] for row in rows]
@@ -204,8 +199,7 @@ async def create_todo(
     """Add a TODO to a note. Returns the todo dict."""
     now = datetime.now(timezone.utc).isoformat()
     cursor = await db.execute(
-        "INSERT INTO note_todos (note_id, description, created_at) "
-        "VALUES (?, ?, ?)",
+        "INSERT INTO note_todos (note_id, description, created_at) VALUES (?, ?, ?)",
         (note_id, description, now),
     )
     await db.commit()
@@ -240,18 +234,14 @@ async def update_todo(
         return await get_todo(db, todo_id)
 
     values.append(todo_id)
-    await db.execute(
-        f"UPDATE note_todos SET {', '.join(parts)} WHERE id = ?", values
-    )
+    await db.execute(f"UPDATE note_todos SET {', '.join(parts)} WHERE id = ?", values)
     await db.commit()
     return await get_todo(db, todo_id)
 
 
 async def delete_todo(db: aiosqlite.Connection, todo_id: int) -> bool:
     """Delete a TODO. Returns True if found."""
-    cursor = await db.execute(
-        "SELECT id FROM note_todos WHERE id = ?", (todo_id,)
-    )
+    cursor = await db.execute("SELECT id FROM note_todos WHERE id = ?", (todo_id,))
     if not await cursor.fetchone():
         return False
     await db.execute("DELETE FROM note_todos WHERE id = ?", (todo_id,))
@@ -261,9 +251,7 @@ async def delete_todo(db: aiosqlite.Connection, todo_id: int) -> bool:
 
 async def get_todo(db: aiosqlite.Connection, todo_id: int) -> dict | None:
     """Fetch a single TODO."""
-    cursor = await db.execute(
-        "SELECT * FROM note_todos WHERE id = ?", (todo_id,)
-    )
+    cursor = await db.execute("SELECT * FROM note_todos WHERE id = ?", (todo_id,))
     row = await cursor.fetchone()
     if not row:
         return None

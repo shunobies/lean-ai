@@ -36,26 +36,14 @@ class TestReorganizeSections:
         assert "Has views too." in result
 
     def test_preserves_preamble(self):
-        text = (
-            "# Project Context\n"
-            "Some intro text.\n\n"
-            "## Section A\n"
-            "Content A"
-        )
+        text = "# Project Context\nSome intro text.\n\n## Section A\nContent A"
         result = reorganize_sections(text)
         assert result.startswith("# Project Context\n")
         assert "Some intro text." in result
         assert "## Section A" in result
 
     def test_preserves_first_occurrence_order(self):
-        text = (
-            "## Bravo\n"
-            "B content\n\n"
-            "## Alpha\n"
-            "A content\n\n"
-            "## Bravo\n"
-            "More B content"
-        )
+        text = "## Bravo\nB content\n\n## Alpha\nA content\n\n## Bravo\nMore B content"
         result = reorganize_sections(text)
         bravo_pos = result.index("## Bravo")
         alpha_pos = result.index("## Alpha")
@@ -73,12 +61,7 @@ class TestReorganizeSections:
         assert result == text
 
     def test_collapses_blank_lines(self):
-        text = (
-            "## Keep\n"
-            "Content\n\n\n\n"
-            "## Also Keep\n"
-            "More content"
-        )
+        text = "## Keep\nContent\n\n\n\n## Also Keep\nMore content"
         result = reorganize_sections(text)
         assert "\n\n\n\n" not in result
         assert "## Keep" in result
@@ -91,16 +74,7 @@ class TestReorganizeSections:
         assert result == text
 
     def test_three_occurrences_merged(self):
-        text = (
-            "## X\n"
-            "First.\n\n"
-            "## Y\n"
-            "Middle.\n\n"
-            "## X\n"
-            "Second.\n\n"
-            "## X\n"
-            "Third."
-        )
+        text = "## X\nFirst.\n\n## Y\nMiddle.\n\n## X\nSecond.\n\n## X\nThird."
         result = reorganize_sections(text)
         assert result.count("## X") == 1
         assert "First." in result

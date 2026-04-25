@@ -64,9 +64,7 @@ async def create_note_endpoint(req: CreateNoteRequest):
         index_note(note_id=note["id"], content=req.content)
 
         # Schedule background LLM categorization
-        schedule_categorization(
-            llm_client, note["id"], req.content, req.source_workspace
-        )
+        schedule_categorization(llm_client, note["id"], req.content, req.source_workspace)
 
         return note
     finally:

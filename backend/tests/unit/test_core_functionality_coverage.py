@@ -34,13 +34,19 @@ def _plan(
 
 
 def _step(
-    *, file_path: str, instruction: str = "", context: str = "",
+    *,
+    file_path: str,
+    instruction: str = "",
+    context: str = "",
     reason: str = "",
 ) -> PlanStep:
     return PlanStep(
-        step_number=1, tool="create_file",
-        file_path=file_path, instruction=instruction or "create test",
-        reason=reason, context=context,
+        step_number=1,
+        tool="create_file",
+        file_path=file_path,
+        instruction=instruction or "create test",
+        reason=reason,
+        context=context,
     )
 
 
@@ -48,7 +54,10 @@ def test_schema_accepts_tags_and_defaults_empty() -> None:
     dar = DesignAndRisks()
     assert dar.core_functionality == []
     plan = ExecutionPlan(
-        scope="s", steps=[], affected_files=[], test_strategy="",
+        scope="s",
+        steps=[],
+        affected_files=[],
+        test_strategy="",
     )
     assert plan.core_functionality == []
 
@@ -75,20 +84,26 @@ def test_no_warnings_when_no_tags() -> None:
 
 
 def test_warns_when_core_entity_has_no_regression_step() -> None:
-    plan = _plan(core=[
-        CoreFunctionalityTag(
-            entity="login",
-            file_path="src/auth.py",
-            reason="primary deliverable",
-            source_signal="phase1_deliverable",
-            confidence="high",
-        ),
-    ])
+    plan = _plan(
+        core=[
+            CoreFunctionalityTag(
+                entity="login",
+                file_path="src/auth.py",
+                reason="primary deliverable",
+                source_signal="phase1_deliverable",
+                confidence="high",
+            ),
+        ]
+    )
     # Only a regular test step, NOT in regression convention.
-    verif = VerificationPlan(steps=[_step(
-        file_path="tests/test_auth.py",
-        instruction="tests for login function in src/auth.py",
-    )])
+    verif = VerificationPlan(
+        steps=[
+            _step(
+                file_path="tests/test_auth.py",
+                instruction="tests for login function in src/auth.py",
+            )
+        ]
+    )
 
     warnings = _check_core_functionality_covered(verif, plan)
     assert len(warnings) == 1
@@ -97,57 +112,75 @@ def test_warns_when_core_entity_has_no_regression_step() -> None:
 
 
 def test_silent_when_entity_has_matching_regression_step_by_entity_name() -> None:
-    plan = _plan(core=[
-        CoreFunctionalityTag(
-            entity="login",
-            file_path="src/auth.py",
-            reason="primary deliverable",
-            source_signal="phase1_deliverable",
-            confidence="high",
-        ),
-    ])
-    verif = VerificationPlan(steps=[_step(
-        file_path="tests/regression/regression_auth_test.py",
-        instruction="regression test for login — must not be removed",
-    )])
+    plan = _plan(
+        core=[
+            CoreFunctionalityTag(
+                entity="login",
+                file_path="src/auth.py",
+                reason="primary deliverable",
+                source_signal="phase1_deliverable",
+                confidence="high",
+            ),
+        ]
+    )
+    verif = VerificationPlan(
+        steps=[
+            _step(
+                file_path="tests/regression/regression_auth_test.py",
+                instruction="regression test for login — must not be removed",
+            )
+        ]
+    )
 
     assert _check_core_functionality_covered(verif, plan) == []
 
 
 def test_silent_when_entity_has_matching_regression_step_by_path() -> None:
-    plan = _plan(core=[
-        CoreFunctionalityTag(
-            entity="do_thing",
-            file_path="src/services/thing.py",
-            reason="public API",
-            source_signal="public_api",
-            confidence="medium",
-        ),
-    ])
+    plan = _plan(
+        core=[
+            CoreFunctionalityTag(
+                entity="do_thing",
+                file_path="src/services/thing.py",
+                reason="public API",
+                source_signal="public_api",
+                confidence="medium",
+            ),
+        ]
+    )
     # No entity name, but the file path is mentioned.
-    verif = VerificationPlan(steps=[_step(
-        file_path="tests/regression/regression_thing_test.py",
-        context="covers contract of src/services/thing.py",
-    )])
+    verif = VerificationPlan(
+        steps=[
+            _step(
+                file_path="tests/regression/regression_thing_test.py",
+                context="covers contract of src/services/thing.py",
+            )
+        ]
+    )
 
     assert _check_core_functionality_covered(verif, plan) == []
 
 
 def test_regular_test_file_does_not_count_as_regression_coverage() -> None:
-    plan = _plan(core=[
-        CoreFunctionalityTag(
-            entity="login",
-            file_path="src/auth.py",
-            reason="primary deliverable",
-            source_signal="phase1_deliverable",
-            confidence="high",
-        ),
-    ])
+    plan = _plan(
+        core=[
+            CoreFunctionalityTag(
+                entity="login",
+                file_path="src/auth.py",
+                reason="primary deliverable",
+                source_signal="phase1_deliverable",
+                confidence="high",
+            ),
+        ]
+    )
     # Step IS about login, but the test file is NOT regression convention.
-    verif = VerificationPlan(steps=[_step(
-        file_path="tests/test_auth.py",
-        instruction="tests login happy path",
-    )])
+    verif = VerificationPlan(
+        steps=[
+            _step(
+                file_path="tests/test_auth.py",
+                instruction="tests login happy path",
+            )
+        ]
+    )
 
     warnings = _check_core_functionality_covered(verif, plan)
     assert warnings, "regular tests should not satisfy a core tag"
@@ -155,29 +188,33 @@ def test_regular_test_file_does_not_count_as_regression_coverage() -> None:
 
 def test_low_confidence_tag_is_not_enforced_at_default_threshold() -> None:
     # Default settings.core_functionality_min_confidence == "medium".
-    plan = _plan(core=[
-        CoreFunctionalityTag(
-            entity="hidden",
-            file_path="src/maybe.py",
-            reason="not sure",
-            source_signal="public_api",
-            confidence="low",
-        ),
-    ])
+    plan = _plan(
+        core=[
+            CoreFunctionalityTag(
+                entity="hidden",
+                file_path="src/maybe.py",
+                reason="not sure",
+                source_signal="public_api",
+                confidence="low",
+            ),
+        ]
+    )
     verif = VerificationPlan(steps=[])  # No tests at all.
     assert _check_core_functionality_covered(verif, plan) == []
 
 
 def test_min_confidence_low_enforces_all_tags() -> None:
-    plan = _plan(core=[
-        CoreFunctionalityTag(
-            entity="hidden",
-            file_path="src/maybe.py",
-            reason="not sure",
-            source_signal="public_api",
-            confidence="low",
-        ),
-    ])
+    plan = _plan(
+        core=[
+            CoreFunctionalityTag(
+                entity="hidden",
+                file_path="src/maybe.py",
+                reason="not sure",
+                source_signal="public_api",
+                confidence="low",
+            ),
+        ]
+    )
     verif = VerificationPlan(steps=[])
 
     with patch(
@@ -189,15 +226,17 @@ def test_min_confidence_low_enforces_all_tags() -> None:
 
 
 def test_min_confidence_high_ignores_medium_tags() -> None:
-    plan = _plan(core=[
-        CoreFunctionalityTag(
-            entity="middling",
-            file_path="src/middle.py",
-            reason="public_api",
-            source_signal="public_api",
-            confidence="medium",
-        ),
-    ])
+    plan = _plan(
+        core=[
+            CoreFunctionalityTag(
+                entity="middling",
+                file_path="src/middle.py",
+                reason="public_api",
+                source_signal="public_api",
+                confidence="medium",
+            ),
+        ]
+    )
     verif = VerificationPlan(steps=[])
 
     with patch(

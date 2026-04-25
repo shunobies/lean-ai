@@ -23,7 +23,9 @@ def ws_send_nowait(ws: WebSocket, msg_type: str, data: dict | None = None) -> No
 
 
 async def _ws_send_quiet(
-    ws: WebSocket, msg_type: str, data: dict | None = None,
+    ws: WebSocket,
+    msg_type: str,
+    data: dict | None = None,
 ) -> None:
     """Send with suppressed errors — used by fire-and-forget tasks."""
     payload = {"type": msg_type, **(data or {})}

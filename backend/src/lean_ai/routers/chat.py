@@ -98,12 +98,21 @@ def _make_chat_tool_executor(repo_root: str | None = None):
 
     async def _executor(name: str, arguments: dict) -> str:
         # ── Workspace tools (need repo_root) ──
-        if name in (
-            "read_file", "grep_files", "list_directory", "directory_tree",
-            "save_note", "list_project_todos",
-            "list_recent_sessions", "get_session_summary",
-            "search_workspace_memory",
-        ) and not repo_root:
+        if (
+            name
+            in (
+                "read_file",
+                "grep_files",
+                "list_directory",
+                "directory_tree",
+                "save_note",
+                "list_project_todos",
+                "list_recent_sessions",
+                "get_session_summary",
+                "search_workspace_memory",
+            )
+            and not repo_root
+        ):
             return f"ERROR: {name} requires an open workspace."
 
         from lean_ai.tools.file_ops import grep_files, read_file
@@ -163,9 +172,7 @@ def _make_chat_tool_executor(repo_root: str | None = None):
             try:
                 note = await _create_note(db, content, repo_root or None)
                 index_note(note_id=note["id"], content=content)
-                schedule_categorization(
-                    llm_client, note["id"], content, repo_root or None
-                )
+                schedule_categorization(llm_client, note["id"], content, repo_root or None)
                 return f"Note saved (id: {note['id']}). Categorization in progress."
             finally:
                 await db.close()
@@ -187,8 +194,7 @@ def _make_chat_tool_executor(repo_root: str | None = None):
                 for t in todos:
                     status = "done" if t["completed"] else "pending"
                     lines.append(
-                        f"- [{status}] {t['description']} "
-                        f"(from note: {t['note_content']}...)"
+                        f"- [{status}] {t['description']} (from note: {t['note_content']}...)"
                     )
                 return "\n".join(lines)
             finally:
@@ -199,7 +205,8 @@ def _make_chat_tool_executor(repo_root: str | None = None):
             from lean_ai.memory.session_tools import list_recent_sessions
 
             return await list_recent_sessions(
-                repo_root, limit=arguments.get("limit", 5),
+                repo_root,
+                limit=arguments.get("limit", 5),
             )
         elif name == "get_session_summary":
             from lean_ai.memory.session_tools import get_session_summary
@@ -253,6 +260,7 @@ def _make_chat_tool_executor(repo_root: str | None = None):
                 get_context_db,
                 query_entries,
             )
+
             db = await get_context_db(repo_root)
             try:
                 results = await query_entries(
@@ -295,7 +303,11 @@ def _make_chat_tool_executor(repo_root: str | None = None):
                 pass
 
             chunks = await asyncio.to_thread(
-                _search_reference, repo_root, query, limit, query_embedding,
+                _search_reference,
+                repo_root,
+                query,
+                limit,
+                query_embedding,
             )
             if not chunks:
                 return f"No reference library results for '{query}'."
@@ -362,12 +374,17 @@ async def _build_chat_messages(
 
             if workspace.active_file and not workspace.active_selection:
                 active_file_content = await asyncio.to_thread(
-                    read_active_file, root, workspace.active_file,
+                    read_active_file,
+                    root,
+                    workspace.active_file,
                 )
 
             if request.message and len(request.message) > 5:
                 search_results = await asyncio.to_thread(
-                    search_workspace, root, request.message, 8,
+                    search_workspace,
+                    root,
+                    request.message,
+                    8,
                 )
         except Exception as e:
             logger.warning("Chat workspace context failed (non-fatal): %s", e)
@@ -378,15 +395,18 @@ async def _build_chat_messages(
         for url in urls[:3]:
             try:
                 result = await internet.fetch_url(
-                    url, llm_client=llm_client,
+                    url,
+                    llm_client=llm_client,
                 )
                 if result.success:
                     fetched_pages.append({"url": url, "content": result.output})
                 else:
-                    fetched_pages.append({
-                        "url": url,
-                        "content": f"(Failed to fetch: {result.error})",
-                    })
+                    fetched_pages.append(
+                        {
+                            "url": url,
+                            "content": f"(Failed to fetch: {result.error})",
+                        }
+                    )
             except Exception as e:
                 logger.warning("Chat URL fetch failed for %s: %s", url, e)
                 fetched_pages.append({"url": url, "content": f"(Failed to fetch: {e})"})
@@ -401,7 +421,8 @@ async def _build_chat_messages(
             from lean_ai.memory.session_tools import get_recent_activity_context
 
             recent_activity = await get_recent_activity_context(
-                workspace.workspace_root, request.message,
+                workspace.workspace_root,
+                request.message,
             )
         except Exception as e:
             logger.debug("Session context lookup failed (non-fatal): %s", e)
@@ -415,9 +436,7 @@ async def _build_chat_messages(
         for a in (request.attachments or [])
         if a.mime_type and a.mime_type.startswith("image/")
     ]
-    image_handler = (
-        resolve_image_handler("chat") if image_attachments_raw else None
-    )
+    image_handler = resolve_image_handler("chat") if image_attachments_raw else None
     image_mode = image_handler[0] if image_handler is not None else None
 
     async def _describe_attachments():
@@ -442,7 +461,8 @@ async def _build_chat_messages(
             return
         try:
             results = await describe_images(
-                image_attachments, prompt=request.message,
+                image_attachments,
+                prompt=request.message,
             )
             image_descriptions = format_image_descriptions(results)
         except Exception as e:
@@ -500,17 +520,22 @@ async def _build_chat_messages(
     # describe round-trip entirely.
     if image_mode == "inline" and image_handler is not None:
         from lean_ai.llm.media_messages import CapabilityError, attach_image
+
         target_client = image_handler[1]
         provider = target_client.provider_name
         try:
             for img_b64, mime_type in image_attachments_raw:
                 messages = attach_image(
-                    messages, img_b64, mime_type, provider=provider,
+                    messages,
+                    img_b64,
+                    mime_type,
+                    provider=provider,
                 )
         except CapabilityError as exc:
             logger.warning(
                 "Inline image handler %s refused: %s; falling back to describe",
-                provider, exc,
+                provider,
+                exc,
             )
             # Fall back to describe-and-inject if vision_model is set.
             if settings.vision_model:
@@ -518,6 +543,7 @@ async def _build_chat_messages(
                     describe_images,
                     format_image_descriptions,
                 )
+
                 try:
                     fallback = await describe_images(
                         [{"data": d, "filename": ""} for d, _ in image_attachments_raw],
@@ -525,17 +551,18 @@ async def _build_chat_messages(
                     )
                     fallback_prose = format_image_descriptions(fallback)
                     if fallback_prose:
-                        messages[-1]["content"] = (
-                            f"{messages[-1]['content']}\n\n{fallback_prose}"
-                        )
+                        messages[-1]["content"] = f"{messages[-1]['content']}\n\n{fallback_prose}"
                 except Exception as e:
                     logger.warning(
-                        "Describe fallback failed after CapabilityError: %s", e,
+                        "Describe fallback failed after CapabilityError: %s",
+                        e,
                     )
 
     logger.info(
         "Chat: history=%d, files=%d, search=%d, project_ctx=%s, refined=%s, images=%d",
-        len(request.history), len(file_tree), len(search_results),
+        len(request.history),
+        len(file_tree),
+        len(search_results),
         bool(project_context),
         bool(refiner_result and refiner_result.was_refined),
         len(request.attachments),
@@ -569,10 +596,7 @@ async def chat(request: ChatRequest):
         tools = build_chat_tools()
         if not repo_root:
             # Without a workspace, only expose search tools
-            tools = [
-                t for t in tools
-                if t["function"]["name"] in ("search_internet", "fetch_url")
-            ]
+            tools = [t for t in tools if t["function"]["name"] in ("search_internet", "fetch_url")]
         telemetry_context = _chat_telemetry_context(repo_root)
         _, reply = await _chat_client.chat_with_tools(
             messages=messages,
@@ -590,10 +614,7 @@ async def chat(request: ChatRequest):
             tokens_per_second=metrics.get("tokens_per_second"),
             eval_count=metrics.get("eval_count"),
             refined=bool(refiner_result and refiner_result.was_refined),
-            privacy_redactions=(
-                len(refiner_result.privacy_redactions)
-                if refiner_result else 0
-            ),
+            privacy_redactions=(len(refiner_result.privacy_redactions) if refiner_result else 0),
             image_descriptions=image_desc or None,
         )
     except Exception as e:
@@ -634,10 +655,7 @@ async def _stream_chat_with_tools(
     executor = _make_chat_tool_executor(repo_root)
     tools = build_chat_tools()
     if not repo_root:
-        tools = [
-            t for t in tools
-            if t["function"]["name"] in ("search_internet", "fetch_url")
-        ]
+        tools = [t for t in tools if t["function"]["name"] in ("search_internet", "fetch_url")]
 
     async def _run():
         try:
@@ -709,7 +727,9 @@ async def chat_stream_endpoint(request: ChatRequest):
             prompt_chars = sum(len(m.get("content", "")) for m in messages)
             logger.info(
                 "Chat stream: prompt ~%d chars (~%d tokens), num_ctx=%d",
-                prompt_chars, prompt_chars // 4, settings._active_context_window,
+                prompt_chars,
+                prompt_chars // 4,
+                settings._active_context_window,
             )
 
             repo_root = (

@@ -15,7 +15,7 @@ class FakeWebSocket:
 
     def __init__(self, messages: list[dict] | None = None):
         self._messages: asyncio.Queue[dict] = asyncio.Queue()
-        for m in (messages or []):
+        for m in messages or []:
             self._messages.put_nowait(m)
         self.sent: list[dict] = []
 
@@ -46,7 +46,8 @@ async def test_safe_put_drops_oldest_on_overflow():
 
     # _safe_put should drop the old message and insert the new one
     dispatcher._safe_put(
-        dispatcher._approval_queue, {"type": "new_msg"},
+        dispatcher._approval_queue,
+        {"type": "new_msg"},
     )
 
     msg = dispatcher._approval_queue.get_nowait()

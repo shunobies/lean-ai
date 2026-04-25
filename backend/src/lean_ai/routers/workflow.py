@@ -79,11 +79,13 @@ async def session_stream(websocket: WebSocket, session_id: str):
                 attachments = data.get("attachments", [])
 
                 if not repo_root:
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "repo_root is required",
-                        "recoverable": True,
-                    })
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "message": "repo_root is required",
+                            "recoverable": True,
+                        }
+                    )
                     continue
 
                 try:
@@ -107,7 +109,8 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                 orig_branch_result = await git_current_branch(repo_root)
                                 original_branch = (
                                     orig_branch_result.output.strip()
-                                    if orig_branch_result.success else ""
+                                    if orig_branch_result.success
+                                    else ""
                                 )
 
                                 # Stash uncommitted changes before switching
@@ -118,27 +121,32 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                 create_result = await git_create_branch(branch_name, repo_root)
                                 if create_result.success:
                                     await update_session(
-                                        db, session_id,
+                                        db,
+                                        session_id,
                                         branch_name=branch_name,
                                         base_branch=base_branch,
                                         stashed=stashed,
                                     )
-                                    await websocket.send_json({
-                                        "type": "branch_created",
-                                        "branch_name": branch_name,
-                                        "base_branch": base_branch,
-                                    })
+                                    await websocket.send_json(
+                                        {
+                                            "type": "branch_created",
+                                            "branch_name": branch_name,
+                                            "base_branch": base_branch,
+                                        }
+                                    )
                                 else:
                                     logger.warning(
                                         "Failed to create branch %s: %s",
-                                        branch_name, create_result.error,
+                                        branch_name,
+                                        create_result.error,
                                     )
                                     branch_name = ""
                                     # Recover stashed changes
                                     if stashed:
                                         if original_branch:
                                             await git_checkout(
-                                                original_branch, repo_root,
+                                                original_branch,
+                                                repo_root,
                                             )
                                         pop_result = await git_stash_pop(
                                             repo_root,
@@ -146,8 +154,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                         if pop_result.success:
                                             stashed = False
                                             logger.info(
-                                                "Recovered stashed changes "
-                                                "after branch failure",
+                                                "Recovered stashed changes after branch failure",
                                             )
                                         else:
                                             logger.error(
@@ -176,21 +183,22 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                             "filename": a.get("filename"),
                                         }
                                         for a in attachments
-                                        if (a.get("mime_type") or "")
-                                        .startswith("image/")
+                                        if (a.get("mime_type") or "").startswith("image/")
                                     ]
                                     if image_attachments:
                                         try:
-                                            await websocket.send_json({
-                                                "type": "stage_status",
-                                                "stage": "VISION",
-                                                "status": "running",
-                                                "summary": (
-                                                    f"Describing "
-                                                    f"{len(image_attachments)} "
-                                                    f"image(s)..."
-                                                ),
-                                            })
+                                            await websocket.send_json(
+                                                {
+                                                    "type": "stage_status",
+                                                    "stage": "VISION",
+                                                    "status": "running",
+                                                    "summary": (
+                                                        f"Describing "
+                                                        f"{len(image_attachments)} "
+                                                        f"image(s)..."
+                                                    ),
+                                                }
+                                            )
                                             results = await describe_images(
                                                 image_attachments,
                                                 prompt=content,
@@ -199,27 +207,28 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                                 results,
                                             )
                                             if desc:
-                                                content = (
-                                                    f"{content}\n\n{desc}"
+                                                content = f"{content}\n\n{desc}"
+                                                await websocket.send_json(
+                                                    {
+                                                        "type": "vision_description",
+                                                        "descriptions": desc,
+                                                    }
                                                 )
-                                                await websocket.send_json({
-                                                    "type": "vision_description",
-                                                    "descriptions": desc,
-                                                })
-                                            await websocket.send_json({
-                                                "type": "stage_status",
-                                                "stage": "VISION",
-                                                "status": "done",
-                                                "summary": (
-                                                    f"Described "
-                                                    f"{len(image_attachments)}"
-                                                    f" image(s)"
-                                                ),
-                                            })
+                                            await websocket.send_json(
+                                                {
+                                                    "type": "stage_status",
+                                                    "stage": "VISION",
+                                                    "status": "done",
+                                                    "summary": (
+                                                        f"Described "
+                                                        f"{len(image_attachments)}"
+                                                        f" image(s)"
+                                                    ),
+                                                }
+                                            )
                                         except Exception as e:
                                             logger.warning(
-                                                "Vision description failed "
-                                                "(non-fatal): %s",
+                                                "Vision description failed (non-fatal): %s",
                                                 e,
                                             )
 
@@ -233,8 +242,12 @@ async def session_stream(websocket: WebSocket, session_id: str):
                             ) -> None:
                                 try:
                                     await log_conversation_entry(
-                                        _db, session_id, role, log_content,
-                                        tool_name=tool_name, tool_args=tool_args,
+                                        _db,
+                                        session_id,
+                                        role,
+                                        log_content,
+                                        tool_name=tool_name,
+                                        tool_args=tool_args,
                                     )
                                 except Exception:
                                     logger.debug("Failed to log conversation entry", exc_info=True)
@@ -252,11 +265,13 @@ async def session_stream(websocket: WebSocket, session_id: str):
                             # Refine task with local LLM before cloud execution
                             if refiner is not None and mode == "plan":
                                 try:
-                                    await websocket.send_json({
-                                        "type": "refiner_status",
-                                        "status": "running",
-                                        "summary": "Refining task with local LLM...",
-                                    })
+                                    await websocket.send_json(
+                                        {
+                                            "type": "refiner_status",
+                                            "status": "running",
+                                            "summary": "Refining task with local LLM...",
+                                        }
+                                    )
                                     refiner_result = await refiner.refine_task(
                                         task=task,
                                         repo_root=repo_root,
@@ -264,35 +279,42 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                     )
                                     if refiner_result.was_refined:
                                         task = refiner_result.refined
-                                        await websocket.send_json({
-                                            "type": "refiner_status",
-                                            "status": "done",
-                                            "summary": (
-                                                f"Task refined "
-                                                f"({refiner_result.duration_ms:.0f}ms)"
-                                            ),
-                                            "privacy_redactions": len(
-                                                refiner_result.privacy_redactions
-                                            ),
-                                            "reference_injected": bool(
-                                                refiner_result.reference_context
-                                            ),
-                                        })
+                                        await websocket.send_json(
+                                            {
+                                                "type": "refiner_status",
+                                                "status": "done",
+                                                "summary": (
+                                                    f"Task refined "
+                                                    f"({refiner_result.duration_ms:.0f}ms)"
+                                                ),
+                                                "privacy_redactions": len(
+                                                    refiner_result.privacy_redactions
+                                                ),
+                                                "reference_injected": bool(
+                                                    refiner_result.reference_context
+                                                ),
+                                            }
+                                        )
                                     else:
-                                        await websocket.send_json({
-                                            "type": "refiner_status",
-                                            "status": "skipped",
-                                            "summary": "Task already well-structured",
-                                        })
+                                        await websocket.send_json(
+                                            {
+                                                "type": "refiner_status",
+                                                "status": "skipped",
+                                                "summary": "Task already well-structured",
+                                            }
+                                        )
                                 except Exception as e:
                                     logger.warning(
-                                        "Refiner failed (non-fatal): %s", e,
+                                        "Refiner failed (non-fatal): %s",
+                                        e,
                                     )
-                                    await websocket.send_json({
-                                        "type": "refiner_status",
-                                        "status": "error",
-                                        "summary": f"Refinement skipped: {e}",
-                                    })
+                                    await websocket.send_json(
+                                        {
+                                            "type": "refiner_status",
+                                            "status": "error",
+                                            "summary": f"Refinement skipped: {e}",
+                                        }
+                                    )
 
                             # Start the dispatcher so cancel / mid-workflow
                             # messages can be received during execution.
@@ -325,12 +347,15 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                 except Exception:
                                     pass
                                 await update_session(
-                                    db, session_id, status="cancelled",
+                                    db,
+                                    session_id,
+                                    status="cancelled",
                                 )
                                 try:
                                     from lean_ai.workflow.hooks import (
                                         fire_workflow_event,
                                     )
+
                                     # Enrich the cancellation payload with a tail
                                     # snapshot from conversation_logs so training
                                     # consumers can reconstruct WHERE the user
@@ -382,7 +407,8 @@ async def session_stream(websocket: WebSocket, session_id: str):
                             # --- Auto-commit agent changes ---
                             if branch_name:
                                 commit_result = await git_add_and_commit(
-                                    commit_msg, repo_root,
+                                    commit_msg,
+                                    repo_root,
                                 )
                                 if commit_result.success:
                                     logger.info(
@@ -394,16 +420,21 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                     if sha_result.success:
                                         sha = sha_result.output.strip()
                                         await log_commit(
-                                            db, session_id, sha, commit_msg,
+                                            db,
+                                            session_id,
+                                            sha,
+                                            commit_msg,
                                         )
 
                             await update_session(db, session_id, status="completed")
                         else:
-                            await websocket.send_json({
-                                "type": "error",
-                                "message": f"Session {session_id} not found",
-                                "recoverable": False,
-                            })
+                            await websocket.send_json(
+                                {
+                                    "type": "error",
+                                    "message": f"Session {session_id} not found",
+                                    "recoverable": False,
+                                }
+                            )
                     finally:
                         await db.close()
                 except WebSocketDisconnect:
@@ -411,22 +442,26 @@ async def session_stream(websocket: WebSocket, session_id: str):
                 except Exception as e:
                     logger.exception("Workflow error for session %s", session_id)
                     try:
-                        await websocket.send_json({
-                            "type": "error",
-                            "message": str(e),
-                            "recoverable": True,
-                        })
+                        await websocket.send_json(
+                            {
+                                "type": "error",
+                                "message": str(e),
+                                "recoverable": True,
+                            }
+                        )
                     except Exception:
                         pass
 
             elif msg_type == "resume":
                 repo_root = data.get("repo_root", "")
                 if not repo_root:
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "repo_root is required",
-                        "recoverable": True,
-                    })
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "message": "repo_root is required",
+                            "recoverable": True,
+                        }
+                    )
                     continue
 
                 try:
@@ -434,11 +469,13 @@ async def session_stream(websocket: WebSocket, session_id: str):
                     try:
                         session = await get_session_raw(db, session_id)
                         if not session:
-                            await websocket.send_json({
-                                "type": "error",
-                                "message": f"Session {session_id} not found",
-                                "recoverable": False,
-                            })
+                            await websocket.send_json(
+                                {
+                                    "type": "error",
+                                    "message": f"Session {session_id} not found",
+                                    "recoverable": False,
+                                }
+                            )
                             continue
 
                         # Branch already checked out by POST /resume endpoint
@@ -457,8 +494,12 @@ async def session_stream(websocket: WebSocket, session_id: str):
                         ) -> None:
                             try:
                                 await log_conversation_entry(
-                                    _db, session_id, role, log_content,
-                                    tool_name=tool_name, tool_args=tool_args,
+                                    _db,
+                                    session_id,
+                                    role,
+                                    log_content,
+                                    tool_name=tool_name,
+                                    tool_args=tool_args,
                                 )
                             except Exception:
                                 logger.debug("Failed to log conversation entry", exc_info=True)
@@ -466,6 +507,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
                         # Build resume task from original task + journal + scratchpad
                         from lean_ai.tools.journal import read_journal
                         from lean_ai.tools.scratchpad import read_scratchpad
+
                         original_task = session.get("task", "")
                         pad_content = read_scratchpad(repo_root, session_id)
                         journal_content = read_journal(repo_root, session_id)
@@ -514,7 +556,9 @@ async def session_stream(websocket: WebSocket, session_id: str):
                             except Exception:
                                 pass
                             await update_session(
-                                db, session_id, status="cancelled",
+                                db,
+                                session_id,
+                                status="cancelled",
                             )
                             continue
                         finally:
@@ -523,14 +567,18 @@ async def session_stream(websocket: WebSocket, session_id: str):
                         # Auto-commit
                         if branch_name:
                             commit_result = await git_add_and_commit(
-                                commit_msg, repo_root,
+                                commit_msg,
+                                repo_root,
                             )
                             if commit_result.success:
                                 sha_result = await git_current_sha(repo_root)
                                 if sha_result.success:
                                     sha = sha_result.output.strip()
                                     await log_commit(
-                                        db, session_id, sha, commit_msg,
+                                        db,
+                                        session_id,
+                                        sha,
+                                        commit_msg,
                                     )
 
                         await update_session(db, session_id, status="completed")
@@ -541,11 +589,13 @@ async def session_stream(websocket: WebSocket, session_id: str):
                 except Exception as e:
                     logger.exception("Resume error for session %s", session_id)
                     try:
-                        await websocket.send_json({
-                            "type": "error",
-                            "message": str(e),
-                            "recoverable": True,
-                        })
+                        await websocket.send_json(
+                            {
+                                "type": "error",
+                                "message": str(e),
+                                "recoverable": True,
+                            }
+                        )
                     except Exception:
                         pass
 
@@ -617,12 +667,16 @@ async def merge_session(session_id: str, repo_root: str):
         from lean_ai.tools.journal import delete_journal
         from lean_ai.tools.observations import delete_observations
         from lean_ai.tools.scratchpad import delete_scratchpad
+
         delete_scratchpad(repo_root, session_id)
         delete_journal(repo_root, session_id)
         delete_observations(repo_root, session_id)
 
         await update_session(
-            db, session_id, status="merged", merge_commit_sha=merge_sha,
+            db,
+            session_id,
+            status="merged",
+            merge_commit_sha=merge_sha,
         )
 
         return {
@@ -676,6 +730,7 @@ async def abandon_session(session_id: str, repo_root: str):
         from lean_ai.tools.journal import delete_journal
         from lean_ai.tools.observations import delete_observations
         from lean_ai.tools.scratchpad import delete_scratchpad
+
         delete_scratchpad(repo_root, session_id)
         delete_journal(repo_root, session_id)
         delete_observations(repo_root, session_id)

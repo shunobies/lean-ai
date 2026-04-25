@@ -43,19 +43,22 @@ async def run_subprocess(
     try:
         if isinstance(cmd, str):
             process = await asyncio.create_subprocess_shell(
-                cmd, cwd=cwd,
+                cmd,
+                cwd=cwd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
         else:
             process = await asyncio.create_subprocess_exec(
-                *cmd, cwd=cwd,
+                *cmd,
+                cwd=cwd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
 
         stdout, stderr = await asyncio.wait_for(
-            process.communicate(), timeout=timeout,
+            process.communicate(),
+            timeout=timeout,
         )
 
         stdout_text = stdout.decode("utf-8", errors="replace")
@@ -82,7 +85,9 @@ async def run_subprocess(
         except ProcessLookupError:
             pass
         return ToolResult(
-            success=False, error="Command timed out", exit_code=-1,
+            success=False,
+            error="Command timed out",
+            exit_code=-1,
         )
     except Exception as e:
         return ToolResult(success=False, error=str(e))

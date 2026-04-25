@@ -55,9 +55,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Tools that act as barriers — they depend on ALL prior steps completing.
-_BARRIER_TOOLS = frozenset({
-    "run_tests", "run_lint", "format_code", "run_command",
-})
+_BARRIER_TOOLS = frozenset(
+    {
+        "run_tests",
+        "run_lint",
+        "format_code",
+        "run_command",
+    }
+)
 
 
 def _normalize_path(p: str) -> str:
@@ -131,9 +136,7 @@ def _build_step_groups(
 
         # Cross-file reference: check if instruction/context mentions
         # any previously-touched file (boundary-aware)
-        searchable = (
-            (step.instruction or "") + " " + (step.file_path or "")
-        )
+        searchable = (step.instruction or "") + " " + (step.file_path or "")
         for fpath, dep_step in file_owners.items():
             if _path_mentioned_in(fpath, searchable):
                 max_dep_group = max(max_dep_group, group_idx[dep_step])
@@ -174,12 +177,18 @@ async def execute_plan(
     # chat_with_tools so make_tool_executor can link tool_executions to
     # the most recent trace_uuid.
     exec_telemetry = {
-        "repo_root": repo_root, "session_id": session_id,
-        "phase": "implementation", "role": "primary",
+        "repo_root": repo_root,
+        "session_id": session_id,
+        "phase": "implementation",
+        "role": "primary",
     }
     tool_executor = make_tool_executor(
-        repo_root, ws, session_id, llm_client=llm_client,
-        dispatcher=dispatcher, telemetry_context=exec_telemetry,
+        repo_root,
+        ws,
+        session_id,
+        llm_client=llm_client,
+        dispatcher=dispatcher,
+        telemetry_context=exec_telemetry,
     )
     total_steps = len(plan.steps)
     all_executed = []
@@ -191,12 +200,14 @@ async def execute_plan(
     # Send execution checklist to the extension for progress UI
     checklist_steps = []
     for step in plan.steps:
-        checklist_steps.append({
-            "step_index": step.step_number - 1,
-            "description": step.instruction[:120],
-            "tool": step.tool,
-            "file_path": step.file_path or "",
-        })
+        checklist_steps.append(
+            {
+                "step_index": step.step_number - 1,
+                "description": step.instruction[:120],
+                "tool": step.tool,
+                "file_path": step.file_path or "",
+            }
+        )
     if getattr(plan, "tdd_test_steps", None):
         tdd_steps = [
             {
@@ -208,10 +219,14 @@ async def execute_plan(
             for s in plan.tdd_test_steps
         ]
         checklist_steps = tdd_steps + checklist_steps
-    await ws_send(ws, "execution_checklist", {
-        "steps": checklist_steps,
-        "total": len(checklist_steps),
-    })
+    await ws_send(
+        ws,
+        "execution_checklist",
+        {
+            "steps": checklist_steps,
+            "total": len(checklist_steps),
+        },
+    )
 
     # Build the system prompt once (shared across all steps)
     naming_text = format_naming_conventions_for_prompt(
@@ -228,12 +243,17 @@ async def execute_plan(
 
     # Callbacks for WebSocket progress + conversation logging.
     cb = build_workflow_callbacks(
-        ws, conversation_logger=conversation_logger,
+        ws,
+        conversation_logger=conversation_logger,
     )
 
     # ── Helper: execute a single step with a given client/tools ─────
     async def _run_step(
-        step, client, tools, executor, sys_prompt,
+        step,
+        client,
+        tools,
+        executor,
+        sys_prompt,
         label_prefix: str = "",
         telemetry: dict | None = None,
     ):
@@ -241,21 +261,28 @@ async def execute_plan(
         step_label = f"{label_prefix}Step {step.step_number}"
         logger.info(
             "Executing %s/%d: %s %s — %s",
-            step_label, total_steps, step.tool,
-            step.file_path, step.instruction[:80],
+            step_label,
+            total_steps,
+            step.tool,
+            step.file_path,
+            step.instruction[:80],
         )
 
-        await ws_send(ws, "checkpoint", {
-            "step_index": step.step_number - 1,
-            "step_description": (
-                f"{step_label}: {step.instruction[:100]}"
-            ),
-            "status": "running",
-            "head_commit_sha": None,
-        })
+        await ws_send(
+            ws,
+            "checkpoint",
+            {
+                "step_index": step.step_number - 1,
+                "step_description": (f"{step_label}: {step.instruction[:100]}"),
+                "status": "running",
+                "head_commit_sha": None,
+            },
+        )
 
         user_msg = build_step_user_message(
-            step, completed_descriptions, total_steps,
+            step,
+            completed_descriptions,
+            total_steps,
             step_artifacts=step_artifacts,
         )
         messages = [
@@ -274,7 +301,9 @@ async def execute_plan(
                 name_registry=name_registry_text,
             )
             fresh_user = build_step_user_message(
-                step, completed_descriptions, total_steps,
+                step,
+                completed_descriptions,
+                total_steps,
                 step_artifacts=step_artifacts,
             )
             pad = scratchpad.read_scratchpad(repo_root, session_id)
@@ -285,29 +314,30 @@ async def execute_plan(
             ]
             refresh_parts = ["[CONTEXT REFRESHED]"]
             if jrnl:
-                refresh_parts.append(
-                    f"SESSION JOURNAL (permanent findings):\n{jrnl}"
-                )
+                refresh_parts.append(f"SESSION JOURNAL (permanent findings):\n{jrnl}")
             if pad:
-                refresh_parts.append(
-                    f"SCRATCHPAD (current state):\n{pad}"
-                )
+                refresh_parts.append(f"SCRATCHPAD (current state):\n{pad}")
             if pad or jrnl:
-                new_messages.append({
-                    "role": "user",
-                    "content": "\n\n".join(refresh_parts),
-                })
+                new_messages.append(
+                    {
+                        "role": "user",
+                        "content": "\n\n".join(refresh_parts),
+                    }
+                )
             else:
-                new_messages.append({
-                    "role": "user",
-                    "content": (
-                        "[CONTEXT REFRESHED]\n\n"
-                        "Continue working on the current step."
-                    ),
-                })
-            ws_send_nowait(ws, "context_refreshed", {
-                "message": "Step context refreshed.",
-            })
+                new_messages.append(
+                    {
+                        "role": "user",
+                        "content": ("[CONTEXT REFRESHED]\n\nContinue working on the current step."),
+                    }
+                )
+            ws_send_nowait(
+                ws,
+                "context_refreshed",
+                {
+                    "message": "Step context refreshed.",
+                },
+            )
             return new_messages
 
         def _build_step_reminder() -> str:
@@ -342,17 +372,11 @@ async def execute_plan(
         async with _artifacts_lock:
             all_executed.extend(executed)
             if explanation.strip():
-                step_explanations.append(
-                    f"{step_label}: {explanation.strip()}"
-                )
-            completed_descriptions.append(
-                f"{step_label}: {step.instruction}"
-            )
+                step_explanations.append(f"{step_label}: {explanation.strip()}")
+            completed_descriptions.append(f"{step_label}: {step.instruction}")
 
             # Collect files created/modified for cross-step context
-            artifact_budget = int(
-                settings._active_context_window * 0.10 * 3.5
-            )
+            artifact_budget = int(settings._active_context_window * 0.10 * 3.5)
             for tc in executed:
                 if tc.tool_name in ("create_file", "edit_file"):
                     fpath = tc.parameters.get("path", "")
@@ -369,22 +393,20 @@ async def execute_plan(
                         except Exception:
                             pass
 
-            while (
-                sum(len(c) for c in step_artifacts.values())
-                > artifact_budget
-                and step_artifacts
-            ):
+            while sum(len(c) for c in step_artifacts.values()) > artifact_budget and step_artifacts:
                 oldest_key = next(iter(step_artifacts))
                 del step_artifacts[oldest_key]
 
-        await ws_send(ws, "checkpoint", {
-            "step_index": step.step_number - 1,
-            "step_description": (
-                f"{step_label}: {step.instruction[:100]}"
-            ),
-            "status": "completed",
-            "head_commit_sha": None,
-        })
+        await ws_send(
+            ws,
+            "checkpoint",
+            {
+                "step_index": step.step_number - 1,
+                "step_description": (f"{step_label}: {step.instruction[:100]}"),
+                "status": "completed",
+                "head_commit_sha": None,
+            },
+        )
 
     # ── TDD three-phase execution ─────────────────────────────────
     tdd_active = (
@@ -415,35 +437,40 @@ async def execute_plan(
             if len(group) == 1 or settings.num_parallel <= 1:
                 for step in group:
                     await _run_step(
-                        step, llm_client,
+                        step,
+                        llm_client,
                         build_implementation_tools(),
-                        tool_executor, system_prompt,
+                        tool_executor,
+                        system_prompt,
                     )
             else:
                 # Run independent steps concurrently
                 logger.info(
                     "Parallel group: %d steps (%s)",
                     len(group),
-                    ", ".join(
-                        s.file_path or s.tool for s in group
-                    ),
+                    ", ".join(s.file_path or s.tool for s in group),
                 )
-                await asyncio.gather(*[
-                    _run_step(
-                        step, llm_client,
-                        build_implementation_tools(),
-                        tool_executor, system_prompt,
-                    )
-                    for step in group
-                ])
+                await asyncio.gather(
+                    *[
+                        _run_step(
+                            step,
+                            llm_client,
+                            build_implementation_tools(),
+                            tool_executor,
+                            system_prompt,
+                        )
+                        for step in group
+                    ]
+                )
 
     # ── All steps done ───────────────────────────────────────────
-    files_modified = list({
-        tc.parameters.get("path", "")
-        for tc in all_executed
-        if tc.tool_name in ("create_file", "edit_file")
-        and tc.parameters.get("path")
-    })
+    files_modified = list(
+        {
+            tc.parameters.get("path", "")
+            for tc in all_executed
+            if tc.tool_name in ("create_file", "edit_file") and tc.parameters.get("path")
+        }
+    )
 
     # ── Post-execution validation ──
     validation_results: dict = {}
@@ -457,8 +484,12 @@ async def execute_plan(
             and settings.post_validation_max_retries > 0
         ):
             validation_results = await _run_validation_fix_loop(
-                repo_root, ws, llm_client, context,
-                validation_results, session_id,
+                repo_root,
+                ws,
+                llm_client,
+                context,
+                validation_results,
+                session_id,
                 conversation_logger=conversation_logger,
                 expert_llm_client=expert_llm_client,
                 dispatcher=dispatcher,
@@ -468,7 +499,9 @@ async def execute_plan(
 
     # Check for incomplete.md
     incomplete_path = os.path.join(
-        repo_root, ".lean_ai", "incomplete.md",
+        repo_root,
+        ".lean_ai",
+        "incomplete.md",
     )
     incomplete_content = ""
     if os.path.isfile(incomplete_path):
@@ -488,14 +521,10 @@ async def execute_plan(
         summary += "\n\n" + "\n".join(step_explanations)
     if incomplete_content:
         summary += (
-            "\n\n⚠️ Some steps had issues — see "
-            f".lean_ai/incomplete.md:\n{incomplete_content}"
+            f"\n\n⚠️ Some steps had issues — see .lean_ai/incomplete.md:\n{incomplete_content}"
         )
     if validation_results:
-        failed = {
-            k: r for k, r in validation_results.items()
-            if not r["success"]
-        }
+        failed = {k: r for k, r in validation_results.items() if not r["success"]}
         if failed:
             summary += "\n\n⚠️ Post-validation failures:"
             for name, result in failed.items():
@@ -510,7 +539,10 @@ async def execute_plan(
     # ── Incremental project_context.md update ──
     if files_modified and settings.enable_project_context:
         await _update_project_context(
-            repo_root, ws, llm_client, files_modified,
+            repo_root,
+            ws,
+            llm_client,
+            files_modified,
         )
 
     # ── Auto-push to linked integrations (fire-and-forget) ──
@@ -523,8 +555,13 @@ async def execute_plan(
     if settings.enable_session_memory:
         asyncio.create_task(
             auto_extract_session_memories(
-                repo_root, session_id, task, plan, llm_client,
-                files_modified, validation_results,
+                repo_root,
+                session_id,
+                task,
+                plan,
+                llm_client,
+                files_modified,
+                validation_results,
             ),
         )
 
@@ -532,9 +569,7 @@ async def execute_plan(
     try:
         from lean_ai.workflow.hooks import fire_workflow_event
 
-        validation_passed = all(
-            r.get("success", True) for r in (validation_results or {}).values()
-        )
+        validation_passed = all(r.get("success", True) for r in (validation_results or {}).values())
         fire_workflow_event(
             repo_root=repo_root,
             session_id=session_id,
@@ -562,7 +597,8 @@ async def execute_plan(
         logger.debug("retention pass scheduling failed (non-fatal)", exc_info=True)
 
     complete_data: dict = {
-        "summary": summary, "files_modified": files_modified,
+        "summary": summary,
+        "files_modified": files_modified,
     }
     if branch_name:
         complete_data["plan_branch"] = branch_name
@@ -571,7 +607,9 @@ async def execute_plan(
     await ws_send(ws, "complete", complete_data)
     logger.info(
         "Workflow complete: %d steps, %d tool calls, %d files",
-        len(plan.steps), len(all_executed), len(files_modified),
+        len(plan.steps),
+        len(all_executed),
+        len(files_modified),
     )
 
     # Build commit message
@@ -622,22 +660,27 @@ async def _run_tdd_execution(
         )
 
     # ── Phase A: Expert writes tests ──────────────────────────
-    await ws_send(ws, "stage_status", {
-        "stage": "tdd_test_writing",
-        "status": "running",
-        "summary": (
-            f"TDD: Expert writing {len(plan.tdd_test_steps)} "
-            f"test step(s)..."
-        ),
-    })
+    await ws_send(
+        ws,
+        "stage_status",
+        {
+            "stage": "tdd_test_writing",
+            "status": "running",
+            "summary": (f"TDD: Expert writing {len(plan.tdd_test_steps)} test step(s)..."),
+        },
+    )
 
     test_tool_executor = make_tool_executor(
-        repo_root, ws, session_id,
+        repo_root,
+        ws,
+        session_id,
         llm_client=expert_llm_client,
         dispatcher=dispatcher,
         telemetry_context={
-            "repo_root": repo_root, "session_id": session_id,
-            "phase": "tdd.write", "role": "expert",
+            "repo_root": repo_root,
+            "session_id": session_id,
+            "phase": "tdd.write",
+            "role": "expert",
         },
     )
     test_system_prompt = build_tdd_test_writing_prompt(
@@ -653,37 +696,46 @@ async def _run_tdd_execution(
 
     for step in plan.tdd_test_steps:
         await run_step(
-            step, expert_llm_client, build_implementation_tools(),
-            test_tool_executor, test_system_prompt,
+            step,
+            expert_llm_client,
+            build_implementation_tools(),
+            test_tool_executor,
+            test_system_prompt,
             label_prefix="[TDD Test] ",
             telemetry={
-                "repo_root": repo_root, "session_id": session_id,
-                "phase": "tdd.write", "role": "expert",
+                "repo_root": repo_root,
+                "session_id": session_id,
+                "phase": "tdd.write",
+                "role": "expert",
             },
         )
 
-    await ws_send(ws, "stage_status", {
-        "stage": "tdd_test_writing",
-        "status": "done",
-        "summary": "TDD: All test steps complete.",
-    })
+    await ws_send(
+        ws,
+        "stage_status",
+        {
+            "stage": "tdd_test_writing",
+            "status": "done",
+            "summary": "TDD: All test steps complete.",
+        },
+    )
 
     # Identify test files created for the review phase
     tdd_test_files = [
-        s.file_path for s in plan.tdd_test_steps
-        if s.file_path and s.tool == "create_file"
+        s.file_path for s in plan.tdd_test_steps if s.file_path and s.tool == "create_file"
     ]
 
     # ── Phase B: Primary reviews tests (read-only) ───────────
     if tdd_test_files:
-        await ws_send(ws, "stage_status", {
-            "stage": "tdd_test_review",
-            "status": "running",
-            "summary": (
-                f"TDD: Primary reviewing {len(tdd_test_files)} "
-                f"test file(s)..."
-            ),
-        })
+        await ws_send(
+            ws,
+            "stage_status",
+            {
+                "stage": "tdd_test_review",
+                "status": "running",
+                "summary": (f"TDD: Primary reviewing {len(tdd_test_files)} test file(s)..."),
+            },
+        )
 
         review_prompt = build_tdd_review_prompt(
             load_execution_context(repo_root),
@@ -700,20 +752,20 @@ async def _run_tdd_execution(
             full_path = os.path.join(repo_root, tf)
             try:
                 with open(full_path, encoding="utf-8") as f:
-                    review_parts.append(
-                        f"\n--- {tf} ---\n```\n{f.read()}\n```"
-                    )
+                    review_parts.append(f"\n--- {tf} ---\n```\n{f.read()}\n```")
             except Exception:
-                review_parts.append(
-                    f"\n--- {tf} --- (could not read)"
-                )
+                review_parts.append(f"\n--- {tf} --- (could not read)")
 
         review_telemetry = {
-            "repo_root": repo_root, "session_id": session_id,
-            "phase": "tdd.review", "role": "primary",
+            "repo_root": repo_root,
+            "session_id": session_id,
+            "phase": "tdd.review",
+            "role": "primary",
         }
         review_executor = make_tool_executor(
-            repo_root, ws, session_id,
+            repo_root,
+            ws,
+            session_id,
             llm_client=llm_client,
             dispatcher=dispatcher,
             tdd_protect_tests=True,
@@ -740,21 +792,26 @@ async def _run_tdd_execution(
             telemetry_context=review_telemetry,
         )
 
-        await ws_send(ws, "stage_status", {
-            "stage": "tdd_test_review",
-            "status": "done",
-            "summary": "TDD: Test review complete.",
-        })
+        await ws_send(
+            ws,
+            "stage_status",
+            {
+                "stage": "tdd_test_review",
+                "status": "done",
+                "summary": "TDD: Test review complete.",
+            },
+        )
 
     # ── Phase C: Primary implements code ──────────────────────
-    await ws_send(ws, "stage_status", {
-        "stage": "tdd_implementation",
-        "status": "running",
-        "summary": (
-            f"TDD: Primary implementing {len(plan.steps)} "
-            f"step(s)..."
-        ),
-    })
+    await ws_send(
+        ws,
+        "stage_status",
+        {
+            "stage": "tdd_implementation",
+            "status": "running",
+            "summary": (f"TDD: Primary implementing {len(plan.steps)} step(s)..."),
+        },
+    )
 
     tdd_impl_prompt = build_tdd_step_system_prompt(
         load_execution_context(repo_root),
@@ -767,32 +824,45 @@ async def _run_tdd_execution(
     )
     for step in plan.steps:
         impl_executor = make_tool_executor(
-            repo_root, ws, session_id,
+            repo_root,
+            ws,
+            session_id,
             llm_client=llm_client,
             dispatcher=dispatcher,
             tdd_protect_tests=True,
             on_test_dispute=_tdd_dispute,
             telemetry_context={
-                "repo_root": repo_root, "session_id": session_id,
-                "phase": "tdd.implement", "role": "primary",
+                "repo_root": repo_root,
+                "session_id": session_id,
+                "phase": "tdd.implement",
+                "role": "primary",
             },
         )
 
         await run_step(
-            step, llm_client, build_tdd_implementation_tools(),
-            impl_executor, tdd_impl_prompt,
+            step,
+            llm_client,
+            build_tdd_implementation_tools(),
+            impl_executor,
+            tdd_impl_prompt,
             label_prefix="[TDD Impl] ",
             telemetry={
-                "repo_root": repo_root, "session_id": session_id,
-                "phase": "tdd.implement", "role": "primary",
+                "repo_root": repo_root,
+                "session_id": session_id,
+                "phase": "tdd.implement",
+                "role": "primary",
             },
         )
 
-    await ws_send(ws, "stage_status", {
-        "stage": "tdd_implementation",
-        "status": "done",
-        "summary": "TDD: Implementation complete.",
-    })
+    await ws_send(
+        ws,
+        "stage_status",
+        {
+            "stage": "tdd_implementation",
+            "status": "done",
+            "summary": "TDD: Implementation complete.",
+        },
+    )
 
 
 async def _update_project_context(
@@ -802,48 +872,61 @@ async def _update_project_context(
     files_modified: list[str],
 ) -> None:
     """Incremental project_context.md update after execution."""
-    await ws_send(ws, "stage_status", {
-        "stage": "context_update",
-        "status": "running",
-        "summary": (
-            f"Updating project context with "
-            f"{len(files_modified)} modified file(s)..."
-        ),
-    })
+    await ws_send(
+        ws,
+        "stage_status",
+        {
+            "stage": "context_update",
+            "status": "running",
+            "summary": (f"Updating project context with {len(files_modified)} modified file(s)..."),
+        },
+    )
     try:
         from lean_ai.context.generation import update_project_context
 
         ctx_path = await update_project_context(
-            repo_root, files_modified, llm_client,
+            repo_root,
+            files_modified,
+            llm_client,
         )
         if ctx_path:
             logger.info(
                 "project_context.md updated with %d modified files",
                 len(files_modified),
             )
-            await ws_send(ws, "stage_status", {
-                "stage": "context_update",
-                "status": "done",
-                "summary": "Project context updated.",
-            })
+            await ws_send(
+                ws,
+                "stage_status",
+                {
+                    "stage": "context_update",
+                    "status": "done",
+                    "summary": "Project context updated.",
+                },
+            )
         else:
             logger.info(
                 "project_context.md update skipped (no changes needed)",
             )
-            await ws_send(ws, "stage_status", {
-                "stage": "context_update",
-                "status": "done",
-                "summary": (
-                    "Project context update skipped "
-                    "(no changes needed)."
-                ),
-            })
+            await ws_send(
+                ws,
+                "stage_status",
+                {
+                    "stage": "context_update",
+                    "status": "done",
+                    "summary": ("Project context update skipped (no changes needed)."),
+                },
+            )
     except Exception as exc:
         logger.warning(
-            "Incremental context update failed (non-fatal): %s", exc,
+            "Incremental context update failed (non-fatal): %s",
+            exc,
         )
-        await ws_send(ws, "stage_status", {
-            "stage": "context_update",
-            "status": "done",
-            "summary": f"Project context update failed: {exc}",
-        })
+        await ws_send(
+            ws,
+            "stage_status",
+            {
+                "stage": "context_update",
+                "status": "done",
+                "summary": f"Project context update failed: {exc}",
+            },
+        )

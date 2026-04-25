@@ -27,9 +27,7 @@ logger = logging.getLogger(__name__)
 
 def observations_path(repo_root: str, session_id: str) -> Path:
     """Return the absolute path to the per-session observations file."""
-    return (
-        Path(repo_root) / ".lean_ai" / "observations" / f"{session_id}.json"
-    )
+    return Path(repo_root) / ".lean_ai" / "observations" / f"{session_id}.json"
 
 
 def _load_all(path: Path) -> list[dict]:
@@ -41,12 +39,15 @@ def _load_all(path: Path) -> list[dict]:
         if isinstance(data, list):
             return data
         logger.warning(
-            "Observations file %s is not a list — discarding", path,
+            "Observations file %s is not a list — discarding",
+            path,
         )
         return []
     except Exception:
         logger.warning(
-            "Failed to read observations at %s", path, exc_info=True,
+            "Failed to read observations at %s",
+            path,
+            exc_info=True,
         )
         return []
 
@@ -77,9 +78,7 @@ async def record_observation(
     if role not in allowed_roles:
         return ToolResult(
             success=False,
-            error=(
-                f"role must be one of {sorted(allowed_roles)}, got {role!r}."
-            ),
+            error=(f"role must be one of {sorted(allowed_roles)}, got {role!r}."),
         )
     if not (reason or "").strip():
         return ToolResult(
@@ -116,7 +115,10 @@ async def record_observation(
     action = "Replaced" if replaced else "Recorded"
     logger.info(
         "%s observation: %s (role=%s) [%d total]",
-        action, file_path, role, len(observations),
+        action,
+        file_path,
+        role,
+        len(observations),
     )
     return ToolResult(
         success=True,

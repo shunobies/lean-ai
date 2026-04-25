@@ -32,11 +32,11 @@ logger = logging.getLogger(__name__)
 # ServiceNow uses numeric state and priority values.
 
 _STATE_MAP: dict[str, TaskStatus] = {
-    "1": TaskStatus.OPEN,          # New
-    "2": TaskStatus.IN_PROGRESS,   # In Progress
-    "3": TaskStatus.BLOCKED,       # On Hold
-    "6": TaskStatus.DONE,          # Resolved
-    "7": TaskStatus.DONE,          # Closed
+    "1": TaskStatus.OPEN,  # New
+    "2": TaskStatus.IN_PROGRESS,  # In Progress
+    "3": TaskStatus.BLOCKED,  # On Hold
+    "6": TaskStatus.DONE,  # Resolved
+    "7": TaskStatus.DONE,  # Closed
 }
 
 _PRIORITY_MAP: dict[str, TaskPriority] = {
@@ -127,6 +127,7 @@ class ServiceNowProvider(IntegrationProvider):
 
     def _parse_record(self, data: dict) -> ExternalTask:
         """Map a ServiceNow table record to ExternalTask."""
+
         # ServiceNow fields may be plain strings or {display_value, value} dicts
         def _val(field) -> str:
             if isinstance(field, dict):
@@ -259,7 +260,8 @@ class ServiceNowProvider(IntegrationProvider):
         if not sys_id:
             return None
         resp = await self._request(
-            "GET", f"/api/now/table/{self._table}/{sys_id}",
+            "GET",
+            f"/api/now/table/{self._table}/{sys_id}",
         )
         if resp is None or resp.status_code != 200:
             return None
@@ -271,9 +273,7 @@ class ServiceNowProvider(IntegrationProvider):
     async def search_tasks(self, query: str, limit: int = 20) -> list[ExternalTask]:
         """Search by short_description or description containing the query."""
         encoded_query = (
-            f"short_descriptionLIKE{query}"
-            f"^ORdescriptionLIKE{query}"
-            f"^ORDERBYDESCsys_updated_on"
+            f"short_descriptionLIKE{query}^ORdescriptionLIKE{query}^ORDERBYDESCsys_updated_on"
         )
         resp = await self._request(
             "GET",

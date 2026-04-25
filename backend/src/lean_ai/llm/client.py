@@ -17,7 +17,8 @@ _TRANSIENT_ERRORS = (ConnectionError, TimeoutError, OSError)
 
 
 def _inject_schema_into_messages(
-    messages: list[dict], schema: type[BaseModel],
+    messages: list[dict],
+    schema: type[BaseModel],
 ) -> list[dict]:
     """Return a copy of *messages* with the schema inlined into the system prompt.
 
@@ -57,10 +58,13 @@ def _inject_schema_into_messages(
             augmented.append(msg)
 
     if not system_injected:
-        augmented.insert(0, {
-            "role": "system",
-            "content": "Produce JSON matching the schema below." + schema_block,
-        })
+        augmented.insert(
+            0,
+            {
+                "role": "system",
+                "content": "Produce JSON matching the schema below." + schema_block,
+            },
+        )
 
     return augmented
 
@@ -159,25 +163,20 @@ class OllamaProvider(LLMProvider):
         self._context_window_val = (
             context_window if context_window is not None else settings.ollama_context_window
         )
-        self._temperature = (
-            temperature if temperature is not None else settings.ollama_temperature
-        )
+        self._temperature = temperature if temperature is not None else settings.ollama_temperature
         self._top_p = top_p if top_p is not None else settings.ollama_top_p
         self._top_k = top_k if top_k is not None else settings.ollama_top_k
         self._repeat_penalty = (
-            repeat_penalty if repeat_penalty is not None
-            else settings.ollama_repeat_penalty
+            repeat_penalty if repeat_penalty is not None else settings.ollama_repeat_penalty
         )
         # Optional params — if both the constructor arg and the settings
         # value are None, stays None so _build_options omits the key.
         self._min_p = min_p if min_p is not None else settings.ollama_min_p
         self._presence_penalty = (
-            presence_penalty if presence_penalty is not None
-            else settings.ollama_presence_penalty
+            presence_penalty if presence_penalty is not None else settings.ollama_presence_penalty
         )
         self._enable_thinking = (
-            enable_thinking if enable_thinking is not None
-            else settings.enable_thinking
+            enable_thinking if enable_thinking is not None else settings.enable_thinking
         )
         self._preserve_thinking = preserve_thinking
         # Client-side interrupt configuration.  Cloud providers enforce
@@ -209,7 +208,10 @@ class OllamaProvider(LLMProvider):
         return self._max_tokens_val
 
     def _build_options(
-        self, *, temperature: float | None = None, max_tokens: int | None = None,
+        self,
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> dict:
         """Build the Ollama options dict.
 
@@ -258,6 +260,7 @@ class OllamaProvider(LLMProvider):
         tokens = ``(chars + 3) // 4`` (rounds up for safety).
         """
         from lean_ai.config import reasoning_effort_to_ollama_limit
+
         approx_tokens = (thinking_chars + 3) // 4
         effort_limit = reasoning_effort_to_ollama_limit(self._reasoning_effort)
         if effort_limit is not None and approx_tokens >= effort_limit:
@@ -285,6 +288,7 @@ class OllamaProvider(LLMProvider):
 
     async def _retry_with_backoff(self, coro_factory, label: str = "LLM call"):
         """Retry an async callable with exponential backoff for transient errors."""
+
         def _is_retryable(exc: Exception) -> bool:
             return (
                 isinstance(exc, ollama_lib.ResponseError)
@@ -315,13 +319,20 @@ class OllamaProvider(LLMProvider):
 
         logger.info(
             "LLM chat_raw: model=%s messages=%d temp=%.1f max_tokens=%d streaming=%s",
-            self._model, len(messages), temp, tokens,
+            self._model,
+            len(messages),
+            temp,
+            tokens,
             bool(stream_callback or thinking_callback),
         )
 
         if stream_callback or thinking_callback:
             return await self._chat_raw_streaming(
-                messages, temp, tokens, stream_callback, thinking_callback,
+                messages,
+                temp,
+                tokens,
+                stream_callback,
+                thinking_callback,
             )
 
         async def _chat():
@@ -329,7 +340,8 @@ class OllamaProvider(LLMProvider):
                 model=self._model,
                 messages=messages,
                 options=self._build_options(temperature=temp, max_tokens=tokens),
-                think=self._enable_thinking, **self._build_chat_template_kwargs(),
+                think=self._enable_thinking,
+                **self._build_chat_template_kwargs(),
             )
 
         response = await self._retry_with_backoff(_chat, label="chat_raw")
@@ -350,13 +362,15 @@ class OllamaProvider(LLMProvider):
         thinking_callback,
     ) -> tuple[str, LLMMetrics]:
         """Stream chat_raw response, forwarding tokens via callbacks."""
+
         async def _start_stream():
             return await self._client.chat(
                 model=self._model,
                 messages=messages,
                 stream=True,
                 options=self._build_options(temperature=temp, max_tokens=tokens),
-                think=self._enable_thinking, **self._build_chat_template_kwargs(),
+                think=self._enable_thinking,
+                **self._build_chat_template_kwargs(),
             )
 
         stream = await self._retry_with_backoff(_start_stream, label="chat_raw(stream)")
@@ -417,7 +431,9 @@ class OllamaProvider(LLMProvider):
 
         logger.info(
             "LLM chat_structured: schema=%s model=%s streaming=%s",
-            schema.__name__, self._model, bool(thinking_callback),
+            schema.__name__,
+            self._model,
+            bool(thinking_callback),
         )
 
         augmented_messages = _inject_schema_into_messages(messages, schema)
@@ -426,20 +442,27 @@ class OllamaProvider(LLMProvider):
         for attempt in range(2):
             if thinking_callback:
                 raw, metrics = await self._chat_structured_streaming(
-                    augmented_messages, schema, temp, tokens, thinking_callback,
+                    augmented_messages,
+                    schema,
+                    temp,
+                    tokens,
+                    thinking_callback,
                 )
             else:
+
                 async def _chat():
                     return await self._client.chat(
                         model=self._model,
                         messages=augmented_messages,
                         format=schema.model_json_schema(),
                         options=self._build_options(temperature=temp, max_tokens=tokens),
-                        think=self._enable_thinking, **self._build_chat_template_kwargs(),
+                        think=self._enable_thinking,
+                        **self._build_chat_template_kwargs(),
                     )
 
                 response = await self._retry_with_backoff(
-                    _chat, label=f"structured({schema.__name__})",
+                    _chat,
+                    label=f"structured({schema.__name__})",
                 )
                 raw = response["message"]["content"]
                 metrics = self._extract_metrics(response)
@@ -451,12 +474,14 @@ class OllamaProvider(LLMProvider):
                 if attempt == 0:
                     logger.warning(
                         "Schema validation failed for %s, retrying: %s",
-                        schema.__name__, exc.errors(),
+                        schema.__name__,
+                        exc.errors(),
                     )
                     continue
                 logger.error(
                     "Schema validation failed after retry for %s. Raw: %s",
-                    schema.__name__, raw[:1000],
+                    schema.__name__,
+                    raw[:1000],
                 )
                 raise
         raise last_error  # type: ignore[misc]
@@ -470,6 +495,7 @@ class OllamaProvider(LLMProvider):
         thinking_callback,
     ) -> tuple[str, LLMMetrics]:
         """Stream structured output, forwarding thinking tokens via callback."""
+
         async def _start_stream():
             return await self._client.chat(
                 model=self._model,
@@ -477,11 +503,13 @@ class OllamaProvider(LLMProvider):
                 format=schema.model_json_schema(),
                 stream=True,
                 options=self._build_options(temperature=temp, max_tokens=tokens),
-                think=self._enable_thinking, **self._build_chat_template_kwargs(),
+                think=self._enable_thinking,
+                **self._build_chat_template_kwargs(),
             )
 
         stream = await self._retry_with_backoff(
-            _start_stream, label=f"structured({schema.__name__})(stream)",
+            _start_stream,
+            label=f"structured({schema.__name__})(stream)",
         )
 
         content_parts: list[str] = []
@@ -524,11 +552,13 @@ class OllamaProvider(LLMProvider):
                     messages=messages,
                     tools=tools,
                     options=self._build_options(max_tokens=tokens),
-                    think=self._enable_thinking, **self._build_chat_template_kwargs(),
+                    think=self._enable_thinking,
+                    **self._build_chat_template_kwargs(),
                 )
 
             response = await self._retry_with_backoff(
-                _chat, label="chat_with_tools_single",
+                _chat,
+                label="chat_with_tools_single",
             )
 
             msg = response["message"]
@@ -555,11 +585,13 @@ class OllamaProvider(LLMProvider):
                 tools=tools,
                 stream=True,
                 options=self._build_options(max_tokens=tokens),
-                think=self._enable_thinking, **self._build_chat_template_kwargs(),
+                think=self._enable_thinking,
+                **self._build_chat_template_kwargs(),
             )
 
         stream = await self._retry_with_backoff(
-            _start_stream, label="chat_with_tools_single(stream)",
+            _start_stream,
+            label="chat_with_tools_single(stream)",
         )
 
         content_parts: list[str] = []
@@ -632,7 +664,8 @@ class OllamaProvider(LLMProvider):
                 messages=messages,
                 stream=True,
                 options=self._build_options(temperature=temp, max_tokens=num_predict),
-                think=self._enable_thinking, **self._build_chat_template_kwargs(),
+                think=self._enable_thinking,
+                **self._build_chat_template_kwargs(),
             )
 
         stream = await self._retry_with_backoff(_chat, label="chat_stream")
@@ -664,8 +697,7 @@ class OllamaProvider(LLMProvider):
         try:
             models = await self._client.list()
             model_names = [
-                m.get("model", "") or m.get("name", "")
-                for m in models.get("models", [])
+                m.get("model", "") or m.get("name", "") for m in models.get("models", [])
             ]
             return any(self._model in name for name in model_names)
         except Exception:
@@ -675,7 +707,10 @@ class OllamaProvider(LLMProvider):
     # ── Ollama-only methods (not on ABC) ──
 
     async def generate_completion(
-        self, prompt: str, suffix: str = "", timeout: float = 5.0,
+        self,
+        prompt: str,
+        suffix: str = "",
+        timeout: float = 5.0,
     ) -> str:
         """Raw text completion for inline predictions (FIM mode)."""
         if not self._fim_supported:
@@ -695,7 +730,8 @@ class OllamaProvider(LLMProvider):
             return ""
         except ConnectionError:
             logger.warning(
-                "Inline prediction: cannot reach Ollama at %s", self._url,
+                "Inline prediction: cannot reach Ollama at %s",
+                self._url,
             )
             return ""
         except Exception as exc:
@@ -744,7 +780,8 @@ class OllamaProvider(LLMProvider):
         for attempt in range(1, max_retries + 1):
             try:
                 response = await self._embed_client.embed(
-                    model=embed_model, input=texts,
+                    model=embed_model,
+                    input=texts,
                 )
                 return response.get("embeddings", [])
             except ResponseError as exc:
@@ -754,10 +791,12 @@ class OllamaProvider(LLMProvider):
                 # -1 (inline streaming error like model crash or GPU OOM).
                 if attempt < max_retries:
                     logger.warning(
-                        "Embed call failed (status=%d, attempt %d/%d, "
-                        "%d texts): %s — retrying…",
-                        exc.status_code, attempt, max_retries,
-                        len(texts), exc.error,
+                        "Embed call failed (status=%d, attempt %d/%d, %d texts): %s — retrying…",
+                        exc.status_code,
+                        attempt,
+                        max_retries,
+                        len(texts),
+                        exc.error,
                     )
                     await asyncio.sleep(2.0 * attempt)
                 else:
@@ -765,9 +804,10 @@ class OllamaProvider(LLMProvider):
             except ConnectionError:
                 if attempt < max_retries:
                     logger.warning(
-                        "Embed connection lost (attempt %d/%d, %d texts), "
-                        "retrying…",
-                        attempt, max_retries, len(texts),
+                        "Embed connection lost (attempt %d/%d, %d texts), retrying…",
+                        attempt,
+                        max_retries,
+                        len(texts),
                     )
                     await asyncio.sleep(2.0 * attempt)
                 else:

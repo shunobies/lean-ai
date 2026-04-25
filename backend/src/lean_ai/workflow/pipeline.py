@@ -78,23 +78,23 @@ async def run_workflow(
                 "primary_model": getattr(llm_client, "model_name", None),
                 "primary_provider": getattr(llm_client, "provider_name", None),
                 "expert_model": (
-                    getattr(expert_llm_client, "model_name", None)
-                    if expert_llm_client else None
+                    getattr(expert_llm_client, "model_name", None) if expert_llm_client else None
                 ),
                 "expert_provider": (
-                    getattr(expert_llm_client, "provider_name", None)
-                    if expert_llm_client else None
+                    getattr(expert_llm_client, "provider_name", None) if expert_llm_client else None
                 ),
                 "request_model": (
-                    getattr(request_llm_client, "model_name", None)
-                    if request_llm_client else None
+                    getattr(request_llm_client, "model_name", None) if request_llm_client else None
                 ),
                 "request_provider": (
                     getattr(request_llm_client, "provider_name", None)
-                    if request_llm_client else None
+                    if request_llm_client
+                    else None
                 ),
                 "context_window": getattr(
-                    settings, "_active_context_window", None,
+                    settings,
+                    "_active_context_window",
+                    None,
                 ),
                 "tdd_enabled": bool(getattr(settings, "enable_tdd", False)),
             },
@@ -105,17 +105,17 @@ async def run_workflow(
     # Validate TDD requirements: expert model + sufficient context window
     if settings.enable_tdd and expert_llm_client is None:
         logger.warning(
-            "TDD mode enabled but no expert model configured — "
-            "falling back to normal mode",
+            "TDD mode enabled but no expert model configured — falling back to normal mode",
         )
-        await ws_send(ws, "stage_status", {
-            "stage": "tdd",
-            "status": "done",
-            "summary": (
-                "TDD mode requires an expert model. "
-                "Falling back to normal mode."
-            ),
-        })
+        await ws_send(
+            ws,
+            "stage_status",
+            {
+                "stage": "tdd",
+                "status": "done",
+                "summary": ("TDD mode requires an expert model. Falling back to normal mode."),
+            },
+        )
 
     if settings.enable_tdd and settings._active_context_window <= 32768:
         logger.warning(
@@ -123,15 +123,19 @@ async def run_workflow(
             "TDD requires cross-phase context that exceeds 32k budget.",
             settings._active_context_window,
         )
-        await ws_send(ws, "stage_status", {
-            "stage": "tdd",
-            "status": "done",
-            "summary": (
-                "TDD mode auto-disabled: context window too small "
-                f"({settings._active_context_window}). "
-                "Increase to 64k+ to enable TDD."
-            ),
-        })
+        await ws_send(
+            ws,
+            "stage_status",
+            {
+                "stage": "tdd",
+                "status": "done",
+                "summary": (
+                    "TDD mode auto-disabled: context window too small "
+                    f"({settings._active_context_window}). "
+                    "Increase to 64k+ to enable TDD."
+                ),
+            },
+        )
 
     # Log the initial task
     if conversation_logger:
@@ -242,11 +246,15 @@ async def _wait_for_approval(
     Returns the approved ExecutionPlan.
     """
     plan_md = plan_to_markdown(plan)
-    await ws_send(ws, "approval_required", {
-        "plan": plan_md,
-        "user_summary": plan.user_summary,
-        "plan_validation_warnings": list(plan.plan_validation_warnings),
-    })
+    await ws_send(
+        ws,
+        "approval_required",
+        {
+            "plan": plan_md,
+            "user_summary": plan.user_summary,
+            "plan_validation_warnings": list(plan.plan_validation_warnings),
+        },
+    )
     revision_count = 0
     # Track the most-recent rejection so that if the user eventually
     # approves a revised plan, we can extract a `rejection` memory
@@ -254,9 +262,7 @@ async def _wait_for_approval(
     last_rejection: tuple[str, str] | None = None
 
     while True:
-        msg = (
-            await dispatcher.wait_for_approval() if dispatcher else None
-        )
+        msg = await dispatcher.wait_for_approval() if dispatcher else None
         if msg is None:
             raise WebSocketDisconnect()
 
@@ -305,26 +311,33 @@ async def _wait_for_approval(
 
             if revision_count > _MAX_REVISIONS:
                 logger.warning(
-                    "Max plan revisions reached (%d)", _MAX_REVISIONS,
+                    "Max plan revisions reached (%d)",
+                    _MAX_REVISIONS,
                 )
-                await ws_send(ws, "error", {
-                    "message": (
-                        f"Maximum revision limit ({_MAX_REVISIONS}) "
-                        "reached. Please start a new session."
-                    ),
-                    "recoverable": False,
-                })
+                await ws_send(
+                    ws,
+                    "error",
+                    {
+                        "message": (
+                            f"Maximum revision limit ({_MAX_REVISIONS}) "
+                            "reached. Please start a new session."
+                        ),
+                        "recoverable": False,
+                    },
+                )
                 raise WebSocketDisconnect()
 
-            await ws_send(ws, "plan_rejected", {
-                "feedback": feedback,
-                "stage": "planning",
-            })
+            await ws_send(
+                ws,
+                "plan_rejected",
+                {
+                    "feedback": feedback,
+                    "stage": "planning",
+                },
+            )
 
             revision_context = (
-                f"PREVIOUS PLAN:\n"
-                f"{plan.model_dump_json(indent=2)}\n\n"
-                f"USER FEEDBACK:\n{feedback}"
+                f"PREVIOUS PLAN:\n{plan.model_dump_json(indent=2)}\n\nUSER FEEDBACK:\n{feedback}"
             )
             plan = await create_plan(
                 task=task,
@@ -339,12 +352,20 @@ async def _wait_for_approval(
                 expert_llm_client=expert_llm_client,
             )
             plan_md = plan_to_markdown(plan)
-            await ws_send(ws, "plan_revision", {
-                "review_feedback": feedback,
-                "revision_number": revision_count,
-            })
-            await ws_send(ws, "approval_required", {
-                "plan": plan_md,
-                "user_summary": plan.user_summary,
-            })
+            await ws_send(
+                ws,
+                "plan_revision",
+                {
+                    "review_feedback": feedback,
+                    "revision_number": revision_count,
+                },
+            )
+            await ws_send(
+                ws,
+                "approval_required",
+                {
+                    "plan": plan_md,
+                    "user_summary": plan.user_summary,
+                },
+            )
             continue

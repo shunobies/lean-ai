@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 class TurnVerdict(Enum):
     """Single decision made after each turn in the tool-calling loop."""
+
     CONTINUE = auto()
     NUDGE = auto()
     REFRESH = auto()
@@ -36,6 +37,7 @@ class TurnVerdict(Enum):
 @dataclass
 class TurnAction:
     """Result of evaluating a turn — one verdict with optional payload."""
+
     verdict: TurnVerdict
     message: str = ""
     exit_reason: str = ""
@@ -44,6 +46,7 @@ class TurnAction:
 @dataclass
 class _TurnState:
     """Mutable counters tracked across turns in chat_with_tools."""
+
     consecutive_text_only: int = 0
     consecutive_truncated: int = 0
     prev_tool_hash: str | None = None
@@ -64,11 +67,18 @@ class _TurnState:
 
 # Tools whose results provide evidence for claims — suppress the
 # verification nudge when any of these were called in the current turn.
-_VERIFICATION_TOOLS = frozenset({
-    "search_internet", "fetch_url",
-    "search_wiki", "fetch_wiki_page",
-    "grep_files", "read_file", "list_directory", "directory_tree",
-})
+_VERIFICATION_TOOLS = frozenset(
+    {
+        "search_internet",
+        "fetch_url",
+        "search_wiki",
+        "fetch_wiki_page",
+        "grep_files",
+        "read_file",
+        "list_directory",
+        "directory_tree",
+    }
+)
 
 # Patterns indicating the LLM is making an unverified external claim.
 _CLAIM_PATTERNS = re.compile(
@@ -139,12 +149,14 @@ class LLMClient:
     ):
         if provider is None:
             from lean_ai.llm.client import OllamaProvider
+
             provider = OllamaProvider()
         self._provider = provider
         self._semaphore = concurrency_semaphore
 
         # For embed / generate_completion — always Ollama
         from lean_ai.llm.client import OllamaProvider
+
         if isinstance(provider, OllamaProvider):
             self._ollama: OllamaProvider | None = provider
         else:
@@ -187,11 +199,17 @@ class LLMClient:
         if self._semaphore is not None:
             async with self._semaphore:
                 text, metrics = await self._provider.chat_raw(
-                    messages, temperature, max_tokens, **kwargs,
+                    messages,
+                    temperature,
+                    max_tokens,
+                    **kwargs,
                 )
         else:
             text, metrics = await self._provider.chat_raw(
-                messages, temperature, max_tokens, **kwargs,
+                messages,
+                temperature,
+                max_tokens,
+                **kwargs,
             )
         self.last_chat_metrics = _metrics_to_dict(metrics)
         return text
@@ -210,7 +228,11 @@ class LLMClient:
             kwargs["thinking_callback"] = thinking_callback
 
         result, metrics = await self._provider.chat_structured(
-            messages, schema, temperature, max_tokens, **kwargs,
+            messages,
+            schema,
+            temperature,
+            max_tokens,
+            **kwargs,
         )
         self.last_chat_metrics = _metrics_to_dict(metrics)
         return result
@@ -224,7 +246,9 @@ class LLMClient:
         thinking_callback=None,
     ) -> AsyncIterator[str]:
         async for token in self._provider.chat_stream(
-            messages, temperature, max_tokens,
+            messages,
+            temperature,
+            max_tokens,
             thinking_callback=thinking_callback,
         ):
             yield token
@@ -235,7 +259,10 @@ class LLMClient:
     # ── Ollama-only methods ──
 
     async def generate_completion(
-        self, prompt: str, suffix: str = "", timeout: float = 5.0,
+        self,
+        prompt: str,
+        suffix: str = "",
+        timeout: float = 5.0,
     ) -> str:
         if self._ollama is None:
             return ""
@@ -296,9 +323,10 @@ class LLMClient:
         batch_size = max(min_batch, min(batch_size, max_batch))
 
         logger.info(
-            "Computed embedding batch size: %d "
-            "(context_window=%d, avg_tokens=%.0f)",
-            batch_size, ctx_window, tokens_per_chunk,
+            "Computed embedding batch size: %d (context_window=%d, avg_tokens=%.0f)",
+            batch_size,
+            ctx_window,
+            tokens_per_chunk,
         )
         return batch_size
 
@@ -411,14 +439,16 @@ class LLMClient:
                         "chat_with_tools: injecting user interrupt (%d chars)",
                         len(pending),
                     )
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            "[USER INTERRUPT] The user has sent you new "
-                            "instructions. Read carefully and adjust your "
-                            "approach:\n\n" + pending
-                        ),
-                    })
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "[USER INTERRUPT] The user has sent you new "
+                                "instructions. Read carefully and adjust your "
+                                "approach:\n\n" + pending
+                            ),
+                        }
+                    )
 
             logger.info(
                 "chat_with_tools turn %d/%s: %d messages",
@@ -450,7 +480,9 @@ class LLMClient:
                 turn_started_at = _monotonic()
 
             content, tool_calls, metrics = await self._provider.chat_with_tools_single(
-                messages, tools, max_tokens=tokens,
+                messages,
+                tools,
+                max_tokens=tokens,
                 stream_callback=_stream_wrapper if _stream_cb else None,
                 thinking_callback=_think_cb,
             )
@@ -462,7 +494,8 @@ class LLMClient:
             if telemetry_context is not None and turn_messages_in is not None:
                 latency_ms = (
                     int((_monotonic() - turn_started_at) * 1000)
-                    if turn_started_at is not None else None
+                    if turn_started_at is not None
+                    else None
                 )
                 _fire_capture_turn(
                     telemetry_context=telemetry_context,
@@ -511,8 +544,7 @@ class LLMClient:
             preserve_thinking = getattr(self._provider, "_preserve_thinking", False)
             turn_thinking = metrics.thinking if preserve_thinking else None
             fold_into_content = (
-                bool(turn_thinking)
-                and getattr(self._provider, "provider_name", "") == "ollama"
+                bool(turn_thinking) and getattr(self._provider, "provider_name", "") == "ollama"
             )
 
             if not tool_calls:
@@ -539,13 +571,12 @@ class LLMClient:
 
                 # Build assistant message via provider
                 assistant_msg = self._provider.format_assistant_tool_message(
-                    content, tool_calls,
+                    content,
+                    tool_calls,
                 )
                 if fold_into_content:
                     existing = assistant_msg.get("content") or ""
-                    assistant_msg["content"] = (
-                        f"<think>\n{turn_thinking}\n</think>\n\n{existing}"
-                    )
+                    assistant_msg["content"] = f"<think>\n{turn_thinking}\n</think>\n\n{existing}"
                 elif turn_thinking:
                     assistant_msg["thinking"] = turn_thinking
                 messages.append(assistant_msg)
@@ -568,41 +599,41 @@ class LLMClient:
                     except Exception as exc:
                         result_str = f"ERROR: {exc}"
                         logger.warning(
-                            "chat_with_tools: tool %s raised: %s", tc.name, exc,
+                            "chat_with_tools: tool %s raised: %s",
+                            tc.name,
+                            exc,
                         )
 
-                    executed.append(ToolCall(
-                        tool_name=tc.name,
-                        parameters=tc.arguments,
-                        description=(
-                            f"{tc.name} "
-                            f"{tc.arguments.get('path', tc.arguments.get('command', ''))}"
-                        ),
-                    ))
+                    executed.append(
+                        ToolCall(
+                            tool_name=tc.name,
+                            parameters=tc.arguments,
+                            description=(
+                                f"{tc.name} "
+                                f"{tc.arguments.get('path', tc.arguments.get('command', ''))}"
+                            ),
+                        )
+                    )
 
                     if on_tool_result:
                         await on_tool_result(tc.name, result_str)
 
                     result_msgs = self._provider.format_tool_result_messages(
-                        tc, result_str,
+                        tc,
+                        result_str,
                     )
                     messages.extend(result_msgs)
 
                     # Track test/lint failure streak for claim verification
                     if tc.name in ("run_tests", "run_lint"):
-                        if isinstance(result_str, str) and (
-                            result_str.startswith("FAILED")
-                        ):
+                        if isinstance(result_str, str) and (result_str.startswith("FAILED")):
                             state.recent_test_failures += 1
                         else:
                             state.recent_test_failures = 0
 
                     # Loop detection (inline — can coexist with reminders)
                     if state.loop_detection_threshold > 0:
-                        call_sig = (
-                            f"{tc.name}:"
-                            f"{json.dumps(tc.arguments, sort_keys=True)}"
-                        )
+                        call_sig = f"{tc.name}:{json.dumps(tc.arguments, sort_keys=True)}"
                         tool_hash = hashlib.sha256(
                             call_sig.encode(),
                         ).hexdigest()
@@ -612,24 +643,25 @@ class LLMClient:
                             state.consecutive_same_tool = 1
                             state.prev_tool_hash = tool_hash
 
-                        if (
-                            state.consecutive_same_tool
-                            >= state.loop_detection_threshold
-                        ):
+                        if state.consecutive_same_tool >= state.loop_detection_threshold:
                             logger.warning(
                                 "chat_with_tools: loop detected — %s "
                                 "called %d times with identical arguments",
-                                tc.name, state.consecutive_same_tool,
+                                tc.name,
+                                state.consecutive_same_tool,
                             )
                             from lean_ai.llm.prompt_registry import registry
-                            messages.append({
-                                "role": "user",
-                                "content": registry.format(
-                                    "nudge.loop_detected",
-                                    tool_name=tc.name,
-                                    count=str(state.consecutive_same_tool),
-                                ),
-                            })
+
+                            messages.append(
+                                {
+                                    "role": "user",
+                                    "content": registry.format(
+                                        "nudge.loop_detected",
+                                        tool_name=tc.name,
+                                        count=str(state.consecutive_same_tool),
+                                    ),
+                                }
+                            )
                             _fire_in_loop_event(
                                 telemetry_context,
                                 event_type="loop_detected",
@@ -660,8 +692,8 @@ class LLMClient:
                                 rejection = str(rejection_maybe)
                         except Exception as exc:
                             logger.warning(
-                                "chat_with_tools: task_complete_validator "
-                                "raised: %s", exc,
+                                "chat_with_tools: task_complete_validator raised: %s",
+                                exc,
                             )
                     if rejection:
                         completion_call = None
@@ -673,10 +705,9 @@ class LLMClient:
                     else:
                         result_text = "Task marked complete."
                     for tc in pending_complete_calls:
-                        result_msgs = (
-                            self._provider.format_tool_result_messages(
-                                tc, result_text,
-                            )
+                        result_msgs = self._provider.format_tool_result_messages(
+                            tc,
+                            result_text,
                         )
                         messages.extend(result_msgs)
 
@@ -713,10 +744,13 @@ class LLMClient:
                     )
                     break
                 from lean_ai.llm.prompt_registry import registry
-                messages.append({
-                    "role": "user",
-                    "content": registry.get("nudge.reasoning_budget_exceeded"),
-                })
+
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": registry.get("nudge.reasoning_budget_exceeded"),
+                    }
+                )
                 logger.info(
                     "chat_with_tools: reasoning budget interrupt #%d — "
                     "nudging for final answer (thinking ~%d tokens)",
@@ -746,7 +780,8 @@ class LLMClient:
 
             if action.verdict == TurnVerdict.EXIT:
                 logger.warning(
-                    "chat_with_tools: exiting — %s", action.exit_reason,
+                    "chat_with_tools: exiting — %s",
+                    action.exit_reason,
                 )
                 break
             if action.verdict == TurnVerdict.REFRESH:
@@ -767,9 +802,7 @@ class LLMClient:
                         },
                     )
                     if on_metrics:
-                        est_new = sum(
-                            len(m.get("content") or "") for m in messages
-                        ) // 4
+                        est_new = sum(len(m.get("content") or "") for m in messages) // 4
                         await on_metrics(est_new, self._provider.context_window)
             elif action.verdict == TurnVerdict.NUDGE:
                 messages.append({"role": "user", "content": action.message})
@@ -803,19 +836,20 @@ class LLMClient:
                 and state.recent_test_failures >= 2
                 and content.strip()
                 and _detect_unverified_claims(content)
-                and not any(
-                    tc.name in _VERIFICATION_TOOLS for tc in (tool_calls or [])
-                )
+                and not any(tc.name in _VERIFICATION_TOOLS for tc in (tool_calls or []))
             ):
                 logger.info(
                     "chat_with_tools: repeated test failures + unverified "
                     "claim detected, nudging internet search"
                 )
                 from lean_ai.llm.prompt_registry import registry
-                messages.append({
-                    "role": "user",
-                    "content": registry.get("nudge.claim_verification"),
-                })
+
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": registry.get("nudge.claim_verification"),
+                    }
+                )
                 _fire_in_loop_event(
                     telemetry_context,
                     event_type="claim_unverified",
@@ -831,26 +865,24 @@ class LLMClient:
             # Detect [UNVERIFIED] markers in model output. Only nudge if
             # search_internet is available in the tool list and wasn't
             # already called this turn.
-            _has_search = any(
-                t["function"]["name"] == "search_internet" for t in tools
-            )
+            _has_search = any(t["function"]["name"] == "search_internet" for t in tools)
             if (
                 content.strip()
                 and "[UNVERIFIED]" in content.upper()
                 and _has_search
-                and not any(
-                    tc.name == "search_internet" for tc in (tool_calls or [])
-                )
+                and not any(tc.name == "search_internet" for tc in (tool_calls or []))
             ):
                 logger.info(
-                    "chat_with_tools: [UNVERIFIED] marker detected, "
-                    "nudging confidence verification"
+                    "chat_with_tools: [UNVERIFIED] marker detected, nudging confidence verification"
                 )
                 from lean_ai.llm.prompt_registry import registry
-                messages.append({
-                    "role": "user",
-                    "content": registry.get("nudge.confidence_verification"),
-                })
+
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": registry.get("nudge.confidence_verification"),
+                    }
+                )
         else:
             logger.warning(
                 "chat_with_tools: reached max_turns=%s without completion",
@@ -894,11 +926,11 @@ class LLMClient:
                     return TurnAction(
                         verdict=TurnVerdict.EXIT,
                         exit_reason=(
-                            f"{state.consecutive_truncated} consecutive "
-                            f"truncated responses"
+                            f"{state.consecutive_truncated} consecutive truncated responses"
                         ),
                     )
                 from lean_ai.llm.prompt_registry import registry
+
                 return TurnAction(
                     verdict=TurnVerdict.NUDGE,
                     message=registry.get("nudge.truncation"),
@@ -919,6 +951,7 @@ class LLMClient:
                 nudge = text_only_nudge
             else:
                 from lean_ai.llm.prompt_registry import registry
+
                 nudge = registry.get("nudge.text_only")
             return TurnAction(verdict=TurnVerdict.NUDGE, message=nudge)
 
@@ -935,12 +968,11 @@ class LLMClient:
             and (turn + 1) % reminder_interval == 0
             and turn + 1 < max_turns
         ):
-            reminder_text = (
-                task_reminder() if callable(task_reminder) else task_reminder
-            )
+            reminder_text = task_reminder() if callable(task_reminder) else task_reminder
             logger.info(
                 "chat_with_tools: injecting task reminder at turn %d (%d chars)",
-                turn + 1, len(reminder_text),
+                turn + 1,
+                len(reminder_text),
             )
             return TurnAction(verdict=TurnVerdict.NUDGE, message=reminder_text)
 
@@ -972,7 +1004,8 @@ class LLMClient:
 
         logger.info(
             "chat_with_tools: context refresh triggered at %d/%d tokens (%.0f%%)",
-            est_tokens, self._provider.context_window,
+            est_tokens,
+            self._provider.context_window,
             (est_tokens / self._provider.context_window) * 100,
         )
 
@@ -990,7 +1023,9 @@ class LLMClient:
         new_est = sum(len(m.get("content") or "") for m in messages) // 4
         logger.info(
             "chat_with_tools: context refreshed — %d→%d est. tokens, %d messages",
-            est_tokens, new_est, len(messages),
+            est_tokens,
+            new_est,
+            len(messages),
         )
         return True
 
@@ -1020,6 +1055,7 @@ def _trim_old_thinking(messages: list[dict], *, keep_recent: int = 3) -> None:
     recent thinking stays visible to the model (useful for self-coherence),
     older thinking is dropped.
     """
+
     def _has_thinking(msg: dict) -> bool:
         if msg.get("role") != "assistant":
             return False
@@ -1062,9 +1098,7 @@ def _build_assistant_output(
     if thinking and getattr(settings, "capture_thinking", True):
         out["thinking"] = thinking
     if tool_calls:
-        out["tool_calls"] = [
-            _serialize_tool_call_for_capture(tc) for tc in tool_calls
-        ]
+        out["tool_calls"] = [_serialize_tool_call_for_capture(tc) for tc in tool_calls]
     return out
 
 
@@ -1123,9 +1157,7 @@ def _fire_capture_turn(
             )
             if trace_uuid:
                 telemetry_context["last_trace_uuid"] = trace_uuid
-                telemetry_context.setdefault("trace_uuids", []).append(
-                    trace_uuid
-                )
+                telemetry_context.setdefault("trace_uuids", []).append(trace_uuid)
         except Exception:
             logger.debug("capture_turn scheduling failed", exc_info=True)
 

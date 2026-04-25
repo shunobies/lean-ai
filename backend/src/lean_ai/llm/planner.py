@@ -117,7 +117,11 @@ async def create_plan(
     """
     if revision_context:
         return await _revise_plan(
-            task, revision_context, llm_client, context, ws,
+            task,
+            revision_context,
+            llm_client,
+            context,
+            ws,
             expert_llm_client=expert_llm_client,
             on_thinking=on_thinking,
         )
@@ -131,9 +135,7 @@ async def create_plan(
     # Expert client for reasoning-heavy phases (3-5), falls back to standard
     expert = expert_llm_client or llm_client
     expert_max_tokens = (
-        settings.effective_expert_max_tokens
-        if expert_llm_client
-        else phase_max_tokens
+        settings.effective_expert_max_tokens if expert_llm_client else phase_max_tokens
     )
 
     expert_ctx = (
@@ -160,22 +162,27 @@ async def create_plan(
 
     # ── Phase 1: Clarification / verification ──
     await _send_stage(
-        ws, "Phase 1: Verifying task (asking clarifying questions if needed)...",
-        model=explorer.model_name, phase=1,
+        ws,
+        "Phase 1: Verifying task (asking clarifying questions if needed)...",
+        model=explorer.model_name,
+        phase=1,
     )
     logger.info(
         "Planning Phase 1 clarification (model=%s, tool_budget=%d)",
-        explorer.model_name, settings.plan_phase1_max_turns,
+        explorer.model_name,
+        settings.plan_phase1_max_turns,
     )
     t0 = time.monotonic()
 
     phase1_turns_str = str(settings.plan_phase1_max_turns)
     phase1_system = registry.format(
-        "planning.scope_system", PHASE1_MAX_TURNS=phase1_turns_str,
+        "planning.scope_system",
+        PHASE1_MAX_TURNS=phase1_turns_str,
     )
     phase1_user_content = registry.format(
         "planning.scope_user",
-        task=task, context=context,
+        task=task,
+        context=context,
         PHASE1_MAX_TURNS=phase1_turns_str,
     )
     if memory_context:
@@ -185,10 +192,16 @@ async def create_plan(
     # codebase, ask the user only when a decision genuinely can't be
     # inferred. Scope document assembly happens in Phase 1a (synthesis).
     phase1_tools = [
-        t for t in build_planning_tools()
-        if t["function"]["name"] in (
-            "grep_files", "read_file", "list_directory",
-            "query_project_context", "search_reference", "task_complete",
+        t
+        for t in build_planning_tools()
+        if t["function"]["name"]
+        in (
+            "grep_files",
+            "read_file",
+            "list_directory",
+            "query_project_context",
+            "search_reference",
+            "task_complete",
         )
     ]
     phase1_tools.append(REQUEST_CLARIFICATION_TOOL)
@@ -196,7 +209,12 @@ async def create_plan(
     # Reuse the same read-only executor Phase 2 uses.
     small_ctx = settings._active_context_window <= 32768
     phase1_executor = _make_read_only_executor(
-        explorer, repo_root, session_id, ws, dispatcher, small_ctx,
+        explorer,
+        repo_root,
+        session_id,
+        ws,
+        dispatcher,
+        small_ctx,
     )
 
     _phase1_tool_calls, scope_prose = await explorer.chat_with_tools(
@@ -215,8 +233,10 @@ async def create_plan(
         on_thinking=on_thinking,
         on_metrics=on_metrics,
         telemetry_context={
-            "repo_root": repo_root, "session_id": session_id,
-            "phase": "planning.phase1", "role": "primary",
+            "repo_root": repo_root,
+            "session_id": session_id,
+            "phase": "planning.phase1",
+            "role": "primary",
         },
     )
     if on_content:
@@ -224,24 +244,32 @@ async def create_plan(
 
     phase_timings["phase_1_clarification"] = time.monotonic() - t0
     _save_debug_phase(
-        repo_root, session_id, "phase_1_clarification",
-        scope_prose, phase_timings["phase_1_clarification"],
+        repo_root,
+        session_id,
+        "phase_1_clarification",
+        scope_prose,
+        phase_timings["phase_1_clarification"],
     )
     logger.info(
         "Phase 1 clarification used %d tool calls in %.1fs",
-        len(_phase1_tool_calls), phase_timings["phase_1_clarification"],
+        len(_phase1_tool_calls),
+        phase_timings["phase_1_clarification"],
     )
     await _send_stage_done(
-        ws, "Task verified",
-        model=explorer.model_name, phase=1,
+        ws,
+        "Task verified",
+        model=explorer.model_name,
+        phase=1,
     )
 
     # ── Phase 1a: Scope document generation ──
     # chat_structured → ScopeDocument with programmatic fallback guarantees
     # Phase 2 always receives the 8-section shape, never raw prose.
     await _send_stage(
-        ws, "Phase 1a: Generating scope document...",
-        model=explorer.model_name, phase=1,
+        ws,
+        "Phase 1a: Generating scope document...",
+        model=explorer.model_name,
+        phase=1,
     )
     t0a = time.monotonic()
     scope_obj, scope, scope_synthesized = await _synthesize_scope(
@@ -262,48 +290,58 @@ async def create_plan(
 
     phase_timings["phase_1a_scope"] = time.monotonic() - t0a
     _save_debug_phase(
-        repo_root, session_id, "phase_1a_scope",
-        scope, phase_timings["phase_1a_scope"],
+        repo_root,
+        session_id,
+        "phase_1a_scope",
+        scope,
+        phase_timings["phase_1a_scope"],
     )
     await _send_stage_done(
-        ws, "Scope document generated",
-        model=explorer.model_name, phase=1,
+        ws,
+        "Scope document generated",
+        model=explorer.model_name,
+        phase=1,
     )
 
     # ── Phase 2: File Identification + Content Reading ──
     await _send_stage(
-        ws, "Phase 2: Exploring codebase and reading files...",
-        model=explorer.model_name, phase=2,
+        ws,
+        "Phase 2: Exploring codebase and reading files...",
+        model=explorer.model_name,
+        phase=2,
     )
     logger.info("Planning Phase 2: File identification and reading")
 
-    file_summary_obj, file_identification, phase2_elapsed = (
-        await run_phase2_exploration(
-            task=task,
-            scope=scope,
-            context=context,
-            repo_root=repo_root,
-            session_id=session_id,
-            explorer=explorer,
-            phase_max_tokens=phase_max_tokens,
-            ws=ws,
-            dispatcher=dispatcher,
-            on_content=on_content,
-            on_thinking=on_thinking,
-            on_tool_call=on_tool_call,
-            on_tool_result=on_tool_result,
-            on_metrics=on_metrics,
-        )
+    file_summary_obj, file_identification, phase2_elapsed = await run_phase2_exploration(
+        task=task,
+        scope=scope,
+        context=context,
+        repo_root=repo_root,
+        session_id=session_id,
+        explorer=explorer,
+        phase_max_tokens=phase_max_tokens,
+        ws=ws,
+        dispatcher=dispatcher,
+        on_content=on_content,
+        on_thinking=on_thinking,
+        on_tool_call=on_tool_call,
+        on_tool_result=on_tool_result,
+        on_metrics=on_metrics,
     )
 
     phase_timings["phase_2_file_identification"] = phase2_elapsed
     _save_debug_phase(
-        repo_root, session_id, "phase_2_file_identification",
-        file_identification, phase2_elapsed,
+        repo_root,
+        session_id,
+        "phase_2_file_identification",
+        file_identification,
+        phase2_elapsed,
     )
     await _send_stage_done(
-        ws, "Codebase exploration complete",
-        model=explorer.model_name, phase=2,
+        ws,
+        "Codebase exploration complete",
+        model=explorer.model_name,
+        phase=2,
     )
 
     # Pass exploration results directly to downstream phases
@@ -322,15 +360,16 @@ async def create_plan(
     # Compact file_summary at small context windows
     if settings._active_context_window <= 32768:
         file_summary = await _compact_file_summary(
-            file_summary, explorer, settings._active_context_window,
+            file_summary,
+            explorer,
+            settings._active_context_window,
         )
 
     # ── Phase 3: Design + Risk Synthesis ──
     if expert_llm_client:
         await _send_stage(
             ws,
-            f"Switching to expert model ({expert_llm_client.model_name}) "
-            f"for design phases...",
+            f"Switching to expert model ({expert_llm_client.model_name}) for design phases...",
             model=expert_llm_client.model_name,
         )
         logger.info(
@@ -338,15 +377,16 @@ async def create_plan(
             expert_llm_client.model_name,
         )
     await _send_stage(
-        ws, "Phase 3: Designing changes and assessing risks...",
-        model=expert.model_name, phase=3,
+        ws,
+        "Phase 3: Designing changes and assessing risks...",
+        model=expert.model_name,
+        phase=3,
     )
     logger.info("Planning Phase 3: Design + risk synthesis")
     t0 = time.monotonic()
 
     phase3_project_context_block = (
-        f"PROJECT CONTEXT:\n{project_context}\n\n"
-        if project_context else ""
+        f"PROJECT CONTEXT:\n{project_context}\n\n" if project_context else ""
     )
     phase3_user_content = registry.format(
         "planning.design_user",
@@ -356,7 +396,9 @@ async def create_plan(
         file_summary=file_summary,
     )
     if settings.enable_session_memory and getattr(
-        settings, "enable_phase3_memory", True,
+        settings,
+        "enable_phase3_memory",
+        True,
     ):
         from lean_ai.llm.planner_helpers import retrieve_design_memories
 
@@ -373,25 +415,21 @@ async def create_plan(
         """Execute search tools for Phase 3 design verification."""
         if name == "search_internet":
             from lean_ai.tools.internet import search_internet
+
             result = await search_internet(
                 query=arguments.get("query", ""),
                 llm_client=expert,
             )
-            return (
-                result.output if result.success
-                else result.error or "Error"
-            )
+            return result.output if result.success else result.error or "Error"
         elif name == "fetch_url":
             from lean_ai.tools.internet import fetch_url
+
             result = await fetch_url(
                 url=arguments.get("url", ""),
                 repo_root=repo_root,
                 llm_client=expert,
             )
-            return (
-                result.output if result.success
-                else result.error or "Error"
-            )
+            return result.output if result.success else result.error or "Error"
         elif name == "task_complete":
             return "Design synthesis marked complete."
         return f"Unknown tool: {name}"
@@ -400,24 +438,24 @@ async def create_plan(
     # text_only_exit_count=1 preserves single-shot behaviour when the
     # FileSummary's VERIFIED REFERENCES already cover every external
     # surface — the model exits on its first text response.
-    _phase3_tool_calls, phase3_exploration_prose = (
-        await expert.chat_with_tools(
-            messages=phase3_messages,
-            tools=build_design_tools(),
-            tool_executor_fn=_search_only_executor,
-            max_turns=15,
-            max_tokens=expert_max_tokens,
-            text_only_exit_count=1,
-            on_tool_call=on_tool_call,
-            on_tool_result=on_tool_result,
-            on_content=on_content,
-            on_thinking=on_thinking,
-            on_metrics=on_metrics,
-            telemetry_context={
-                "repo_root": repo_root, "session_id": session_id,
-                "phase": "planning.phase3", "role": "expert",
-            },
-        )
+    _phase3_tool_calls, phase3_exploration_prose = await expert.chat_with_tools(
+        messages=phase3_messages,
+        tools=build_design_tools(),
+        tool_executor_fn=_search_only_executor,
+        max_turns=15,
+        max_tokens=expert_max_tokens,
+        text_only_exit_count=1,
+        on_tool_call=on_tool_call,
+        on_tool_result=on_tool_result,
+        on_content=on_content,
+        on_thinking=on_thinking,
+        on_metrics=on_metrics,
+        telemetry_context={
+            "repo_root": repo_root,
+            "session_id": session_id,
+            "phase": "planning.phase3",
+            "role": "expert",
+        },
     )
     if on_content:
         await _send_content_done(ws, phase3_exploration_prose)
@@ -438,12 +476,14 @@ async def create_plan(
 
     phase_timings["phase_3_design_and_risks"] = time.monotonic() - t0
     _save_debug_phase(
-        repo_root, session_id, "phase_3_design_and_risks",
-        design_and_risks, phase_timings["phase_3_design_and_risks"],
+        repo_root,
+        session_id,
+        "phase_3_design_and_risks",
+        design_and_risks,
+        phase_timings["phase_3_design_and_risks"],
     )
     logger.info(
-        "Phase 3 synthesis: naming=%d designs=%d missing=%d "
-        "deps=%d risks=%d citations=%d in %.1fs",
+        "Phase 3 synthesis: naming=%d designs=%d missing=%d deps=%d risks=%d citations=%d in %.1fs",
         len(design_and_risks_obj.naming_conventions),
         len(design_and_risks_obj.change_designs),
         len(design_and_risks_obj.missing_files),
@@ -453,14 +493,18 @@ async def create_plan(
         phase_timings["phase_3_design_and_risks"],
     )
     await _send_stage_done(
-        ws, "Design and risk synthesis complete",
-        model=expert.model_name, phase=3,
+        ws,
+        "Design and risk synthesis complete",
+        model=expert.model_name,
+        phase=3,
     )
 
     # ── Phase 4: Structured Plan Assembly ──
     await _send_stage(
-        ws, "Phase 4: Assembling structured plan...",
-        model=expert.model_name, phase=4,
+        ws,
+        "Phase 4: Assembling structured plan...",
+        model=expert.model_name,
+        phase=4,
     )
     logger.info("Planning Phase 4: Structured plan assembly")
     t0 = time.monotonic()
@@ -490,7 +534,8 @@ async def create_plan(
                     file_summary=file_summary,
                     project_context=(
                         f"PROJECT CONTEXT:\n{phase4_project_context}\n\n"
-                        if phase4_project_context else ""
+                        if phase4_project_context
+                        else ""
                     ),
                     scope=phase4_scope,
                     missing_files=(
@@ -499,7 +544,8 @@ async def create_plan(
                         "for the app to work. Each one MUST have a "
                         "corresponding create_file or edit_file step in "
                         f"the plan:\n{missing_files}\n\n"
-                        if missing_files else ""
+                        if missing_files
+                        else ""
                     ),
                 ),
             },
@@ -516,23 +562,17 @@ async def create_plan(
     # Phase 5's regression-coverage mandate. Gated by the feature
     # flag so disabling Layer 9 cleanly suppresses the field.
     if settings.enable_core_functionality_tagging:
-        plan.core_functionality = list(
-            design_and_risks_obj.core_functionality
-        )
+        plan.core_functionality = list(design_and_risks_obj.core_functionality)
 
     # Safety: strip exploration tools from the implementation plan
-    impl_steps = [
-        s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS
-    ]
+    impl_steps = [s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS]
     stripped_count = len(plan.steps) - len(impl_steps)
     if stripped_count:
-        stripped_tools = [
-            s.tool for s in plan.steps
-            if s.tool not in IMPLEMENTATION_STEP_TOOLS
-        ]
+        stripped_tools = [s.tool for s in plan.steps if s.tool not in IMPLEMENTATION_STEP_TOOLS]
         logger.warning(
             "Stripped %d non-implementation steps from Phase 4 plan: %s",
-            stripped_count, stripped_tools,
+            stripped_count,
+            stripped_tools,
         )
         for i, step in enumerate(impl_steps, 1):
             step.step_number = i
@@ -546,9 +586,7 @@ async def create_plan(
         )
 
     # Warn if plan has steps but none are actual implementation
-    has_implementation = any(
-        s.tool in ("create_file", "edit_file") for s in plan.steps
-    )
+    has_implementation = any(s.tool in ("create_file", "edit_file") for s in plan.steps)
     if plan.steps and not has_implementation:
         logger.warning(
             "Phase 4 plan has %d steps but none are create_file or "
@@ -563,12 +601,13 @@ async def create_plan(
     # extension approval screen. Uncovered BLOCKING missing_files
     # trigger a single auto-revision.
     plan_warnings = _run_plan_validations(
-        plan, file_summary_obj, design_and_risks_obj,
+        plan,
+        file_summary_obj,
+        design_and_risks_obj,
     )
 
     blocking_uncovered = [
-        mf for mf in _uncovered_missing_files(plan, design_and_risks_obj)
-        if mf.blocking
+        mf for mf in _uncovered_missing_files(plan, design_and_risks_obj) if mf.blocking
     ]
     if blocking_uncovered:
         logger.warning(
@@ -579,11 +618,7 @@ async def create_plan(
         feedback = (
             "Phase 3 identified BLOCKING missing files that the plan "
             "does not cover. Add a create_file or edit_file step for "
-            "each:\n"
-            + "\n".join(
-                f"- {mf.file_path}: {mf.purpose}"
-                for mf in blocking_uncovered
-            )
+            "each:\n" + "\n".join(f"- {mf.file_path}: {mf.purpose}" for mf in blocking_uncovered)
         )
         plan = await _revise_plan(
             task=task,
@@ -601,34 +636,38 @@ async def create_plan(
         # Revision may re-introduce non-implementation tool steps —
         # strip again, renumber, then re-validate. On the second pass,
         # any still-uncovered blocking files fall through to warn-only.
-        plan.steps = [
-            s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS
-        ]
+        plan.steps = [s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS]
         for i, step in enumerate(plan.steps, 1):
             step.step_number = i
         plan_warnings = _run_plan_validations(
-            plan, file_summary_obj, design_and_risks_obj,
+            plan,
+            file_summary_obj,
+            design_and_risks_obj,
         )
 
     plan.plan_validation_warnings = plan_warnings
 
     # Save Phase 4 outputs
     _save_debug_phase(
-        repo_root, session_id, "phase_4_plan",
+        repo_root,
+        session_id,
+        "phase_4_plan",
         plan.model_dump_json(indent=2),
         phase_timings["phase_4_plan_assembly"],
     )
     _save_debug_phase(
-        repo_root, session_id, "phase_4_plan_markdown",
+        repo_root,
+        session_id,
+        "phase_4_plan_markdown",
         plan_to_markdown(plan),
         phase_timings["phase_4_plan_assembly"],
     )
 
     await _send_stage_done(
         ws,
-        f"Plan assembled — {len(plan.steps)} steps across "
-        f"{len(plan.affected_files)} file(s)",
-        model=expert.model_name, phase=4,
+        f"Plan assembled — {len(plan.steps)} steps across {len(plan.affected_files)} file(s)",
+        model=expert.model_name,
+        phase=4,
     )
 
     # ── Phase 5: Verification (Layer 4 — always runs) ─────────────
@@ -664,17 +703,17 @@ async def create_plan(
             "steps": len(plan.steps),
             "affected_files": len(plan.affected_files),
         }
-        debug_dir = (
-            Path(repo_root) / ".lean_ai" / "plan_debug" / session_id
-        )
+        debug_dir = Path(repo_root) / ".lean_ai" / "plan_debug" / session_id
         debug_dir.mkdir(parents=True, exist_ok=True)
         (debug_dir / "meta.json").write_text(
-            json.dumps(meta, indent=2), encoding="utf-8",
+            json.dumps(meta, indent=2),
+            encoding="utf-8",
         )
 
     logger.info(
         "Plan created: %d steps, %d affected files",
-        len(plan.steps), len(plan.affected_files),
+        len(plan.steps),
+        len(plan.affected_files),
     )
     return plan
 
@@ -716,7 +755,8 @@ async def _run_phase5_verification(
     )
     await _send_stage(ws, phase_label, model=expert.model_name, phase=5)
     logger.info(
-        "Planning Phase 5: Verification step generation (tdd=%s)", tdd_mode,
+        "Planning Phase 5: Verification step generation (tdd=%s)",
+        tdd_mode,
     )
     t0 = time.monotonic()
 
@@ -724,7 +764,8 @@ async def _run_phase5_verification(
     next_step = len(plan.steps) + 1
 
     verification_targets = _build_verification_targets(
-        file_summary_obj, design_and_risks_obj,
+        file_summary_obj,
+        design_and_risks_obj,
     )
     security_concerns = _build_security_concerns(design_and_risks_obj)
 
@@ -741,10 +782,7 @@ async def _run_phase5_verification(
     # invent a phantom test command. The Layer 4 PR removes the
     # ``if test_command:`` gate around Phase 5 entirely.
     if test_command:
-        run_tests_rule = (
-            f"- Exactly ONE final run_tests step invoking: "
-            f"{test_command}\n"
-        )
+        run_tests_rule = f"- Exactly ONE final run_tests step invoking: {test_command}\n"
     else:
         run_tests_rule = (
             "- Do NOT include a run_tests step — no test runner is "
@@ -793,9 +831,7 @@ async def _run_phase5_verification(
         # The TDD user prompt asks explicitly for no run_tests step;
         # keep the filter as defensive safety in case the model
         # ignores that instruction.
-        test_steps_only = [
-            s for s in verification.steps if s.tool != "run_tests"
-        ]
+        test_steps_only = [s for s in verification.steps if s.tool != "run_tests"]
         for i, step in enumerate(test_steps_only, 1):
             step.step_number = i
         plan.tdd_test_steps = test_steps_only
@@ -817,8 +853,7 @@ async def _run_phase5_verification(
         # test files are seeded on disk without a run_tests step.
         if test_command and not any(s.tool == "run_tests" for s in appended):
             logger.warning(
-                "Phase 5 produced no run_tests step — injecting one "
-                "so existing tests run (%s).",
+                "Phase 5 produced no run_tests step — injecting one so existing tests run (%s).",
                 test_command,
             )
             # Defensively filter any run_tests step the LLM tried to
@@ -834,8 +869,7 @@ async def _run_phase5_verification(
                         f"the implementation works: {test_command}"
                     ),
                     reason=(
-                        "Verify the existing test suite still passes "
-                        "after the plan's changes."
+                        "Verify the existing test suite still passes after the plan's changes."
                     ),
                     context="",
                 )
@@ -863,9 +897,7 @@ async def _run_phase5_verification(
         plan.steps.extend(appended)
 
     # Update affected_files with any new test files.
-    all_verification_steps = (
-        plan.tdd_test_steps if tdd_mode else verification.steps
-    )
+    all_verification_steps = plan.tdd_test_steps if tdd_mode else verification.steps
     existing = set(plan.affected_files)
     for step in all_verification_steps:
         if step.file_path and step.file_path not in existing:
@@ -874,7 +906,8 @@ async def _run_phase5_verification(
     # Test-path convention check — append warnings to the plan so the
     # approval UI surfacing (from Phase 4) picks them up.
     path_warnings = _check_test_path_conventions(
-        verification, file_summary_obj,
+        verification,
+        file_summary_obj,
     )
     if path_warnings:
         plan.plan_validation_warnings.extend(path_warnings)
@@ -882,7 +915,9 @@ async def _run_phase5_verification(
     # Layer 2 — coverage validator: warn when an executable affected
     # file has no test step referencing it. Non-blocking.
     coverage_warnings = _check_affected_files_covered(
-        verification, plan, file_summary_obj,
+        verification,
+        plan,
+        file_summary_obj,
     )
     if coverage_warnings:
         plan.plan_validation_warnings.extend(coverage_warnings)
@@ -895,21 +930,24 @@ async def _run_phase5_verification(
 
     elapsed = time.monotonic() - t0
     _save_debug_phase(
-        repo_root, session_id, "phase_5_verification",
-        verification.model_dump_json(indent=2), elapsed,
+        repo_root,
+        session_id,
+        "phase_5_verification",
+        verification.model_dump_json(indent=2),
+        elapsed,
     )
     test_steps = len(all_verification_steps)
     if tdd_mode:
         stage_msg = f"TDD test steps designed — {test_steps} step(s)"
     elif not test_command:
-        stage_msg = (
-            f"Test files seeded — {test_steps} step(s); no test "
-            f"runner configured"
-        )
+        stage_msg = f"Test files seeded — {test_steps} step(s); no test runner configured"
     else:
         stage_msg = f"Verification steps added — {test_steps} test step(s)"
     await _send_stage_done(
-        ws, stage_msg, model=expert.model_name, phase=5,
+        ws,
+        stage_msg,
+        model=expert.model_name,
+        phase=5,
     )
 
     return elapsed
@@ -943,9 +981,7 @@ async def _synthesize_design_and_risks(
         user_parts.append(project_context_block.rstrip())
     user_parts.append(f"FILE SUMMARY:\n{file_summary}")
     if exploration_prose.strip():
-        user_parts.append(
-            f"PASS 1 EXPLORATION PROSE:\n{exploration_prose}"
-        )
+        user_parts.append(f"PASS 1 EXPLORATION PROSE:\n{exploration_prose}")
     user_parts.append(
         "Produce a DesignAndRisks object from the inputs above. "
         "Populate every field per the system-prompt rubric. Empty lists "
@@ -983,9 +1019,7 @@ def _format_design_and_risks(dar: DesignAndRisks) -> str:
         lines.append("| category | pattern | source_file |")
         lines.append("|---|---|---|")
         for nc in dar.naming_conventions:
-            lines.append(
-                f"| {nc.category} | {nc.pattern} | {nc.source_file} |"
-            )
+            lines.append(f"| {nc.category} | {nc.pattern} | {nc.source_file} |")
         lines.append("")
 
     if dar.change_designs:
@@ -1009,18 +1043,14 @@ def _format_design_and_risks(dar: DesignAndRisks) -> str:
         lines.append("## Dependency Order")
         lines.append("")
         for d in dar.dependency_order:
-            lines.append(
-                f"- {d.file_path} depends on {d.depends_on} — {d.reason}"
-            )
+            lines.append(f"- {d.file_path} depends on {d.depends_on} — {d.reason}")
         lines.append("")
 
     if dar.critical_risks:
         lines.append("## Critical Risks")
         lines.append("")
         for r in dar.critical_risks:
-            lines.append(
-                f"- **[{r.severity}]** {r.risk} — {r.mitigation}"
-            )
+            lines.append(f"- **[{r.severity}]** {r.risk} — {r.mitigation}")
         lines.append("")
 
     if dar.citations:
@@ -1106,10 +1136,7 @@ def _check_hallucinated_paths(
     if not known_paths:
         return []
     plan_paths = {s.file_path for s in plan.steps if s.file_path}
-    return [
-        f"invented path: {p}"
-        for p in sorted(plan_paths - known_paths)
-    ]
+    return [f"invented path: {p}" for p in sorted(plan_paths - known_paths)]
 
 
 def _uncovered_missing_files(
@@ -1122,10 +1149,7 @@ def _uncovered_missing_files(
     ``.blocking`` (triggers auto-revision) versus non-blocking (warn only).
     """
     step_paths = {s.file_path for s in plan.steps}
-    return [
-        mf for mf in dar.missing_files
-        if mf.file_path not in step_paths
-    ]
+    return [mf for mf in dar.missing_files if mf.file_path not in step_paths]
 
 
 def _check_edit_create_consistency(
@@ -1136,28 +1160,18 @@ def _check_edit_create_consistency(
     """Flag edit_file on unknown paths and create_file on existing paths."""
     if file_summary is None:
         return []
-    to_modify: set[str] = {
-        o.file_path for o in file_summary.files_to_modify
-    }
-    to_modify |= {
-        o.file_path for o in file_summary.files_read_for_context
-    }
-    to_create: set[str] = {
-        o.file_path for o in file_summary.files_to_create
-    }
+    to_modify: set[str] = {o.file_path for o in file_summary.files_to_modify}
+    to_modify |= {o.file_path for o in file_summary.files_read_for_context}
+    to_create: set[str] = {o.file_path for o in file_summary.files_to_create}
     to_create |= {mf.file_path for mf in dar.missing_files}
     warnings: list[str] = []
     for s in plan.steps:
         if not s.file_path:
             continue
         if s.tool == "edit_file" and s.file_path not in to_modify:
-            warnings.append(
-                f"edit_file on unknown-to-modify path: {s.file_path}"
-            )
+            warnings.append(f"edit_file on unknown-to-modify path: {s.file_path}")
         elif s.tool == "create_file" and s.file_path not in to_create:
-            warnings.append(
-                f"create_file on unknown-to-create path: {s.file_path}"
-            )
+            warnings.append(f"create_file on unknown-to-create path: {s.file_path}")
     return warnings
 
 
@@ -1177,9 +1191,7 @@ def _run_plan_validations(
     warnings.extend(_check_edit_create_consistency(plan, file_summary, dar))
     for mf in _uncovered_missing_files(plan, dar):
         tag = " [BLOCKING]" if mf.blocking else ""
-        warnings.append(
-            f"uncovered missing file: {mf.file_path} — {mf.purpose}{tag}"
-        )
+        warnings.append(f"uncovered missing file: {mf.file_path} — {mf.purpose}{tag}")
     for w in warnings:
         logger.warning("Phase 4 plan validation — %s", w)
     return warnings
@@ -1230,8 +1242,7 @@ def _build_security_concerns(dar: DesignAndRisks) -> str:
     if not dar.critical_risks:
         return ""
     return "\n".join(
-        f"- **[{r.severity}]** {r.risk} — mitigation: {r.mitigation}"
-        for r in dar.critical_risks
+        f"- **[{r.severity}]** {r.risk} — mitigation: {r.mitigation}" for r in dar.critical_risks
     )
 
 
@@ -1260,15 +1271,9 @@ def _format_testing_inventory(file_summary: FileSummary | None) -> str:
     if inv.test_file_pattern:
         lines.append(f"- File pattern: {inv.test_file_pattern}")
     if inv.assertion_style_excerpt:
-        lines.append(
-            "- Assertion style excerpt:\n```\n"
-            + inv.assertion_style_excerpt
-            + "\n```"
-        )
+        lines.append("- Assertion style excerpt:\n```\n" + inv.assertion_style_excerpt + "\n```")
     if inv.existing_regression_files:
-        lines.append(
-            "- Existing regression files (MUST NOT be modified):"
-        )
+        lines.append("- Existing regression files (MUST NOT be modified):")
         for p in inv.existing_regression_files:
             lines.append(f"  - {p}")
     if inv.affected_files_existing_coverage:
@@ -1290,10 +1295,7 @@ def _format_core_functionality(plan: "ExecutionPlan") -> str:
     """
     tags = getattr(plan, "core_functionality", []) or []
     if not tags:
-        return (
-            "(none tagged — no mandatory regression tests required "
-            "by Phase 3.)"
-        )
+        return "(none tagged — no mandatory regression tests required by Phase 3.)"
     lines: list[str] = []
     for tag in tags:
         lines.append(
@@ -1344,9 +1346,7 @@ def _check_test_path_conventions(
             continue
         if any(low.startswith(pfx) for pfx in learned_prefixes):
             continue
-        warnings.append(
-            f"test step path outside test convention: {step.file_path}"
-        )
+        warnings.append(f"test step path outside test convention: {step.file_path}")
     for w in warnings:
         logger.warning("Phase 5 plan validation — %s", w)
     return warnings
@@ -1355,14 +1355,55 @@ def _check_test_path_conventions(
 # Layer 2 — files that would benefit from a test. We only expand
 # coverage checks to files with executable extensions. Docs / config /
 # lockfiles / generated assets are skipped.
-_EXECUTABLE_EXTENSIONS: frozenset[str] = frozenset({
-    ".py", ".pyi", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
-    ".go", ".rs", ".java", ".kt", ".kts", ".cs", ".fs", ".vb",
-    ".rb", ".php", ".swift", ".m", ".mm", ".cpp", ".cxx", ".cc",
-    ".c", ".h", ".hpp", ".hh", ".ex", ".exs", ".erl", ".hrl",
-    ".scala", ".clj", ".cljs", ".lua", ".dart", ".ml", ".mli",
-    ".hs", ".r", ".nim", ".zig", ".v", ".d",
-})
+_EXECUTABLE_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        ".py",
+        ".pyi",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".mjs",
+        ".cjs",
+        ".go",
+        ".rs",
+        ".java",
+        ".kt",
+        ".kts",
+        ".cs",
+        ".fs",
+        ".vb",
+        ".rb",
+        ".php",
+        ".swift",
+        ".m",
+        ".mm",
+        ".cpp",
+        ".cxx",
+        ".cc",
+        ".c",
+        ".h",
+        ".hpp",
+        ".hh",
+        ".ex",
+        ".exs",
+        ".erl",
+        ".hrl",
+        ".scala",
+        ".clj",
+        ".cljs",
+        ".lua",
+        ".dart",
+        ".ml",
+        ".mli",
+        ".hs",
+        ".r",
+        ".nim",
+        ".zig",
+        ".v",
+        ".d",
+    }
+)
 
 
 def _has_executable_extension(path: str) -> bool:
@@ -1401,10 +1442,7 @@ def _check_core_functionality_covered(
     except KeyError:
         min_rank = confidence_rank["medium"]
 
-    enforced_tags = [
-        t for t in tags
-        if confidence_rank.get(t.confidence, 1) >= min_rank
-    ]
+    enforced_tags = [t for t in tags if confidence_rank.get(t.confidence, 1) >= min_rank]
     if not enforced_tags:
         return []
 
@@ -1415,12 +1453,14 @@ def _check_core_functionality_covered(
             continue
         if not is_regression_test_path(step.file_path):
             continue
-        haystack = "\n".join([
-            step.file_path or "",
-            step.instruction or "",
-            step.context or "",
-            step.reason or "",
-        ])
+        haystack = "\n".join(
+            [
+                step.file_path or "",
+                step.instruction or "",
+                step.context or "",
+                step.reason or "",
+            ]
+        )
         haystacks.append((step.file_path, haystack))
 
     warnings: list[str] = []
@@ -1428,8 +1468,7 @@ def _check_core_functionality_covered(
         entity = tag.entity.strip()
         file_path = tag.file_path.strip()
         covered = any(
-            (entity and entity in hay) or (file_path and file_path in hay)
-            for _, hay in haystacks
+            (entity and entity in hay) or (file_path and file_path in hay) for _, hay in haystacks
         )
         if not covered:
             warnings.append(
@@ -1500,9 +1539,7 @@ def _check_affected_files_covered(
         filename = code_path.rsplit("/", 1)[-1]
         if code_path in combined or filename in combined:
             continue
-        warnings.append(
-            f"affected file has no test coverage: {code_path}"
-        )
+        warnings.append(f"affected file has no test coverage: {code_path}")
 
     for w in warnings:
         logger.warning("Phase 5 coverage — %s", w)

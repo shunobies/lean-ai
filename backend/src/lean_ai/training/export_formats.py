@@ -31,7 +31,9 @@ def workspace_id(repo_root: str) -> str:
 
 
 def _anonymize_text(
-    text: str, repo_root: str, workspace_id_value: str,
+    text: str,
+    repo_root: str,
+    workspace_id_value: str,
 ) -> str:
     """Replace repo_root paths with a workspace-scoped placeholder."""
     if not text:
@@ -41,7 +43,8 @@ def _anonymize_text(
     basename = os.path.basename(repo_root)
     if basename and basename != repo_root:
         cleaned = cleaned.replace(
-            f"/{basename}/", f"{placeholder}/",
+            f"/{basename}/",
+            f"{placeholder}/",
         )
     return cleaned
 
@@ -66,8 +69,7 @@ def anonymize_row(row: dict, repo_root: str) -> dict:
     - ``id`` (raw int primary key) removed.
     """
     ws_id = workspace_id(repo_root)
-    session_salt = (getattr(settings, "export_workspace_salt", "") or "") + \
-        ":session"
+    session_salt = (getattr(settings, "export_workspace_salt", "") or "") + ":session"
     out: dict[str, Any] = {}
     for key, value in row.items():
         if key == "id":
@@ -216,8 +218,7 @@ def to_dpo_jsonl(rows: Iterable[dict], repo_root: str) -> Iterable[str]:
             continue
         chosen_prepared = prepared_trace(bucket["chosen"], repo_root)
         rejected_prepared = prepared_trace(bucket["rejected"], repo_root)
-        prompt = chosen_prepared.get("messages") or \
-            rejected_prepared.get("messages") or []
+        prompt = chosen_prepared.get("messages") or rejected_prepared.get("messages") or []
         chosen_msg = _assistant_message_for_sft(
             chosen_prepared.get("assistant_output") or {},
         )
@@ -229,8 +230,7 @@ def to_dpo_jsonl(rows: Iterable[dict], repo_root: str) -> Iterable[str]:
             "chosen": chosen_msg,
             "rejected": rejected_msg,
             "pair_id": pair_id,
-            "pair_kind": chosen_prepared.get("pair_kind")
-            or rejected_prepared.get("pair_kind"),
+            "pair_kind": chosen_prepared.get("pair_kind") or rejected_prepared.get("pair_kind"),
             "workspace_id": chosen_prepared.get("workspace_id"),
             "model_name": chosen_prepared.get("model_name"),
             "phase": chosen_prepared.get("phase"),

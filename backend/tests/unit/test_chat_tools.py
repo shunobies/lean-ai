@@ -38,8 +38,9 @@ class FakeProvider(LLMProvider):
     async def chat_structured(self, messages, schema, temperature=None, max_tokens=None, **kwargs):
         raise NotImplementedError
 
-    async def chat_with_tools_single(self, messages, tools, max_tokens=None, *,
-                                     stream_callback=None, thinking_callback=None):
+    async def chat_with_tools_single(
+        self, messages, tools, max_tokens=None, *, stream_callback=None, thinking_callback=None
+    ):
         self.messages_at_each_call.append(list(messages))
         self.stream_callbacks_received.append(stream_callback is not None)
 
@@ -81,10 +82,16 @@ def test_chat_tools_contains_expected_tools():
 def test_chat_tools_names():
     names = {t["function"]["name"] for t in CHAT_TOOLS}
     assert names == {
-        "read_file", "list_directory", "directory_tree", "grep_files",
-        "search_internet", "fetch_url",
-        "save_note", "list_project_todos",
-        "list_recent_sessions", "get_session_summary",
+        "read_file",
+        "list_directory",
+        "directory_tree",
+        "grep_files",
+        "search_internet",
+        "fetch_url",
+        "save_note",
+        "list_project_todos",
+        "list_recent_sessions",
+        "get_session_summary",
         "search_workspace_memory",
     }
 
@@ -111,9 +118,11 @@ async def _noop_executor(name: str, args: dict) -> str:
 @pytest.mark.asyncio
 async def test_text_only_exit_count_1_exits_immediately():
     """With text_only_exit_count=1, the loop exits on the first text-only response."""
-    provider = FakeProvider([
-        _text_response("Hello, here is my answer."),
-    ])
+    provider = FakeProvider(
+        [
+            _text_response("Hello, here is my answer."),
+        ]
+    )
     client = LLMClient(provider)
 
     _, explanation = await client.chat_with_tools(
@@ -130,9 +139,11 @@ async def test_text_only_exit_count_1_exits_immediately():
 @pytest.mark.asyncio
 async def test_text_only_exit_count_1_no_nudge():
     """With exit_count=1, no nudge message is injected."""
-    provider = FakeProvider([
-        _text_response("Answer"),
-    ])
+    provider = FakeProvider(
+        [
+            _text_response("Answer"),
+        ]
+    )
     client = LLMClient(provider)
 
     await client.chat_with_tools(
@@ -151,11 +162,13 @@ async def test_text_only_exit_count_1_no_nudge():
 @pytest.mark.asyncio
 async def test_text_only_exit_count_default_nudges():
     """Default exit_count=3 injects nudges before exiting."""
-    provider = FakeProvider([
-        _text_response("first"),
-        _text_response("second"),
-        _text_response("third"),
-    ])
+    provider = FakeProvider(
+        [
+            _text_response("first"),
+            _text_response("second"),
+            _text_response("third"),
+        ]
+    )
     client = LLMClient(provider)
 
     await client.chat_with_tools(
@@ -178,10 +191,12 @@ async def test_tools_then_text_exits_cleanly():
         tool_results[name] = args
         return "file content here"
 
-    provider = FakeProvider([
-        _tool_response("read_file", {"path": "src/main.py"}),
-        _text_response("Based on main.py, here is the answer."),
-    ])
+    provider = FakeProvider(
+        [
+            _tool_response("read_file", {"path": "src/main.py"}),
+            _text_response("Based on main.py, here is the answer."),
+        ]
+    )
     client = LLMClient(provider)
 
     executed, explanation = await client.chat_with_tools(
@@ -203,9 +218,11 @@ async def test_tools_then_text_exits_cleanly():
 @pytest.mark.asyncio
 async def test_stream_content_passes_callback_to_provider():
     """When stream_content=True, stream_callback is passed to the provider."""
-    provider = FakeProvider([
-        _text_response("streamed answer"),
-    ])
+    provider = FakeProvider(
+        [
+            _text_response("streamed answer"),
+        ]
+    )
     client = LLMClient(provider)
 
     streamed_tokens = []
@@ -229,9 +246,11 @@ async def test_stream_content_passes_callback_to_provider():
 @pytest.mark.asyncio
 async def test_stream_content_false_no_callback():
     """When stream_content=False, no stream_callback is passed to provider."""
-    provider = FakeProvider([
-        _text_response("bulk answer"),
-    ])
+    provider = FakeProvider(
+        [
+            _text_response("bulk answer"),
+        ]
+    )
     client = LLMClient(provider)
 
     content_received = []
@@ -315,12 +334,15 @@ async def test_chat_executor_grep_files(tmp_path):
 @pytest.mark.asyncio
 async def test_task_complete_validator_approves_by_default():
     """No validator passed → task_complete exits the loop immediately."""
+
     async def executor(name, args):
         return "result"
 
-    provider = FakeProvider([
-        _tool_response("task_complete", {}),
-    ])
+    provider = FakeProvider(
+        [
+            _tool_response("task_complete", {}),
+        ]
+    )
     client = LLMClient(provider)
 
     executed, _ = await client.chat_with_tools(
@@ -336,15 +358,18 @@ async def test_task_complete_validator_approves_by_default():
 async def test_task_complete_validator_rejects_and_continues():
     """Validator returning a rejection string continues the loop with
     the rejection as the task_complete tool result."""
+
     async def executor(name, args):
         return "result"
 
     # Turn 1: task_complete (rejected, loop continues)
     # Turn 2: text response (exits on text_only_exit_count=1)
-    provider = FakeProvider([
-        _tool_response("task_complete", {}),
-        _text_response("ok, continuing."),
-    ])
+    provider = FakeProvider(
+        [
+            _tool_response("task_complete", {}),
+            _text_response("ok, continuing."),
+        ]
+    )
     client = LLMClient(provider)
 
     rejections: list[str] = []
@@ -368,12 +393,10 @@ async def test_task_complete_validator_rejects_and_continues():
     # in the messages given to the second provider call.
     second_call_messages = provider.messages_at_each_call[1]
     tool_result_contents = [
-        m.get("content") for m in second_call_messages
-        if m.get("role") in ("tool", "user")
+        m.get("content") for m in second_call_messages if m.get("role") in ("tool", "user")
     ]
     assert any(
-        isinstance(c, str) and "record observations first" in c
-        for c in tool_result_contents
+        isinstance(c, str) and "record observations first" in c for c in tool_result_contents
     )
 
 
@@ -390,19 +413,21 @@ async def test_task_complete_validator_sees_same_turn_tool_writes():
         return "result"
 
     # Single turn with both calls: record + task_complete
-    provider = FakeProvider([
-        (
-            "",
-            [
-                ToolCallInfo(
-                    name="record_file_observation",
-                    arguments={"file_path": "a.py"},
-                ),
-                ToolCallInfo(name="task_complete", arguments={}),
-            ],
-            LLMMetrics(),
-        ),
-    ])
+    provider = FakeProvider(
+        [
+            (
+                "",
+                [
+                    ToolCallInfo(
+                        name="record_file_observation",
+                        arguments={"file_path": "a.py"},
+                    ),
+                    ToolCallInfo(name="task_complete", arguments={}),
+                ],
+                LLMMetrics(),
+            ),
+        ]
+    )
     client = LLMClient(provider)
 
     def validator() -> str | None:
@@ -425,12 +450,15 @@ async def test_task_complete_validator_sees_same_turn_tool_writes():
 async def test_task_complete_validator_exception_fails_open():
     """Validator raising an exception is logged and treated as approval
     so a broken validator never traps the loop."""
+
     async def executor(name, args):
         return "result"
 
-    provider = FakeProvider([
-        _tool_response("task_complete", {}),
-    ])
+    provider = FakeProvider(
+        [
+            _tool_response("task_complete", {}),
+        ]
+    )
     client = LLMClient(provider)
 
     def validator() -> str | None:
@@ -450,13 +478,16 @@ async def test_task_complete_validator_exception_fails_open():
 @pytest.mark.asyncio
 async def test_task_complete_validator_supports_async():
     """Async validator coroutines are awaited."""
+
     async def executor(name, args):
         return "result"
 
-    provider = FakeProvider([
-        _tool_response("task_complete", {}),
-        _text_response("ok."),
-    ])
+    provider = FakeProvider(
+        [
+            _tool_response("task_complete", {}),
+            _text_response("ok."),
+        ]
+    )
     client = LLMClient(provider)
 
     async def validator() -> str | None:

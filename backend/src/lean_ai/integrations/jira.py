@@ -122,7 +122,10 @@ class JiraProvider(IntegrationProvider):
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.request(
-                    method, url, headers=self._headers, **kwargs,
+                    method,
+                    url,
+                    headers=self._headers,
+                    **kwargs,
                 )
                 return resp
         except Exception as exc:
@@ -151,18 +154,14 @@ class JiraProvider(IntegrationProvider):
         created_at = None
         if fields.get("created"):
             try:
-                created_at = datetime.fromisoformat(
-                    fields["created"].replace("Z", "+00:00")
-                )
+                created_at = datetime.fromisoformat(fields["created"].replace("Z", "+00:00"))
             except (ValueError, TypeError):
                 pass
 
         updated_at = None
         if fields.get("updated"):
             try:
-                updated_at = datetime.fromisoformat(
-                    fields["updated"].replace("Z", "+00:00")
-                )
+                updated_at = datetime.fromisoformat(fields["updated"].replace("Z", "+00:00"))
             except (ValueError, TypeError):
                 pass
 
@@ -275,10 +274,12 @@ class JiraProvider(IntegrationProvider):
         # ADF document with a single paragraph per line
         adf_content = []
         for line in lines:
-            adf_content.append({
-                "type": "paragraph",
-                "content": [{"type": "text", "text": line}],
-            })
+            adf_content.append(
+                {
+                    "type": "paragraph",
+                    "content": [{"type": "text", "text": line}],
+                }
+            )
 
         comment_body = {
             "body": {
@@ -306,13 +307,17 @@ class JiraProvider(IntegrationProvider):
                     "comment": {
                         "type": "doc",
                         "version": 1,
-                        "content": [{
-                            "type": "paragraph",
-                            "content": [{
-                                "type": "text",
-                                "text": f"Lean AI session {summary.session_id}",
-                            }],
-                        }],
+                        "content": [
+                            {
+                                "type": "paragraph",
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": f"Lean AI session {summary.session_id}",
+                                    }
+                                ],
+                            }
+                        ],
                     },
                 }
                 wl_resp = await self._request(
@@ -336,7 +341,8 @@ class JiraProvider(IntegrationProvider):
         """Update issue status by finding and executing a matching transition."""
         # Get available transitions
         resp = await self._request(
-            "GET", f"/rest/api/3/issue/{external_id}/transitions",
+            "GET",
+            f"/rest/api/3/issue/{external_id}/transitions",
         )
         if resp is None or resp.status_code != 200:
             return False
@@ -360,7 +366,8 @@ class JiraProvider(IntegrationProvider):
         if transition_id is None:
             logger.warning(
                 "No matching Jira transition for %s → %s (available: %s)",
-                external_id, status.value,
+                external_id,
+                status.value,
                 [t.get("name") for t in transitions],
             )
             return False

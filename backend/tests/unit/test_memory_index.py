@@ -43,8 +43,12 @@ def test_search_by_tags(repo):
 
 def test_search_by_source_task(repo):
     index_memory(
-        repo, "m1", "API requires auth header",
-        "gotcha", ["auth"], "Fix API authentication",
+        repo,
+        "m1",
+        "API requires auth header",
+        "gotcha",
+        ["auth"],
+        "Fix API authentication",
     )
 
     results = search_memories(repo, "authentication")
@@ -89,9 +93,11 @@ def test_search_limit(repo):
 def test_search_relevance_order(repo):
     index_memory(repo, "m1", "unrelated topic about cooking", "pattern")
     index_memory(
-        repo, "m2",
+        repo,
+        "m2",
         "pytest fixtures require conftest.py at repo root",
-        "testing", ["pytest"],
+        "testing",
+        ["pytest"],
     )
 
     results = search_memories(repo, "pytest fixtures repo root")

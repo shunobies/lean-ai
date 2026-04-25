@@ -70,8 +70,10 @@ def _make_provider(types_mod=None, **overrides):
     """Create a GeminiProvider with mocked SDK."""
     types_mod = types_mod or _make_types_module()
 
-    with patch("lean_ai.llm.provider_gemini.genai", create=True), \
-         patch.dict("sys.modules", {"google": MagicMock(), "google.genai": MagicMock()}):
+    with (
+        patch("lean_ai.llm.provider_gemini.genai", create=True),
+        patch.dict("sys.modules", {"google": MagicMock(), "google.genai": MagicMock()}),
+    ):
         provider = object.__new__(GeminiProvider)
         provider._genai = MagicMock()
         provider._types = types_mod
@@ -91,7 +93,6 @@ def _make_provider(types_mod=None, **overrides):
 
 
 class TestSplitSystem:
-
     def test_extracts_system_messages(self):
         messages = [
             {"role": "system", "content": "You are helpful."},
@@ -125,7 +126,6 @@ class TestSplitSystem:
 
 
 class TestConvertTools:
-
     def test_openai_format_conversion(self):
         types = _make_types_module()
         tools = [
@@ -164,7 +164,6 @@ class TestConvertTools:
 
 
 class TestBuildContents:
-
     def test_basic_text_messages(self):
         types = _make_types_module()
         provider = _make_provider(types_mod=types)
@@ -182,13 +181,15 @@ class TestBuildContents:
     def test_function_call_message(self):
         types = _make_types_module()
         provider = _make_provider(types_mod=types)
-        messages = [{
-            "role": "assistant",
-            "content": "Let me read that.",
-            "_gemini_function_calls": [
-                {"name": "read_file", "args": {"path": "foo.py"}, "id": "fc1"},
-            ],
-        }]
+        messages = [
+            {
+                "role": "assistant",
+                "content": "Let me read that.",
+                "_gemini_function_calls": [
+                    {"name": "read_file", "args": {"path": "foo.py"}, "id": "fc1"},
+                ],
+            }
+        ]
         contents = provider._build_contents(messages)
         assert len(contents) == 1
         assert contents[0].role == "model"
@@ -199,15 +200,17 @@ class TestBuildContents:
     def test_function_response_message(self):
         types = _make_types_module()
         provider = _make_provider(types_mod=types)
-        messages = [{
-            "role": "user",
-            "content": "file contents",
-            "_gemini_function_response": {
-                "name": "read_file",
-                "response": {"result": "file contents"},
-                "id": "fc1",
-            },
-        }]
+        messages = [
+            {
+                "role": "user",
+                "content": "file contents",
+                "_gemini_function_response": {
+                    "name": "read_file",
+                    "response": {"result": "file contents"},
+                    "id": "fc1",
+                },
+            }
+        ]
         contents = provider._build_contents(messages)
         assert len(contents) == 1
         assert contents[0].role == "user"
@@ -215,13 +218,15 @@ class TestBuildContents:
     def test_anthropic_style_content_blocks(self):
         types = _make_types_module()
         provider = _make_provider(types_mod=types)
-        messages = [{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "Block 1"},
-                {"type": "text", "text": "Block 2"},
-            ],
-        }]
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Block 1"},
+                    {"type": "text", "text": "Block 2"},
+                ],
+            }
+        ]
         contents = provider._build_contents(messages)
         assert len(contents) == 1
         assert "Block 1" in contents[0].parts[0].text
@@ -239,7 +244,6 @@ class TestBuildContents:
 
 
 class TestProviderProperties:
-
     def test_model_name(self):
         provider = _make_provider(model="gemini-2.5-pro")
         assert provider.model_name == "gemini-2.5-pro"
@@ -257,7 +261,6 @@ class TestProviderProperties:
 
 
 class TestMetrics:
-
     def test_extract_metrics_with_usage(self):
         provider = _make_provider()
         response = MagicMock()
@@ -291,7 +294,6 @@ class TestMetrics:
 
 
 class TestMessageFormatting:
-
     def test_format_tool_result_messages(self):
         provider = _make_provider()
         tc = ToolCallInfo(name="read_file", arguments={"path": "x"}, id="fc1")
@@ -324,7 +326,6 @@ class TestMessageFormatting:
 
 
 class TestRetry:
-
     @pytest.mark.asyncio
     async def test_retry_on_transient_error(self):
         provider = _make_provider(retry_max=2, retry_base_delay=0.001)
@@ -370,7 +371,6 @@ class TestRetry:
 
 
 class TestChatRaw:
-
     @pytest.mark.asyncio
     async def test_chat_raw_non_streaming(self):
         types = _make_types_module()
@@ -404,10 +404,12 @@ class TestChatRaw:
 
         provider._client.aio.models.generate_content = AsyncMock(return_value=response)
 
-        text, metrics = await provider.chat_raw([
-            {"role": "system", "content": "Be helpful"},
-            {"role": "user", "content": "Hi"},
-        ])
+        text, metrics = await provider.chat_raw(
+            [
+                {"role": "system", "content": "Be helpful"},
+                {"role": "user", "content": "Hi"},
+            ]
+        )
         assert text == "OK"
         # Verify generate_content was called (system prompt handled via config)
         provider._client.aio.models.generate_content.assert_called_once()
@@ -417,7 +419,6 @@ class TestChatRaw:
 
 
 class TestChatWithTools:
-
     @pytest.mark.asyncio
     async def test_parses_function_call(self):
         types = _make_types_module()
@@ -475,7 +476,6 @@ class TestChatWithTools:
 
 
 class TestCheckHealth:
-
     @pytest.mark.asyncio
     async def test_health_ok(self):
         types = _make_types_module()

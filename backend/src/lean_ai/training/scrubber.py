@@ -137,15 +137,17 @@ AuditCallback = Callable[[str, str, str], None]
 
 def _match_preview(match: str) -> str:
     """First 12 chars of sha256 — audit-safe, never the secret itself."""
-    return hashlib.sha256(match.encode("utf-8", errors="replace")) \
-        .hexdigest()[:12]
+    return hashlib.sha256(match.encode("utf-8", errors="replace")).hexdigest()[:12]
 
 
 def _apply_pattern_to_string(
-    pat: _Pattern, text: str, audit: AuditCallback | None,
+    pat: _Pattern,
+    text: str,
+    audit: AuditCallback | None,
 ) -> str:
     """Apply one pattern to a string. Handles the @entropy gate."""
     if pat.replacement == "@entropy":
+
         def _entropy_sub(m: re.Match[str]) -> str:
             token = m.group(0)
             if _shannon_entropy(token) < 4.0:
@@ -153,6 +155,7 @@ def _apply_pattern_to_string(
             if audit is not None:
                 audit(pat.name, "<REDACTED:entropy>", _match_preview(token))
             return "<REDACTED:entropy>"
+
         return pat.regex.sub(_entropy_sub, text)
 
     def _static_sub(m: re.Match[str]) -> str:
@@ -163,6 +166,7 @@ def _apply_pattern_to_string(
             return m.expand(pat.replacement)
         except re.error:
             return pat.replacement
+
     return pat.regex.sub(_static_sub, text)
 
 

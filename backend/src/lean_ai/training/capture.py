@@ -213,7 +213,8 @@ async def capture_tool_execution(
         )
     except Exception:
         logger.debug(
-            "capture_tool_execution failed (non-fatal)", exc_info=True,
+            "capture_tool_execution failed (non-fatal)",
+            exc_info=True,
         )
         return None
 
@@ -264,7 +265,8 @@ async def capture_tool_compression(
         )
     except Exception:
         logger.debug(
-            "capture_tool_compression failed (non-fatal)", exc_info=True,
+            "capture_tool_compression failed (non-fatal)",
+            exc_info=True,
         )
         return None
 
@@ -307,7 +309,8 @@ async def capture_clarification(
         )
     except Exception:
         logger.debug(
-            "capture_clarification failed (non-fatal)", exc_info=True,
+            "capture_clarification failed (non-fatal)",
+            exc_info=True,
         )
         return None
 
@@ -329,8 +332,11 @@ async def capture_phase2_synthesis(
     if not _is_enabled():
         return None
     payload = {
-        "task": task, "scope": scope, "observations": observations,
-        "scratchpad": scratchpad, "journal": journal,
+        "task": task,
+        "scope": scope,
+        "observations": observations,
+        "scratchpad": scratchpad,
+        "journal": journal,
         "exploration_output": exploration_output,
         "file_summary": file_summary,
     }
@@ -359,7 +365,8 @@ async def capture_phase2_synthesis(
         )
     except Exception:
         logger.debug(
-            "capture_phase2_synthesis failed (non-fatal)", exc_info=True,
+            "capture_phase2_synthesis failed (non-fatal)",
+            exc_info=True,
         )
         return None
 
@@ -400,7 +407,8 @@ async def capture_diff_decision(
         )
     except Exception:
         logger.debug(
-            "capture_diff_decision failed (non-fatal)", exc_info=True,
+            "capture_diff_decision failed (non-fatal)",
+            exc_info=True,
         )
         return None
 
@@ -504,7 +512,8 @@ async def capture_validation_attempt(
         )
     except Exception:
         logger.debug(
-            "capture_validation_attempt failed (non-fatal)", exc_info=True,
+            "capture_validation_attempt failed (non-fatal)",
+            exc_info=True,
         )
         return None
 
@@ -542,6 +551,7 @@ async def capture_workflow_event(
         )
     except Exception:
         logger.debug(
-            "capture_workflow_event failed (non-fatal)", exc_info=True,
+            "capture_workflow_event failed (non-fatal)",
+            exc_info=True,
         )
         return None

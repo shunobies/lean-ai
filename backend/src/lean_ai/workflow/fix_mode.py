@@ -66,16 +66,22 @@ async def _run_fix(
         active_client = request_llm_client or llm_client
     else:
         active_client = expert_llm_client or llm_client
-    fix_role = "request" if is_request else (
-        "expert" if expert_llm_client is not None else "primary"
+    fix_role = (
+        "request" if is_request else ("expert" if expert_llm_client is not None else "primary")
     )
     fix_telemetry = {
-        "repo_root": repo_root, "session_id": session_id,
-        "phase": mode, "role": fix_role,
+        "repo_root": repo_root,
+        "session_id": session_id,
+        "phase": mode,
+        "role": fix_role,
     }
     tool_executor = make_tool_executor(
-        repo_root, ws, session_id, llm_client=active_client,
-        dispatcher=dispatcher, telemetry_context=fix_telemetry,
+        repo_root,
+        ws,
+        session_id,
+        llm_client=active_client,
+        dispatcher=dispatcher,
+        telemetry_context=fix_telemetry,
     )
     commands = _effective_post_commands(repo_root)
     execution_context = load_condensed_context(repo_root)
@@ -90,7 +96,8 @@ async def _run_fix(
 
     # Callbacks — fire-and-forget (same rationale as plan mode callbacks)
     cb = build_workflow_callbacks(
-        ws, conversation_logger=conversation_logger,
+        ws,
+        conversation_logger=conversation_logger,
     )
 
     # ── Investigation phase (fix mode only) ───────────────────────
@@ -100,7 +107,8 @@ async def _run_fix(
         await ws_send(ws, "stage_change", {"stage": "investigating"})
 
         investigation_prompt = build_fix_investigation_prompt(
-            execution_context, test_command=commands.get("test", ""),
+            execution_context,
+            test_command=commands.get("test", ""),
         )
 
         messages = [
@@ -112,22 +120,23 @@ async def _run_fix(
         if session_id:
             existing_journal = read_journal(repo_root, session_id)
             if existing_journal:
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "[JOURNAL FROM PREVIOUS EXECUTION]\n"
-                        f"{existing_journal}"
-                    ),
-                })
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (f"[JOURNAL FROM PREVIOUS EXECUTION]\n{existing_journal}"),
+                    }
+                )
             existing_pad = scratchpad.read_scratchpad(repo_root, session_id)
             if existing_pad:
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "[SCRATCHPAD FROM PREVIOUS EXECUTION — resume from here]\n"
-                        f"{existing_pad}"
-                    ),
-                })
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "[SCRATCHPAD FROM PREVIOUS EXECUTION — resume from here]\n"
+                            f"{existing_pad}"
+                        ),
+                    }
+                )
 
         def _build_investigation_refresh(
             current_messages: list[dict],
@@ -135,7 +144,8 @@ async def _run_fix(
             """Rebuild investigation messages from fresh disk state."""
             fresh_context = load_condensed_context(repo_root)
             fresh_prompt = build_fix_investigation_prompt(
-                fresh_context, test_command=commands.get("test", ""),
+                fresh_context,
+                test_command=commands.get("test", ""),
             )
             pad = scratchpad.read_scratchpad(repo_root, session_id)
             jrnl = read_journal(repo_root, session_id)
@@ -144,21 +154,25 @@ async def _run_fix(
                 {"role": "user", "content": task},
             ]
             if jrnl:
-                refreshed.append({
-                    "role": "user",
-                    "content": f"[SESSION JOURNAL]\n{jrnl}",
-                })
+                refreshed.append(
+                    {
+                        "role": "user",
+                        "content": f"[SESSION JOURNAL]\n{jrnl}",
+                    }
+                )
             if pad:
-                refreshed.append({
+                refreshed.append(
+                    {
+                        "role": "user",
+                        "content": f"[SCRATCHPAD]\n{pad}",
+                    }
+                )
+            refreshed.append(
+                {
                     "role": "user",
-                    "content": f"[SCRATCHPAD]\n{pad}",
-                })
-            refreshed.append({
-                "role": "user",
-                "content": (
-                    "[CONTEXT REFRESHED] Continue investigating."
-                ),
-            })
+                    "content": ("[CONTEXT REFRESHED] Continue investigating."),
+                }
+            )
             return refreshed
 
         investigation_telemetry = dict(fix_telemetry)
@@ -181,16 +195,18 @@ async def _run_fix(
 
         # Transition: swap system prompt, nudge LLM to start fixing
         messages[0] = {"role": "system", "content": system_prompt}
-        messages.append({
-            "role": "user",
-            "content": (
-                "MODE: IMPLEMENTATION\n"
-                "All tools now available: create_file, edit_file, "
-                "run_command, format_code (plus all investigation tools).\n"
-                "Use your scratchpad diagnosis. Make the minimal fix. "
-                "Do not continue investigating."
-            ),
-        })
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "MODE: IMPLEMENTATION\n"
+                    "All tools now available: create_file, edit_file, "
+                    "run_command, format_code (plus all investigation tools).\n"
+                    "Use your scratchpad diagnosis. Make the minimal fix. "
+                    "Do not continue investigating."
+                ),
+            }
+        )
     else:
         messages = [
             {"role": "system", "content": system_prompt},
@@ -201,22 +217,23 @@ async def _run_fix(
         if session_id:
             existing_journal = read_journal(repo_root, session_id)
             if existing_journal:
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "[JOURNAL FROM PREVIOUS EXECUTION]\n"
-                        f"{existing_journal}"
-                    ),
-                })
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (f"[JOURNAL FROM PREVIOUS EXECUTION]\n{existing_journal}"),
+                    }
+                )
             existing_pad = scratchpad.read_scratchpad(repo_root, session_id)
             if existing_pad:
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "[SCRATCHPAD FROM PREVIOUS EXECUTION — resume from here]\n"
-                        f"{existing_pad}"
-                    ),
-                })
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "[SCRATCHPAD FROM PREVIOUS EXECUTION — resume from here]\n"
+                            f"{existing_pad}"
+                        ),
+                    }
+                )
 
     def _build_fix_reminder() -> str:
         parts = [f"REMINDER — Your task: {task}"]
@@ -227,9 +244,7 @@ async def _run_fix(
         if pad:
             parts.append(f"\nYour current scratchpad:\n{pad}")
         else:
-            parts.append(
-                "\nCall update_scratchpad to record your progress so far."
-            )
+            parts.append("\nCall update_scratchpad to record your progress so far.")
         return "\n".join(parts)
 
     def _build_context_refresh(current_messages: list[dict]) -> list[dict]:
@@ -252,34 +267,39 @@ async def _run_fix(
         ]
         refresh_parts = ["[CONTEXT REFRESHED]"]
         if jrnl:
-            refresh_parts.append(
-                f"SESSION JOURNAL (permanent findings):\n{jrnl}"
-            )
+            refresh_parts.append(f"SESSION JOURNAL (permanent findings):\n{jrnl}")
         if pad:
-            refresh_parts.append(
-                f"SCRATCHPAD (current state):\n{pad}"
-            )
+            refresh_parts.append(f"SCRATCHPAD (current state):\n{pad}")
         if pad or jrnl:
-            new_messages.append({
-                "role": "user",
-                "content": "\n\n".join(refresh_parts),
-            })
+            new_messages.append(
+                {
+                    "role": "user",
+                    "content": "\n\n".join(refresh_parts),
+                }
+            )
         else:
-            new_messages.append({
-                "role": "user",
-                "content": "[CONTEXT REFRESHED]\n\nContinue working on the task.",
-            })
+            new_messages.append(
+                {
+                    "role": "user",
+                    "content": "[CONTEXT REFRESHED]\n\nContinue working on the task.",
+                }
+            )
 
-        ws_send_nowait(ws, "context_refreshed", {
-            "message": "Context refreshed — journal and scratchpad provide continuity.",
-        })
+        ws_send_nowait(
+            ws,
+            "context_refreshed",
+            {
+                "message": "Context refreshed — journal and scratchpad provide continuity.",
+            },
+        )
         return new_messages
 
     # Request mode: stronger nudge that suggests specific tools for open-ended tasks
     request_nudge = (
-        "Call one tool now. Prefer reading workspace state before "
-        "broader research."
-    ) if is_request else None
+        ("Call one tool now. Prefer reading workspace state before broader research.")
+        if is_request
+        else None
+    )
 
     # ── Implementation phase ──────────────────────────────────────
     await ws_send(ws, "stage_change", {"stage": "implementing"})
@@ -304,12 +324,13 @@ async def _run_fix(
     )
 
     # ── Completion ────────────────────────────────────────────────
-    files_modified = list({
-        tc.parameters.get("path", "")
-        for tc in executed
-        if tc.tool_name in ("create_file", "edit_file")
-        and tc.parameters.get("path")
-    })
+    files_modified = list(
+        {
+            tc.parameters.get("path", "")
+            for tc in executed
+            if tc.tool_name in ("create_file", "edit_file") and tc.parameters.get("path")
+        }
+    )
 
     # ── Post-execution validation ──
     validation_results: dict = {}
@@ -323,8 +344,12 @@ async def _run_fix(
             and settings.post_validation_max_retries > 0
         ):
             validation_results = await _run_validation_fix_loop(
-                repo_root, ws, llm_client, context,
-                validation_results, session_id,
+                repo_root,
+                ws,
+                llm_client,
+                context,
+                validation_results,
+                session_id,
                 conversation_logger=conversation_logger,
                 expert_llm_client=expert_llm_client,
                 dispatcher=dispatcher,
@@ -354,41 +379,59 @@ async def _run_fix(
 
     # ── Incremental project_context.md update ──
     if files_modified and settings.enable_project_context:
-        await ws_send(ws, "stage_status", {
-            "stage": "context_update",
-            "status": "running",
-            "summary": f"Updating project context with {len(files_modified)} modified file(s)...",
-        })
+        await ws_send(
+            ws,
+            "stage_status",
+            {
+                "stage": "context_update",
+                "status": "running",
+                "summary": f"Updating project context with {len(files_modified)} modified files...",
+            },
+        )
         try:
             from lean_ai.context.generation import update_project_context
 
             ctx_path = await update_project_context(
-                repo_root, files_modified, llm_client,
+                repo_root,
+                files_modified,
+                llm_client,
             )
             if ctx_path:
                 logger.info(
                     "project_context.md updated with %d modified files",
                     len(files_modified),
                 )
-                await ws_send(ws, "stage_status", {
-                    "stage": "context_update",
-                    "status": "done",
-                    "summary": "Project context updated.",
-                })
+                await ws_send(
+                    ws,
+                    "stage_status",
+                    {
+                        "stage": "context_update",
+                        "status": "done",
+                        "summary": "Project context updated.",
+                    },
+                )
             else:
                 logger.info("project_context.md update skipped (no changes needed)")
-                await ws_send(ws, "stage_status", {
-                    "stage": "context_update",
-                    "status": "done",
-                    "summary": "Project context update skipped (no changes needed).",
-                })
+                await ws_send(
+                    ws,
+                    "stage_status",
+                    {
+                        "stage": "context_update",
+                        "status": "done",
+                        "summary": "Project context update skipped (no changes needed).",
+                    },
+                )
         except Exception as exc:
             logger.warning("Incremental context update failed (non-fatal): %s", exc)
-            await ws_send(ws, "stage_status", {
-                "stage": "context_update",
-                "status": "done",
-                "summary": f"Project context update failed: {exc}",
-            })
+            await ws_send(
+                ws,
+                "stage_status",
+                {
+                    "stage": "context_update",
+                    "status": "done",
+                    "summary": f"Project context update failed: {exc}",
+                },
+            )
 
     complete_data: dict = {"summary": summary, "files_modified": files_modified}
     if branch_name:
@@ -398,7 +441,8 @@ async def _run_fix(
     await ws_send(ws, "complete", complete_data)
     logger.info(
         "Fix complete: %d tool calls, %d files",
-        len(all_executed), len(files_modified),
+        len(all_executed),
+        len(files_modified),
     )
 
     task_summary = task[:72].replace("\n", " ")

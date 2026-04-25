@@ -58,14 +58,17 @@ async def test_phase_c_dispute_routes_to_callback(tmp_path):
         on_test_dispute=dispute_callback,
     )
 
-    result = await executor("request_test_change", {
-        "test_file": "tests/test_auth.py",
-        "test_function": "test_login_rejects_empty_password",
-        "reason": (
-            "test asserts password.strip() != '' but the contract says "
-            "empty passwords raise ValueError rather than returning False"
-        ),
-    })
+    result = await executor(
+        "request_test_change",
+        {
+            "test_file": "tests/test_auth.py",
+            "test_function": "test_login_rejects_empty_password",
+            "reason": (
+                "test asserts password.strip() != '' but the contract says "
+                "empty passwords raise ValueError rather than returning False"
+            ),
+        },
+    )
 
     assert dispute_callback.call_count == 1
     assert "ACCEPTED" in result
@@ -84,11 +87,14 @@ async def test_request_test_change_without_callback_returns_error(tmp_path):
         on_test_dispute=None,
     )
 
-    result = await executor("request_test_change", {
-        "test_file": "tests/test_auth.py",
-        "test_function": "test_x",
-        "reason": "something",
-    })
+    result = await executor(
+        "request_test_change",
+        {
+            "test_file": "tests/test_auth.py",
+            "test_function": "test_x",
+            "reason": "something",
+        },
+    )
     assert "ERROR" in result
     assert "not available" in result
 
@@ -110,11 +116,14 @@ async def test_phase_c_still_blocks_direct_test_edits(tmp_path):
         on_test_dispute=AsyncMock(return_value="unused"),
     )
 
-    result = await executor("edit_file", {
-        "path": "tests/test_auth.py",
-        "search": "assert True",
-        "replace": "assert False",
-    })
+    result = await executor(
+        "edit_file",
+        {
+            "path": "tests/test_auth.py",
+            "search": "assert True",
+            "replace": "assert False",
+        },
+    )
     assert "ERROR" in result
     assert "TDD" in result or "test files" in result.lower()
     # File on disk must be untouched.

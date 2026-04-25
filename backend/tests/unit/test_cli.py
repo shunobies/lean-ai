@@ -27,6 +27,7 @@ def test_encrypt_key_command(tmp_path):
 
 def test_decrypt_key_command(tmp_path):
     from lean_ai.crypto import encrypt_value
+
     keyfile = tmp_path / ".lean_ai" / ".keyfile"
     encrypted = encrypt_value("my-api-key", keyfile)
     result = _run_cli("decrypt-key", encrypted, "--keyfile", str(keyfile), cwd=tmp_path)
@@ -46,14 +47,17 @@ def test_migrate_env_command(tmp_path):
         "# My config\n"
         "LEAN_AI_OLLAMA_URL=http://localhost:11434\n"
         "LEAN_AI_OLLAMA_MODEL=test-model\n"
-        'LEAN_AI_OPENAI_API_KEY=sk-secret\n'
+        "LEAN_AI_OPENAI_API_KEY=sk-secret\n"
     )
     keyfile = tmp_path / ".lean_ai" / ".keyfile"
     result = _run_cli(
         "migrate-env",
-        "--env-file", str(env_file),
-        "--yaml-file", str(tmp_path / "config.yaml"),
-        "--keyfile", str(keyfile),
+        "--env-file",
+        str(env_file),
+        "--yaml-file",
+        str(tmp_path / "config.yaml"),
+        "--keyfile",
+        str(keyfile),
         cwd=tmp_path,
     )
     assert result.returncode == 0
@@ -70,7 +74,8 @@ def test_migrate_env_command(tmp_path):
 def test_migrate_env_missing_file(tmp_path):
     result = _run_cli(
         "migrate-env",
-        "--env-file", str(tmp_path / "nonexistent.env"),
+        "--env-file",
+        str(tmp_path / "nonexistent.env"),
         cwd=tmp_path,
     )
     assert result.returncode != 0
@@ -83,8 +88,10 @@ def test_migrate_env_no_overwrite(tmp_path):
     yaml_file.write_text("# existing\n")
     result = _run_cli(
         "migrate-env",
-        "--env-file", str(env_file),
-        "--yaml-file", str(yaml_file),
+        "--env-file",
+        str(env_file),
+        "--yaml-file",
+        str(yaml_file),
         cwd=tmp_path,
     )
     assert result.returncode != 0
@@ -98,8 +105,10 @@ def test_migrate_env_force_overwrite(tmp_path):
     yaml_file.write_text("# existing\n")
     result = _run_cli(
         "migrate-env",
-        "--env-file", str(env_file),
-        "--yaml-file", str(yaml_file),
+        "--env-file",
+        str(env_file),
+        "--yaml-file",
+        str(yaml_file),
         "--force",
         cwd=tmp_path,
     )
@@ -110,7 +119,8 @@ def test_migrate_env_force_overwrite(tmp_path):
 def test_generate_config_command(tmp_path):
     result = _run_cli(
         "generate-config",
-        "--yaml-file", str(tmp_path / "config.yaml"),
+        "--yaml-file",
+        str(tmp_path / "config.yaml"),
         cwd=tmp_path,
     )
     assert result.returncode == 0

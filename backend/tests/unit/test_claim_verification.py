@@ -27,14 +27,10 @@ class TestPositiveDetection:
         )
 
     def test_not_yet_available(self):
-        assert _detect_unverified_claims(
-            "The v3 API is not yet available for production use."
-        )
+        assert _detect_unverified_claims("The v3 API is not yet available for production use.")
 
     def test_no_longer_supported(self):
-        assert _detect_unverified_claims(
-            "Python 2 is no longer supported by the Django framework."
-        )
+        assert _detect_unverified_claims("Python 2 is no longer supported by the Django framework.")
 
     def test_future_version(self):
         assert _detect_unverified_claims(
@@ -52,9 +48,7 @@ class TestPositiveDetection:
         )
 
     def test_will_be_removed(self):
-        assert _detect_unverified_claims(
-            "This method will be removed in the next major release."
-        )
+        assert _detect_unverified_claims("This method will be removed in the next major release.")
 
     def test_knowledge_cutoff(self):
         assert _detect_unverified_claims(
@@ -62,24 +56,16 @@ class TestPositiveDetection:
         )
 
     def test_training_data(self):
-        assert _detect_unverified_claims(
-            "My training data doesn't cover releases after 2024."
-        )
+        assert _detect_unverified_claims("My training data doesn't cover releases after 2024.")
 
     def test_assume_library(self):
-        assert _detect_unverified_claims(
-            "I assume this library does not support async operations."
-        )
+        assert _detect_unverified_claims("I assume this library does not support async operations.")
 
     def test_believe_package(self):
-        assert _detect_unverified_claims(
-            "I believe that package was discontinued last year."
-        )
+        assert _detect_unverified_claims("I believe that package was discontinued last year.")
 
     def test_not_a_valid_function(self):
-        assert _detect_unverified_claims(
-            "That is not a valid function in the numpy API."
-        )
+        assert _detect_unverified_claims("That is not a valid function in the numpy API.")
 
     def test_does_not_provide(self):
         assert _detect_unverified_claims(
@@ -92,9 +78,7 @@ class TestPositiveDetection:
         )
 
     def test_only_in_beta(self):
-        assert _detect_unverified_claims(
-            "This is only available in the beta preview of the SDK."
-        )
+        assert _detect_unverified_claims("This is only available in the beta preview of the SDK.")
 
 
 class TestProjectContext:
@@ -135,9 +119,7 @@ class TestNegativeDetection:
         )
 
     def test_tool_result(self):
-        assert not _detect_unverified_claims(
-            "File created successfully at src/utils/helpers.py"
-        )
+        assert not _detect_unverified_claims("File created successfully at src/utils/helpers.py")
 
     def test_empty_string(self):
         assert not _detect_unverified_claims("")

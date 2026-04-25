@@ -43,7 +43,9 @@ def test_post_diff_decision_requires_session(client, tmp_path):
 
 
 def test_post_diff_decision_returns_stored_false_when_disabled(
-    client, tmp_path, monkeypatch,
+    client,
+    tmp_path,
+    monkeypatch,
 ):
     from lean_ai.config import settings as cfg
 

@@ -58,18 +58,21 @@ async def lifespan(app: FastAPI):
     # Shutdown integrations
     try:
         from lean_ai.integrations.registry import shutdown_integrations
+
         await shutdown_integrations()
     except ImportError:
         pass
     # Cleanup headless Chrome if browser search provider was used
     try:
         from lean_ai.tools.browser_search import close_browser
+
         close_browser()
     except ImportError:
         pass
     # Cleanup voice audio resources
     try:
         from lean_ai.voice.audio_manager import get_audio_manager
+
         mgr = get_audio_manager()
         if mgr:
             mgr.cleanup()

@@ -91,8 +91,18 @@ async def link_task(
         "INSERT OR REPLACE INTO task_links "
         "(id, integration_name, external_id, session_id, workspace, title, status, metadata, "
         "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (link_id, integration_name, external_id, session_id, workspace,
-         title, status, meta_json, now, now),
+        (
+            link_id,
+            integration_name,
+            external_id,
+            session_id,
+            workspace,
+            title,
+            status,
+            meta_json,
+            now,
+            now,
+        ),
     )
     await db.commit()
     return {
@@ -180,7 +190,8 @@ async def update_task_link(
     values.append(link_id)
 
     await db.execute(
-        f"UPDATE task_links SET {', '.join(parts)} WHERE id = ?", values,
+        f"UPDATE task_links SET {', '.join(parts)} WHERE id = ?",
+        values,
     )
     await db.commit()
     cursor = await db.execute("SELECT * FROM task_links WHERE id = ?", (link_id,))
@@ -207,8 +218,7 @@ async def log_sync_event(
         "INSERT INTO sync_log "
         "(task_link_id, direction, event_type, payload, success, error_message, created_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (task_link_id, direction, event_type, payload_json,
-         int(success), error_message, now),
+        (task_link_id, direction, event_type, payload_json, int(success), error_message, now),
     )
     await db.commit()
     return cursor.lastrowid or 0

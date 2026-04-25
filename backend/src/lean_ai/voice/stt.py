@@ -54,7 +54,8 @@ class STTService:
         )
         logger.info(
             "STT: loaded model %s on cpu (int8, threads=%d)",
-            settings.stt_model, settings.stt_cpu_threads,
+            settings.stt_model,
+            settings.stt_cpu_threads,
         )
 
     async def warm_up(self) -> None:
@@ -67,8 +68,10 @@ class STTService:
         """Create PyAudio instance if needed."""
         if self._pa is None:
             from lean_ai.voice.alsa_suppression import suppress_alsa_errors
+
             suppress_alsa_errors()
             import pyaudio
+
             self._pa = pyaudio.PyAudio()
 
     @staticmethod
@@ -98,9 +101,7 @@ class STTService:
         )
 
         silence_frames = 0
-        silence_limit = int(
-            settings.stt_silence_threshold * SAMPLE_RATE / CHUNK_SIZE
-        )
+        silence_limit = int(settings.stt_silence_threshold * SAMPLE_RATE / CHUNK_SIZE)
 
         logger.info("STT: recording started (auto_stop=%s)", self._auto_stop)
 
@@ -137,7 +138,9 @@ class STTService:
                 self._stream = None
 
     async def start_recording(
-        self, auto_stop: bool = False, on_auto_stop: Callable | None = None,
+        self,
+        auto_stop: bool = False,
+        on_auto_stop: Callable | None = None,
     ) -> None:
         """Begin capturing audio from the microphone."""
         async with self._lock:
@@ -152,7 +155,8 @@ class STTService:
             self._record_start_time = time.monotonic()
 
             self._record_task = asyncio.get_event_loop().run_in_executor(
-                None, self._recording_loop,
+                None,
+                self._recording_loop,
             )
 
     async def stop_recording(self) -> dict:
@@ -167,7 +171,8 @@ class STTService:
             if self._record_task is not None:
                 try:
                     await asyncio.wait_for(
-                        asyncio.shield(self._record_task), timeout=3.0,
+                        asyncio.shield(self._record_task),
+                        timeout=3.0,
                     )
                 except (asyncio.TimeoutError, Exception):
                     pass
@@ -192,7 +197,8 @@ class STTService:
             }
 
     async def _transcribe_via_llm_or_whisper(
-        self, audio_data: bytes,
+        self,
+        audio_data: bytes,
     ) -> tuple[str, str | None]:
         """Dispatch: flagged LLM role → Whisper fallback.
 
@@ -213,19 +219,23 @@ class STTService:
         if handler is not None:
             try:
                 text, language = await self._transcribe_via_llm(
-                    audio_data, handler,
+                    audio_data,
+                    handler,
                 )
                 return text, language
             except Exception as exc:  # catches CapabilityError + transport errors
                 logger.warning(
                     "LLM audio handler %s refused/failed: %s; falling back to Whisper",
-                    handler.provider_name, exc,
+                    handler.provider_name,
+                    exc,
                 )
 
         return await asyncio.to_thread(self._transcribe, audio_data)
 
     async def _transcribe_via_llm(
-        self, pcm_data: bytes, client,
+        self,
+        pcm_data: bytes,
+        client,
     ) -> tuple[str, str | None]:
         """Transcribe PCM bytes via a flagged LLM client.
 
@@ -269,7 +279,9 @@ class STTService:
         text = (text or "").strip()
         logger.info(
             "STT via LLM (%s): %d bytes PCM → %d chars",
-            client.provider_name, len(pcm_data), len(text),
+            client.provider_name,
+            len(pcm_data),
+            len(text),
         )
         # LLM transcription doesn't expose a detected language — return None.
         return text, None
@@ -295,7 +307,9 @@ class STTService:
         detected_lang = info.language if hasattr(info, "language") else None
         logger.info(
             "STT: transcribed %d bytes → %d chars (lang=%s)",
-            len(audio_data), len(full_text), detected_lang,
+            len(audio_data),
+            len(full_text),
+            detected_lang,
         )
 
         return full_text, detected_lang

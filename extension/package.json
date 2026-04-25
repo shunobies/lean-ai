@@ -1052,12 +1052,15 @@
     "package": "npm run copy-backend && npm run build && vsce package"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.93.0",
     "@types/ws": "^8.5.0",
     "@vscode/vsce": "^3.9.1",
     "esbuild": "^0.25.0",
     "eslint": "^9.0.0",
+    "jest": "^30.3.0",
+    "ts-jest": "^29.4.9",
     "typescript": "^5.6.0"
   },
   "dependencies": {

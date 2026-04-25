@@ -26,11 +26,11 @@ class RoleConfig:
     """Provider-agnostic configuration for a model role."""
 
     role_name: str
-    provider_setting: str          # e.g. "expert_llm_provider"
+    provider_setting: str  # e.g. "expert_llm_provider"
     enable_thinking: bool
 
     # Ollama-specific
-    ollama_model: str              # e.g. settings.ollama_model_expert
+    ollama_model: str  # e.g. settings.ollama_model_expert
     ollama_max_tokens: int
     ollama_context_window: int
     ollama_temperature: float
@@ -70,6 +70,7 @@ def _create_openai_provider(
     reasoning_effort: str = "",
 ) -> LLMProvider:
     from lean_ai.llm.provider_openai import OpenAIProvider
+
     return OpenAIProvider(
         api_key=settings.openai_api_key,
         model=model,
@@ -94,6 +95,7 @@ def _create_anthropic_provider(
     # factories so the caller can flag it uniformly.
     _ = preserve_thinking
     from lean_ai.llm.provider_anthropic import AnthropicProvider
+
     return AnthropicProvider(
         api_key=settings.anthropic_api_key,
         model=model,
@@ -112,6 +114,7 @@ def _create_serve_provider(
     reasoning_effort: str = "",
 ) -> LLMProvider:
     from lean_ai.llm.provider_openai import OpenAIProvider
+
     return OpenAIProvider(
         api_key=settings.serve_api_key,
         model=model,
@@ -135,6 +138,7 @@ def _create_gemini_provider(
     # is a no-op here.  Accept for interface parity.
     _ = preserve_thinking
     from lean_ai.llm.provider_gemini import GeminiProvider
+
     return GeminiProvider(
         api_key=settings.gemini_api_key,
         model=model,
@@ -214,7 +218,8 @@ def create_role_client(
         if not model or not key_val:
             logger.warning(
                 "%s provider is %r but %s — %s model disabled",
-                cfg.role_name, provider,
+                cfg.role_name,
+                provider,
                 f"{key_name} is not set" if not key_val else "no model name resolved",
                 cfg.role_name.lower(),
             )
@@ -230,13 +235,17 @@ def create_role_client(
             client = LLMClient(provider=role_provider, concurrency_semaphore=sem)
             logger.info(
                 "%s model enabled (%s): %s",
-                cfg.role_name, provider.capitalize(), model,
+                cfg.role_name,
+                provider.capitalize(),
+                model,
             )
             return client
         except Exception as e:
             logger.warning(
                 "Could not create %s LLM client (%s): %s",
-                cfg.role_name.lower(), provider.capitalize(), e,
+                cfg.role_name.lower(),
+                provider.capitalize(),
+                e,
             )
             return None
 
@@ -278,7 +287,8 @@ def create_role_client(
         except Exception as e:
             logger.warning(
                 "Could not create %s LLM client (Ollama): %s",
-                cfg.role_name.lower(), e,
+                cfg.role_name.lower(),
+                e,
             )
             return None
 

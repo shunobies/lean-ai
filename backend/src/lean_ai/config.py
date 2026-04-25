@@ -34,18 +34,20 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, Settings
 from lean_ai.crypto import decrypt_value
 
 # Fields that accept the k-shorthand notation.
-_CONTEXT_WINDOW_FIELDS = frozenset({
-    "ollama_context_window",
-    "ollama_expert_context_window",
-    "ollama_request_context_window",
-    "ollama_worker_context_window",
-    "openai_context_window",
-    "anthropic_context_window",
-    "gemini_context_window",
-    "serve_context_window",
-    "inline_context_window",
-    "embedding_context_window",
-})
+_CONTEXT_WINDOW_FIELDS = frozenset(
+    {
+        "ollama_context_window",
+        "ollama_expert_context_window",
+        "ollama_request_context_window",
+        "ollama_worker_context_window",
+        "openai_context_window",
+        "anthropic_context_window",
+        "gemini_context_window",
+        "serve_context_window",
+        "inline_context_window",
+        "embedding_context_window",
+    }
+)
 
 
 def _expand_ctx(raw: int | str) -> int:
@@ -119,22 +121,27 @@ class _DecryptingYamlSource(PydanticBaseSettingsSource):
     post-processes secret fields through :func:`decrypt_value`.
     """
 
-    _SECRET_FIELDS = frozenset({
-        "openai_api_key", "anthropic_api_key", "gemini_api_key",
-        "serve_api_key", "search_api_key",
-        "jira_api_token", "servicenow_password",
-        "wiki_password",
-        "export_api_key",
-    })
+    _SECRET_FIELDS = frozenset(
+        {
+            "openai_api_key",
+            "anthropic_api_key",
+            "gemini_api_key",
+            "serve_api_key",
+            "search_api_key",
+            "jira_api_token",
+            "servicenow_password",
+            "wiki_password",
+            "export_api_key",
+        }
+    )
 
     def __init__(self, settings_cls: type[BaseSettings], yaml_file: str = "config.yaml") -> None:
         super().__init__(settings_cls)
         from pydantic_settings import YamlConfigSettingsSource
+
         self._yaml_source = YamlConfigSettingsSource(settings_cls, yaml_file=yaml_file)
 
-    def get_field_value(
-        self, field: Any, field_name: str
-    ) -> tuple[Any, str, bool]:
+    def get_field_value(self, field: Any, field_name: str) -> tuple[Any, str, bool]:
         return self._yaml_source.get_field_value(field, field_name)
 
     def __call__(self) -> dict[str, Any]:
@@ -184,7 +191,7 @@ class Settings(BaseSettings):
     ollama_max_tokens: int | None = None  # Derived: 25% of context window
     # Optional sampling params — blank/None means "omit from options dict"
     # entirely so text-only models that don't implement these aren't confused.
-    ollama_min_p: float | None = None          # e.g. 0.05 to tighten nucleus
+    ollama_min_p: float | None = None  # e.g. 0.05 to tighten nucleus
     ollama_presence_penalty: float | None = None  # e.g. 1.5 to reduce repetition
 
     # ── Ollama — expert model (reasoning-heavy phases) ──
@@ -397,10 +404,10 @@ class Settings(BaseSettings):
     internet_timeout_seconds: int = 30
 
     # ── MediaWiki ──
-    wiki_url: str = ""              # e.g. "https://wiki.company.com" — empty = disabled
+    wiki_url: str = ""  # e.g. "https://wiki.company.com" — empty = disabled
     wiki_api_path: str = "/w/api.php"  # API endpoint path (MediaWiki default)
-    wiki_username: str = ""         # For authenticated wikis (bot account)
-    wiki_password: str = ""         # Bot password or user password (stored in keychain)
+    wiki_username: str = ""  # For authenticated wikis (bot account)
+    wiki_password: str = ""  # Bot password or user password (stored in keychain)
 
     # ── Project context ──
     enable_project_context: bool = True
@@ -415,13 +422,13 @@ class Settings(BaseSettings):
     reference_search_default_limit: int = 5  # Default hits returned by search_reference
 
     # ── Local Refiner (cloud pre-processing) ──
-    enable_refiner: bool = True           # Active only with cloud providers
+    enable_refiner: bool = True  # Active only with cloud providers
     refiner_ollama_url: str | None = None  # Falls back to ollama_url
-    refiner_model: str | None = None       # Falls back to ollama_model
-    refiner_timeout: float = 30.0          # Max seconds for refinement pipeline
+    refiner_model: str | None = None  # Falls back to ollama_model
+    refiner_timeout: float = 30.0  # Max seconds for refinement pipeline
     refiner_enable_reference: bool = True  # Inject reference library context
-    refiner_enable_privacy: bool = True    # Strip sensitive data
-    refiner_reference_chunks: int = 5      # Max reference chunks to inject
+    refiner_enable_privacy: bool = True  # Strip sensitive data
+    refiner_reference_chunks: int = 5  # Max reference chunks to inject
 
     # ── Implementation ──
     implementation_max_tokens: int | None = None  # Derived: 25% of active context window
@@ -468,10 +475,10 @@ class Settings(BaseSettings):
 
     # ── Post-execution validation ──
     enable_post_validation: bool = True  # Master switch
-    post_format_command: str = ""     # e.g. "ruff format src/"
-    post_lint_fix_command: str = ""   # e.g. "ruff check --fix src/"
-    post_lint_command: str = ""       # e.g. "ruff check src/"
-    post_test_command: str = ""       # e.g. "pytest tests/ -x -q"
+    post_format_command: str = ""  # e.g. "ruff format src/"
+    post_lint_fix_command: str = ""  # e.g. "ruff check --fix src/"
+    post_lint_command: str = ""  # e.g. "ruff check src/"
+    post_test_command: str = ""  # e.g. "pytest tests/ -x -q"
     post_validation_max_retries: int = 2  # Max LLM fix attempts (0 = no retries)
     post_validation_fix_turns: int = 30  # Tool-calling turns per fix attempt
 
@@ -484,20 +491,20 @@ class Settings(BaseSettings):
     memory_retrieval_statuses: str = "user_confirmed,high_confidence_auto"
     memory_confidence_ttl_days: int = 90
     memory_autopromote_threshold: int = 3  # seen_count to auto→high_confidence_auto
-    enable_phase3_memory: bool = True      # Inject memories into Phase 3 design
-    enable_fix_loop_memory: bool = True    # Inject fix_patterns into validation fix loop
+    enable_phase3_memory: bool = True  # Inject memories into Phase 3 design
+    enable_fix_loop_memory: bool = True  # Inject fix_patterns into validation fix loop
     phase3_memory_budget_percent: float = 0.02
     fix_loop_memory_budget_percent: float = 0.02
 
     # ── Self-improvement training pipeline (Phase B+; Layer 1 defaults) ──
-    enable_training_capture: bool = True   # Local capture runs; export gated below
+    enable_training_capture: bool = True  # Local capture runs; export gated below
     training_db_path: str = ".lean_ai/training.db"
     training_retention_days: int = 365
-    capture_thinking: bool = True          # Preserve <think> blocks for reasoning LoRA
-    scrubbing_strict: bool = True          # Fail-closed on scrubber exception
+    capture_thinking: bool = True  # Preserve <think> blocks for reasoning LoRA
+    scrubbing_strict: bool = True  # Fail-closed on scrubber exception
     # Empty string disables the /api/export endpoints (returns 503 until set).
     export_api_key: str = ""
-    export_workspace_salt: str = ""        # Optional stable salt for workspace_id hash
+    export_workspace_salt: str = ""  # Optional stable salt for workspace_id hash
     memory_export_drop_threshold: float = 0.40  # Drop memories >40% redacted
 
     # ── Integrations (Jira, ServiceNow, etc.) ──
@@ -505,14 +512,14 @@ class Settings(BaseSettings):
     integration_auto_push: bool = True  # Auto-push session summaries on completion
 
     # Jira Cloud
-    jira_url: str = ""          # e.g. "https://yourcompany.atlassian.net"
-    jira_email: str = ""        # Jira account email
-    jira_api_token: str = ""    # Jira API token (stored in OS keychain)
+    jira_url: str = ""  # e.g. "https://yourcompany.atlassian.net"
+    jira_email: str = ""  # Jira account email
+    jira_api_token: str = ""  # Jira API token (stored in OS keychain)
 
     # ServiceNow
-    servicenow_url: str = ""         # e.g. "https://yourinstance.service-now.com"
-    servicenow_username: str = ""    # ServiceNow username
-    servicenow_password: str = ""    # ServiceNow password (stored in OS keychain)
+    servicenow_url: str = ""  # e.g. "https://yourinstance.service-now.com"
+    servicenow_username: str = ""  # ServiceNow username
+    servicenow_password: str = ""  # ServiceNow password (stored in OS keychain)
     servicenow_table: str = "incident"  # Default ServiceNow table
 
     # ── Debug / Testing ──
@@ -549,25 +556,25 @@ class Settings(BaseSettings):
     def _validate_positive_fields(self) -> Settings:
         """Ensure critical numeric settings are positive."""
         for field_name in (
-            "ollama_context_window", "openai_context_window",
-            "anthropic_context_window", "gemini_context_window",
+            "ollama_context_window",
+            "openai_context_window",
+            "anthropic_context_window",
+            "gemini_context_window",
             "serve_context_window",
-            "tool_timeout_seconds", "stt_cpu_threads",
+            "tool_timeout_seconds",
+            "stt_cpu_threads",
         ):
             val = getattr(self, field_name, None)
             if val is not None and val <= 0:
-                raise ValueError(
-                    f"{field_name} must be positive, got {val}"
-                )
+                raise ValueError(f"{field_name} must be positive, got {val}")
         for field_name in (
-            "stt_silence_threshold", "tts_speed",
+            "stt_silence_threshold",
+            "tts_speed",
             "refresh_threshold",
         ):
             val = getattr(self, field_name, None)
             if val is not None and val <= 0:
-                raise ValueError(
-                    f"{field_name} must be positive, got {val}"
-                )
+                raise ValueError(f"{field_name} must be positive, got {val}")
         return self
 
     @model_validator(mode="after")

@@ -157,7 +157,13 @@ class _ProviderFake(LLMProvider):
         raise NotImplementedError
 
     async def chat_with_tools_single(
-        self, messages, tools, max_tokens=None, *, stream_callback=None, thinking_callback=None,
+        self,
+        messages,
+        tools,
+        max_tokens=None,
+        *,
+        stream_callback=None,
+        thinking_callback=None,
     ):
         resp = self._responses.pop(0) if self._responses else ("done", [], LLMMetrics())
         return resp
@@ -295,6 +301,7 @@ def _openai_provider_or_skip(**kwargs):
     import pytest
 
     from lean_ai.llm.provider_openai import OpenAIProvider
+
     try:
         return OpenAIProvider(**kwargs)
     except ModuleNotFoundError:

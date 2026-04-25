@@ -120,16 +120,19 @@ async def retry_with_backoff(
         try:
             return await coro_factory()
         except Exception as exc:
-            should_retry = (
-                isinstance(exc, retryable_exceptions)
-                or (is_retryable is not None and is_retryable(exc))
+            should_retry = isinstance(exc, retryable_exceptions) or (
+                is_retryable is not None and is_retryable(exc)
             )
             if not should_retry or attempt >= max_retries:
                 raise
-            delay = base_delay * (2 ** attempt)
+            delay = base_delay * (2**attempt)
             logger.warning(
                 "%s failed (attempt %d/%d), retrying in %.1fs: %s",
-                label, attempt + 1, max_retries + 1, delay, exc,
+                label,
+                attempt + 1,
+                max_retries + 1,
+                delay,
+                exc,
             )
             await asyncio.sleep(delay)
     return None  # unreachable — loop always returns or raises
@@ -251,7 +254,9 @@ class LLMProvider(ABC):
     # ── Message formatting (provider-specific) ──
 
     def format_tool_result_messages(
-        self, tool_call: ToolCallInfo, content: str,
+        self,
+        tool_call: ToolCallInfo,
+        content: str,
     ) -> list[dict]:
         """Build message(s) representing a tool result.
 
@@ -261,7 +266,9 @@ class LLMProvider(ABC):
         return [{"role": "tool", "content": content}]
 
     def format_assistant_tool_message(
-        self, content: str, tool_calls: list[ToolCallInfo],
+        self,
+        content: str,
+        tool_calls: list[ToolCallInfo],
     ) -> dict:
         """Build the assistant message that contains tool calls.
 

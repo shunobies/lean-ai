@@ -29,9 +29,7 @@ _WHOOSH_SPECIAL_CHARS = set('/:*?\\<>|"^~')
 
 def _safe_query(q: str) -> str:
     """Escape special Whoosh characters in a user query."""
-    return "".join(
-        f"\\{c}" if c in _WHOOSH_SPECIAL_CHARS else c for c in q
-    ).strip()
+    return "".join(f"\\{c}" if c in _WHOOSH_SPECIAL_CHARS else c for c in q).strip()
 
 
 def _ensure_index():
@@ -103,12 +101,14 @@ def search_notes(query: str, limit: int = 20) -> list[dict]:
     with ix.searcher() as searcher:
         hits = searcher.search(parsed, limit=limit)
         for hit in hits:
-            results.append({
-                "note_id": hit["note_id"],
-                "content": hit["content"],
-                "project": hit["project"] or None,
-                "tags": hit["tags"],
-                "score": hit.score,
-            })
+            results.append(
+                {
+                    "note_id": hit["note_id"],
+                    "content": hit["content"],
+                    "project": hit["project"] or None,
+                    "tags": hit["tags"],
+                    "score": hit.score,
+                }
+            )
 
     return results

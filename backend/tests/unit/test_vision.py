@@ -39,8 +39,10 @@ class TestDescribeImage:
     async def test_successful_description(self):
         mock_response = {"message": {"content": "A screenshot of a React app."}}
 
-        with patch("lean_ai.llm.vision.settings") as mock_settings, \
-             patch("lean_ai.llm.vision.ollama_lib") as mock_ollama:
+        with (
+            patch("lean_ai.llm.vision.settings") as mock_settings,
+            patch("lean_ai.llm.vision.ollama_lib") as mock_ollama,
+        ):
             mock_settings.vision_model = "qwen3-vl:8b"
             mock_settings.effective_vision_url = "http://localhost:11434"
             mock_settings.vision_max_tokens = 1024
@@ -60,8 +62,10 @@ class TestDescribeImage:
 
     @pytest.mark.asyncio
     async def test_timeout_returns_error(self):
-        with patch("lean_ai.llm.vision.settings") as mock_settings, \
-             patch("lean_ai.llm.vision.ollama_lib") as mock_ollama:
+        with (
+            patch("lean_ai.llm.vision.settings") as mock_settings,
+            patch("lean_ai.llm.vision.ollama_lib") as mock_ollama,
+        ):
             mock_settings.vision_model = "qwen3-vl:8b"
             mock_settings.effective_vision_url = "http://localhost:11434"
             mock_settings.vision_max_tokens = 1024
@@ -82,8 +86,10 @@ class TestDescribeImage:
 
     @pytest.mark.asyncio
     async def test_connection_error_returns_error(self):
-        with patch("lean_ai.llm.vision.settings") as mock_settings, \
-             patch("lean_ai.llm.vision.ollama_lib") as mock_ollama:
+        with (
+            patch("lean_ai.llm.vision.settings") as mock_settings,
+            patch("lean_ai.llm.vision.ollama_lib") as mock_ollama,
+        ):
             mock_settings.vision_model = "qwen3-vl:8b"
             mock_settings.effective_vision_url = "http://localhost:11434"
             mock_settings.vision_max_tokens = 1024
@@ -108,8 +114,10 @@ class TestDescribeImage:
         empty_response = {"message": {"content": ""}}
         good_response = {"message": {"content": "A React component."}}
 
-        with patch("lean_ai.llm.vision.settings") as mock_settings, \
-             patch("lean_ai.llm.vision.ollama_lib") as mock_ollama:
+        with (
+            patch("lean_ai.llm.vision.settings") as mock_settings,
+            patch("lean_ai.llm.vision.ollama_lib") as mock_ollama,
+        ):
             mock_settings.vision_model = "qwen3-vl:8b"
             mock_settings.effective_vision_url = "http://localhost:11434"
             mock_settings.vision_max_tokens = 1024
@@ -131,8 +139,10 @@ class TestDescribeImage:
     async def test_empty_response_retries_then_fails(self):
         empty_response = {"message": {"content": ""}}
 
-        with patch("lean_ai.llm.vision.settings") as mock_settings, \
-             patch("lean_ai.llm.vision.ollama_lib") as mock_ollama:
+        with (
+            patch("lean_ai.llm.vision.settings") as mock_settings,
+            patch("lean_ai.llm.vision.ollama_lib") as mock_ollama,
+        ):
             mock_settings.vision_model = "qwen3-vl:8b"
             mock_settings.effective_vision_url = "http://localhost:11434"
             mock_settings.vision_max_tokens = 1024
@@ -152,8 +162,10 @@ class TestDescribeImage:
     async def test_whitespace_only_response_treated_as_empty(self):
         whitespace_response = {"message": {"content": "   \n  "}}
 
-        with patch("lean_ai.llm.vision.settings") as mock_settings, \
-             patch("lean_ai.llm.vision.ollama_lib") as mock_ollama:
+        with (
+            patch("lean_ai.llm.vision.settings") as mock_settings,
+            patch("lean_ai.llm.vision.ollama_lib") as mock_ollama,
+        ):
             mock_settings.vision_model = "qwen3-vl:8b"
             mock_settings.effective_vision_url = "http://localhost:11434"
             mock_settings.vision_max_tokens = 1024
@@ -172,8 +184,10 @@ class TestDescribeImage:
     async def test_includes_filename_in_prompt(self):
         mock_response = {"message": {"content": "An error dialog."}}
 
-        with patch("lean_ai.llm.vision.settings") as mock_settings, \
-             patch("lean_ai.llm.vision.ollama_lib") as mock_ollama:
+        with (
+            patch("lean_ai.llm.vision.settings") as mock_settings,
+            patch("lean_ai.llm.vision.ollama_lib") as mock_ollama,
+        ):
             mock_settings.vision_model = "qwen3-vl:8b"
             mock_settings.effective_vision_url = "http://localhost:11434"
             mock_settings.vision_max_tokens = 1024
@@ -211,8 +225,10 @@ class TestDescribeImages:
     async def test_multiple_images_described_in_parallel(self):
         mock_response = {"message": {"content": "Description."}}
 
-        with patch("lean_ai.llm.vision.settings") as mock_settings, \
-             patch("lean_ai.llm.vision.ollama_lib") as mock_ollama:
+        with (
+            patch("lean_ai.llm.vision.settings") as mock_settings,
+            patch("lean_ai.llm.vision.ollama_lib") as mock_ollama,
+        ):
             mock_settings.vision_model = "qwen3-vl:8b"
             mock_settings.effective_vision_url = "http://localhost:11434"
             mock_settings.vision_max_tokens = 1024

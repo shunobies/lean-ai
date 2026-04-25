@@ -159,9 +159,7 @@ def load_planning_context(repo_root: str) -> str:
 
     Budget-gated at PLANNING_CONTEXT_PERCENT of the active context window.
     """
-    budget = int(
-        settings._active_context_window * PLANNING_CONTEXT_PERCENT * 3.5
-    )
+    budget = int(settings._active_context_window * PLANNING_CONTEXT_PERCENT * 3.5)
     parts: list[str] = []
     lean_dir = Path(repo_root) / ".lean_ai"
     used = 0
@@ -195,9 +193,7 @@ def load_execution_context(repo_root: str) -> str:
     (search-on-demand during execution).
     Budget-gated at EXECUTION_CONTEXT_PERCENT of the active context window.
     """
-    total_budget = int(
-        settings._active_context_window * EXECUTION_CONTEXT_PERCENT * 3.5
-    )
+    total_budget = int(settings._active_context_window * EXECUTION_CONTEXT_PERCENT * 3.5)
     custom_text = load_custom_steering_docs(repo_root)
     if not custom_text:
         return ""
@@ -214,9 +210,7 @@ def load_condensed_context(repo_root: str) -> str:
     reserved allocation so they are not truncated away by large auto-generated
     context files.
     """
-    total_budget = int(
-        settings._active_context_window * EXECUTION_CONTEXT_PERCENT * 3.5
-    )
+    total_budget = int(settings._active_context_window * EXECUTION_CONTEXT_PERCENT * 3.5)
 
     # Load components separately
     lean_dir = Path(repo_root) / ".lean_ai"
@@ -309,23 +303,23 @@ def build_chat_system_prompt(
     if user_name:
         parts.append("")
         parts.append(
-            f"The user's name is {user_name}. "
-            "Address them by name naturally in conversation."
+            f"The user's name is {user_name}. Address them by name naturally in conversation."
         )
 
-    parts.extend([
-        "",
-        "IMPORTANT — How your capabilities work:",
-        "- The system has ALREADY read the user's project files and searched "
-        "their codebase for you.",
-        "- You also have read-only tools (read_file, grep_files, list_directory, "
-        "directory_tree) to explore further when you need more detail.",
-        "- You DO have access to their code. DO NOT say 'I cannot access "
-        "your files'.",
-        "- You have search_internet and fetch_url tools to look up documentation, "
-        "error messages, or any external information when needed.",
-        "- When answering, reference the actual code provided below.",
-    ])
+    parts.extend(
+        [
+            "",
+            "IMPORTANT — How your capabilities work:",
+            "- The system has ALREADY read the user's project files and searched "
+            "their codebase for you.",
+            "- You also have read-only tools (read_file, grep_files, list_directory, "
+            "directory_tree) to explore further when you need more detail.",
+            "- You DO have access to their code. DO NOT say 'I cannot access your files'.",
+            "- You have search_internet and fetch_url tools to look up documentation, "
+            "error messages, or any external information when needed.",
+            "- When answering, reference the actual code provided below.",
+        ]
+    )
 
     # Workspace metadata — always included (tiny)
     if workspace:
@@ -353,10 +347,8 @@ def build_chat_system_prompt(
             return True
         # Try truncating to fit
         if budget > len(header) + 200:
-            truncated = content[:budget - len(header) - 50]
-            parts.append(
-                f"\n{header}\n{truncated}\n... (truncated to fit context budget)"
-            )
+            truncated = content[: budget - len(header) - 50]
+            parts.append(f"\n{header}\n{truncated}\n... (truncated to fit context budget)")
             budget = 0
             return True
         return False
@@ -383,8 +375,7 @@ def build_chat_system_prompt(
         sr_parts = []
         for result in search_results[:8]:
             sr_parts.append(
-                f"--- {result['file_path']} "
-                f"(lines {result['start_line']}-{result['end_line']}) ---"
+                f"--- {result['file_path']} (lines {result['start_line']}-{result['end_line']}) ---"
             )
             sr_parts.append(f"```\n{result['content']}\n```")
         _try_append("=== CODE SEARCH RESULTS ===", "\n".join(sr_parts))

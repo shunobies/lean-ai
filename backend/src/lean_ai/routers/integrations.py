@@ -54,7 +54,10 @@ async def list_external_tasks(
         raise HTTPException(404, f"Integration not active: {name}")
     task_status = TaskStatus(status) if status else None
     tasks = await integration.list_tasks(
-        project=project, status=task_status, assignee=assignee, limit=limit,
+        project=project,
+        status=task_status,
+        assignee=assignee,
+        limit=limit,
     )
     return [dataclasses.asdict(t) for t in tasks]
 
@@ -124,7 +127,9 @@ async def link_task_endpoint(name: str, req: LinkTaskRequest):
     db = await get_integrations_db()
     try:
         result = await link_task(
-            db, name, req.external_id,
+            db,
+            name,
+            req.external_id,
             session_id=req.session_id,
             workspace=req.workspace,
             title=task.title,
@@ -161,7 +166,9 @@ async def get_all_linked_tasks(
     db = await get_integrations_db()
     try:
         return await get_linked_tasks(
-            db, workspace=workspace, integration_name=integration_name,
+            db,
+            workspace=workspace,
+            integration_name=integration_name,
         )
     finally:
         await db.close()

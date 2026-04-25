@@ -44,7 +44,11 @@ def chunk_file(
         boundaries = get_definition_nodes(content, lang)
         if boundaries:
             return _chunk_by_boundaries(
-                lines, boundaries, max_lines, overlap_lines, language_name,
+                lines,
+                boundaries,
+                max_lines,
+                overlap_lines,
+                language_name,
             )
 
     # Fallback: line-based chunking
@@ -83,12 +87,14 @@ def _chunk_by_boundaries(
         # Would adding this definition exceed max_lines?
         if def_end - chunk_start + 1 > max_lines:
             # Emit current chunk
-            chunks.append({
-                "content": "\n".join(lines[chunk_start - 1 : chunk_end]),
-                "start_line": chunk_start,
-                "end_line": chunk_end,
-                "language": language,
-            })
+            chunks.append(
+                {
+                    "content": "\n".join(lines[chunk_start - 1 : chunk_end]),
+                    "start_line": chunk_start,
+                    "end_line": chunk_end,
+                    "language": language,
+                }
+            )
             chunk_start = max(1, def_start - overlap_lines)
             chunk_end = def_end
         else:
@@ -99,24 +105,29 @@ def _chunk_by_boundaries(
     # Emit final chunk (includes any trailing content)
     if chunk_end > 0:
         final_end = min(total, max(chunk_end, total))
-        chunks.append({
-            "content": "\n".join(lines[chunk_start - 1 : final_end]),
-            "start_line": chunk_start,
-            "end_line": final_end,
-            "language": language,
-        })
+        chunks.append(
+            {
+                "content": "\n".join(lines[chunk_start - 1 : final_end]),
+                "start_line": chunk_start,
+                "end_line": final_end,
+                "language": language,
+            }
+        )
 
     # If the file had content before the first definition or gaps between defs,
     # the above handles it. If somehow we missed the start, add a preamble chunk.
     if chunks and chunks[0]["start_line"] > 1:
         preamble_end = chunks[0]["start_line"] - 1
         if preamble_end > overlap_lines:
-            chunks.insert(0, {
-                "content": "\n".join(lines[0:preamble_end]),
-                "start_line": 1,
-                "end_line": preamble_end,
-                "language": language,
-            })
+            chunks.insert(
+                0,
+                {
+                    "content": "\n".join(lines[0:preamble_end]),
+                    "start_line": 1,
+                    "end_line": preamble_end,
+                    "language": language,
+                },
+            )
 
     return chunks if chunks else _chunk_by_lines(lines, max_lines, overlap_lines, language)
 
@@ -134,12 +145,14 @@ def _chunk_by_lines(
 
     while start < total:
         end = min(start + max_lines, total)
-        chunks.append({
-            "content": "\n".join(lines[start:end]),
-            "start_line": start + 1,
-            "end_line": end,
-            "language": language,
-        })
+        chunks.append(
+            {
+                "content": "\n".join(lines[start:end]),
+                "start_line": start + 1,
+                "end_line": end,
+                "language": language,
+            }
+        )
         start = end - overlap_lines if end < total else total
 
     return chunks

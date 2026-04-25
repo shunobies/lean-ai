@@ -80,13 +80,20 @@ def build_workflow_callbacks(
         full_desc = f"{description_prefix}{desc}"
         _last_tool_desc[name] = full_desc
         fire_tool_progress(
-            ws, tool=name, status="running", description=full_desc,
+            ws,
+            tool=name,
+            status="running",
+            description=full_desc,
         )
         if conversation_logger:
-            t = asyncio.create_task(conversation_logger(
-                "tool_call", desc,
-                tool_name=name, tool_args=json.dumps(args),
-            ))
+            t = asyncio.create_task(
+                conversation_logger(
+                    "tool_call",
+                    desc,
+                    tool_name=name,
+                    tool_args=json.dumps(args),
+                )
+            )
             t.add_done_callback(log_task_exception)
 
     async def on_tool_result(name: str, result: str) -> None:
@@ -99,10 +106,13 @@ def build_workflow_callbacks(
             output=result[:500] if is_error else None,
         )
         if conversation_logger:
-            t = asyncio.create_task(conversation_logger(
-                "tool_result", result[:2000],
-                tool_name=name,
-            ))
+            t = asyncio.create_task(
+                conversation_logger(
+                    "tool_result",
+                    result[:2000],
+                    tool_name=name,
+                )
+            )
             t.add_done_callback(log_task_exception)
 
     async def on_content(text: str) -> None:
@@ -117,6 +127,7 @@ def build_workflow_callbacks(
 
     on_thinking: Callable | None = None
     if include_thinking:
+
         async def _on_thinking(text: str) -> None:
             fire_thinking_content(ws, content=text, streaming=streaming)
 
@@ -124,11 +135,9 @@ def build_workflow_callbacks(
 
     on_metrics: Callable | None = None
     if include_metrics:
+
         async def _on_metrics(prompt_tokens: int, context_window: int) -> None:
-            context_percent = (
-                round((prompt_tokens / context_window) * 100)
-                if context_window else 0
-            )
+            context_percent = round((prompt_tokens / context_window) * 100) if context_window else 0
             fire_metrics_update(
                 ws,
                 prompt_tokens=prompt_tokens,
@@ -145,8 +154,7 @@ def build_workflow_callbacks(
         aborted thinking mid-stream."""
         fire_thinking_content(ws, content="", truncated=True)
         logger.info(
-            "Reasoning budget interrupt — notifying extension "
-            "(thinking ~%d tokens)",
+            "Reasoning budget interrupt — notifying extension (thinking ~%d tokens)",
             thinking_token_count,
         )
 

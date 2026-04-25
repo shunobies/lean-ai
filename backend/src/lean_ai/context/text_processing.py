@@ -43,13 +43,13 @@ def _truncate_repetition(text: str, *, max_repeats: int = 5) -> str:
         # Search for repeated phrases of length 15-80 chars
         for phrase_len in range(15, 80):
             for start in range(0, min(len(line) - phrase_len * 3, 500)):
-                phrase = line[start:start + phrase_len]
+                phrase = line[start : start + phrase_len]
                 if not phrase.strip():
                     continue
                 count = 0
                 pos = start
                 while pos <= len(line) - phrase_len:
-                    if line[pos:pos + phrase_len] == phrase:
+                    if line[pos : pos + phrase_len] == phrase:
                         count += 1
                         pos += phrase_len
                     else:
@@ -83,15 +83,17 @@ def _appears_truncated(text: str) -> bool:
 
 
 # Section headings that expansion rounds sometimes produce
-_EXPANSION_ARTIFACT_HEADINGS: frozenset[str] = frozenset({
-    "## Additional Information from Additional Files",
-    "## Additional Files",
-    "## New Classes and Functions",
-    "## Updated Module Map",
-    "## Additional Information",
-    "## Additional Context",
-    "## Additional Details",
-})
+_EXPANSION_ARTIFACT_HEADINGS: frozenset[str] = frozenset(
+    {
+        "## Additional Information from Additional Files",
+        "## Additional Files",
+        "## New Classes and Functions",
+        "## Updated Module Map",
+        "## Additional Information",
+        "## Additional Context",
+        "## Additional Details",
+    }
+)
 
 
 def _normalize_h2(heading: str) -> str:
@@ -112,7 +114,7 @@ def _normalize_h2(heading: str) -> str:
         return stripped
 
     # Verify no unclosed parens between paren_start and end
-    candidate = stripped[paren_start + 2:-1]
+    candidate = stripped[paren_start + 2 : -1]
     if "(" in candidate:
         return stripped
 

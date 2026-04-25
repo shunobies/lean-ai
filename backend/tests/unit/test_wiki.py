@@ -172,11 +172,7 @@ class TestFetchWikiPage:
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
-            "parse": {
-                "text": {
-                    "*": "<p>Hello <b>world</b></p><script>alert('x')</script>"
-                }
-            }
+            "parse": {"text": {"*": "<p>Hello <b>world</b></p><script>alert('x')</script>"}}
         }
         mock_response.raise_for_status = MagicMock()
 
@@ -242,16 +238,12 @@ class TestAuthentication:
 
         # Token response
         token_response = MagicMock()
-        token_response.json.return_value = {
-            "query": {"tokens": {"logintoken": "abc123+\\"}}
-        }
+        token_response.json.return_value = {"query": {"tokens": {"logintoken": "abc123+\\"}}}
         token_response.raise_for_status = MagicMock()
 
         # Login response
         login_response = MagicMock()
-        login_response.json.return_value = {
-            "login": {"result": "Success", "lgusername": "bot"}
-        }
+        login_response.json.return_value = {"login": {"result": "Success", "lgusername": "bot"}}
         login_response.raise_for_status = MagicMock()
 
         mock_client = AsyncMock()
@@ -272,15 +264,11 @@ class TestAuthentication:
         from lean_ai.tools.wiki import _ensure_authenticated
 
         token_response = MagicMock()
-        token_response.json.return_value = {
-            "query": {"tokens": {"logintoken": "abc123+\\"}}
-        }
+        token_response.json.return_value = {"query": {"tokens": {"logintoken": "abc123+\\"}}}
         token_response.raise_for_status = MagicMock()
 
         login_response = MagicMock()
-        login_response.json.return_value = {
-            "login": {"result": "Failed", "reason": "Bad password"}
-        }
+        login_response.json.return_value = {"login": {"result": "Failed", "reason": "Bad password"}}
         login_response.raise_for_status = MagicMock()
 
         mock_client = AsyncMock()

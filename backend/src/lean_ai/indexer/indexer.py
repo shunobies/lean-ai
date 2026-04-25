@@ -27,15 +27,17 @@ logger = logging.getLogger(__name__)
 @dataclass
 class EmbeddingRunStats:
     """Breakdown of a generate_embeddings run for user-visible diagnostics."""
-    embedded: int = 0          # newly embedded chunks
-    unchanged: int = 0         # content-hash matched, skipped
+
+    embedded: int = 0  # newly embedded chunks
+    unchanged: int = 0  # content-hash matched, skipped
     orphaned_removed: int = 0  # chunks dropped (file deleted or re-chunked)
-    failed_batches: int = 0    # batches that raised in the producer
-    total_batches: int = 0     # total batches attempted
+    failed_batches: int = 0  # batches that raised in the producer
+    total_batches: int = 0  # total batches attempted
 
     def __int__(self) -> int:
         # Backward compat with callers that still treat the return as an int.
         return self.embedded
+
 
 INDEX_SCHEMA = Schema(
     chunk_id=ID(stored=True, unique=True),
@@ -143,7 +145,10 @@ def _full_index(repo_root: str, idx_dir: Path, entries=None) -> tuple[int, int]:
 
 
 def _incremental_index(
-    repo_root: str, idx_dir: Path, old_manifest: Manifest, entries=None,
+    repo_root: str,
+    idx_dir: Path,
+    old_manifest: Manifest,
+    entries=None,
 ) -> tuple[int, int]:
     """Update only changed files in the index."""
     root = Path(repo_root)
@@ -156,7 +161,9 @@ def _incremental_index(
 
     logger.info(
         "Incremental index: +%d ~%d -%d",
-        len(diff.added), len(diff.modified), len(diff.deleted),
+        len(diff.added),
+        len(diff.modified),
+        len(diff.deleted),
     )
 
     ix = open_dir(str(idx_dir))
@@ -199,7 +206,8 @@ def _incremental_index(
             )
 
         manifest.files[path] = FileRecord(
-            sha256=current_hashes[path], chunk_count=len(chunks),
+            sha256=current_hashes[path],
+            chunk_count=len(chunks),
         )
         total_chunks += len(chunks)
 
@@ -240,7 +248,9 @@ async def generate_embeddings(
 
     with busy("embeddings.code"):
         return await _generate_embeddings_inner(
-            repo_root, llm_client, batch_size,
+            repo_root,
+            llm_client,
+            batch_size,
         )
 
 
@@ -260,7 +270,8 @@ async def _generate_embeddings_inner(
     idx_dir = _index_dir(repo_root)
     if not exists_in(str(idx_dir)):
         logger.info(
-            "[code embed] no Whoosh index at %s — nothing to embed", idx_dir,
+            "[code embed] no Whoosh index at %s — nothing to embed",
+            idx_dir,
         )
         return stats
 
@@ -272,7 +283,8 @@ async def _generate_embeddings_inner(
         t1 = time.perf_counter()
         logger.info(
             "[code embed] loaded existing-index (%d entries) in %.2fs",
-            len(existing), t1 - t0,
+            len(existing),
+            t1 - t0,
         )
 
         ix = open_dir(str(idx_dir))
@@ -287,7 +299,8 @@ async def _generate_embeddings_inner(
         t2 = time.perf_counter()
         logger.info(
             "[code embed] read %d Whoosh chunks in %.2fs",
-            len(chunks), t2 - t1,
+            len(chunks),
+            t2 - t1,
         )
         return chunks, existing, store
 
@@ -298,7 +311,9 @@ async def _generate_embeddings_inner(
         return stats
 
     def _sync_diff() -> tuple[
-        list[tuple[str, str, str]], set[str], int,
+        list[tuple[str, str, str]],
+        set[str],
+        int,
     ]:
         """Hash + diff — run off the event loop for large indexes."""
         t0 = time.perf_counter()
@@ -316,9 +331,11 @@ async def _generate_embeddings_inner(
             to_embed_local.append((chunk_id, content, content_hash))
         t1 = time.perf_counter()
         logger.info(
-            "[code embed] hashed+diffed %d chunks in %.2fs "
-            "(%d need embedding, %d orphans)",
-            len(all_chunks), t1 - t0, len(to_embed_local), len(orphans),
+            "[code embed] hashed+diffed %d chunks in %.2fs (%d need embedding, %d orphans)",
+            len(all_chunks),
+            t1 - t0,
+            len(to_embed_local),
+            len(orphans),
         )
         return to_embed_local, orphans, len(all_chunks)
 
@@ -346,9 +363,9 @@ async def _generate_embeddings_inner(
     if not to_embed:
         await asyncio.to_thread(store.flush_index)
         logger.info(
-            "[code embed] up to date — %d unchanged, %d orphans removed "
-            "(no embed calls made)",
-            stats.unchanged, stats.orphaned_removed,
+            "[code embed] up to date — %d unchanged, %d orphans removed (no embed calls made)",
+            stats.unchanged,
+            stats.orphaned_removed,
         )
         return stats
 
@@ -360,9 +377,11 @@ async def _generate_embeddings_inner(
     total_to_embed = len(to_embed)
     stats.total_batches = (total_to_embed + batch_size - 1) // batch_size
     logger.info(
-        "[code embed] calling Ollama: %d chunks, batch_size=%d, "
-        "%d unchanged, %d orphans removed",
-        total_to_embed, batch_size, stats.unchanged, stats.orphaned_removed,
+        "[code embed] calling Ollama: %d chunks, batch_size=%d, %d unchanged, %d orphans removed",
+        total_to_embed,
+        batch_size,
+        stats.unchanged,
+        stats.orphaned_removed,
     )
 
     # Producer-consumer: overlap Ollama compute with disk I/O.
@@ -384,14 +403,17 @@ async def _generate_embeddings_inner(
             logger.info(
                 "[code embed] batch %d/%d → Ollama (%d texts, first cold "
                 "batch triggers model load)",
-                batch_num + 1, stats.total_batches, len(batch_texts),
+                batch_num + 1,
+                stats.total_batches,
+                len(batch_texts),
             )
             try:
                 embeddings = await llm_client.embed(batch_texts)
                 t1 = time.perf_counter()
                 logger.info(
                     "[code embed] batch %d returned in %.1fs",
-                    batch_num + 1, t1 - t0,
+                    batch_num + 1,
+                    t1 - t0,
                 )
                 await queue.put((batch_ids, embeddings, batch_hashes))
             except Exception as e:
@@ -399,7 +421,9 @@ async def _generate_embeddings_inner(
                 t1 = time.perf_counter()
                 logger.warning(
                     "[code embed] batch %d FAILED after %.1fs: %s",
-                    batch_num + 1, t1 - t0, e,
+                    batch_num + 1,
+                    t1 - t0,
+                    e,
                 )
         await queue.put(None)  # sentinel
 
@@ -411,12 +435,17 @@ async def _generate_embeddings_inner(
                 break
             batch_ids, embeddings, batch_hashes = item
             await asyncio.to_thread(
-                store.save_batch, batch_ids, embeddings, batch_hashes,
+                store.save_batch,
+                batch_ids,
+                embeddings,
+                batch_hashes,
             )
             total += len(embeddings)
             logger.info(
                 "Embedding progress: %d/%d code chunks (%.0f%%)",
-                total, total_to_embed, (total / total_to_embed) * 100,
+                total,
+                total_to_embed,
+                (total / total_to_embed) * 100,
             )
 
     producer_task = asyncio.create_task(_producer())
@@ -426,10 +455,12 @@ async def _generate_embeddings_inner(
     store.flush_index()
     stats.embedded = total
     logger.info(
-        "Generated %d embeddings (%d unchanged, %d orphaned removed, "
-        "%d/%d batches failed)",
-        stats.embedded, stats.unchanged, stats.orphaned_removed,
-        stats.failed_batches, stats.total_batches,
+        "Generated %d embeddings (%d unchanged, %d orphaned removed, %d/%d batches failed)",
+        stats.embedded,
+        stats.unchanged,
+        stats.orphaned_removed,
+        stats.failed_batches,
+        stats.total_batches,
     )
     return stats
 
@@ -454,15 +485,17 @@ def search_index(
 
         hits: list[dict] = []
         for hit in results:
-            hits.append({
-                "chunk_id": hit["chunk_id"],
-                "file_path": hit["file_path"],
-                "content": hit["content"],
-                "language": hit["language"],
-                "start_line": hit["start_line"],
-                "end_line": hit["end_line"],
-                "score": hit.score,
-            })
+            hits.append(
+                {
+                    "chunk_id": hit["chunk_id"],
+                    "file_path": hit["file_path"],
+                    "content": hit["content"],
+                    "language": hit["language"],
+                    "start_line": hit["start_line"],
+                    "end_line": hit["end_line"],
+                    "score": hit.score,
+                }
+            )
 
     # Optional RRF re-ranking with embeddings
     if query_embedding and hits:

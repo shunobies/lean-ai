@@ -58,59 +58,70 @@ async def list_models():
         response = await client.list()
         for m in response.models:
             name = m.model
-            models.append(ModelInfo(
-                provider="ollama",
-                model=name,
-                display_name=f"Ollama: {name}",
-                is_default=(
-                    settings.llm_provider == "ollama"
-                    and name == settings.ollama_model
-                ),
-            ))
+            models.append(
+                ModelInfo(
+                    provider="ollama",
+                    model=name,
+                    display_name=f"Ollama: {name}",
+                    is_default=(
+                        settings.llm_provider == "ollama" and name == settings.ollama_model
+                    ),
+                )
+            )
     except Exception:
         # Ollama not reachable — add the configured model as fallback
-        models.append(ModelInfo(
-            provider="ollama",
-            model=settings.ollama_model,
-            display_name=f"Ollama: {settings.ollama_model}",
-            is_default=settings.llm_provider == "ollama",
-        ))
+        models.append(
+            ModelInfo(
+                provider="ollama",
+                model=settings.ollama_model,
+                display_name=f"Ollama: {settings.ollama_model}",
+                is_default=settings.llm_provider == "ollama",
+            )
+        )
 
     # OpenAI: show if API key configured
     if settings.openai_api_key:
-        models.append(ModelInfo(
-            provider="openai",
-            model=settings.openai_model,
-            display_name=f"OpenAI: {settings.openai_model}",
-            is_default=settings.llm_provider == "openai",
-        ))
+        models.append(
+            ModelInfo(
+                provider="openai",
+                model=settings.openai_model,
+                display_name=f"OpenAI: {settings.openai_model}",
+                is_default=settings.llm_provider == "openai",
+            )
+        )
 
     # Anthropic: show if API key configured
     if settings.anthropic_api_key:
-        models.append(ModelInfo(
-            provider="anthropic",
-            model=settings.anthropic_model,
-            display_name=f"Anthropic: {settings.anthropic_model}",
-            is_default=settings.llm_provider == "anthropic",
-        ))
+        models.append(
+            ModelInfo(
+                provider="anthropic",
+                model=settings.anthropic_model,
+                display_name=f"Anthropic: {settings.anthropic_model}",
+                is_default=settings.llm_provider == "anthropic",
+            )
+        )
 
     # Gemini: show if API key configured
     if settings.gemini_api_key:
-        models.append(ModelInfo(
-            provider="gemini",
-            model=settings.gemini_model,
-            display_name=f"Gemini: {settings.gemini_model}",
-            is_default=settings.llm_provider == "gemini",
-        ))
+        models.append(
+            ModelInfo(
+                provider="gemini",
+                model=settings.gemini_model,
+                display_name=f"Gemini: {settings.gemini_model}",
+                is_default=settings.llm_provider == "gemini",
+            )
+        )
 
     # Lean AI Serve: show if API key and model configured
     if settings.serve_api_key and settings.serve_model:
-        models.append(ModelInfo(
-            provider="serve",
-            model=settings.serve_model,
-            display_name=f"Serve: {settings.serve_model}",
-            is_default=settings.llm_provider == "serve",
-        ))
+        models.append(
+            ModelInfo(
+                provider="serve",
+                model=settings.serve_model,
+                display_name=f"Serve: {settings.serve_model}",
+                is_default=settings.llm_provider == "serve",
+            )
+        )
 
     return ModelsResponse(
         models=models,
@@ -124,7 +135,8 @@ async def inline_predict(request: InlinePredictRequest):
     """Stateless inline prediction — Copilot-style completions."""
     try:
         completion = await _inline_client.generate_completion(
-            request.prefix, suffix=request.suffix,
+            request.prefix,
+            suffix=request.suffix,
         )
         confidence = 0.8 if completion.strip() else 0.0
         return {"completion": completion, "confidence": confidence}
@@ -155,11 +167,14 @@ async def health():
     }
     try:
         from lean_ai.voice.availability import voice_status
+
         result.update(voice_status())
     except ImportError:
-        result.update({
-            "stt_available": False,
-            "tts_available": False,
-            "wake_word_available": False,
-        })
+        result.update(
+            {
+                "stt_available": False,
+                "tts_available": False,
+                "wake_word_available": False,
+            }
+        )
     return result

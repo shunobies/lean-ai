@@ -48,6 +48,8 @@ class ToolExecutor:
         duration_ms = int((time.monotonic() - start_time) * 1000)
         logger.info(
             "Tool %s completed in %dms (success=%s)",
-            tool_name, duration_ms, result.success,
+            tool_name,
+            duration_ms,
+            result.success,
         )
         return result

@@ -173,8 +173,7 @@ class PromptRefiner:
         # original length, the LLM likely mangled it — keep original
         if len(sanitized) < len(text) * 0.6:
             logger.warning(
-                "Privacy strip removed >40%% of text (%d -> %d chars), "
-                "keeping original",
+                "Privacy strip removed >40%% of text (%d -> %d chars), keeping original",
                 len(text),
                 len(sanitized),
             )
@@ -198,11 +197,14 @@ class PromptRefiner:
         # Step 1: Query reference library for context
         reference_context = ""
         if self._enable_reference and repo_root:
-            reference_context = await self._query_reference(
-                query=text,
-                repo_root=repo_root,
-                limit=self._reference_chunks,
-            ) or ""
+            reference_context = (
+                await self._query_reference(
+                    query=text,
+                    repo_root=repo_root,
+                    limit=self._reference_chunks,
+                )
+                or ""
+            )
 
         # Step 2: Build and execute refinement prompt
         reference_section = ""
@@ -292,7 +294,11 @@ class PromptRefiner:
 
         try:
             chunks = await asyncio.to_thread(
-                search_reference, repo_root, query, limit, query_embedding,
+                search_reference,
+                repo_root,
+                query,
+                limit,
+                query_embedding,
             )
         except Exception as e:
             logger.debug("Reference query failed: %s", e)

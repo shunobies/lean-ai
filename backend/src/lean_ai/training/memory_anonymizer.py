@@ -37,9 +37,7 @@ logger = logging.getLogger(__name__)
 
 # Tokens that look like Python / TS module paths.  Matches ``foo.bar.baz``,
 # ``src/foo``, ``./foo``, backtick-wrapped identifiers, etc.
-_PATH_TOKEN = re.compile(
-    r"(?:\.\.?/)?(?:[A-Za-z0-9_\-]+/)+[A-Za-z0-9_.\-]+"
-)
+_PATH_TOKEN = re.compile(r"(?:\.\.?/)?(?:[A-Za-z0-9_\-]+/)+[A-Za-z0-9_.\-]+")
 # Absolute paths: must start at a non-word boundary so we don't chop
 # inside relative paths like ``src/auth/token.py`` (where the ``/auth/...``
 # substring would otherwise match).
@@ -95,7 +93,7 @@ async def build_symbol_table(
                 continue
             # Best-effort path extraction
             for match in _PATH_TOKEN.finditer(raw):
-                token = match.group(0).strip('"\'`,;')
+                token = match.group(0).strip("\"'`,;")
                 if token and 1 <= len(token) <= 200:
                     file_paths.add(token)
     except Exception:
@@ -104,8 +102,7 @@ async def build_symbol_table(
     # Module names from conversation_logs (import statements)
     try:
         cursor = await db.execute(
-            "SELECT content FROM conversation_logs "
-            "WHERE role = 'tool_result' LIMIT 200"
+            "SELECT content FROM conversation_logs WHERE role = 'tool_result' LIMIT 200"
         )
         rows = await cursor.fetchall()
         for (raw,) in rows:
@@ -151,8 +148,10 @@ class AnonymizedMemory:
 
 
 def anonymize_memory_content(
-    content: str, table: SymbolTable,
-    *, drop_threshold: float | None = None,
+    content: str,
+    table: SymbolTable,
+    *,
+    drop_threshold: float | None = None,
 ) -> AnonymizedMemory:
     """Rewrite workspace-specific identifiers inside *content*."""
     if not content:
@@ -167,6 +166,7 @@ def anonymize_memory_content(
         nonlocal redacted_chars
         redacted_chars += len(m.group(0))
         return "<WORKSPACE_PATH>"
+
     out = _ABS_PATH.sub(_sub_abs, out)
 
     # File paths from the symbol table — longest first so more specific
@@ -194,7 +194,7 @@ def anonymize_memory_content(
     # "the", "class", "function") to avoid redacting English words.
     # Match case-insensitively so "The Foo class" and "the foo class" both
     # count as framed, but keep the symbol itself case-sensitive.
-    framing = (r"(?:`|the\s+|class\s+|function\s+|module\s+|file\s+)")
+    framing = r"(?:`|the\s+|class\s+|function\s+|module\s+|file\s+)"
     for sym in sorted(table.symbols, key=len, reverse=True):
         if len(sym) < 4:
             continue
@@ -217,7 +217,8 @@ def anonymize_memory_content(
 
     ratio = (redacted_chars / original_len) if original_len else 0.0
     threshold = (
-        drop_threshold if drop_threshold is not None
+        drop_threshold
+        if drop_threshold is not None
         else getattr(settings, "memory_export_drop_threshold", 0.40)
     )
     return AnonymizedMemory(content=out, ratio=ratio, dropped=ratio > threshold)
@@ -238,7 +239,9 @@ def anonymize_memories(
     for row in rows:
         content = row.get("content") or ""
         result = anonymize_memory_content(
-            content, table, drop_threshold=drop_threshold,
+            content,
+            table,
+            drop_threshold=drop_threshold,
         )
         if result.dropped:
             continue

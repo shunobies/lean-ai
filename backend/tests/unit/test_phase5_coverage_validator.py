@@ -55,18 +55,27 @@ def test_executable_extension_recognizes_common_languages() -> None:
 def test_no_warning_when_every_executable_file_is_covered() -> None:
     plan = _plan(affected=["src/foo.py", "src/bar.ts"])
     fs = FileSummary(
-        files_to_create=[FileObservation(
-            file_path="src/foo.py", role="create", reason="new",
-        )],
-        files_to_modify=[FileObservation(
-            file_path="src/bar.ts", role="modify", reason="upd",
-        )],
+        files_to_create=[
+            FileObservation(
+                file_path="src/foo.py",
+                role="create",
+                reason="new",
+            )
+        ],
+        files_to_modify=[
+            FileObservation(
+                file_path="src/bar.ts",
+                role="modify",
+                reason="upd",
+            )
+        ],
     )
-    verif = _verif([
-        _test_step(file_path="tests/test_foo.py"),
-        _test_step(file_path="tests/bar.spec.ts",
-                   instruction="tests for src/bar.ts"),
-    ])
+    verif = _verif(
+        [
+            _test_step(file_path="tests/test_foo.py"),
+            _test_step(file_path="tests/bar.spec.ts", instruction="tests for src/bar.ts"),
+        ]
+    )
 
     warnings = _check_affected_files_covered(verif, plan, fs)
     assert warnings == []
@@ -107,15 +116,23 @@ def test_doc_and_config_files_are_ignored() -> None:
 def test_filename_match_in_instruction_counts_as_coverage() -> None:
     plan = _plan(affected=["src/services/foo.py"])
     fs = FileSummary(
-        files_to_create=[FileObservation(
-            file_path="src/services/foo.py", role="create", reason="new",
-        )],
+        files_to_create=[
+            FileObservation(
+                file_path="src/services/foo.py",
+                role="create",
+                reason="new",
+            )
+        ],
     )
     # Test step references the filename in its instruction, not path.
-    verif = _verif([_test_step(
-        file_path="tests/test_services.py",
-        instruction="cover the behavior of foo.py's public API",
-    )])
+    verif = _verif(
+        [
+            _test_step(
+                file_path="tests/test_services.py",
+                instruction="cover the behavior of foo.py's public API",
+            )
+        ]
+    )
 
     warnings = _check_affected_files_covered(verif, plan, fs)
     assert warnings == []
@@ -133,17 +150,28 @@ def test_falls_back_to_affected_files_when_file_summary_is_none() -> None:
 def test_run_tests_step_does_not_count_as_coverage() -> None:
     plan = _plan(affected=["src/foo.py"])
     fs = FileSummary(
-        files_to_create=[FileObservation(
-            file_path="src/foo.py", role="create", reason="new",
-        )],
+        files_to_create=[
+            FileObservation(
+                file_path="src/foo.py",
+                role="create",
+                reason="new",
+            )
+        ],
     )
     # The only step is run_tests — not a create_file step, so
     # coverage is absent.
-    verif = _verif([PlanStep(
-        step_number=1, tool="run_tests", file_path="",
-        instruction="pytest tests/ -q",
-        reason="execute test suite", context="",
-    )])
+    verif = _verif(
+        [
+            PlanStep(
+                step_number=1,
+                tool="run_tests",
+                file_path="",
+                instruction="pytest tests/ -q",
+                reason="execute test suite",
+                context="",
+            )
+        ]
+    )
 
     warnings = _check_affected_files_covered(verif, plan, fs)
     assert any("src/foo.py" in w for w in warnings)

@@ -104,8 +104,7 @@ async def get_manifest_endpoint(
         main_db = await get_db(repo_root)
         try:
             cursor = await main_db.execute(
-                "SELECT curation_status, COUNT(*) FROM session_memories "
-                "GROUP BY curation_status"
+                "SELECT curation_status, COUNT(*) FROM session_memories GROUP BY curation_status"
             )
             rows = await cursor.fetchall()
             by_status = {r[0]: r[1] for r in rows}
@@ -169,10 +168,7 @@ async def _iter_training_rows(
     params.append(limit)
 
     where = " AND ".join(clauses) if clauses else "1=1"
-    sql = (
-        f"SELECT * FROM training_traces WHERE {where} "
-        f"ORDER BY id ASC LIMIT ?"
-    )
+    sql = f"SELECT * FROM training_traces WHERE {where} ORDER BY id ASC LIMIT ?"
 
     db = await get_training_db(repo_root)
     try:
@@ -201,12 +197,12 @@ async def export_traces_endpoint(
     if format not in FORMATS:
         raise HTTPException(
             status_code=400,
-            detail=f"Unknown format '{format}'. "
-                   f"Supported: {sorted(FORMATS.keys())}",
+            detail=f"Unknown format '{format}'. Supported: {sorted(FORMATS.keys())}",
         )
     if limit <= 0 or limit > 10000:
         raise HTTPException(
-            status_code=400, detail="limit must be between 1 and 10000",
+            status_code=400,
+            detail="limit must be between 1 and 10000",
         )
     converter = FORMATS[format]
 
@@ -214,8 +210,12 @@ async def export_traces_endpoint(
         rows: list[dict] = []
         async for row in _iter_training_rows(
             repo_root,
-            model=model, phase=phase, outcome=outcome,
-            since=since, cursor=cursor, limit=limit,
+            model=model,
+            phase=phase,
+            outcome=outcome,
+            since=since,
+            cursor=cursor,
+            limit=limit,
         ):
             rows.append(row)
         # Converters are sync generators — materialize rows then feed in.
@@ -238,7 +238,8 @@ async def export_memories_endpoint(
     await require_export_key(authorization)
     if limit <= 0 or limit > 5000:
         raise HTTPException(
-            status_code=400, detail="limit must be between 1 and 5000",
+            status_code=400,
+            detail="limit must be between 1 and 5000",
         )
     statuses: list[str] | None = None
     if curation_status:
@@ -266,6 +267,7 @@ async def export_memories_endpoint(
                 out = {k: v for k, v in row.items() if k != "session_id"}
                 out["workspace_id"] = ws_id
                 yield (json.dumps(out, ensure_ascii=False) + "\n").encode("utf-8")
+
         return _gen()
 
     return StreamingResponse(_stream(), media_type="application/x-ndjson")
@@ -284,7 +286,8 @@ async def export_events_endpoint(
     await require_export_key(authorization)
     if limit <= 0 or limit > 10000:
         raise HTTPException(
-            status_code=400, detail="limit must be between 1 and 10000",
+            status_code=400,
+            detail="limit must be between 1 and 10000",
         )
 
     clauses: list[str] = []
@@ -305,8 +308,7 @@ async def export_events_endpoint(
         db = await get_training_db(repo_root)
         try:
             cursor_obj = await db.execute(
-                f"SELECT * FROM workflow_events WHERE {where} "
-                f"ORDER BY id ASC LIMIT ?",
+                f"SELECT * FROM workflow_events WHERE {where} ORDER BY id ASC LIMIT ?",
                 tuple(params),
             )
             rows = await cursor_obj.fetchall()
@@ -347,16 +349,13 @@ async def _stream_anonymized_table(
     db = await get_training_db(repo_root)
     try:
         cursor_obj = await db.execute(
-            f"SELECT * FROM {table} WHERE {where} "
-            f"ORDER BY id ASC LIMIT ?",
+            f"SELECT * FROM {table} WHERE {where} ORDER BY id ASC LIMIT ?",
             tuple(params),
         )
         rows = await cursor_obj.fetchall()
         for row in rows:
             anonymized = anonymize_row(dict(row), repo_root)
-            yield (
-                json.dumps(anonymized, ensure_ascii=False) + "\n"
-            ).encode("utf-8")
+            yield (json.dumps(anonymized, ensure_ascii=False) + "\n").encode("utf-8")
     finally:
         await db.close()
 
@@ -393,7 +392,8 @@ async def export_tool_executions_endpoint(
         )
     if limit <= 0 or limit > 10000:
         raise HTTPException(
-            status_code=400, detail="limit must be between 1 and 10000",
+            status_code=400,
+            detail="limit must be between 1 and 10000",
         )
     extra_clauses: list[str] = []
     extra_params: list = []
@@ -413,9 +413,12 @@ async def export_tool_executions_endpoint(
     if format == "raw":
         return StreamingResponse(
             _stream_anonymized_table(
-                repo_root, table="tool_executions",
-                extra_clauses=extra_clauses, extra_params=extra_params,
-                cursor=cursor, limit=limit,
+                repo_root,
+                table="tool_executions",
+                extra_clauses=extra_clauses,
+                extra_params=extra_params,
+                cursor=cursor,
+                limit=limit,
             ),
             media_type="application/x-ndjson",
         )
@@ -469,15 +472,14 @@ async def export_tool_executions_endpoint(
                     },
                 }
                 pair = anonymize_row(pair, repo_root)
-                yield (
-                    json.dumps(pair, ensure_ascii=False) + "\n"
-                ).encode("utf-8")
+                yield (json.dumps(pair, ensure_ascii=False) + "\n").encode("utf-8")
                 emitted += 1
                 if emitted >= limit:
                     return
 
     return StreamingResponse(
-        _stream_pairs(), media_type="application/x-ndjson",
+        _stream_pairs(),
+        media_type="application/x-ndjson",
     )
 
 
@@ -499,7 +501,8 @@ async def export_tool_compressions_endpoint(
     await require_export_key(authorization)
     if limit <= 0 or limit > 5000:
         raise HTTPException(
-            status_code=400, detail="limit must be between 1 and 5000",
+            status_code=400,
+            detail="limit must be between 1 and 5000",
         )
     extra_clauses: list[str] = []
     extra_params: list = []
@@ -512,9 +515,12 @@ async def export_tool_compressions_endpoint(
 
     return StreamingResponse(
         _stream_anonymized_table(
-            repo_root, table="tool_compressions",
-            extra_clauses=extra_clauses, extra_params=extra_params,
-            cursor=cursor, limit=limit,
+            repo_root,
+            table="tool_compressions",
+            extra_clauses=extra_clauses,
+            extra_params=extra_params,
+            cursor=cursor,
+            limit=limit,
         ),
         media_type="application/x-ndjson",
     )
@@ -533,7 +539,8 @@ async def export_clarifications_endpoint(
     await require_export_key(authorization)
     if limit <= 0 or limit > 5000:
         raise HTTPException(
-            status_code=400, detail="limit must be between 1 and 5000",
+            status_code=400,
+            detail="limit must be between 1 and 5000",
         )
     extra_clauses: list[str] = []
     extra_params: list = []
@@ -546,9 +553,12 @@ async def export_clarifications_endpoint(
 
     return StreamingResponse(
         _stream_anonymized_table(
-            repo_root, table="clarifications",
-            extra_clauses=extra_clauses, extra_params=extra_params,
-            cursor=cursor, limit=limit,
+            repo_root,
+            table="clarifications",
+            extra_clauses=extra_clauses,
+            extra_params=extra_params,
+            cursor=cursor,
+            limit=limit,
         ),
         media_type="application/x-ndjson",
     )
@@ -572,7 +582,8 @@ async def export_phase2_syntheses_endpoint(
     await require_export_key(authorization)
     if limit <= 0 or limit > 2000:
         raise HTTPException(
-            status_code=400, detail="limit must be between 1 and 2000",
+            status_code=400,
+            detail="limit must be between 1 and 2000",
         )
     extra_clauses: list[str] = []
     extra_params: list = []
@@ -582,9 +593,12 @@ async def export_phase2_syntheses_endpoint(
 
     return StreamingResponse(
         _stream_anonymized_table(
-            repo_root, table="phase2_syntheses",
-            extra_clauses=extra_clauses, extra_params=extra_params,
-            cursor=cursor, limit=limit,
+            repo_root,
+            table="phase2_syntheses",
+            extra_clauses=extra_clauses,
+            extra_params=extra_params,
+            cursor=cursor,
+            limit=limit,
         ),
         media_type="application/x-ndjson",
     )
@@ -603,7 +617,8 @@ async def export_diff_decisions_endpoint(
     await require_export_key(authorization)
     if limit <= 0 or limit > 10000:
         raise HTTPException(
-            status_code=400, detail="limit must be between 1 and 10000",
+            status_code=400,
+            detail="limit must be between 1 and 10000",
         )
     extra_clauses: list[str] = []
     extra_params: list = []
@@ -616,9 +631,12 @@ async def export_diff_decisions_endpoint(
 
     return StreamingResponse(
         _stream_anonymized_table(
-            repo_root, table="diff_decisions",
-            extra_clauses=extra_clauses, extra_params=extra_params,
-            cursor=cursor, limit=limit,
+            repo_root,
+            table="diff_decisions",
+            extra_clauses=extra_clauses,
+            extra_params=extra_params,
+            cursor=cursor,
+            limit=limit,
         ),
         media_type="application/x-ndjson",
     )

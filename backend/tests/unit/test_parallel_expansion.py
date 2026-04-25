@@ -14,7 +14,9 @@ from lean_ai.llm.base import LLMMetrics
 from lean_ai.llm.facade import LLMClient
 
 _DUMMY_METRICS = LLMMetrics(
-    tokens_per_second=0.0, completion_tokens=0, prompt_tokens=0,
+    tokens_per_second=0.0,
+    completion_tokens=0,
+    prompt_tokens=0,
 )
 
 
@@ -83,8 +85,7 @@ class TestMergeAdditionsIntoDoc:
 
     def test_additions_to_different_headings(self):
         additions = [
-            "## Module Map\n- `lib/` — utilities\n"
-            "## Key Abstractions\n- `Helper`: utility class\n",
+            "## Module Map\n- `lib/` — utilities\n## Key Abstractions\n- `Helper`: utility class\n",
         ]
         result = _merge_additions_into_doc(BASE_DOC, additions)
         assert "- `lib/` — utilities" in result

@@ -36,12 +36,12 @@ def _try_register() -> None:
         import ebooklib  # noqa: F401
 
         from lean_ai.reference.readers.epub import EpubReader
+
         _readers.append(EpubReader())
         logger.debug("Reference: EPUB reader registered (ebooklib available)")
     except ImportError:
         logger.debug(
-            "Reference: EPUB reader not registered — install ebooklib: "
-            "pip install ebooklib"
+            "Reference: EPUB reader not registered — install ebooklib: pip install ebooklib"
         )
 
     # PDF — requires pypdf.
@@ -49,25 +49,23 @@ def _try_register() -> None:
         import pypdf  # noqa: F401
 
         from lean_ai.reference.readers.pdf import PdfReader
+
         _readers.append(PdfReader())
         logger.debug("Reference: PDF reader registered (pypdf available)")
     except ImportError:
-        logger.debug(
-            "Reference: PDF reader not registered — install pypdf: "
-            "pip install pypdf"
-        )
+        logger.debug("Reference: PDF reader not registered — install pypdf: pip install pypdf")
 
     # Word — requires python-docx.
     try:
         import docx  # noqa: F401
 
         from lean_ai.reference.readers.docx import DocxReader
+
         _readers.append(DocxReader())
         logger.debug("Reference: DOCX reader registered (python-docx available)")
     except ImportError:
         logger.debug(
-            "Reference: DOCX reader not registered — install python-docx: "
-            "pip install python-docx"
+            "Reference: DOCX reader not registered — install python-docx: pip install python-docx"
         )
 
 
@@ -100,7 +98,8 @@ def read_document(path: Path, rel_path: str) -> list[ReferenceChunk]:
     if reader is None:
         logger.debug(
             "No reader for extension %s (supported: %s)",
-            path.suffix, supported_extensions(),
+            path.suffix,
+            supported_extensions(),
         )
         return []
 

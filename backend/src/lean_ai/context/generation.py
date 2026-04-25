@@ -57,7 +57,8 @@ ProgressCallback = Callable[[dict], Awaitable[None]]
 
 
 async def _emit_progress(
-    callback: ProgressCallback | None, **kwargs: object,
+    callback: ProgressCallback | None,
+    **kwargs: object,
 ) -> None:
     """Fire a progress event if *callback* is set."""
     if callback:
@@ -67,6 +68,7 @@ async def _emit_progress(
 # ---------------------------------------------------------------------------
 # Phase 1: Single-file extraction
 # ---------------------------------------------------------------------------
+
 
 async def _extract_single_file(
     file_path: str,
@@ -83,10 +85,7 @@ async def _extract_single_file(
     which eliminates the heuristic markdown parsing the pipeline used
     previously.
     """
-    user_msg = (
-        f"=== SOURCE FILE: {file_path} ===\n"
-        f"```\n{file_content}\n```"
-    )
+    user_msg = f"=== SOURCE FILE: {file_path} ===\n```\n{file_content}\n```"
     msgs = [
         {"role": "system", "content": _EXTRACTION_PROMPT},
         {"role": "user", "content": user_msg},
@@ -109,6 +108,7 @@ async def _extract_single_file(
 # Condensation (kept from previous pipeline)
 # ---------------------------------------------------------------------------
 
+
 async def _condense(
     document: str,
     client: "LLMClient",
@@ -127,7 +127,8 @@ async def _condense(
     if current_words <= target_words:
         logger.info(
             "Condensation: document already under target (%d <= %d words), skipping",
-            current_words, target_words,
+            current_words,
+            target_words,
         )
         return document
 
@@ -162,7 +163,9 @@ async def _condense(
 
         logger.info(
             "Condensation complete: %d → %d chars (%.0f%%)",
-            len(document), len(result), ratio * 100,
+            len(document),
+            len(result),
+            ratio * 100,
         )
         return result
     except Exception as exc:
@@ -173,6 +176,7 @@ async def _condense(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 async def generate_project_context(
     repo_root: str,
@@ -199,10 +203,7 @@ async def generate_project_context(
 
     logger.info("Generating project context for %s", repo_root)
 
-    max_out = (
-        settings.ollama_max_tokens
-        or settings.ollama_context_window // 4
-    )
+    max_out = settings.ollama_max_tokens or settings.ollama_context_window // 4
     caps = _scale_generation_caps(settings.ollama_context_window, max_out)
     max_file = caps.get("max_file_chars", _MAX_FILE_CHARS)
 
@@ -231,11 +232,13 @@ async def generate_project_context(
         # ── Collect source files ────────────────────────────────────
         try:
             from lean_ai.indexer.tree import list_repo_tree
+
             entries = list_repo_tree(repo_root)
         except Exception:
             entries = []
 
         from .metadata import extract_metadata_cached
+
         metadata = extract_metadata_cached(repo_root, entries=entries)
 
         candidates = _collect_all_ranked_candidates(
@@ -267,13 +270,21 @@ async def generate_project_context(
 
         if settings.num_parallel >= 2 and total_files > 1:
             await _phase1_parallel(
-                candidates, extraction_client, max_out,
-                repo_root, thinking_callback, progress_callback,
+                candidates,
+                extraction_client,
+                max_out,
+                repo_root,
+                thinking_callback,
+                progress_callback,
             )
         else:
             await _phase1_sequential(
-                candidates, extraction_client, max_out,
-                db, thinking_callback, progress_callback,
+                candidates,
+                extraction_client,
+                max_out,
+                db,
+                thinking_callback,
+                progress_callback,
             )
 
         # ── Phase 2: export + optional condensation ─────────────────
@@ -293,6 +304,7 @@ async def generate_project_context(
     content = _deduplicate_subsections(content)
 
     from lean_ai.context.dedup import reorganize_sections
+
     content = reorganize_sections(content, log_prefix="Project context")
 
     # Optional condensation.
@@ -330,15 +342,21 @@ async def _phase1_sequential(
         )
         try:
             entries = await _extract_single_file(
-                file_path, file_content, client,
-                max_tokens, thinking_callback,
+                file_path,
+                file_content,
+                client,
+                max_tokens,
+                thinking_callback,
             )
             if entries:
                 await upsert_entries_batch(db, entries)
         except Exception as exc:
             logger.warning(
                 "Extraction %d/%d failed (non-fatal): %s — file: %s",
-                idx + 1, total, exc, file_path,
+                idx + 1,
+                total,
+                exc,
+                file_path,
             )
 
     logger.info("Phase 1 complete: processed %d files sequentially", total)
@@ -360,8 +378,11 @@ async def _phase1_parallel(
         nonlocal completed
         try:
             entries = await _extract_single_file(
-                file_path, file_content, client,
-                max_tokens, thinking_callback,
+                file_path,
+                file_content,
+                client,
+                max_tokens,
+                thinking_callback,
             )
             if not entries:
                 return
@@ -375,7 +396,10 @@ async def _phase1_parallel(
         except Exception as exc:
             logger.warning(
                 "Extraction %d/%d failed (non-fatal): %s — file: %s",
-                idx + 1, total, exc, file_path,
+                idx + 1,
+                total,
+                exc,
+                file_path,
             )
         finally:
             completed += 1
@@ -460,15 +484,19 @@ async def update_project_context(
             # Re-extract.
             try:
                 entries = await _extract_single_file(
-                    rel_path, file_content, llm_client,
-                    max_out, thinking_callback,
+                    rel_path,
+                    file_content,
+                    llm_client,
+                    max_out,
+                    thinking_callback,
                 )
                 if entries:
                     await upsert_entries_batch(db, entries)
             except Exception as exc:
                 logger.warning(
                     "update_project_context: extraction failed for %s: %s",
-                    rel_path, exc,
+                    rel_path,
+                    exc,
                 )
 
         # Re-export.
@@ -477,6 +505,7 @@ async def update_project_context(
         await db.close()
 
     from lean_ai.context.dedup import reorganize_sections
+
     content = reorganize_sections(content, log_prefix="Incremental update")
 
     path = write_project_context(repo_root, content)

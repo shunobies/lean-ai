@@ -99,10 +99,7 @@ def is_chromium_installed(repo_root: str) -> bool:
     if not d.is_dir():
         return False
     try:
-        return any(
-            p.is_dir() and p.name.startswith("chromium")
-            for p in d.iterdir()
-        )
+        return any(p.is_dir() and p.name.startswith("chromium") for p in d.iterdir())
     except OSError:
         return False
 
@@ -169,10 +166,7 @@ async def install_chromium(repo_root: str) -> tuple[bool, str]:
     # isn't supported yet" and the user already has a system browser, we
     # can use that instead — report success with a note.
     lowered = output.lower()
-    os_unsupported = (
-        "does not support chromium on" in lowered
-        or "unsupported platform" in lowered
-    )
+    os_unsupported = "does not support chromium on" in lowered or "unsupported platform" in lowered
     system_channel = detect_system_browser_channel()
 
     if os_unsupported and system_channel:
@@ -221,9 +215,7 @@ def _parse_viewport(viewport: str) -> tuple[int, int]:
         if w <= 0 or h <= 0:
             raise ValueError
     except ValueError as e:
-        raise ValueError(
-            f"Invalid viewport {viewport!r}, expected 'WxH' e.g. '1280x800'"
-        ) from e
+        raise ValueError(f"Invalid viewport {viewport!r}, expected 'WxH' e.g. '1280x800'") from e
     return w, h
 
 
@@ -288,7 +280,9 @@ async def capture_web(
     out_dir = captures_dir(repo_root)
     out_dir.mkdir(parents=True, exist_ok=True)
     fd, png_path_str = tempfile.mkstemp(
-        prefix="web_", suffix=".png", dir=str(out_dir),
+        prefix="web_",
+        suffix=".png",
+        dir=str(out_dir),
     )
     os.close(fd)  # Playwright will write the file itself.
     png_path = Path(png_path_str)
@@ -317,11 +311,13 @@ async def capture_web(
             ):
                 logger.warning(
                     "Managed Chromium launch failed (%s); falling back to system %s",
-                    str(e).split(chr(10))[0][:120], system_channel,
+                    str(e).split(chr(10))[0][:120],
+                    system_channel,
                 )
                 try:
                     browser = await pw.chromium.launch(
-                        headless=True, channel=system_channel,
+                        headless=True,
+                        channel=system_channel,
                     )
                 except Exception as retry_err:
                     png_path.unlink(missing_ok=True)
@@ -355,14 +351,13 @@ async def capture_web(
                 )
             except Exception as e:
                 png_path.unlink(missing_ok=True)
-                raise WebCaptureError(
-                    f"Navigation to {url!r} failed: {e}"
-                ) from e
+                raise WebCaptureError(f"Navigation to {url!r} failed: {e}") from e
 
             if wait_for_selector:
                 try:
                     await page.wait_for_selector(
-                        wait_for_selector, timeout=10000,
+                        wait_for_selector,
+                        timeout=10000,
                     )
                 except Exception as e:
                     png_path.unlink(missing_ok=True)
@@ -380,6 +375,10 @@ async def capture_web(
 
     logger.info(
         "Captured web screenshot: url=%s viewport=%dx%d full_page=%s path=%s",
-        url, w, h, full_page, png_path,
+        url,
+        w,
+        h,
+        full_page,
+        png_path,
     )
     return png_path

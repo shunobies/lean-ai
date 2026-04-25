@@ -37,6 +37,7 @@ class OpenAIProvider(LLMProvider):
         reasoning_effort: str = "",
     ):
         import openai as openai_lib
+
         self._openai = openai_lib
 
         client_kwargs: dict = {"api_key": api_key}
@@ -72,6 +73,7 @@ class OpenAIProvider(LLMProvider):
         doesn't pass an empty extra body.
         """
         from lean_ai.config import reasoning_effort_to_openai_param
+
         body: dict = {}
         if self._preserve_thinking:
             body["chat_template_kwargs"] = {"preserve_thinking": True}
@@ -112,13 +114,17 @@ class OpenAIProvider(LLMProvider):
         )
 
     def _extract_metrics(
-        self, response, *, stop_reason: str | None = None,
+        self,
+        response,
+        *,
+        stop_reason: str | None = None,
     ) -> LLMMetrics:
         """Extract metrics from an OpenAI response."""
         usage = getattr(response, "usage", None)
         if usage:
             return LLMMetrics.from_usage(
-                usage.prompt_tokens, usage.completion_tokens,
+                usage.prompt_tokens,
+                usage.completion_tokens,
                 stop_reason=stop_reason,
             )
         return LLMMetrics(stop_reason=stop_reason)
@@ -138,13 +144,21 @@ class OpenAIProvider(LLMProvider):
         logger.info(
             "OpenAI chat_raw: model=%s messages=%d temp=%.1f max_tokens=%d "
             "streaming=%s thinking=%s",
-            self._model, len(messages), temp, tokens,
-            bool(stream_callback or thinking_callback), self._enable_thinking,
+            self._model,
+            len(messages),
+            temp,
+            tokens,
+            bool(stream_callback or thinking_callback),
+            self._enable_thinking,
         )
 
         if stream_callback or thinking_callback:
             return await self._chat_raw_streaming(
-                messages, temp, tokens, stream_callback, thinking_callback,
+                messages,
+                temp,
+                tokens,
+                stream_callback,
+                thinking_callback,
             )
 
         async def _chat():
@@ -160,7 +174,8 @@ class OpenAIProvider(LLMProvider):
         choice = response.choices[0]
         text = choice.message.content or ""
         metrics = self._extract_metrics(
-            response, stop_reason=choice.finish_reason,
+            response,
+            stop_reason=choice.finish_reason,
         )
 
         logger.info("OpenAI chat_raw response (%d chars): %s", len(text), text[:200])
@@ -175,11 +190,7 @@ class OpenAIProvider(LLMProvider):
         thinking_callback,
     ) -> tuple[str, LLMMetrics]:
         """Stream chat_raw response, forwarding content and reasoning tokens."""
-        use_reasoning = (
-            self._enable_thinking
-            and self._is_reasoning_model
-            and thinking_callback
-        )
+        use_reasoning = self._enable_thinking and self._is_reasoning_model and thinking_callback
 
         create_kwargs: dict = {
             "model": self._model,
@@ -199,7 +210,8 @@ class OpenAIProvider(LLMProvider):
             return await self._client.chat.completions.create(**create_kwargs)
 
         stream = await self._retry_with_backoff(
-            _start_stream, label="chat_raw(stream)",
+            _start_stream,
+            label="chat_raw(stream)",
         )
 
         content_parts: list[str] = []
@@ -236,7 +248,9 @@ class OpenAIProvider(LLMProvider):
 
         logger.info(
             "OpenAI chat_raw response (%d chars, thinking=%d chars): %s",
-            len(text), len(thinking or ""), text[:200],
+            len(text),
+            len(thinking or ""),
+            text[:200],
         )
         return text, metrics
 
@@ -252,15 +266,13 @@ class OpenAIProvider(LLMProvider):
         temp = temperature if temperature is not None else self._temperature
         tokens = max_tokens if max_tokens is not None else self._max_tokens_val
 
-        use_reasoning = (
-            self._enable_thinking
-            and self._is_reasoning_model
-            and thinking_callback
-        )
+        use_reasoning = self._enable_thinking and self._is_reasoning_model and thinking_callback
 
         logger.info(
             "OpenAI chat_structured: schema=%s model=%s thinking=%s",
-            schema.__name__, self._model, use_reasoning,
+            schema.__name__,
+            self._model,
+            use_reasoning,
         )
 
         json_schema = schema.model_json_schema()
@@ -280,10 +292,14 @@ class OpenAIProvider(LLMProvider):
         for attempt in range(2):
             if use_reasoning:
                 raw, metrics = await self._chat_structured_streaming(
-                    messages, tokens, response_format, thinking_callback,
+                    messages,
+                    tokens,
+                    response_format,
+                    thinking_callback,
                     label=f"structured({schema.__name__})",
                 )
             else:
+
                 async def _chat():
                     return await self._client.chat.completions.create(
                         model=self._model,
@@ -295,12 +311,14 @@ class OpenAIProvider(LLMProvider):
                     )
 
                 response = await self._retry_with_backoff(
-                    _chat, label=f"structured({schema.__name__})",
+                    _chat,
+                    label=f"structured({schema.__name__})",
                 )
                 choice = response.choices[0]
                 raw = choice.message.content or ""
                 metrics = self._extract_metrics(
-                    response, stop_reason=choice.finish_reason,
+                    response,
+                    stop_reason=choice.finish_reason,
                 )
             try:
                 return schema.model_validate_json(raw), metrics
@@ -309,12 +327,14 @@ class OpenAIProvider(LLMProvider):
                 if attempt == 0:
                     logger.warning(
                         "Schema validation failed for %s, retrying: %s",
-                        schema.__name__, exc.errors(),
+                        schema.__name__,
+                        exc.errors(),
                     )
                     continue
                 logger.error(
                     "Schema validation failed after retry for %s. Raw: %s",
-                    schema.__name__, raw[:1000],
+                    schema.__name__,
+                    raw[:1000],
                 )
                 raise
         raise last_error  # type: ignore[misc]
@@ -328,6 +348,7 @@ class OpenAIProvider(LLMProvider):
         label: str = "structured(stream)",
     ) -> tuple[str, LLMMetrics]:
         """Stream structured output for reasoning models, forwarding reasoning tokens."""
+
         async def _start_stream():
             return await self._client.chat.completions.create(
                 model=self._model,
@@ -388,14 +409,16 @@ class OpenAIProvider(LLMProvider):
             )
 
         response = await self._retry_with_backoff(
-            _chat, label="chat_with_tools_single",
+            _chat,
+            label="chat_with_tools_single",
         )
 
         choice = response.choices[0]
         content = choice.message.content or ""
         raw_tool_calls = choice.message.tool_calls or []
         metrics = self._extract_metrics(
-            response, stop_reason=choice.finish_reason,
+            response,
+            stop_reason=choice.finish_reason,
         )
 
         # Graceful fallback: deliver full content via callback after response
@@ -408,11 +431,13 @@ class OpenAIProvider(LLMProvider):
                 arguments = json.loads(tc.function.arguments)
             except (json.JSONDecodeError, TypeError):
                 arguments = {}
-            tool_calls.append(ToolCallInfo(
-                name=tc.function.name,
-                arguments=arguments,
-                id=tc.id,
-            ))
+            tool_calls.append(
+                ToolCallInfo(
+                    name=tc.function.name,
+                    arguments=arguments,
+                    id=tc.id,
+                )
+            )
 
         return content, tool_calls, metrics
 
@@ -454,16 +479,22 @@ class OpenAIProvider(LLMProvider):
     # ── Message formatting ──
 
     def format_tool_result_messages(
-        self, tool_call: ToolCallInfo, content: str,
+        self,
+        tool_call: ToolCallInfo,
+        content: str,
     ) -> list[dict]:
-        return [{
-            "role": "tool",
-            "tool_call_id": tool_call.id or "",
-            "content": content,
-        }]
+        return [
+            {
+                "role": "tool",
+                "tool_call_id": tool_call.id or "",
+                "content": content,
+            }
+        ]
 
     def format_assistant_tool_message(
-        self, content: str, tool_calls: list[ToolCallInfo],
+        self,
+        content: str,
+        tool_calls: list[ToolCallInfo],
     ) -> dict:
         return {
             "role": "assistant",

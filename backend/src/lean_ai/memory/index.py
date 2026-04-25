@@ -32,9 +32,7 @@ def _index_dir(repo_root: str) -> str:
 
 def _safe_query(q: str) -> str:
     """Escape special Whoosh characters in a user query."""
-    return "".join(
-        f"\\{c}" if c in _WHOOSH_SPECIAL_CHARS else c for c in q
-    ).strip()
+    return "".join(f"\\{c}" if c in _WHOOSH_SPECIAL_CHARS else c for c in q).strip()
 
 
 def _ensure_index(repo_root: str):
@@ -116,14 +114,16 @@ def search_memories(
     with ix.searcher() as searcher:
         hits = searcher.search(parsed, limit=limit)
         for hit in hits:
-            results.append({
-                "memory_id": hit["memory_id"],
-                "content": hit["content"],
-                "category": hit["category"] or None,
-                "tags": hit["tags"],
-                "source_task": hit["source_task"] or None,
-                "score": hit.score,
-            })
+            results.append(
+                {
+                    "memory_id": hit["memory_id"],
+                    "content": hit["content"],
+                    "category": hit["category"] or None,
+                    "tags": hit["tags"],
+                    "source_task": hit["source_task"] or None,
+                    "score": hit.score,
+                }
+            )
 
     return results
 

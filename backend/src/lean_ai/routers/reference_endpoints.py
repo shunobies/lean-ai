@@ -48,7 +48,8 @@ async def index_reference_endpoint(request: IndexReferenceRequest):
     if settings.enable_embeddings and chunk_count > 0:
         try:
             embed_stats = await generate_reference_embeddings(
-                request.repo_root, llm_client,
+                request.repo_root,
+                llm_client,
             )
             embedding_count = embed_stats.embedded
         except Exception as e:

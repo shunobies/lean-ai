@@ -70,7 +70,6 @@ def _mock_response(status_code=200, json_data=None):
 
 
 class TestStateMapping:
-
     def test_new(self):
         assert _map_state("1") == TaskStatus.OPEN
 
@@ -95,7 +94,6 @@ class TestStateMapping:
 
 
 class TestPriorityMapping:
-
     def test_critical(self):
         assert _map_priority("1") == TaskPriority.CRITICAL
 
@@ -117,7 +115,6 @@ class TestPriorityMapping:
 
 
 class TestSysIdRegex:
-
     def test_valid_sys_id(self):
         assert _SYS_ID_RE.match("abc12345def67890abc12345def67890")
 
@@ -132,7 +129,6 @@ class TestSysIdRegex:
 
 
 class TestParseRecord:
-
     def test_basic_fields(self):
         provider = _make_provider()
         record = _make_record()
@@ -178,7 +174,6 @@ class TestParseRecord:
 
 
 class TestProperties:
-
     def test_name(self):
         provider = _make_provider()
         assert provider.name == "servicenow"
@@ -192,7 +187,6 @@ class TestProperties:
 
 
 class TestResolveSysId:
-
     @pytest.mark.asyncio
     async def test_already_sys_id(self):
         provider = _make_provider()
@@ -202,9 +196,12 @@ class TestResolveSysId:
     @pytest.mark.asyncio
     async def test_resolve_by_number(self):
         provider = _make_provider()
-        resp = _mock_response(200, {
-            "result": [{"sys_id": "abc12345def67890abc12345def67890"}],
-        })
+        resp = _mock_response(
+            200,
+            {
+                "result": [{"sys_id": "abc12345def67890abc12345def67890"}],
+            },
+        )
         with patch.object(provider, "_request", new_callable=AsyncMock) as mock_req:
             mock_req.return_value = resp
             result = await provider._resolve_sys_id("INC0012345")
@@ -232,7 +229,6 @@ class TestResolveSysId:
 
 
 class TestHealthCheck:
-
     @pytest.mark.asyncio
     async def test_health_ok(self):
         provider = _make_provider()
@@ -259,7 +255,6 @@ class TestHealthCheck:
 
 
 class TestListTasks:
-
     @pytest.mark.asyncio
     async def test_list_tasks_default(self):
         provider = _make_provider()
@@ -294,13 +289,15 @@ class TestListTasks:
 
 
 class TestGetTask:
-
     @pytest.mark.asyncio
     async def test_get_task_by_number(self):
         provider = _make_provider()
-        resolve_resp = _mock_response(200, {
-            "result": [{"sys_id": "abc12345def67890abc12345def67890"}],
-        })
+        resolve_resp = _mock_response(
+            200,
+            {
+                "result": [{"sys_id": "abc12345def67890abc12345def67890"}],
+            },
+        )
         record_resp = _mock_response(200, {"result": _make_record()})
 
         call_count = 0
@@ -343,7 +340,6 @@ class TestGetTask:
 
 
 class TestSearchTasks:
-
     @pytest.mark.asyncio
     async def test_search_tasks(self):
         provider = _make_provider()
@@ -369,14 +365,16 @@ class TestSearchTasks:
 
 
 class TestPushSummary:
-
     @pytest.mark.asyncio
     async def test_push_summary_success(self):
         provider = _make_provider()
         # First call: resolve sys_id (since INC number), second: PUT work_notes
-        resolve_resp = _mock_response(200, {
-            "result": [{"sys_id": "abc12345def67890abc12345def67890"}],
-        })
+        resolve_resp = _mock_response(
+            200,
+            {
+                "result": [{"sys_id": "abc12345def67890abc12345def67890"}],
+            },
+        )
         put_resp = _mock_response(200)
 
         call_count = 0
@@ -408,7 +406,9 @@ class TestPushSummary:
         with patch.object(provider, "_request", new_callable=AsyncMock) as mock_req:
             mock_req.return_value = _mock_response(200, {"result": []})
             summary = SessionSummary(
-                session_id="s-1", task_description="test", status="completed",
+                session_id="s-1",
+                task_description="test",
+                status="completed",
             )
             result = await provider.push_session_summary("INC9999999", summary)
             assert result is False
@@ -416,9 +416,12 @@ class TestPushSummary:
     @pytest.mark.asyncio
     async def test_push_summary_put_fails(self):
         provider = _make_provider()
-        resolve_resp = _mock_response(200, {
-            "result": [{"sys_id": "abc12345def67890abc12345def67890"}],
-        })
+        resolve_resp = _mock_response(
+            200,
+            {
+                "result": [{"sys_id": "abc12345def67890abc12345def67890"}],
+            },
+        )
         put_resp = _mock_response(500)
 
         call_count = 0
@@ -432,7 +435,9 @@ class TestPushSummary:
 
         with patch.object(provider, "_request", side_effect=mock_request):
             summary = SessionSummary(
-                session_id="s-1", task_description="test", status="completed",
+                session_id="s-1",
+                task_description="test",
+                status="completed",
             )
             result = await provider.push_session_summary("INC0012345", summary)
             assert result is False
@@ -442,7 +447,6 @@ class TestPushSummary:
 
 
 class TestUpdateStatus:
-
     @pytest.mark.asyncio
     async def test_update_status_success(self):
         provider = _make_provider()
@@ -490,7 +494,6 @@ class TestUpdateStatus:
 
 
 class TestWebhook:
-
     @pytest.mark.asyncio
     async def test_handle_webhook(self):
         provider = _make_provider()

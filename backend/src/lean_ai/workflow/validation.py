@@ -73,7 +73,9 @@ def _effective_post_commands(repo_root: str) -> dict[str, str]:
                 logger.debug(
                     "Post-validation %s: commands.json (%r) "
                     "overrides env var (%r) for this workspace",
-                    field, per_project, env_val,
+                    field,
+                    per_project,
+                    env_val,
                 )
         else:
             resolved[field] = env_val or ""
@@ -101,11 +103,15 @@ async def _run_post_validation(
     if not any(commands.values()):
         return results
 
-    await ws_send(ws, "stage_status", {
-        "stage": "post_validation",
-        "status": "running",
-        "summary": "Running post-execution validation...",
-    })
+    await ws_send(
+        ws,
+        "stage_status",
+        {
+            "stage": "post_validation",
+            "status": "running",
+            "summary": "Running post-execution validation...",
+        },
+    )
 
     # ── Auto-fix passes (silent success, report failure) ──
     for label, command, runner in [
@@ -124,12 +130,16 @@ async def _run_post_validation(
             if not result.success:
                 logger.warning(
                     "Post-validation %s failed (exit %s): %s",
-                    label, result.exit_code, result.output[:500],
+                    label,
+                    result.exit_code,
+                    result.output[:500],
                 )
         except Exception as exc:
             logger.warning("Post-validation %s error: %s", label, exc)
             results[label] = {
-                "success": False, "output": str(exc), "full_output": str(exc),
+                "success": False,
+                "output": str(exc),
+                "full_output": str(exc),
             }
 
     # ── Reporting passes (lint + test in parallel — both read-only) ──
@@ -143,6 +153,7 @@ async def _run_post_validation(
     ]
 
     if reporting_steps:
+
         async def _run_report(label, command, runner):
             try:
                 result = await runner(command=command, repo_root=repo_root)
@@ -162,22 +173,30 @@ async def _run_post_validation(
                     "output": str(exc),
                     "full_output": str(exc),
                 }
-                await ws_send(ws, "test_result", {
-                    "command": command,
-                    "passed": False,
-                    "output": str(exc),
-                })
+                await ws_send(
+                    ws,
+                    "test_result",
+                    {
+                        "command": command,
+                        "passed": False,
+                        "output": str(exc),
+                    },
+                )
             else:
                 results[label] = {
                     "success": result.success,
                     "output": result.output[:2000] if result.output else "",
                     "full_output": result.output or "",
                 }
-                await ws_send(ws, "test_result", {
-                    "command": command,
-                    "passed": result.success,
-                    "output": result.output[:2000] if result.output else "",
-                })
+                await ws_send(
+                    ws,
+                    "test_result",
+                    {
+                        "command": command,
+                        "passed": result.success,
+                        "output": result.output[:2000] if result.output else "",
+                    },
+                )
 
     # ── Summary ──
     passed = sum(1 for r in results.values() if r["success"])
@@ -187,11 +206,15 @@ async def _run_post_validation(
         failed_names = [k for k, r in results.items() if not r["success"]]
         summary += f" Failed: {', '.join(failed_names)}."
 
-    await ws_send(ws, "stage_status", {
-        "stage": "post_validation",
-        "status": "done",
-        "summary": summary,
-    })
+    await ws_send(
+        ws,
+        "stage_status",
+        {
+            "stage": "post_validation",
+            "status": "done",
+            "summary": summary,
+        },
+    )
 
     logger.info("Post-validation complete: %s", summary)
     return results
@@ -232,7 +255,8 @@ async def _run_validation_fix_loop(
         return validation_results
 
     system_prompt = build_fix_system_prompt(
-        load_condensed_context(repo_root), task=task,
+        load_condensed_context(repo_root),
+        task=task,
     )
 
     # Callbacks — same WebSocket progress reporting used by the main loop
@@ -252,15 +276,14 @@ async def _run_validation_fix_loop(
         attempts_used = attempt + 1
 
         # Escalate to expert model on final attempt
-        is_final_attempt = (attempt == max_retries - 1)
-        active_client = (
-            expert_llm_client if is_final_attempt and expert_llm_client
-            else llm_client
-        )
+        is_final_attempt = attempt == max_retries - 1
+        active_client = expert_llm_client if is_final_attempt and expert_llm_client else llm_client
 
         logger.info(
             "Validation fix attempt %d/%d: %d failure(s) — %s%s",
-            attempts_used, max_retries, len(failures),
+            attempts_used,
+            max_retries,
+            len(failures),
             ", ".join(failures.keys()),
             " (escalating to expert model)" if is_final_attempt and expert_llm_client else "",
         )
@@ -268,19 +291,22 @@ async def _run_validation_fix_loop(
         escalation_note = ""
         if is_final_attempt and expert_llm_client:
             escalation_note = (
-                f" (escalating to expert model: "
-                f"{expert_llm_client._provider.model_name})"
+                f" (escalating to expert model: {expert_llm_client._provider.model_name})"
             )
 
-        await ws_send(ws, "stage_status", {
-            "stage": "validation_fix",
-            "status": "running",
-            "summary": (
-                f"Fix attempt {attempts_used}/{max_retries}: "
-                f"fixing {len(failures)} failure(s)..."
-                f"{escalation_note}"
-            ),
-        })
+        await ws_send(
+            ws,
+            "stage_status",
+            {
+                "stage": "validation_fix",
+                "status": "running",
+                "summary": (
+                    f"Fix attempt {attempts_used}/{max_retries}: "
+                    f"fixing {len(failures)} failure(s)..."
+                    f"{escalation_note}"
+                ),
+            },
+        )
 
         # Build focused fix prompt with full error output
         failure_parts: list[str] = []
@@ -290,9 +316,7 @@ async def _run_validation_fix_loop(
                 # Tail is where errors are — keep last 80 lines
                 lines = raw.splitlines()
                 raw = "\n".join(lines[-80:])
-            failure_parts.append(
-                f"### {name}\n```\n{raw}\n```"
-            )
+            failure_parts.append(f"### {name}\n```\n{raw}\n```")
         failure_text = "\n\n".join(failure_parts)
 
         # Layer 7 — regression-aware banner. If any failing output
@@ -302,6 +326,7 @@ async def _run_validation_fix_loop(
         from lean_ai.tools.regression_guard import (
             extract_regression_paths_from_text,
         )
+
         regression_hits: list[str] = []
         seen_reg: set[str] = set()
         for result in failures.values():
@@ -326,7 +351,9 @@ async def _run_validation_fix_loop(
 
         fix_memory_context = ""
         if settings.enable_session_memory and getattr(
-            settings, "enable_fix_loop_memory", True,
+            settings,
+            "enable_fix_loop_memory",
+            True,
         ):
             from lean_ai.llm.planner_helpers import (
                 retrieve_fix_pattern_memories,
@@ -342,7 +369,8 @@ async def _run_validation_fix_loop(
                 if first_line:
                     memory_query_parts.append(first_line[:200])
             fix_memory_context = await retrieve_fix_pattern_memories(
-                repo_root, " ".join(memory_query_parts),
+                repo_root,
+                " ".join(memory_query_parts),
             )
 
         messages = [
@@ -358,7 +386,8 @@ async def _run_validation_fix_loop(
                         "(new files are allowed):\n"
                         + "\n".join(f"- {f}" for f in allowed_files)
                         + "\n\n"
-                        if allowed_files else "\n"
+                        if allowed_files
+                        else "\n"
                     )
                     + failure_text
                     + fix_memory_context
@@ -370,16 +399,20 @@ async def _run_validation_fix_loop(
         if session_id:
             jrnl = read_journal(repo_root, session_id)
             if jrnl:
-                messages.append({
-                    "role": "user",
-                    "content": f"[SESSION JOURNAL]\n{jrnl}",
-                })
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"[SESSION JOURNAL]\n{jrnl}",
+                    }
+                )
             pad = scratchpad.read_scratchpad(repo_root, session_id)
             if pad:
-                messages.append({
-                    "role": "user",
-                    "content": f"[SCRATCHPAD]\n{pad}",
-                })
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"[SCRATCHPAD]\n{pad}",
+                    }
+                )
 
         # Run LLM with a tight turn budget
         # In TDD mode, protect test files and allow disputes
@@ -403,7 +436,8 @@ async def _run_validation_fix_loop(
         # Context refresh: rebuild messages from fresh disk state
         def _build_fix_refresh(current_messages: list[dict]) -> list[dict]:
             fresh_sys = build_fix_system_prompt(
-                load_condensed_context(repo_root), task=task,
+                load_condensed_context(repo_root),
+                task=task,
             )
             pad = scratchpad.read_scratchpad(repo_root, session_id)
             jrnl = read_journal(repo_root, session_id)
@@ -413,19 +447,25 @@ async def _run_validation_fix_loop(
                 {"role": "user", "content": current_messages[1]["content"]},
             ]
             if jrnl:
-                refreshed.append({
-                    "role": "user",
-                    "content": f"[SESSION JOURNAL]\n{jrnl}",
-                })
+                refreshed.append(
+                    {
+                        "role": "user",
+                        "content": f"[SESSION JOURNAL]\n{jrnl}",
+                    }
+                )
             if pad:
-                refreshed.append({
+                refreshed.append(
+                    {
+                        "role": "user",
+                        "content": f"[SCRATCHPAD]\n{pad}",
+                    }
+                )
+            refreshed.append(
+                {
                     "role": "user",
-                    "content": f"[SCRATCHPAD]\n{pad}",
-                })
-            refreshed.append({
-                "role": "user",
-                "content": "[CONTEXT REFRESHED] Continue fixing.",
-            })
+                    "content": "[CONTEXT REFRESHED] Continue fixing.",
+                }
+            )
             return refreshed
 
         def _build_validation_reminder(_ft=failure_text) -> str:
@@ -436,18 +476,19 @@ async def _run_validation_fix_loop(
             return "\n".join(parts)
 
         fix_tools = (
-            build_tdd_implementation_tools()
-            if tdd_fix_protect
-            else build_implementation_tools()
+            build_tdd_implementation_tools() if tdd_fix_protect else build_implementation_tools()
         )
         validation_telemetry = {
-            "repo_root": repo_root, "session_id": session_id,
-            "phase": "validation_fix", "role": (
-                "expert" if active_client is expert_llm_client else "primary"
-            ),
+            "repo_root": repo_root,
+            "session_id": session_id,
+            "phase": "validation_fix",
+            "role": ("expert" if active_client is expert_llm_client else "primary"),
         }
         tool_executor = make_tool_executor(
-            repo_root, ws, session_id, llm_client=active_client,
+            repo_root,
+            ws,
+            session_id,
+            llm_client=active_client,
             dispatcher=dispatcher,
             tdd_protect_tests=tdd_fix_protect,
             on_test_dispute=tdd_fix_dispute,
@@ -473,7 +514,8 @@ async def _run_validation_fix_loop(
 
         logger.info(
             "Validation fix attempt %d: %d tool calls, re-validating...",
-            attempts_used, len(executed),
+            attempts_used,
+            len(executed),
         )
 
         # Re-run full validation (including auto-fix passes)
@@ -482,12 +524,8 @@ async def _run_validation_fix_loop(
         validation_results = await _run_post_validation(repo_root, ws)
 
         # Fire memory hook: if this attempt succeeded, extract a fix_pattern
-        still_failing = {
-            k: v for k, v in validation_results.items() if not v["success"]
-        }
-        attempt_succeeded = (
-            bool(failing_commands_before) and not still_failing
-        )
+        still_failing = {k: v for k, v in validation_results.items() if not v["success"]}
+        attempt_succeeded = bool(failing_commands_before) and not still_failing
         try:
             from lean_ai.workflow.hooks import fire_validation_attempt_hook
 
@@ -500,12 +538,10 @@ async def _run_validation_fix_loop(
             ]
             # Compact failure summaries for the training archive
             failures_before_summary = {
-                name: (res.get("output") or "")[:500]
-                for name, res in failures.items()
+                name: (res.get("output") or "")[:500] for name, res in failures.items()
             }
             failures_after_summary = {
-                name: (res.get("output") or "")[:500]
-                for name, res in still_failing.items()
+                name: (res.get("output") or "")[:500] for name, res in still_failing.items()
             }
             fire_validation_attempt_hook(
                 repo_root=repo_root,
@@ -529,9 +565,7 @@ async def _run_validation_fix_loop(
             )
 
     # Report final status
-    final_failures = {
-        k: v for k, v in validation_results.items() if not v["success"]
-    }
+    final_failures = {k: v for k, v in validation_results.items() if not v["success"]}
     if attempts_used > 0:
         if final_failures:
             fix_summary = (
@@ -540,16 +574,17 @@ async def _run_validation_fix_loop(
                 f"{', '.join(final_failures.keys())}."
             )
         else:
-            fix_summary = (
-                f"Validation fix: all issues resolved after "
-                f"{attempts_used} attempt(s)."
-            )
+            fix_summary = f"Validation fix: all issues resolved after {attempts_used} attempt(s)."
 
-        await ws_send(ws, "stage_status", {
-            "stage": "validation_fix",
-            "status": "done",
-            "summary": fix_summary,
-        })
+        await ws_send(
+            ws,
+            "stage_status",
+            {
+                "stage": "validation_fix",
+                "status": "done",
+                "summary": fix_summary,
+            },
+        )
         logger.info("Validation fix loop complete: %s", fix_summary)
 
     return validation_results

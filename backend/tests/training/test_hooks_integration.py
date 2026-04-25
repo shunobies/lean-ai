@@ -114,8 +114,7 @@ async def test_validation_attempt_hook_records_both_outcomes(tmp_path):
     db = await get_training_db(root)
     try:
         cursor = await db.execute(
-            "SELECT attempt_num, succeeded FROM validation_attempts "
-            "ORDER BY attempt_num"
+            "SELECT attempt_num, succeeded FROM validation_attempts ORDER BY attempt_num"
         )
         rows = await cursor.fetchall()
         assert len(rows) == 2
@@ -129,16 +128,15 @@ async def test_validation_attempt_hook_records_both_outcomes(tmp_path):
 async def test_workflow_event_cancellation_captured(tmp_path):
     root = str(tmp_path)
     await on_workflow_event(
-        root, "sess-1",
+        root,
+        "sess-1",
         event_type="cancellation",
         payload={"task": "do X", "mode": "plan"},
     )
 
     db = await get_training_db(root)
     try:
-        cursor = await db.execute(
-            "SELECT event_type, payload FROM workflow_events"
-        )
+        cursor = await db.execute("SELECT event_type, payload FROM workflow_events")
         rows = await cursor.fetchall()
         assert len(rows) == 1
         assert rows[0]["event_type"] == "cancellation"
@@ -187,12 +185,21 @@ async def test_training_capture_disabled_skips_rows(tmp_path, monkeypatch):
 
     root = str(tmp_path)
     await on_plan_decision(
-        root, "s", _NullLLM(), task="t",
-        plan_before="", feedback="", plan_after="x",
-        decision="approved", revision_count=0,
+        root,
+        "s",
+        _NullLLM(),
+        task="t",
+        plan_before="",
+        feedback="",
+        plan_after="x",
+        decision="approved",
+        revision_count=0,
     )
     await on_workflow_event(
-        root, "s", event_type="cancellation", payload=None,
+        root,
+        "s",
+        event_type="cancellation",
+        payload=None,
     )
 
     # With capture disabled, no rows should be written. But because

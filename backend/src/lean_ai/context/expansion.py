@@ -83,7 +83,8 @@ def _merge_additions_into_doc(base_doc: str, additions_list: list[str]) -> str:
     for heading in heading_additions:
         if heading not in heading_end:
             logger.info(
-                "merge: heading %r not in base document, skipping", heading,
+                "merge: heading %r not in base document, skipping",
+                heading,
             )
 
     return "\n".join(lines)

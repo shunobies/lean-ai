@@ -101,9 +101,7 @@ class TestDiscoverStyleFiles:
     def test_laravel_project(self, tmp_path):
         # Create a minimal Laravel-like structure.
         (tmp_path / "resources" / "css").mkdir(parents=True)
-        (tmp_path / "resources" / "css" / "app.css").write_text(
-            ":root { --primary: #1a1a2e; }"
-        )
+        (tmp_path / "resources" / "css" / "app.css").write_text(":root { --primary: #1a1a2e; }")
         (tmp_path / "resources" / "views" / "layouts").mkdir(parents=True)
         (tmp_path / "resources" / "views" / "layouts" / "app.blade.php").write_text(
             "<html>...</html>"

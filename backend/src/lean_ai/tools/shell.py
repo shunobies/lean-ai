@@ -30,7 +30,9 @@ async def format_code(command: str, repo_root: str) -> ToolResult:
 
 
 async def run_command(
-    command: str, repo_root: str, working_directory: str = "",
+    command: str,
+    repo_root: str,
+    working_directory: str = "",
 ) -> ToolResult:
     """Run a general-purpose shell command."""
     if working_directory:

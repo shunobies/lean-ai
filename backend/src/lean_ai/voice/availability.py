@@ -13,10 +13,12 @@ def is_stt_available() -> bool:
     if not settings.enable_stt:
         return False
     from lean_ai.voice.alsa_suppression import suppress_alsa_errors
+
     suppress_alsa_errors()
     try:
         import faster_whisper  # noqa: F401
         import pyaudio  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -29,6 +31,7 @@ def is_tts_available() -> bool:
     try:
         import kokoro_onnx  # noqa: F401
         import soundfile  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -39,10 +42,12 @@ def is_wake_word_available() -> bool:
     if not settings.enable_wake_word:
         return False
     from lean_ai.voice.alsa_suppression import suppress_alsa_errors
+
     suppress_alsa_errors()
     try:
         import openwakeword  # noqa: F401
         import pyaudio  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -77,8 +82,7 @@ def get_setup_instructions() -> dict:
             "pip": 'pip install "lean-ai[voice]"',
             "system": None,
             "description": (
-                "Text-to-speech via kokoro-onnx"
-                " (model files ~310MB auto-downloaded on first use)"
+                "Text-to-speech via kokoro-onnx (model files ~310MB auto-downloaded on first use)"
             ),
         },
         "wake_word": {

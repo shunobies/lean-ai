@@ -27,7 +27,10 @@ async def db(tmp_path):
 @pytest.mark.asyncio
 async def test_defaults_on_create(db):
     mem = await create_memory(
-        db, session_id="s1", category="pattern", content="default defaults",
+        db,
+        session_id="s1",
+        category="pattern",
+        content="default defaults",
     )
     assert mem["curation_status"] == "auto"
     assert mem["confidence"] == pytest.approx(0.5)
@@ -69,7 +72,8 @@ async def test_list_filters_by_curation_status(db):
     assert len(confirmed) == 1 and confirmed[0]["content"] == "confirmed one"
 
     multi = await list_memories(
-        db, curation_status=["user_confirmed", "user_rejected"],
+        db,
+        curation_status=["user_confirmed", "user_rejected"],
     )
     assert {m["content"] for m in multi} == {"confirmed one", "rejected one"}
 
@@ -97,7 +101,10 @@ async def test_list_excludes_expired_by_default(db):
 async def test_update_curation_status_roundtrip(db):
     mem = await create_memory(db, "s1", "pattern", "promote me")
     ok = await update_curation_status(
-        db, mem["id"], "user_confirmed", confidence=0.9,
+        db,
+        mem["id"],
+        "user_confirmed",
+        confidence=0.9,
     )
     assert ok is True
 
@@ -121,11 +128,15 @@ async def test_update_nonexistent_returns_false(db):
 @pytest.mark.asyncio
 async def test_find_similar_matches_normalized_content(db):
     first = await create_memory(
-        db, "s1", "gotcha", "When pytest fails, check PYTHONPATH.",
+        db,
+        "s1",
+        "gotcha",
+        "When pytest fails, check PYTHONPATH.",
     )
     # Same content, different capitalization + punctuation
     match = await find_similar_memory(
-        db, "when PYTEST FAILS check pythonpath",
+        db,
+        "when PYTEST FAILS check pythonpath",
     )
     assert match is not None and match["id"] == first["id"]
 
@@ -178,8 +189,7 @@ async def test_set_expiry_from_ttl(db):
 @pytest.mark.asyncio
 async def test_indexes_exist_after_ensure_columns(db):
     cursor = await db.execute(
-        "SELECT name FROM sqlite_master WHERE type='index' "
-        "AND tbl_name='session_memories'"
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='session_memories'"
     )
     rows = await cursor.fetchall()
     names = {r[0] for r in rows}

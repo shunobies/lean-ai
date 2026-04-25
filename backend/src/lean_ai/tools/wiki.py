@@ -67,24 +67,30 @@ async def _ensure_authenticated() -> None:
 
     try:
         # Step 1: get login token
-        token_resp = await client.get(api, params={
-            "action": "query",
-            "meta": "tokens",
-            "type": "login",
-            "format": "json",
-        })
+        token_resp = await client.get(
+            api,
+            params={
+                "action": "query",
+                "meta": "tokens",
+                "type": "login",
+                "format": "json",
+            },
+        )
         token_resp.raise_for_status()
         token_data = token_resp.json()
         login_token = token_data["query"]["tokens"]["logintoken"]
 
         # Step 2: login
-        login_resp = await client.post(api, data={
-            "action": "login",
-            "lgname": settings.wiki_username,
-            "lgpassword": settings.wiki_password,
-            "lgtoken": login_token,
-            "format": "json",
-        })
+        login_resp = await client.post(
+            api,
+            data={
+                "action": "login",
+                "lgname": settings.wiki_username,
+                "lgpassword": settings.wiki_password,
+                "lgtoken": login_token,
+                "format": "json",
+            },
+        )
         login_resp.raise_for_status()
         login_result = login_resp.json().get("login", {})
 
@@ -121,14 +127,17 @@ async def search_wiki(query: str, limit: int = 5) -> ToolResult:
     api = _api_url()
 
     try:
-        resp = await client.get(api, params={
-            "action": "query",
-            "list": "search",
-            "srsearch": query,
-            "srlimit": str(limit),
-            "srprop": "snippet|titlesnippet|size|wordcount",
-            "format": "json",
-        })
+        resp = await client.get(
+            api,
+            params={
+                "action": "query",
+                "list": "search",
+                "srsearch": query,
+                "srlimit": str(limit),
+                "srprop": "snippet|titlesnippet|size|wordcount",
+                "format": "json",
+            },
+        )
         resp.raise_for_status()
         data = resp.json()
     except httpx.TimeoutException:
@@ -149,12 +158,7 @@ async def search_wiki(query: str, limit: int = 5) -> ToolResult:
         snippet = strip_html(item.get("snippet", ""))
         word_count = item.get("wordcount", 0)
         page_url = f"{base_url}/wiki/{title.replace(' ', '_')}"
-        lines.append(
-            f"Title: {title}\n"
-            f"URL: {page_url}\n"
-            f"Words: {word_count}\n"
-            f"{snippet}\n"
-        )
+        lines.append(f"Title: {title}\nURL: {page_url}\nWords: {word_count}\n{snippet}\n")
 
     return ToolResult(success=True, output="\n".join(lines))
 
@@ -179,12 +183,15 @@ async def fetch_wiki_page(title: str, repo_root: str) -> ToolResult:
     api = _api_url()
 
     try:
-        resp = await client.get(api, params={
-            "action": "parse",
-            "page": title,
-            "prop": "text",
-            "format": "json",
-        })
+        resp = await client.get(
+            api,
+            params={
+                "action": "parse",
+                "page": title,
+                "prop": "text",
+                "format": "json",
+            },
+        )
         resp.raise_for_status()
         data = resp.json()
     except httpx.TimeoutException:

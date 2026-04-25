@@ -35,7 +35,9 @@ async def test_auto_promote_returns_none_for_fresh_content(tmp_path):
     db = await get_db(str(tmp_path))
     try:
         result = await auto_promote_memory(
-            db, category="pattern", content="never-before-seen lesson",
+            db,
+            category="pattern",
+            content="never-before-seen lesson",
         )
         assert result is None
     finally:
@@ -47,11 +49,14 @@ async def test_auto_promote_bumps_existing_memory(tmp_path):
     db = await get_db(str(tmp_path))
     try:
         first = await create_memory(
-            db, session_id="s1", category="pattern",
+            db,
+            session_id="s1",
+            category="pattern",
             content="use pytest-asyncio for async tests",
         )
         result = await auto_promote_memory(
-            db, category="pattern",
+            db,
+            category="pattern",
             content="Use pytest-asyncio for async tests!",  # normalized = same
         )
         assert result is not None
@@ -77,7 +82,9 @@ async def test_auto_promote_upgrades_at_threshold(tmp_path, monkeypatch):
         await auto_promote_memory(db, category="pattern", content=content)
         # Third sighting — should promote to high_confidence_auto
         result = await auto_promote_memory(
-            db, category="pattern", content=content,
+            db,
+            category="pattern",
+            content=content,
         )
         assert result["seen_count"] == 3
         assert result["curation_status"] == "high_confidence_auto"
@@ -91,12 +98,17 @@ async def test_supersede_skips_user_rejected(tmp_path):
     db = await get_db(str(tmp_path))
     try:
         mem = await create_memory(
-            db, "s1", "pattern", "this lesson was rejected",
+            db,
+            "s1",
+            "pattern",
+            "this lesson was rejected",
         )
         await update_curation_status(db, mem["id"], "user_rejected")
 
         should_skip = await supersede_user_rejected(
-            db, category="pattern", content="this lesson was rejected",
+            db,
+            category="pattern",
+            content="this lesson was rejected",
         )
         assert should_skip is True
     finally:
@@ -108,7 +120,9 @@ async def test_supersede_allows_unrelated_content(tmp_path):
     db = await get_db(str(tmp_path))
     try:
         should_skip = await supersede_user_rejected(
-            db, category="pattern", content="something totally new",
+            db,
+            category="pattern",
+            content="something totally new",
         )
         assert should_skip is False
     finally:
@@ -120,25 +134,36 @@ async def test_bulk_invalidate_by_model(tmp_path):
     db = await get_db(str(tmp_path))
     try:
         await create_memory(
-            db, "s1", "pattern", "memory from model A",
-            model_name="bad-model-v1", curation_status="auto",
+            db,
+            "s1",
+            "pattern",
+            "memory from model A",
+            model_name="bad-model-v1",
+            curation_status="auto",
         )
         await create_memory(
-            db, "s1", "pattern", "memory from model B",
-            model_name="good-model", curation_status="high_confidence_auto",
+            db,
+            "s1",
+            "pattern",
+            "memory from model B",
+            model_name="good-model",
+            curation_status="high_confidence_auto",
         )
 
         count = await bulk_invalidate_by_model(db, model_name="bad-model-v1")
         assert count == 1
 
         remaining = await list_memories(
-            db, curation_status="superseded", include_expired=True,
+            db,
+            curation_status="superseded",
+            include_expired=True,
         )
         assert len(remaining) == 1
         assert remaining[0]["model_name"] == "bad-model-v1"
 
         good = await list_memories(
-            db, curation_status="high_confidence_auto",
+            db,
+            curation_status="high_confidence_auto",
         )
         assert len(good) == 1
     finally:
@@ -155,8 +180,12 @@ async def test_run_retention_pass_throttled(tmp_path):
     # Seed a stale row
     trace_uuid = await capture_turn(
         str(tmp_path),
-        session_id="s1", phase="p", model_name="m", provider="ollama",
-        messages=[], assistant_output={},
+        session_id="s1",
+        phase="p",
+        model_name="m",
+        provider="ollama",
+        messages=[],
+        assistant_output={},
     )
     db = await get_training_db(str(tmp_path))
     try:
@@ -212,11 +241,16 @@ async def test_extractor_dedupes_via_auto_promote(tmp_path, monkeypatch):
     try:
         # Seed one memory
         original = await create_memory(
-            db, "s1", "gotcha", "same lesson",
+            db,
+            "s1",
+            "gotcha",
+            "same lesson",
         )
         # Simulate another extraction round via auto_promote
         second = await auto_promote_memory(
-            db, category="gotcha", content="Same lesson!!",  # different case
+            db,
+            category="gotcha",
+            content="Same lesson!!",  # different case
         )
         assert second["id"] == original["id"]
         # seen_count bumped AND promoted (threshold 2)
@@ -225,7 +259,8 @@ async def test_extractor_dedupes_via_auto_promote(tmp_path, monkeypatch):
 
         # Rows count stays at 1 — no duplicate insert
         all_rows = await list_memories(
-            db, include_expired=True,
+            db,
+            include_expired=True,
             curation_status=["auto", "high_confidence_auto"],
         )
         assert len(all_rows) == 1
@@ -242,7 +277,9 @@ async def test_extractor_skips_rejected_duplicates(tmp_path):
 
         # Should report "skip" for near-identical content
         should_skip = await supersede_user_rejected(
-            db, category="gotcha", content="Bad lesson.",
+            db,
+            category="gotcha",
+            content="Bad lesson.",
         )
         assert should_skip is True
 

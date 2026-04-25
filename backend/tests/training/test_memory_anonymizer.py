@@ -38,9 +38,14 @@ def test_file_path_replaced_with_workspace_file():
 
 def test_longer_paths_replaced_first():
     content = "src/auth and src/auth/token.py both referenced"
-    table = _table(file_paths=frozenset({
-        "src/auth", "src/auth/token.py",
-    }))
+    table = _table(
+        file_paths=frozenset(
+            {
+                "src/auth",
+                "src/auth/token.py",
+            }
+        )
+    )
     result = anonymize_memory_content(content, table)
     # Longer path replaced first → both become the placeholder, nothing left
     assert "src/auth" not in result.content
@@ -92,7 +97,9 @@ def test_drop_threshold_triggered():
     # Content that's nearly all file path → should be dropped
     content = "/home/user/very/long/workspace/path/that/dominates/the/content"
     result = anonymize_memory_content(
-        content, _table(), drop_threshold=0.5,
+        content,
+        _table(),
+        drop_threshold=0.5,
     )
     assert result.dropped
 
@@ -112,11 +119,13 @@ def test_anonymize_memories_skips_dropped():
         {"id": "1", "content": "Generic lesson: use explicit imports."},
         {"id": "2", "content": "/a/b/c/d/e/f/g/h/i/j tiny"},
     ]
-    result = list(anonymize_memories(
-        iter(rows),
-        table=_table(),
-        drop_threshold=0.2,
-    ))
+    result = list(
+        anonymize_memories(
+            iter(rows),
+            table=_table(),
+            drop_threshold=0.2,
+        )
+    )
     assert len(result) == 1
     assert result[0]["id"] == "1"
     assert "anonymization_ratio" in result[0]
@@ -156,8 +165,7 @@ async def test_build_symbol_table_captures_tool_log_paths(tmp_path):
             ),
         )
         await db.execute(
-            "INSERT INTO sessions (id, repo_root, task, status, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO sessions (id, repo_root, task, status, created_at) VALUES (?, ?, ?, ?, ?)",
             ("sess", str(tmp_path), "t", "active", "2026-04-20T00:00:00Z"),
         )
         await db.commit()

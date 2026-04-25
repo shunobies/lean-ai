@@ -177,6 +177,7 @@ def test_safety_rail_fires_even_on_off_effort():
 
 def _openai_or_skip(**kwargs):
     from lean_ai.llm.provider_openai import OpenAIProvider
+
     try:
         return OpenAIProvider(**kwargs)
     except ModuleNotFoundError:
@@ -203,13 +204,17 @@ def test_openai_extra_body_reasoning_max_omitted():
 def test_openai_extra_body_merges_with_preserve_thinking():
     """Both knobs set → single extra_body dict with both keys."""
     p = _openai_or_skip(
-        api_key="dummy", reasoning_effort="high", preserve_thinking=True,
+        api_key="dummy",
+        reasoning_effort="high",
+        preserve_thinking=True,
     )
     eb = p._extra_body()
-    assert eb == {"extra_body": {
-        "chat_template_kwargs": {"preserve_thinking": True},
-        "reasoning_effort": "high",
-    }}
+    assert eb == {
+        "extra_body": {
+            "chat_template_kwargs": {"preserve_thinking": True},
+            "reasoning_effort": "high",
+        }
+    }
 
 
 # ── Facade budget-interrupt loop ────────────────────────────────────
@@ -253,8 +258,13 @@ class _BudgetFake(LLMProvider):
         raise NotImplementedError
 
     async def chat_with_tools_single(
-        self, messages, tools, max_tokens=None, *,
-        stream_callback=None, thinking_callback=None,
+        self,
+        messages,
+        tools,
+        max_tokens=None,
+        *,
+        stream_callback=None,
+        thinking_callback=None,
     ):
         self._turn += 1
         m = LLMMetrics()
@@ -294,7 +304,8 @@ async def test_facade_injects_interrupt_nudge_on_budget_exceeded():
 
     # The interrupt nudge should appear as a user message between turns
     user_nudges = [
-        m for m in messages
+        m
+        for m in messages
         if m.get("role") == "user" and "reasoning" in str(m.get("content", "")).lower()
     ]
     assert user_nudges, f"expected budget nudge, got {messages}"

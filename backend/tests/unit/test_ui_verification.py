@@ -103,9 +103,11 @@ def test_detect_system_browser_channel_chrome_fallback(monkeypatch):
     from lean_ai.tools import ui_capture_web as mod
 
     monkeypatch.setattr(mod.sys, "platform", "linux")
+
     # chromium probes return None; chrome probe hits
     def fake_which(cmd):
         return "/usr/bin/google-chrome" if "chrome" in cmd else None
+
     monkeypatch.setattr(mod.shutil, "which", fake_which)
     assert mod.detect_system_browser_channel() == "chrome"
 
@@ -144,7 +146,9 @@ def test_validate_launch_command_accepts_valid_list():
 
     assert _validate_launch_command(["python", "app.py"]) == ["python", "app.py"]
     assert _validate_launch_command(["java", "-jar", "app.jar"]) == [
-        "java", "-jar", "app.jar",
+        "java",
+        "-jar",
+        "app.jar",
     ]
 
 
@@ -231,20 +235,26 @@ def test_wayland_compositor_none_when_not_wayland():
 def test_wayland_compositor_detects_gnome():
     from lean_ai.tools.ui_capture_desktop import wayland_compositor
 
-    with patch.dict(os.environ, {
-        "WAYLAND_DISPLAY": "wayland-0",
-        "XDG_CURRENT_DESKTOP": "GNOME",
-    }):
+    with patch.dict(
+        os.environ,
+        {
+            "WAYLAND_DISPLAY": "wayland-0",
+            "XDG_CURRENT_DESKTOP": "GNOME",
+        },
+    ):
         assert wayland_compositor() == "gnome"
 
 
 def test_wayland_compositor_detects_kde():
     from lean_ai.tools.ui_capture_desktop import wayland_compositor
 
-    with patch.dict(os.environ, {
-        "WAYLAND_DISPLAY": "wayland-0",
-        "XDG_CURRENT_DESKTOP": "KDE",
-    }):
+    with patch.dict(
+        os.environ,
+        {
+            "WAYLAND_DISPLAY": "wayland-0",
+            "XDG_CURRENT_DESKTOP": "KDE",
+        },
+    ):
         assert wayland_compositor() == "kde"
 
 
@@ -297,8 +307,13 @@ def test_analysis_unavailable_when_feature_disabled():
 def test_analysis_unavailable_when_no_vision_model():
     from lean_ai.tools.ui_analysis import availability_reason, is_analysis_available
 
-    with patch.object(settings, "enable_ui_verification", True), patch.object(
-        settings, "vision_model", "",
+    with (
+        patch.object(settings, "enable_ui_verification", True),
+        patch.object(
+            settings,
+            "vision_model",
+            "",
+        ),
     ):
         assert is_analysis_available() is False
         reason = availability_reason()
@@ -363,8 +378,11 @@ def test_format_analysis_includes_screenshot_path():
     from lean_ai.tools.ui_verification import _format_analysis
 
     analysis = UIAnalysis(
-        inventory=UIInventory(), text=UITextTranscript(),
-        colors={}, answer="ok", warnings=[],
+        inventory=UIInventory(),
+        text=UITextTranscript(),
+        colors={},
+        answer="ok",
+        warnings=[],
     )
     out = _format_analysis(analysis, Path("/abs/path/to/screenshot.png"))
     assert "`/abs/path/to/screenshot.png`" in out
@@ -411,7 +429,8 @@ def test_ui_tools_present_when_feature_enabled():
     with patch.object(settings, "enable_ui_verification", True):
         ui = _maybe_ui_verification_tools()
         assert [t["function"]["name"] for t in ui] == [
-            "verify_web_ui", "verify_desktop_ui",
+            "verify_web_ui",
+            "verify_desktop_ui",
         ]
 
         for builder in (
@@ -423,9 +442,7 @@ def test_ui_tools_present_when_feature_enabled():
         ):
             names = [t["function"]["name"] for t in builder()]
             assert "verify_web_ui" in names, f"{builder.__name__} missing verify_web_ui"
-            assert "verify_desktop_ui" in names, (
-                f"{builder.__name__} missing verify_desktop_ui"
-            )
+            assert "verify_desktop_ui" in names, f"{builder.__name__} missing verify_desktop_ui"
 
 
 def test_verify_web_ui_schema_required_params():
@@ -446,7 +463,9 @@ def test_verify_desktop_ui_schema_required_params():
     fn = VERIFY_DESKTOP_UI_TOOL["function"]
     assert fn["name"] == "verify_desktop_ui"
     assert set(fn["parameters"]["required"]) == {
-        "launch_command", "window_title", "question",
+        "launch_command",
+        "window_title",
+        "question",
     }
     # launch_command must be an array (enforces list → blocks shell injection)
     assert fn["parameters"]["properties"]["launch_command"]["type"] == "array"

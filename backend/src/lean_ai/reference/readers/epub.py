@@ -38,7 +38,8 @@ class EpubReader(DocumentReader):
             logger.warning(
                 "Cannot read EPUB %s — missing optional dependency: %s. "
                 "Install with: pip install ebooklib",
-                path, e,
+                path,
+                e,
             )
             return []
 
@@ -88,14 +89,16 @@ class EpubReader(DocumentReader):
             for chunk_text in raw_chunks:
                 if not chunk_text.strip():
                     continue
-                chunks.append(ReferenceChunk(
-                    doc_path=rel_path,
-                    doc_title=doc_title,
-                    section=section_title,
-                    content=chunk_text,
-                    chunk_index=chunk_index,
-                    format="epub",
-                ))
+                chunks.append(
+                    ReferenceChunk(
+                        doc_path=rel_path,
+                        doc_title=doc_title,
+                        section=section_title,
+                        content=chunk_text,
+                        chunk_index=chunk_index,
+                        format="epub",
+                    )
+                )
                 chunk_index += 1
 
         return chunks

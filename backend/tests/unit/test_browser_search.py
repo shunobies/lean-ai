@@ -277,4 +277,3 @@ class TestParseBingResults:
     def test_empty_html(self):
         assert _parse_bing_results("") == []
         assert _parse_bing_results("<html></html>") == []
-

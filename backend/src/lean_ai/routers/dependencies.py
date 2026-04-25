@@ -32,10 +32,9 @@ def _create_provider():
 
     if provider == "openai":
         if not settings.openai_api_key:
-            raise ValueError(
-                "LEAN_AI_OPENAI_API_KEY must be set when LEAN_AI_LLM_PROVIDER=openai"
-            )
+            raise ValueError("LEAN_AI_OPENAI_API_KEY must be set when LEAN_AI_LLM_PROVIDER=openai")
         from lean_ai.llm.provider_openai import OpenAIProvider
+
         return OpenAIProvider(
             api_key=settings.openai_api_key,
             model=settings.openai_model,
@@ -54,6 +53,7 @@ def _create_provider():
                 "LEAN_AI_ANTHROPIC_API_KEY must be set when LEAN_AI_LLM_PROVIDER=anthropic"
             )
         from lean_ai.llm.provider_anthropic import AnthropicProvider
+
         return AnthropicProvider(
             api_key=settings.anthropic_api_key,
             model=settings.anthropic_model,
@@ -66,14 +66,11 @@ def _create_provider():
 
     if provider == "serve":
         if not settings.serve_api_key:
-            raise ValueError(
-                "LEAN_AI_SERVE_API_KEY must be set when LEAN_AI_LLM_PROVIDER=serve"
-            )
+            raise ValueError("LEAN_AI_SERVE_API_KEY must be set when LEAN_AI_LLM_PROVIDER=serve")
         if not settings.serve_model:
-            raise ValueError(
-                "LEAN_AI_SERVE_MODEL must be set when LEAN_AI_LLM_PROVIDER=serve"
-            )
+            raise ValueError("LEAN_AI_SERVE_MODEL must be set when LEAN_AI_LLM_PROVIDER=serve")
         from lean_ai.llm.provider_openai import OpenAIProvider
+
         return OpenAIProvider(
             api_key=settings.serve_api_key,
             model=settings.serve_model,
@@ -88,10 +85,9 @@ def _create_provider():
 
     if provider == "gemini":
         if not settings.gemini_api_key:
-            raise ValueError(
-                "LEAN_AI_GEMINI_API_KEY must be set when LEAN_AI_LLM_PROVIDER=gemini"
-            )
+            raise ValueError("LEAN_AI_GEMINI_API_KEY must be set when LEAN_AI_LLM_PROVIDER=gemini")
         from lean_ai.llm.provider_gemini import GeminiProvider
+
         return GeminiProvider(
             api_key=settings.gemini_api_key,
             model=settings.gemini_model,
@@ -103,8 +99,7 @@ def _create_provider():
         )
 
     raise ValueError(
-        f"Unknown LLM provider: {provider!r}. "
-        f"Supported: ollama, openai, anthropic, gemini, serve"
+        f"Unknown LLM provider: {provider!r}. Supported: ollama, openai, anthropic, gemini, serve"
     )
 
 
@@ -119,13 +114,15 @@ llm_client = LLMClient(
 
 # Inline prediction client — always Ollama-backed
 _inline_client: LLMClient = (
-    LLMClient(provider=OllamaProvider(
-        ollama_url=settings.effective_inline_url,
-        model=settings.inline_model,
-        max_tokens=settings.inline_max_tokens,
-        context_window=settings.inline_context_window,
-        enable_thinking=False,
-    ))
+    LLMClient(
+        provider=OllamaProvider(
+            ollama_url=settings.effective_inline_url,
+            model=settings.inline_model,
+            max_tokens=settings.inline_max_tokens,
+            context_window=settings.inline_context_window,
+            enable_thinking=False,
+        )
+    )
     if settings.inline_model
     else llm_client
 )

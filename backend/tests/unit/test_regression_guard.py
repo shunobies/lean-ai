@@ -17,29 +17,35 @@ from lean_ai.tools.regression_guard import (
 )
 
 
-@pytest.mark.parametrize("path", [
-    "regression_foo_test.py",
-    "regression-bar.spec.ts",
-    "tests/regression/foo_test.py",
-    "tests/regression/bar.spec.ts",
-    "spec/regression/baz_spec.rb",
-    "src/regressions/core.py",
-    "path/to/regressions/deep/nested.go",
-    "tests/regression/FooTest.java",
-])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "regression_foo_test.py",
+        "regression-bar.spec.ts",
+        "tests/regression/foo_test.py",
+        "tests/regression/bar.spec.ts",
+        "spec/regression/baz_spec.rb",
+        "src/regressions/core.py",
+        "path/to/regressions/deep/nested.go",
+        "tests/regression/FooTest.java",
+    ],
+)
 def test_matches_regression_paths(path: str) -> None:
     assert is_regression_test_path(path), f"should match: {path}"
 
 
-@pytest.mark.parametrize("path", [
-    "tests/test_foo.py",
-    "src/service.py",
-    "test_regression_logic.py",  # "regression" is inside a filename, no path component
-    "regression.log",            # log file, not a test file
-    "notes/regression.md",       # doc, not a code extension
-    "regression",                # bare word with no extension
-    "",
-])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "tests/test_foo.py",
+        "src/service.py",
+        "test_regression_logic.py",  # "regression" is inside a filename, no path component
+        "regression.log",  # log file, not a test file
+        "notes/regression.md",  # doc, not a code extension
+        "regression",  # bare word with no extension
+        "",
+    ],
+)
 def test_does_not_match_non_regression_paths(path: str) -> None:
     assert not is_regression_test_path(path), f"should NOT match: {path}"
 

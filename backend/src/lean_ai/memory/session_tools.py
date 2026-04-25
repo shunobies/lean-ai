@@ -178,9 +178,7 @@ async def _summarize_conversation(
         if not transcript_parts:
             return ""
 
-        session_data = f"TASK: {task}\n\nCONVERSATION:\n" + "\n".join(
-            transcript_parts
-        )
+        session_data = f"TASK: {task}\n\nCONVERSATION:\n" + "\n".join(transcript_parts)
         prompt_text = registry.get("memory.session_summary")
         user_msg = prompt_text.format(session_data=session_data)
 

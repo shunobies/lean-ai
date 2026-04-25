@@ -29,6 +29,7 @@ def _unavailable(feature: str) -> JSONResponse:
     """Return 501 with setup instructions for a missing voice feature."""
     try:
         from lean_ai.voice.availability import get_setup_instructions
+
         instructions = get_setup_instructions()
         info = instructions.get(feature, {})
     except ImportError:
@@ -48,6 +49,7 @@ def _get_manager():
     """Get the AudioManager or None."""
     try:
         from lean_ai.voice.audio_manager import get_audio_manager
+
         return get_audio_manager()
     except ImportError:
         return None
@@ -111,7 +113,9 @@ async def tts_synthesize(request: TTSRequest):
 
     try:
         result = await mgr.synthesize(
-            request.text, voice=request.voice, speed=request.speed,
+            request.text,
+            voice=request.voice,
+            speed=request.speed,
         )
         return TTSResponse(**result)
     except Exception as e:
@@ -129,15 +133,18 @@ async def tts_stream(request: TTSRequest):
     async def event_generator():
         try:
             async for chunk in mgr.synthesize_streaming(
-                request.text, voice=request.voice, speed=request.speed,
+                request.text,
+                voice=request.voice,
+                speed=request.speed,
             ):
                 yield f"data: {json.dumps(chunk)}\n\n"
-            yield "data: {\"type\": \"done\"}\n\n"
+            yield 'data: {"type": "done"}\n\n'
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(
-        event_generator(), media_type="text/event-stream",
+        event_generator(),
+        media_type="text/event-stream",
     )
 
 
@@ -155,15 +162,18 @@ async def tts_stream_pcm(request: TTSRequest):
     async def event_generator():
         try:
             async for chunk in mgr.tts.synthesize_streaming_pcm(
-                request.text, voice=request.voice, speed=request.speed,
+                request.text,
+                voice=request.voice,
+                speed=request.speed,
             ):
                 yield f"data: {json.dumps(chunk)}\n\n"
-            yield "data: {\"type\": \"done\"}\n\n"
+            yield 'data: {"type": "done"}\n\n'
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(
-        event_generator(), media_type="text/event-stream",
+        event_generator(),
+        media_type="text/event-stream",
     )
 
 
@@ -181,12 +191,14 @@ async def list_voices():
 
 
 @voice_router.post(
-    "/voice/tts/ensure-models", response_model=EnsureModelsResponse,
+    "/voice/tts/ensure-models",
+    response_model=EnsureModelsResponse,
 )
 async def tts_ensure_models():
     """Ensure TTS model files are downloaded. Returns download status."""
     try:
         from lean_ai.voice.availability import is_tts_available
+
         if not is_tts_available():
             return _unavailable("tts")
     except ImportError:
@@ -206,7 +218,8 @@ async def tts_ensure_models():
         model_path, voices_path = get_model_paths()
         size = os.path.getsize(model_path) + os.path.getsize(voices_path)
         return EnsureModelsResponse(
-            downloaded=True, size_mb=round(size / (1024 * 1024), 1),
+            downloaded=True,
+            size_mb=round(size / (1024 * 1024), 1),
         )
     except Exception as e:
         logger.exception("TTS model download failed")
@@ -277,7 +290,8 @@ async def wakeword_start():
 
     try:
         await mgr.start_wake_word(
-            _on_wake_word_detected, on_error=_on_wake_word_error,
+            _on_wake_word_detected,
+            on_error=_on_wake_word_error,
         )
         return {"status": "listening"}
     except Exception as e:
@@ -350,6 +364,7 @@ async def voice_status():
         from lean_ai.voice.availability import (
             voice_status as get_status,
         )
+
         status = get_status()
         status["setup"] = get_setup_instructions()
         return VoiceStatusResponse(**status)
