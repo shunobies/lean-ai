@@ -8,7 +8,7 @@ to produce concise, user-facing progress messages.
 def humanize_tool_call(name: str, args: dict) -> str:
     """Return a concise, user-facing description of a tool invocation."""
     if name == "read_file":
-        return f"Reading {args.get('path', '...')}"
+        return f"Reading {args.get('path', '...')} (up to 500 lines)"
     if name == "grep_files":
         return f"Searching for '{args.get('pattern', '...')}'"
     if name == "list_directory":
