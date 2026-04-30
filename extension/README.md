@@ -69,6 +69,7 @@ If you prefer to manage the backend yourself, set `lean-ai.backendDir` or `lean-
 | `/reject` | Discard the agent's branch |
 | `/scaffold` | Bootstrap a new project from a recipe |
 | `/note` | Save a note from the chat (auto-categorized by project) |
+| `/memories` | Manually trigger memory extraction from the last completed workflow session |
 | `/reboot` | Restart the backend server |
 
 ## Vision

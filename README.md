@@ -130,6 +130,7 @@ See [Architecture](docs/architecture.md) for the full breakdown.
 | `/mock-interview [slug]` | Interactive Q&A practice with rubric scoring |
 | `/note` | Save a note (auto-categorized by project) |
 | `/scaffold` | Bootstrap a new project |
+| `/memories` | Manually trigger memory extraction from the last completed workflow session |
 | `/reboot` | Restart the backend server |
 
 ## Configuration

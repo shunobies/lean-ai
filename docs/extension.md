@@ -233,6 +233,7 @@ Type these in the chat panel:
 | `/mock-interview [slug]` | Interactive Q&A practice with rubric scoring |
 | `/note <text>` | Save a quick note |
 | `/scaffold <name>` | Bootstrap a new project from a recipe |
+| `/memories` | Manually trigger memory extraction from the last completed workflow session |
 | `/reboot` | Restart the backend server |
 
 ## Command Palette
