@@ -24,9 +24,26 @@ from lean_ai.memory.db import (
 )
 from lean_ai.memory.index import index_memory, remove_memory
 
+
+class ExtractMemoriesRequest(BaseModel):
+    session_id: str = Field(description="Session ID to extract memories from.")
+    repo_root: str = Field(description="Workspace root for context.")
+    task: str | None = Field(default=None, description="Task description (used as source_task for the memory).")
+    session_summary: str | None = Field(default=None, description="Session summary text to analyze (optional; falls back to session task if not provided).")
+    source_phase: str = Field(default="session_end", description="Phase label for the memory source.")
+
+
 logger = logging.getLogger(__name__)
 
 memories_router = APIRouter(prefix="/memories", tags=["memories"])
+
+
+class ExtractMemoriesResponse(BaseModel):
+    """Response from the extract_memories endpoint."""
+
+    session_id: str
+    memories_extracted: int
+    categories: list[str]
 
 
 class CreateMemoryRequest(BaseModel):
@@ -173,3 +190,51 @@ async def delete_memory_endpoint(memory_id: str, repo_root: str):
         await db.close()
     remove_memory(repo_root, memory_id)
     return {"deleted": memory_id}
+
+
+class ExtractMemoriesResponse(BaseModel):
+    """Response from the extract_memories endpoint."""
+
+    session_id: str
+    memories_extracted: int
+    categories: list[str]
+
+
+@memories_router.post("/extract", response_model=ExtractMemoriesResponse)
+async def extract_memories_endpoint(req: ExtractMemoriesRequest):
+    """Manually trigger memory extraction for a completed session.
+
+    This is useful when the background extraction task was lost
+    (e.g. process restart, no idle time) or the user wants to
+    force-extract memories after approving/rejecting a workflow.
+    """
+    from lean_ai.llm.facade import LLMClient
+    from lean_ai.memory.extractor import extract_memories
+    from lean_ai.routers.dependencies import worker_llm_client
+
+    # Get the LLM client
+    llm: LLMClient | None = worker_llm_client
+
+    if llm is None:
+        raise HTTPException(
+            status_code=503,
+            detail="No LLM client available — memories extraction requires a running LLM provider.",
+        )
+
+    # Call the synchronous extractor
+    extracted = await extract_memories(
+        llm=llm,
+        repo_root=req.repo_root,
+        session_id=req.session_id,
+        session_summary=req.session_summary,
+        source_task=req.task,
+        source_phase=req.source_phase,
+    )
+
+    categories = [m.get("category", "unknown") for m in extracted]
+
+    return ExtractMemoriesResponse(
+        session_id=req.session_id,
+        memories_extracted=len(extracted),
+        categories=categories,
+    )

@@ -533,6 +533,34 @@ export async function deleteMemory(
     }
 }
 
+export interface ExtractMemoriesResponse {
+    session_id: string;
+    memories_extracted: number;
+    categories: string[];
+}
+
+export async function extractMemories(
+    baseUrl: string,
+    req: {
+        session_id: string;
+        repo_root: string;
+        task: string;
+        session_summary?: string;
+        source_phase?: string;
+    },
+): Promise<ExtractMemoriesResponse> {
+    const resp = await fetch(`${baseUrl}/api/memories/extract`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+    });
+    if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        throw new Error(`Failed to extract memories: ${resp.statusText}${body ? ` — ${body}` : ""}`);
+    }
+    return resp.json() as Promise<ExtractMemoriesResponse>;
+}
+
 // ---------------------------------------------------------------------------
 // Chat
 // ---------------------------------------------------------------------------

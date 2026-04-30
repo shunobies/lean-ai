@@ -77,6 +77,8 @@ import {
     confirmMemory as _confirmMemory,
     rejectMemory as _rejectMemory,
     deleteMemory as _deleteMemory,
+    extractMemories as _extractMemories,
+    type ExtractMemoriesResponse,
     type ListMemoriesParams,
     type MemoryRow,
     chat as _chat,
@@ -671,6 +673,16 @@ export class BackendClient {
     }
     deleteMemory(memoryId: string, repoRoot: string): Promise<void> {
         return _deleteMemory(this.baseUrl, memoryId, repoRoot);
+    }
+
+    extractMemories(req: {
+        session_id: string;
+        repo_root: string;
+        task: string;
+        session_summary?: string;
+        source_phase?: string;
+    }): Promise<ExtractMemoriesResponse> {
+        return _extractMemories(this.baseUrl, req);
     }
 
     chat(

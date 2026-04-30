@@ -1347,6 +1347,7 @@ export async function handleHelpCommand(
         "",
         "**Notes + system**",
         "- `/note <text>` — Save a quick note.",
+        "- `/memories` — Manually trigger memory extraction from the last completed workflow session.",
         "- `/reboot` — Restart the backend server.",
         "- `/help` — Show this help.",
     ].join("\n");
@@ -1356,4 +1357,78 @@ export async function handleHelpCommand(
         text: helpText,
         cls: "msg-system",
     });
+}
+
+// ── /memories — manually trigger memory extraction for the last session ─
+
+export async function handleMemoriesCommand(
+    ctx: SlashCommandContext,
+    args: string,
+): Promise<void> {
+    // Determine the session to extract memories from
+    let sessionId = ctx.getLastCompletedSessionId();
+    if (!sessionId) {
+        // Allow optional session_id as argument
+        const trimmed = args.trim();
+        if (trimmed) {
+            sessionId = trimmed;
+        } else {
+            ctx.postMessage({
+                type: "error",
+                text: "No completed workflow found. Run `/agent` first or pass a session ID: `/memories <session_id>`",
+            });
+            return;
+        }
+    }
+
+    // Check backend health first
+    ctx.postMessage({ type: "thinking", show: true, text: "Extracting memories..." });
+
+    const healthy = await ctx.client.healthCheck();
+    if (!healthy) {
+        ctx.postMessage({ type: "thinking", show: false });
+        ctx.postMessage({
+            type: "error",
+            text: "Backend not available. Start the server:\ncd backend && uvicorn lean_ai.main:app --reload --port 8422",
+        });
+        return;
+    }
+
+    const repoRoot = ctx.getRepoRoot();
+
+    try {
+        const result = await ctx.client.extractMemories({
+            session_id: sessionId,
+            repo_root: repoRoot,
+            task: args.trim() || "",
+        });
+
+        ctx.postMessage({ type: "thinking", show: false });
+
+        const categories = result.categories.length > 0
+            ? `categories: ${result.categories.join(", ")}`
+            : "no new memories extracted";
+
+        ctx.postMessage({
+            type: "reply",
+            text: `Extracted ${result.memories_extracted} memory(ies) for session \`${sessionId}\`: ${categories}.`,
+            cls: "msg-system",
+        });
+    } catch (e) {
+        ctx.postMessage({ type: "thinking", show: false });
+        const error = e instanceof Error ? e.message : String(e);
+
+        // Provide a helpful message for the 503 case (no LLM available)
+        if (error.includes("503") || error.includes("LLM client")) {
+            ctx.postMessage({
+                type: "error",
+                text: "No LLM client available — memory extraction requires a running LLM provider.",
+            });
+        } else {
+            ctx.postMessage({
+                type: "error",
+                text: `Memory extraction failed: ${error}`,
+            });
+        }
+    }
 }

@@ -30,6 +30,7 @@ import {
     handleLogAppliedCommand,
     handleMockInterviewCommand,
     handleHelpCommand,
+    handleMemoriesCommand,
 } from "./slashCommandsWorkspace";
 
 // ── Context interface ────────────────────────────────────────────────
@@ -77,6 +78,7 @@ export function createSlashCommands(
     map.set("/log-applied", (args) => handleLogAppliedCommand(ctx, args));
     map.set("/mock-interview", (args) => handleMockInterviewCommand(ctx, args));
     map.set("/help", (args) => handleHelpCommand(ctx, args));
+    map.set("/memories", (args) => handleMemoriesCommand(ctx, args));
     return map;
 }
 
