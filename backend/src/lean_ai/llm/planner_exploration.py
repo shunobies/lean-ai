@@ -756,6 +756,32 @@ async def _run_serial_exploration(
         if pad:
             refresh_parts.append(f"SCRATCHPAD (current state):\n{pad}")
         if obs or pad or jrnl:
+            # Build an "already explored" summary from observations
+            explored_files = []
+            if obs:
+                if isinstance(obs, list):
+                    for item in obs:
+                        if isinstance(item, dict) and item.get("file_path"):
+                            explored_files.append(item["file_path"])
+                        elif isinstance(item, str):
+                            explored_files.append(item)
+                elif isinstance(obs, dict):
+                    for item in obs.values():
+                        if isinstance(item, dict) and item.get("file_path"):
+                            explored_files.append(item["file_path"])
+
+            refresh_parts.append(
+                "INSTRUCTIONS AFTER CONTEXT REFRESH:\n"
+                "1. Review the journal, observations, and scratchpad above. These represent work "
+                "you ALREADY completed before the refresh.\n"
+                "2. Do NOT re-read or re-explore files that are already recorded in observations.\n"
+                "3. If you need to explore new files, add them to your journal as you go.\n"
+                "4. Resume from where you left off — check the scratchpad for your last known state."
+            )
+            if explored_files:
+                refresh_parts.append(
+                    f"ALREADY EXPLORED FILES (do not re-read): {', '.join(explored_files)}"
+                )
             new_messages.append(
                 {
                     "role": "user",
