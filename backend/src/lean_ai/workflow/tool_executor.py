@@ -1050,6 +1050,30 @@ def make_tool_executor(
 
         elif name == "task_complete":
             return "Task marked complete."
+        elif name == "request_clarification":
+            question = (arguments.get("question") or "").strip()
+            if not question:
+                return "ERROR: request_clarification requires a non-empty 'question' string."
+            await ws_send(
+                ws,
+                "clarification_needed",
+                {"questions": question},
+            )
+            if dispatcher is None:
+                return (
+                    "ERROR: request_clarification unavailable because no websocket dispatcher "
+                    "is attached."
+                )
+            user_msg = await dispatcher.wait_for_user_message()
+            if user_msg.get("type") != "user_message":
+                return (
+                    "ERROR: expected user_message while clarification was pending; got "
+                    f"{user_msg.get('type')!r}."
+                )
+            answer = (user_msg.get("content") or "").strip()
+            if not answer:
+                return "User replied with an empty response."
+            return answer
 
         return f"ERROR: Unknown tool: {name}"
 

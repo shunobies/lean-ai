@@ -169,3 +169,13 @@ async def test_ping_receives_pong():
         assert any(m.get("type") == "pong" for m in ws.sent)
     finally:
         await dispatcher.stop()
+
+
+@pytest.mark.asyncio
+async def test_wait_for_user_message_returns_execution_message():
+    ws = FakeWebSocket()
+    dispatcher = WSMessageDispatcher(ws)
+    dispatcher._user_messages.put_nowait({"type": "user_message", "content": "answer"})
+    msg = await dispatcher.wait_for_user_message()
+    assert msg["type"] == "user_message"
+    assert msg["content"] == "answer"
