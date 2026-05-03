@@ -1,5 +1,14 @@
 # Workflow
 
+## Mandatory Intake Loop
+Before any file creation, web search, or crawling, complete this intake loop:
+1. Ask concise clarifying questions for any missing required constraints (vehicle type/body style, max budget, location, radius, mileage cap, title constraints, seller type preference, optional criteria).
+2. Apply defaults only when user is silent: radius defaults to 250 miles around provided location; existing hybrid/price/mileage defaults remain only if user does not provide alternatives.
+3. Recap interpreted requirements in a short confirmation summary.
+4. Only after recap confirmation, proceed to mandatory ledger creation and normal crawling loops.
+
+If requirements change mid-run, add a **Requirements Change** note to the ledger and adjust search filters/strategy before continuing.
+
 ## Mandatory First Step
 Before any web search:
 1. Check whether `hybrid_car_private_seller_research.md` exists.

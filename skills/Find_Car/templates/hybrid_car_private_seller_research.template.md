@@ -1,5 +1,17 @@
 # Hybrid Car Private Seller Research
 
+## User Requirements
+
+- Vehicle type/body style: [captured value]
+- Max budget: [captured value or default]
+- User location (city/ZIP): [captured value]
+- Search radius: [captured value or default: 250 miles]
+- Mileage cap: [captured value or default]
+- Title constraints: [captured value or default]
+- Seller type preference: [captured value or default]
+- Optional criteria: [captured values or "None provided"]
+- Defaults used: [explicit list of any defaults applied]
+
 ## Search Summary
 
 Search started.
@@ -48,6 +60,10 @@ Target criteria:
 
 | Source | URL | Page Type | Useful Links Found | Notes |
 |--------|-----|-----------|--------------------|-------|
+
+## Requirements Change Log
+
+- None.
 
 ## Search Notes
 
