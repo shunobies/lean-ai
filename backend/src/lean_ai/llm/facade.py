@@ -61,6 +61,7 @@ class _TurnState:
     # whatever content has accumulated.
     consecutive_budget_interrupts: int = 0
     max_budget_interrupts: int = 2
+    pre_refresh_nudge_sent: bool = False
 
 
 # ── Claim verification ────────────────────────────────────────────
@@ -958,8 +959,32 @@ class LLMClient:
         # ── Context refresh (event-driven by token threshold) ─────
         if on_context_refresh and prompt_tokens is not None:
             limit = int(settings.refresh_threshold * self._provider.context_window)
+            # Pre-refresh warning should be tied to the existing configurable
+            # refresh threshold (default 0.7), not a separate hardcoded ratio.
+            # Fire shortly before refresh so the model can checkpoint journal
+            # and scratchpad state before callback-based context rebuild.
+            pre_refresh_buffer = max(256, int(self._provider.context_window * 0.03))
+            pre_refresh_limit = max(1, limit - pre_refresh_buffer)
+            if (
+                prompt_tokens >= pre_refresh_limit
+                and prompt_tokens < limit
+                and not state.pre_refresh_nudge_sent
+            ):
+                state.pre_refresh_nudge_sent = True
+                return TurnAction(
+                    verdict=TurnVerdict.NUDGE,
+                    message=(
+                        "CONTEXT WARNING: You are nearing context refresh. "
+                        "Before continuing, summarize progress and key findings with "
+                        "add_journal_entry, then write the single best next action to "
+                        "update_scratchpad so it can be resumed after refresh."
+                    ),
+                )
             if prompt_tokens >= limit:
+                state.pre_refresh_nudge_sent = False
                 return TurnAction(verdict=TurnVerdict.REFRESH)
+            if prompt_tokens < pre_refresh_limit:
+                state.pre_refresh_nudge_sent = False
 
         # ── Periodic task reminder ────────────────────────────────
         if (
