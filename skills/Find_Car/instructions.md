@@ -1,13 +1,15 @@
 # Skill: Find_Car
 
-Use this skill to find sell-by-owner hybrid vehicle listings under $19,000 and maintain a strict working ledger.
+Use this skill to find **private-seller hybrid vehicle listings** and maintain a strict, append-safe markdown ledger.
 
 ## Model Target
+
 - Primary target model: `gpt-oss:20b`
 - Reasoning mode: High
 - Priority: correctness and auditability over speed
 
 ## Required Files
+
 - `workflow.md`
 - `criteria_and_validation.md`
 - `crawling_and_url_patterns.md`
@@ -15,29 +17,34 @@ Use this skill to find sell-by-owner hybrid vehicle listings under $19,000 and m
 - `templates/hybrid_car_private_seller_research.template.md`
 - `tools_and_fallbacks.md`
 
-Read and follow all files above before starting the task. Use `tools_and_fallbacks.md` when `fetch_url` is insufficient.
+Read and follow all files above before starting the task.
 
-## Requirements Intake (Mandatory Before Search)
-Before any ledger creation or search/crawling, run a concise intake loop:
-- Ask short clarifying questions for any missing constraints.
-- Required intake fields: vehicle type/body style, max budget, user location (city/ZIP), search radius, mileage cap, title constraints, seller type preference, and optional criteria (year range, makes/models, fuel economy, drivetrain, seating, features, etc.).
-- Defaults when user is silent: radius defaults to 250 miles around provided location; keep existing hybrid/price/mileage defaults only if the user does not provide alternatives.
-- Confirm interpreted requirements in a short recap before proceeding.
-- If requirements change mid-run, log a **Requirements Change** note in the ledger and update search strategy immediately.
+## Core Rules
+
+- Never fabricate listing details.
+- Missing fields: `Not listed`.
+- Uncertain fields: `Unclear`.
+- Do not bypass logins, CAPTCHAs, paywalls, robots restrictions, or anti-bot controls.
+- Default target is **private seller / sell-by-owner**.
+- Dealer listings are excluded unless the user explicitly changes requirements.
 
 ## Invocation Contract
+
 When activated:
-1. Load all referenced files.
-2. Execute the mandatory-first-step workflow exactly.
-3. Treat the research markdown as a live ledger.
-4. Never fabricate listing details.
+
+1. Load all required files.
+2. Execute `workflow.md` phases in order.
+3. Treat `hybrid_car_private_seller_research.md` as a live ledger.
+4. Use append-only ledger edits as defined in `memory_and_reporting.md`.
 
 ## Output Contract
+
 Final response must include:
+
 - number of qualifying listings found
-- filename created
+- filename used
 - biggest uncertainty
-- whether search stayed within 250 miles of Kansas City or expanded nationwide
+- whether search stayed local or expanded nationwide
 - most useful sources
 - blocked/limited sources
 - recommended next steps

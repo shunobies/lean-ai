@@ -1,56 +1,70 @@
 # Criteria and Validation Rules
 
-## Required criteria
+## Required Criteria (Default)
+
 A listing qualifies only if all required checks pass:
+
 1. Hybrid vehicle
 2. Private seller / sell-by-owner (or likely private seller)
-3. Price under $19,000
-4. Mileage under 80,000
+3. Price under $19,000 (unless user changed budget)
+4. Mileage under 80,000 (unless user changed mileage cap)
 5. Reachable listing URL
-6. Prefer clean title when available
+6. Title not branded/salvage/rebuilt/flood/total-loss
 
-Search should start within 250 miles of Kansas City and expand nationwide only if fewer than 25 qualifying listings are found.
+Search starts local (default 250-mile radius around user location) and expands nationwide only when local yield is insufficient.
 
-## Explicit exclusions
-Reject clear:
-- dealer/dealership/broker/auction/commercial/business-account listings
-- rebuilt/salvage/branded/lemon/flood/total-loss/insurance-loss titles
-- non-hybrids
-- duplicates
-- over-price / over-mileage listings
+## Explicit Exclusions
 
-## Required fields for accepted listings
+Reject listings that are clearly:
+
+- dealer / dealership / broker / auction / commercial / business-account
+- rebuilt / salvage / branded / lemon / flood / total-loss / insurance-loss title
+- non-hybrid
+- duplicate of an already recorded listing
+- above budget or mileage cap
+
+If user explicitly allows dealers, log that change in `Requirements Change Log` and apply updated rule.
+
+## Required Fields for Accepted Listings
+
 - Year
 - Make
-- Model/trim
+- Model/Trim
 - Price
 - Miles
 - Location
 - Seller Type
 - Contact Info
 - Listing URL
-- VIN (or `Not listed`)
+- VIN
 - Title Status
 - Owner Count
 - Hybrid Verification
 - Notes
 
-If missing: `Not listed`
-If uncertain: `Unclear`
-Never guess.
+Field rules:
 
-## Seller type values
+- Missing: `Not listed`
+- Uncertain: `Unclear`
+- Never guess
+
+## Seller Type Values
+
 - `Private seller`
 - `Likely private seller`
 - `Unclear`
 
-## Contact information
-Use only public contact details visible on listing pages.
-If unavailable, use `Contact through listing`.
+## Contact Information
 
-## Hybrid verification
+Use only public contact details visible on listing pages.
+If unavailable: `Contact through listing`.
+
+## Hybrid Verification
+
 Must verify listed year/make/model/trim was sold as hybrid.
+
 Preferred sources:
+
 - manufacturer pages
 - Edmunds
 - Kelley Blue Book
@@ -59,22 +73,28 @@ Preferred sources:
 - Consumer Reports
 - Wikipedia (fallback only)
 
-Format: `Verified hybrid — [source name]`
+Format:
+
+- `Verified hybrid — [source name]`
+
 If not verifiable: reject with `Hybrid status could not be verified`.
 
-## Title status values
+## Title Status Values
+
 - `Confirmed clean`
 - `Likely clean`
 - `Unclear`
 - `Not clean / branded title`
 
 Rules:
+
 - explicit "clean/clear title" -> `Confirmed clean`
 - "clean title in hand" -> `Confirmed clean`
 - "title in hand" only -> `Likely clean`
 - no title mention -> `Unclear`
 
-## Owner count values
+## Owner Count Values
+
 - `1 owner`
 - `2 owners`
 - `3+ owners`
