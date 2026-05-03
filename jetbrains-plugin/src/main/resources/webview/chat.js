@@ -32,6 +32,7 @@
         { cmd: 'agent', desc: 'Start agent workflow (plan → approve → execute)', hasArgs: true },
         { cmd: 'fix', desc: 'Bug-fix mode (skip planning)', hasArgs: true },
         { cmd: 'request', desc: 'Open-ended task mode', hasArgs: true },
+        { cmd: 'skill', desc: 'Run a skill via request workflow (auto-branch)', hasArgs: true },
         { cmd: 'guide', desc: 'Regenerate framework guide' },
         { cmd: 'style', desc: 'Regenerate code style guide' },
         { cmd: 'scaffold', desc: 'Create project from template' },
