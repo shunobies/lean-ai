@@ -186,7 +186,7 @@ class ChatBridge(private val project: Project) {
                     }
                 }
             }
-            "agent", "fix", "request" -> {
+            "agent", "fix", "request", "skill" -> {
                 // Start a workflow session via WebSocket
                 startWorkflow(cmd, args, workspacePath)
             }
@@ -209,7 +209,7 @@ class ChatBridge(private val project: Project) {
     }
 
     /**
-     * Start a workflow session (agent, fix, or request mode) via WebSocket.
+     * Start a workflow session (agent, fix, request, or skill alias) via WebSocket.
      */
     private fun startWorkflow(mode: String, task: String, workspacePath: String) {
         ApplicationManager.getApplication().executeOnPooledThread {
@@ -218,7 +218,7 @@ class ChatBridge(private val project: Project) {
             // Create session
             val wsMode = when (mode) {
                 "fix" -> "fix"
-                "request" -> "request"
+                "request", "skill" -> "request"
                 else -> "plan"
             }
             val session = client.createSession(

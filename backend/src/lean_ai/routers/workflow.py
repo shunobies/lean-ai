@@ -252,7 +252,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                 except Exception:
                                     logger.debug("Failed to log conversation entry", exc_info=True)
 
-                            # Detect /fix or /request prefix → skip planning
+                            # Detect /fix, /request, or /skill prefix → skip planning
                             mode = "plan"
                             task = content
                             if content.startswith("/fix "):
@@ -261,6 +261,9 @@ async def session_stream(websocket: WebSocket, session_id: str):
                             elif content.startswith("/request "):
                                 mode = "request"
                                 task = content[9:]  # strip "/request " prefix
+                            elif content.startswith("/skill "):
+                                mode = "request"
+                                task = content[7:]  # strip "/skill " prefix (alias for /request)
 
                             # Refine task with local LLM before cloud execution
                             if refiner is not None and mode == "plan":

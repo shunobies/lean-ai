@@ -28,16 +28,22 @@ import {
     type MockInterviewDifficulty,
 } from "./jobSearchPrompts";
 
-function parseSkillNameArg(args: string): string {
+function parseSkillArgs(args: string): { skillName: string; task: string } {
     const trimmed = args.trim();
     if (!trimmed) {
-        return "";
+        return { skillName: "", task: "" };
     }
-    const quoted = trimmed.match(/^(['"])(.+)\1$/s);
+
+    const quoted = trimmed.match(/^(['"])(.+)\1(?:\s+(.*))?$/s);
     if (quoted) {
-        return quoted[2].trim();
+        return {
+            skillName: quoted[2].trim(),
+            task: (quoted[3] || "").trim(),
+        };
     }
-    return trimmed.split(/\s+/)[0];
+
+    const [skillName, ...rest] = trimmed.split(/\s+/);
+    return { skillName: (skillName || "").trim(), task: rest.join(" ").trim() };
 }
 
 function resolveReferencedSkillFiles(instructions: string, skillDir: string): string[] {
@@ -69,11 +75,11 @@ export async function handleSkillCommand(
     ctx: SlashCommandContext,
     args: string,
 ): Promise<void> {
-    const skillName = parseSkillNameArg(args);
+    const { skillName, task } = parseSkillArgs(args);
     if (!skillName) {
         ctx.postMessage({
             type: "error",
-            text: "Usage: `/skill 'skillname'` or `/skill skillname`",
+            text: "Usage: `/skill <skillname> <task>`",
         });
         return;
     }
@@ -81,6 +87,13 @@ export async function handleSkillCommand(
         ctx.postMessage({
             type: "error",
             text: "Invalid skill name. Use only letters, numbers, dot, underscore, or hyphen.",
+        });
+        return;
+    }
+    if (!task) {
+        ctx.postMessage({
+            type: "error",
+            text: "Usage: `/skill <skillname> <task>`",
         });
         return;
     }
@@ -122,9 +135,8 @@ export async function handleSkillCommand(
         cls: "msg-system",
     });
 
-    await ctx.handleChatDispatch(
-        `${sections.join("\n\n")}\n\nFollow this skill exactly for the user's next request in this chat.`,
-    );
+    const skillPrompt = `${sections.join("\n\n")}\n\nUser task:\n${task}`;
+    await ctx.handleAgentMessage(`/skill ${skillPrompt}`);
 }
 
 // ── /init — workspace indexing + project context ─────────────────────
@@ -1447,7 +1459,7 @@ export async function handleHelpCommand(
         "**Notes + system**",
         "- `/note <text>` — Save a quick note.",
         "- `/memories` — Manually trigger memory extraction from the last completed workflow session.",
-        "- `/skill 'skillname'` — Load `.lean_ai/skills/<skillname>/instructions.md` plus referenced instruction files.",
+        "- `/skill <skillname> <task>` — Run a skill through request workflow (tool-enabled + branch-safe).",
         "- `/reboot` — Restart the backend server.",
         "- `/help` — Show this help.",
     ].join("\n");
