@@ -168,6 +168,34 @@ class WSMessageDispatcher:
         except asyncio.QueueEmpty:
             return None
 
+    async def wait_for_user_message(self) -> dict:
+        """Block until a ``user_message`` arrives on the execution queue.
+
+        Used by long-running execution workflows when the model asks for
+        clarification and must pause until the user responds.
+        """
+        if self._cancel_event.is_set():
+            raise WorkflowCancelledError()
+
+        cancel_waiter = asyncio.ensure_future(self._cancel_event.wait())
+        queue_getter = asyncio.ensure_future(self._user_messages.get())
+
+        done, pending = await asyncio.wait(
+            {cancel_waiter, queue_getter},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        if queue_getter in done:
+            return queue_getter.result()
+
+        raise WorkflowCancelledError()
+
     # ── Approval wait (replaces safe_receive) ─────────────────────
 
     async def wait_for_approval(self) -> dict | None:
