@@ -62,11 +62,24 @@ class TestParseGoogleResults:
         results = _parse_google_results(html, max_results=3)
         assert len(results) == 3
 
-    def test_skips_google_internal_links(self):
+    def test_extracts_google_redirect_url(self):
         html = """
         <div id="search">
           <div class="g">
-            <a href="/url?q=https://example.com"><h3>Internal</h3></a>
+            <a href="/url?q=https://example.com/from-google&sa=U"><h3>Redirected</h3></a>
+            <div class="VwiC3b">Should parse destination URL</div>
+          </div>
+        </div>
+        """
+        results = _parse_google_results(html)
+        assert len(results) == 1
+        assert results[0]["url"] == "https://example.com/from-google"
+
+    def test_skips_non_result_google_internal_links(self):
+        html = """
+        <div id="search">
+          <div class="g">
+            <a href="/search?q=test"><h3>Internal</h3></a>
             <div class="VwiC3b">Should skip</div>
           </div>
           <div class="g">
