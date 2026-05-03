@@ -1,57 +1,166 @@
-# Workflow
+# Workflow (Phase-Based, Mandatory)
 
-## Mandatory Intake Loop
-Before any file creation, web search, or crawling, complete this intake loop:
-1. Ask concise clarifying questions for any missing required constraints (vehicle type/body style, max budget, location, radius, mileage cap, title constraints, seller type preference, optional criteria).
-2. Apply defaults only when user is silent: radius defaults to 250 miles around provided location; existing hybrid/price/mileage defaults remain only if user does not provide alternatives.
-3. Recap interpreted requirements in a short confirmation summary.
-4. Only after recap confirmation, proceed to mandatory ledger creation and normal crawling loops.
+Follow phases in order. Do not skip required ledger/scratch updates.
 
-If requirements change mid-run, add a **Requirements Change** note to the ledger and adjust search filters/strategy before continuing.
+## Phase 0: Intake
 
-## Mandatory First Step
-Before any web search:
+**Allowed tools:** user chat only.
+
+**Actions:**
+
+1. Ask for missing requirements:
+   - vehicle type/body style
+   - max budget
+   - user location (city/ZIP)
+   - search radius
+   - mileage cap
+   - title constraints
+   - seller type preference
+   - optional criteria
+2. If user is silent, apply defaults:
+   - radius: 250 miles from provided location
+   - preserve existing hybrid/price/mileage defaults
+3. Recap interpreted requirements and wait for confirmation.
+
+**Required ledger update:** none.
+
+**Required scratch_pad update:** none.
+
+**Exit condition:** user requirements are complete (or defaults applied) and recap is confirmed.
+
+## Phase 1: Ledger Setup
+
+**Allowed tools:** `read_file`, `create_file`, `scratch_pad`, `journal`.
+
+**Actions:**
+
 1. Check whether `hybrid_car_private_seller_research.md` exists.
-2. If missing, create it from `templates/hybrid_car_private_seller_research.template.md`.
-3. Immediately record file creation in both `scratch_pad` and `journal`.
+2. If missing, create it from template.
+3. Record ledger setup in scratch_pad and journal.
 
-## Non-Negotiable Operating Loop
-After every `fetch_url`, immediately record the outcome in the active ledger using `edit_file`.
+**Required ledger update:** create file only if missing.
 
-Each fetched URL must map to exactly one action:
-1. add to Qualifying Listings
-2. add to Rejected Listings
-3. add to Pending Candidate URLs
-4. add to Working Search URLs
-5. add to Crawled Pages
-6. add a Search Notes entry
+**Required scratch_pad update:** record file existence/creation and next phase.
 
-Do not perform more than 2 consecutive `search_url`/`fetch_url` calls without `edit_file` or `scratch_pad`.
+**Exit condition:** ledger exists and setup is logged.
 
-### General loop
-1. `search_url`
-2. `scratch_pad`
-3. `fetch_url`
-4. `edit_file`
-5. `scratch_pad`
-6. `journal` only at milestones
+## Phase 2: Source Discovery
 
-### Candidate listing loop
-1. `fetch_url` listing
-2. `fetch_url` hybrid verification source
-3. `edit_file` with accepted/rejected decision
-4. `scratch_pad` count update and next action
+**Allowed tools:** `search_internet`, `scratch_pad`.
 
-### Search-result page loop
-1. `fetch_url` search-result page
-2. inspect URL pattern
-3. `edit_file` (Working Search URLs / Crawled Pages / Pending URLs / Search Notes)
-4. `scratch_pad` next candidates
+**Actions:**
 
-## Pre-query checklist
-Before each new search query, confirm:
-- all fetched listings were recorded
-- working URL patterns were captured
-- crawled pages were captured
-- scratch_pad has current counts/next action
-- pending URLs were reviewed if too many
+1. Run broad + source-specific searches.
+2. Use known listing URL patterns to discover likely listing paths.
+3. Do not stop just because first results lack direct listing URLs.
+
+**Required ledger update:** none yet.
+
+**Required scratch_pad update:** summarize discovered source candidates and next fetch target.
+
+**Exit condition:** at least one fetchable search/result/source URL identified.
+
+## Phase 3: Search URL and Crawl Tracking
+
+**Allowed tools:** `fetch_url`, `edit_file`, `scratch_pad`.
+
+**Actions:**
+
+1. Fetch search/result/source pages.
+2. Append useful entries to `Working Search URLs`.
+3. Append each fetched page to `Crawled Pages`.
+4. Append blocked/JS-only/limited findings to `Search Notes`.
+
+**Required ledger update:** append rows/bullets in tracked sections.
+
+**Required scratch_pad update:** counts and next crawl action.
+
+**Exit condition:** at least one candidate listing URL discovered OR source is logged as limited/blocked.
+
+## Phase 4: Pending Candidate Collection
+
+**Allowed tools:** `fetch_url`, `edit_file`, `scratch_pad`.
+
+**Actions:**
+
+1. Append candidate listing URLs to `Pending Candidate URLs`.
+2. Batch discovery before deep verification when many candidates exist.
+3. If pending count exceeds limit, stop discovery and move to verification.
+
+**Required ledger update:** append to pending table.
+
+**Required scratch_pad update:** pending count and verification queue.
+
+**Exit condition:** pending queue is non-empty or all tested sources exhausted.
+
+## Phase 5: Candidate Verification
+
+**Allowed tools:** `fetch_url`, `edit_file`, `scratch_pad`, `journal`.
+
+**Actions:**
+
+1. Fetch listing URL.
+2. Verify hybrid status with reliable source.
+3. Classify accepted/rejected.
+4. Append exactly one row to `Qualifying Listings` or `Rejected Listings`.
+5. Mark pending row as reviewed per allowed rule.
+
+**Required ledger update:** one classification row + pending cleanup marker.
+
+**Required scratch_pad update:** decision rationale, updated counts, next candidate.
+
+**Exit condition:** queue is empty OR acceptance target reached OR source budget reached.
+
+## Phase 6: Reconciliation
+
+**Allowed tools:** `edit_file`, `scratch_pad`, `journal`.
+
+**Actions:**
+
+1. Replace `Current Counts` numbers.
+2. Ensure pending URLs reviewed/marked.
+3. Update `Search Limitation` with concrete blockers or `None`.
+4. Renumber accepted listings only if numbering drifted.
+
+**Required ledger update:** counts + final limitation text.
+
+**Required scratch_pad update:** final totals and uncertainty.
+
+**Exit condition:** ledger internally consistent.
+
+## Phase 7: Final Response
+
+**Allowed tools:** user chat, `journal`.
+
+**Actions:**
+
+1. Report qualifying listing count.
+2. Report ledger filename.
+3. Report biggest uncertainty.
+4. Report local-only vs nationwide expansion.
+5. Report useful sources and blocked sources.
+6. Report next steps.
+
+**Required ledger update:** none.
+
+**Required scratch_pad update:** none.
+
+**Exit condition:** user-facing summary delivered.
+
+## One Tool Batch Then Record Rule
+
+Never run long search/fetch loops without state updates.
+
+- Maximum batch: 2 tool calls that gather external data (`search_internet` or `fetch_url`).
+- After that batch, record updates in:
+  - ledger (`edit_file`) when any ledger-relevant fact was found
+  - `scratch_pad` always
+- If no useful data was found, still append a `Search Notes` bullet and scratch_pad note.
+
+## Safe Targeting Rule for File Edits
+
+When using `grep`/`find`/`edit_file` to update ledger sections:
+
+1. Locate the exact section anchor comment (for example, `<!-- ANCHOR:QUALIFYING_LISTINGS -->`).
+2. Apply the smallest possible edit under that anchor section only.
+3. Do not target generic phrases like "Search Notes" that may appear in prose elsewhere.

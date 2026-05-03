@@ -1,23 +1,45 @@
 # Tools and Fallbacks
 
-## Primary tools
+## Primary Tools
+
 - `search_internet` for discovery
-- `fetch_url` for reading public pages
+- `fetch_url` for public page retrieval
 - `edit_file` and `create_file` for ledger updates
 - `scratch_pad` for short-term state
 - `journal` for durable milestones
 
-## Optional fallback: shell (`bash`) + `curl`
-Use this fallback only when `fetch_url` is blocked, incomplete, or returns unusable output.
+## Source Failure Handling
 
-Allowed fallback behavior:
+When a source fails, do not stop the whole task. Use this sequence:
+
+1. Record failure in `Crawled Pages` (if fetched) and `Search Notes`.
+2. Classify failure type:
+   - JS-only rendering
+   - blocked / rate-limited
+   - login/paywall required
+   - no useful listing links
+3. Try one alternative path:
+   - different query
+   - different source section
+   - known listing URL pattern
+4. If still blocked, move to next source and continue discovery ladder.
+
+Stopping condition is budget or exhausted viable sources, not first failure.
+
+## Optional Fallback: shell (`bash`) + `curl`
+
+Use only when `fetch_url` is blocked, incomplete, or unusable.
+
+Allowed behavior:
+
 1. Use `curl` only for publicly accessible pages.
-2. Use a normal browser-like user-agent and respect website access controls.
-3. Do not bypass logins, CAPTCHAs, paywalls, robots restrictions, or anti-bot controls.
-4. Save request output to a local evidence file so the retrieval attempt is auditable.
-5. Immediately record in ledger Search Notes and/or Crawled Pages that `curl` fallback was used.
+2. Use a normal browser-like user-agent.
+3. Do not bypass protections or restrictions.
+4. Save output to local evidence file for auditability.
+5. Immediately log fallback usage in ledger.
 
-## Suggested evidence capture pattern
+Suggested pattern:
+
 ```bash
 mkdir -p artifacts/find_car
 curl -L --max-time 30 \
@@ -26,11 +48,17 @@ curl -L --max-time 30 \
   -o "artifacts/find_car/<safe_name>.html"
 ```
 
-Then add an entry to:
-- `Crawled Pages` (page type: `Blocked/inaccessible page` or `Search result page`)
-- `Search Notes` (why fallback was needed and whether output was useful)
+Then append:
 
-## When to avoid curl fallback
-- If site clearly requires interactive JavaScript login flows and output is unreadable.
-- If terms or protections indicate automated retrieval is not allowed.
-- If repeated attempts are failing; record limitation and move to another source.
+- `Crawled Pages`: fetched URL + page type
+- `Search Notes`: why fallback was used and whether it helped
+
+## One Tool Batch Then Record
+
+Hard rule:
+
+- Run at most 2 consecutive discovery/fetch calls.
+- Then perform recording steps:
+  - ledger append/replace (allowed sections only)
+  - scratch_pad state update
+- Resume tooling only after recording.

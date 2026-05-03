@@ -10,7 +10,7 @@
 - Title constraints: [captured value or default]
 - Seller type preference: [captured value or default]
 - Optional criteria: [captured values or "None provided"]
-- Defaults used: [explicit list of any defaults applied]
+- Defaults used: [explicit list of defaults applied]
 
 ## Search Summary
 
@@ -18,57 +18,75 @@ Search started.
 
 Target criteria:
 
-- Private seller / sell by owner / Dealer if all other criteria met
+- Private seller / sell by owner (default)
 - Hybrid vehicle
-- Under $19,000
-- Under 80,000 miles
+- Under $19,000 (unless user changed budget)
+- Under 80,000 miles (unless user changed mileage cap)
 - Prefer clean title
-- Prefer within 250 miles of Kansas City, then expand nationwide if needed
+- Start local radius, then expand nationwide only if needed
 - Log owner count when available
 - Verify hybrid status with reliable sources
 - Record accepted, rejected, pending, working search URLs, and source limitations
 
 ## Current Counts
 
+<!-- ANCHOR:CURRENT_COUNTS -->
+
 - Qualifying listings: 0
 - Rejected listings: 0
 - Pending candidate URLs: 0
-- Search radius: 250 miles from Kansas City
+- Search radius: 250 miles from user location
 - Search expansion status: Not expanded nationwide
 
 ## Qualifying Listings
+
+<!-- ANCHOR:QUALIFYING_LISTINGS -->
 
 | # | Year | Make | Model/Trim | Price | Miles | Location | Seller Type | Contact Info | Listing URL | VIN | Title Status | Owner Count | Hybrid Verification | Notes |
 |---|------|------|------------|-------|-------|----------|-------------|--------------|-------------|-----|--------------|-------------|---------------------|-------|
 
 ## Rejected Listings
 
+<!-- ANCHOR:REJECTED_LISTINGS -->
+
 | Vehicle | URL | Reason Rejected |
 |---------|-----|-----------------|
 
 ## Pending Candidate URLs
+
+<!-- ANCHOR:PENDING_CANDIDATE_URLS -->
 
 | URL | Source | Why Pending | Next Action |
 |-----|--------|-------------|-------------|
 
 ## Working Search URLs
 
+<!-- ANCHOR:WORKING_SEARCH_URLS -->
+
 | Source | Search URL | Filters Confirmed | Notes |
 |--------|------------|-------------------|-------|
 
 ## Crawled Pages
+
+<!-- ANCHOR:CRAWLED_PAGES -->
 
 | Source | URL | Page Type | Useful Links Found | Notes |
 |--------|-----|-----------|--------------------|-------|
 
 ## Requirements Change Log
 
+<!-- ANCHOR:REQUIREMENTS_CHANGE_LOG -->
+
 - None.
 
 ## Search Notes
 
+<!-- ANCHOR:SEARCH_NOTES -->
+
 - Search in progress.
 
 ## Search Limitation
+
+<!-- ANCHOR:SEARCH_LIMITATION -->
 
 Not yet determined.
