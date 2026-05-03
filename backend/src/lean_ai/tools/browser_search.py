@@ -19,7 +19,7 @@ import atexit
 import logging
 import time
 from threading import Lock
-from urllib.parse import quote_plus
+from urllib.parse import parse_qs, quote_plus, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -167,6 +167,17 @@ def _dismiss_consent(browser) -> None:
 # Google HTML result parser
 # ---------------------------------------------------------------------------
 
+def _normalize_google_result_url(raw_url: str) -> str:
+    """Resolve Google redirect wrappers to destination URLs."""
+    if not raw_url:
+        return ""
+
+    if raw_url.startswith("/url?"):
+        parsed = urlparse(raw_url)
+        return parse_qs(parsed.query).get("q", [""])[0]
+
+    return raw_url
+
 
 def _parse_google_results(
     page_source: str,
@@ -209,9 +220,9 @@ def _parse_google_results(
             link = div.find("a", href=True)
         if not link or not link.get("href"):
             continue
-        url = link["href"]
+        url = _normalize_google_result_url(link["href"])
         # Skip Google internal links
-        if url.startswith("/") or "google.com" in url:
+        if not url or url.startswith("/") or "google.com" in url:
             continue
 
         # Snippet — try several known selectors
@@ -244,8 +255,8 @@ def _parse_google_results(
             link = h3.find_parent("a")
             if not link or not link.get("href"):
                 continue
-            url = link["href"]
-            if url.startswith("/") or "google.com" in url:
+            url = _normalize_google_result_url(link["href"])
+            if not url or url.startswith("/") or "google.com" in url:
                 continue
             title = h3.get_text(strip=True)
             parent = link.parent
