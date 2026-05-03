@@ -28,6 +28,105 @@ import {
     type MockInterviewDifficulty,
 } from "./jobSearchPrompts";
 
+function parseSkillNameArg(args: string): string {
+    const trimmed = args.trim();
+    if (!trimmed) {
+        return "";
+    }
+    const quoted = trimmed.match(/^(['"])(.+)\1$/s);
+    if (quoted) {
+        return quoted[2].trim();
+    }
+    return trimmed.split(/\s+/)[0];
+}
+
+function resolveReferencedSkillFiles(instructions: string, skillDir: string): string[] {
+    const referenced = new Set<string>();
+    const matchers = [
+        /`([^`]+)`/g,                 // inline code filenames
+        /\[[^\]]*]\(([^)]+)\)/g,      // markdown links
+        /\b([\w.-]+\.(?:md|txt|yaml|yml|json))\b/g, // explicit file mentions
+    ];
+
+    for (const re of matchers) {
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(instructions)) !== null) {
+            const raw = (m[1] || "").trim();
+            if (!raw) { continue; }
+            const fullPath = path.resolve(skillDir, raw);
+            if (!fullPath.startsWith(skillDir + path.sep) && fullPath !== skillDir) {
+                continue;
+            }
+            if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+                referenced.add(fullPath);
+            }
+        }
+    }
+    return Array.from(referenced);
+}
+
+export async function handleSkillCommand(
+    ctx: SlashCommandContext,
+    args: string,
+): Promise<void> {
+    const skillName = parseSkillNameArg(args);
+    if (!skillName) {
+        ctx.postMessage({
+            type: "error",
+            text: "Usage: `/skill 'skillname'` or `/skill skillname`",
+        });
+        return;
+    }
+    if (!/^[a-zA-Z0-9._-]+$/.test(skillName)) {
+        ctx.postMessage({
+            type: "error",
+            text: "Invalid skill name. Use only letters, numbers, dot, underscore, or hyphen.",
+        });
+        return;
+    }
+
+    const repoRoot = ctx.getRepoRoot();
+    const skillDir = path.join(repoRoot, ".lean_ai", "skills", skillName);
+    const instructionsPath = path.join(skillDir, "instructions.md");
+    if (!fs.existsSync(skillDir) || !fs.statSync(skillDir).isDirectory()) {
+        ctx.postMessage({ type: "error", text: `Skill not found: \`${skillName}\`` });
+        return;
+    }
+    if (!fs.existsSync(instructionsPath) || !fs.statSync(instructionsPath).isFile()) {
+        ctx.postMessage({
+            type: "error",
+            text: `Skill \`${skillName}\` is missing required file: \`.lean_ai/skills/${skillName}/instructions.md\``,
+        });
+        return;
+    }
+
+    const baseInstructions = fs.readFileSync(instructionsPath, "utf8");
+    const referencedFiles = resolveReferencedSkillFiles(baseInstructions, skillDir)
+        .filter((p) => path.resolve(p) !== path.resolve(instructionsPath));
+
+    const sections: string[] = [];
+    sections.push(`# Skill: ${skillName}`);
+    sections.push("## instructions.md");
+    sections.push(baseInstructions);
+
+    for (const filePath of referencedFiles) {
+        const rel = path.relative(skillDir, filePath);
+        const content = fs.readFileSync(filePath, "utf8");
+        sections.push(`## Referenced file: ${rel}`);
+        sections.push(content);
+    }
+
+    ctx.postMessage({
+        type: "reply",
+        text: `Loaded skill \`${skillName}\` (${1 + referencedFiles.length} file${referencedFiles.length === 0 ? "" : "s"}). Applying instructions now.`,
+        cls: "msg-system",
+    });
+
+    await ctx.handleChatDispatch(
+        `${sections.join("\n\n")}\n\nFollow this skill exactly for the user's next request in this chat.`,
+    );
+}
+
 // ── /init — workspace indexing + project context ─────────────────────
 
 export async function handleInitCommand(
@@ -1348,6 +1447,7 @@ export async function handleHelpCommand(
         "**Notes + system**",
         "- `/note <text>` — Save a quick note.",
         "- `/memories` — Manually trigger memory extraction from the last completed workflow session.",
+        "- `/skill 'skillname'` — Load `.lean_ai/skills/<skillname>/instructions.md` plus referenced instruction files.",
         "- `/reboot` — Restart the backend server.",
         "- `/help` — Show this help.",
     ].join("\n");
