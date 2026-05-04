@@ -45,6 +45,12 @@ kotlin {
 }
 
 intellijPlatform {
+    pluginVerification {
+        ides {
+            recommended()
+        }
+    }
+
     pluginConfiguration {
         name = providers.gradleProperty("pluginName")
         version = providers.gradleProperty("pluginVersion")
