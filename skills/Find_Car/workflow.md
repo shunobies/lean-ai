@@ -45,8 +45,15 @@ Follow phases in order. Do not skip required report/scratch updates.
 **Actions:**
 
 1. Check whether `hybrid_car_private_seller_research.md` exists.
-2. If missing, create it from template.
-3. Record report setup in scratch_pad and journal.
+2. Detect whether `.lean_ai/state/{session_id}.jsonl` already exists and can be read as prior session state.
+3. If report is missing, create it from template; if present, do not recreate.
+4. Summarize recent state events (most recent first) to identify the last completed phase/checkpoint.
+5. Reconcile markdown report sections against recent events:
+   - compare section counts to event-derived totals
+   - compare pending queue rows to recent pending enqueue/review events
+   - compare last source touched in report notes/tables to latest relevant event metadata
+6. Choose continuation point: continue from the next incomplete phase instead of restarting discovery.
+7. Record setup/recovery outcome in scratch_pad and journal.
 
 **Required state event update:** emit phase/tool/checkpoint events for phase entry, key decisions, and phase exit.
 
@@ -60,9 +67,11 @@ Follow phases in order. Do not skip required report/scratch updates.
 
 **Required report update:** create file only if missing.
 
-**Required scratch_pad update:** record file existence/creation and next phase.
+**Required scratch_pad update:** record report existence/creation, detected ledger status, reconciliation outcome, discrepancy notes (if any), and next phase.
 
-**Exit condition:** report exists and setup is logged.
+**Exit condition:** report exists, recovery context is reconciled, and continuation phase is logged.
+
+**Recovery discrepancy rule (mandatory):** if event history and markdown report disagree during setup/recovery, emit a `checkpoint` event that captures the mismatch and add a `Search Notes` entry describing the discrepancy before proceeding to the next phase.
 
 ## Phase 2: Source Discovery
 
