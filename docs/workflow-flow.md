@@ -187,6 +187,8 @@ User Input
 │  │    ✅ Journal    — available, re-injected on refresh         │  │
 │  │    ✅ Context refresh callback — rebuilds from disk          │  │
 │  │    ✅ Existing pad/journal injected at start (recovery)      │  │
+│  │    ✅ State ledger summary injected on refresh (recent        │  │
+│  │       machine events: phase transitions + tool outcomes)      │  │
 │  │                                                              │  │
 │  │  SYNTHESIS PASS (after the loop exits):                     │  │
 │  │    _synthesize_file_summary → chat_structured with          │  │

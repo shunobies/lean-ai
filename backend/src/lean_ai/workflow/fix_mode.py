@@ -14,6 +14,7 @@ from lean_ai.llm.tool_definitions import build_implementation_tools, build_inves
 from lean_ai.routers.context_helpers import load_condensed_context
 from lean_ai.tools import scratchpad
 from lean_ai.tools.journal import read_journal
+from lean_ai.tools.state_ledger import append_event, summarize_recent_events
 from lean_ai.workflow.callbacks import build_workflow_callbacks
 from lean_ai.workflow.prompts import (
     build_fix_investigation_prompt,
@@ -33,6 +34,19 @@ if TYPE_CHECKING:
     from lean_ai.llm.facade import LLMClient
 
 logger = logging.getLogger(__name__)
+
+
+_REFRESH_PAD_MAX_CHARS = 2000
+_REFRESH_JOURNAL_MAX_CHARS = 1600
+
+
+def _tail(text: str, max_chars: int) -> str:
+    """Return the trailing slice of *text* capped at *max_chars*."""
+    if not text:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return "[TRUNCATED TO MOST RECENT CONTEXT]\n" + text[-max_chars:]
 
 
 async def _run_fix(
@@ -58,6 +72,12 @@ async def _run_fix(
     """
     if dispatcher:
         dispatcher.enter_execution_mode()
+    append_event(
+        repo_root=repo_root,
+        session_id=session_id,
+        event_type="phase_transition",
+        payload={"phase": mode},
+    )
 
     is_request = mode == "request"
     # Use dedicated model when available: request model for /request,
@@ -267,9 +287,15 @@ async def _run_fix(
         ]
         refresh_parts = ["[CONTEXT REFRESHED]"]
         if jrnl:
-            refresh_parts.append(f"SESSION JOURNAL (permanent findings):\n{jrnl}")
+            refresh_parts.append(
+                "SESSION JOURNAL (recent permanent findings):\n"
+                f"{_tail(jrnl, _REFRESH_JOURNAL_MAX_CHARS)}"
+            )
         if pad:
-            refresh_parts.append(f"SCRATCHPAD (current state):\n{pad}")
+            refresh_parts.append(
+                "SCRATCHPAD (recent current state):\n"
+                f"{_tail(pad, _REFRESH_PAD_MAX_CHARS)}"
+            )
         if pad or jrnl:
             new_messages.append(
                 {
@@ -284,6 +310,20 @@ async def _run_fix(
                     "content": "[CONTEXT REFRESHED]\n\nContinue working on the task.",
                 }
             )
+        ledger_summary = summarize_recent_events(repo_root, session_id)
+        if ledger_summary:
+            new_messages.append(
+                {
+                    "role": "user",
+                    "content": f"RECENT STATE LEDGER (machine events):\n{ledger_summary}",
+                }
+            )
+        append_event(
+            repo_root=repo_root,
+            session_id=session_id,
+            event_type="context_refreshed",
+            payload={"phase": mode},
+        )
 
         ws_send_nowait(
             ws,

@@ -12,6 +12,7 @@ from fastapi import WebSocket
 from lean_ai.config import settings
 from lean_ai.tools import file_ops, scratchpad, shell
 from lean_ai.tools.command_safety import CommandRisk, check_command
+from lean_ai.tools.state_ledger import append_event
 from lean_ai.workflow.ws_messages import (
     send_diff,
     send_test_result,
@@ -461,6 +462,15 @@ def make_tool_executor(
 
     async def execute(name: str, arguments: dict) -> str:
         """Execute a tool and return the result as a string."""
+        append_event(
+            repo_root=repo_root,
+            session_id=session_id,
+            event_type="tool_called",
+            payload={
+                "tool": name,
+                "target": arguments.get("path", "") or arguments.get("command", ""),
+            },
+        )
         started = time.monotonic()
         try:
             result = await _execute_inner(name, arguments)
@@ -483,6 +493,15 @@ def make_tool_executor(
             result=result if isinstance(result, str) else str(result),
             success=success,
             latency_ms=latency_ms,
+        )
+        append_event(
+            repo_root=repo_root,
+            session_id=session_id,
+            event_type=("tool_succeeded" if success else "tool_failed"),
+            payload={
+                "tool": name,
+                "target": arguments.get("path", "") or arguments.get("command", ""),
+            },
         )
         return result
 

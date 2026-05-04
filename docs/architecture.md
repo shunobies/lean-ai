@@ -116,7 +116,8 @@ No `ContextWindowManager`. Ollama manages its own KV cache. The system focuses o
 
 - Context refresh triggers at 70% of the context window
 - Old messages are dropped, the system prompt is rebuilt from fresh disk state
-- The scratchpad provides continuity across refreshes
+- Scratchpad and journal continuity are re-injected as recent-tail slices during refresh (not full-file replay) to reduce context refill overhead.
+- A per-session state ledger (`.lean_ai/state/{session_id}.jsonl`) records typed workflow events (phase transitions, tool calls/results, refresh checkpoints) so refresh payloads can include deterministic machine-state summaries alongside prose notes.
 - No LLM summarization call — the scratchpad is the agent's persistent memory
 
 ## Indexer
