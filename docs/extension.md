@@ -219,6 +219,7 @@ Type these in the chat panel:
 | `/approve` | Merge the current session's branch |
 | `/reject` | Discard the current session's branch |
 | `/style` | Generate style guide from CSS/template files |
+| `/skill <name> <task>` | Load `.lean_ai/skills/<name>/instructions.md` (plus referenced files) and apply it to a task |
 | `/request <task>` | Skip planning, open-ended task with full tool access |
 | `/resume [session_id]` | Resume a previous session |
 | `/help` | Show this help |
