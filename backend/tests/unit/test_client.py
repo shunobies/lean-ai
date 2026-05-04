@@ -1,5 +1,7 @@
 """Tests for LLMClient.chat_with_tools() — reminders, loop detection, compression, sanitization."""
 
+import logging
+
 import pytest
 
 from lean_ai.llm.base import LLMMetrics, LLMProvider, ToolCallInfo
@@ -969,6 +971,32 @@ async def test_default_nudge_when_no_custom():
     assert len(nudge_msgs) == 1
 
 
+@pytest.mark.asyncio
+async def test_text_only_nudge_logged(caplog):
+    """Backend logs the injected text-only nudge so the harness action is visible."""
+    responses = [
+        _make_text_response("Let me plan..."),
+        _make_task_complete_response("Done."),
+    ]
+
+    client, _fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    caplog.set_level(logging.INFO, logger="lean_ai.llm.facade")
+
+    await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=10,
+    )
+
+    assert "LLM harness message injected: kind=nudge key=nudge.text_only" in caplog.text
+
+
 # ── Truncation handling tests ──
 
 
@@ -1109,3 +1137,73 @@ async def test_anthropic_max_tokens_treated_as_truncation():
     # Should have continued past the truncated response
     assert fake.call_count == 3
     assert len(executed) == 1
+
+
+@pytest.mark.asyncio
+async def test_reasoning_budget_nudge_logged(caplog):
+    """Backend logs reasoning-budget nudges so 'stop thinking and answer' is traceable."""
+    responses = [
+        (
+            "Partial answer",
+            [],
+            LLMMetrics(
+                thinking_budget_exceeded=True,
+                thinking_token_count=321,
+            ),
+        ),
+        _make_task_complete_response("Done."),
+    ]
+
+    client, _fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    caplog.set_level(logging.WARNING, logger="lean_ai.llm.facade")
+
+    await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=10,
+    )
+
+    assert (
+        "LLM harness message injected: kind=nudge key=nudge.reasoning_budget_exceeded"
+        in caplog.text
+    )
+    assert "thinking_tokens=321" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_task_complete_validator_rejection_logged(caplog):
+    """Harness/LLM completion conflicts are logged when task_complete is rejected."""
+    responses = [
+        _make_task_complete_response("Done too early."),
+        _make_task_complete_response("Done for real."),
+    ]
+
+    client, _fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    caplog.set_level(logging.WARNING, logger="lean_ai.llm.facade")
+
+    rejections = iter(["Need at least one file edit before completion.", None])
+
+    def _validator():
+        return next(rejections)
+
+    await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=10,
+        task_complete_validator=_validator,
+    )
+
+    assert "LLM tool result overridden: key=task_complete_validator_rejection" in caplog.text
+    assert "Need at least one file edit before completion." in caplog.text

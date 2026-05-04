@@ -41,6 +41,8 @@ class TurnAction:
     verdict: TurnVerdict
     message: str = ""
     exit_reason: str = ""
+    nudge_key: str = ""
+    log_level: int = logging.INFO
 
 
 @dataclass
@@ -130,6 +132,43 @@ def _detect_unverified_claims(content: str) -> bool:
             continue
         return True
     return False
+
+
+def _preview_log_text(text: str, limit: int = 160) -> str:
+    """Return a compact single-line preview suitable for backend logs."""
+    compact = " ".join((text or "").split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3] + "..."
+
+
+def _log_harness_message(
+    *,
+    kind: str,
+    key: str,
+    content: str,
+    level: int = logging.INFO,
+    turn: int | None = None,
+    **metadata,
+) -> None:
+    """Log a backend-injected control message before it reaches the LLM."""
+    metadata_parts = []
+    if turn is not None:
+        metadata_parts.append(f"turn={turn + 1}")
+    for meta_key, meta_value in metadata.items():
+        if meta_value is None:
+            continue
+        metadata_parts.append(f"{meta_key}={meta_value}")
+    suffix = f" ({', '.join(metadata_parts)})" if metadata_parts else ""
+    logger.log(
+        level,
+        "LLM harness message injected: kind=%s key=%s chars=%d%s preview=%r",
+        kind,
+        key,
+        len(content or ""),
+        suffix,
+        _preview_log_text(content or ""),
+    )
 
 
 class LLMClient:
@@ -436,18 +475,22 @@ class LLMClient:
                 dispatcher.check_cancelled()
                 pending = dispatcher.get_pending_message()
                 if pending:
-                    logger.info(
-                        "chat_with_tools: injecting user interrupt (%d chars)",
-                        len(pending),
+                    interrupt_message = (
+                        "[USER INTERRUPT] The user has sent you new "
+                        "instructions. Read carefully and adjust your "
+                        "approach:\n\n" + pending
+                    )
+                    _log_harness_message(
+                        kind="interrupt",
+                        key="user_interrupt",
+                        content=interrupt_message,
+                        level=logging.INFO,
+                        turn=turn,
                     )
                     messages.append(
                         {
                             "role": "user",
-                            "content": (
-                                "[USER INTERRUPT] The user has sent you new "
-                                "instructions. Read carefully and adjust your "
-                                "approach:\n\n" + pending
-                            ),
+                            "content": interrupt_message,
                         }
                     )
 
@@ -653,14 +696,24 @@ class LLMClient:
                             )
                             from lean_ai.llm.prompt_registry import registry
 
+                            loop_nudge = registry.format(
+                                "nudge.loop_detected",
+                                tool_name=tc.name,
+                                count=str(state.consecutive_same_tool),
+                            )
+                            _log_harness_message(
+                                kind="nudge",
+                                key="nudge.loop_detected",
+                                content=loop_nudge,
+                                level=logging.WARNING,
+                                turn=turn,
+                                tool_name=tc.name,
+                                repeat_count=state.consecutive_same_tool,
+                            )
                             messages.append(
                                 {
                                     "role": "user",
-                                    "content": registry.format(
-                                        "nudge.loop_detected",
-                                        tool_name=tc.name,
-                                        count=str(state.consecutive_same_tool),
-                                    ),
+                                    "content": loop_nudge,
                                 }
                             )
                             _fire_in_loop_event(
@@ -699,9 +752,11 @@ class LLMClient:
                     if rejection:
                         completion_call = None
                         result_text = rejection
-                        logger.info(
-                            "chat_with_tools: task_complete rejected by "
-                            "validator — continuing loop",
+                        logger.warning(
+                            "LLM tool result overridden: key=task_complete_validator_rejection "
+                            "turn=%d preview=%r",
+                            turn + 1,
+                            _preview_log_text(result_text),
                         )
                     else:
                         result_text = "Task marked complete."
@@ -746,17 +801,21 @@ class LLMClient:
                     break
                 from lean_ai.llm.prompt_registry import registry
 
+                budget_nudge = registry.get("nudge.reasoning_budget_exceeded")
+                _log_harness_message(
+                    kind="nudge",
+                    key="nudge.reasoning_budget_exceeded",
+                    content=budget_nudge,
+                    level=logging.WARNING,
+                    turn=turn,
+                    interrupt_count=state.consecutive_budget_interrupts,
+                    thinking_tokens=getattr(metrics, "thinking_token_count", 0),
+                )
                 messages.append(
                     {
                         "role": "user",
-                        "content": registry.get("nudge.reasoning_budget_exceeded"),
+                        "content": budget_nudge,
                     }
-                )
-                logger.info(
-                    "chat_with_tools: reasoning budget interrupt #%d — "
-                    "nudging for final answer (thinking ~%d tokens)",
-                    state.consecutive_budget_interrupts,
-                    getattr(metrics, "thinking_token_count", 0),
                 )
                 if on_budget_interrupt:
                     await on_budget_interrupt(
@@ -806,6 +865,13 @@ class LLMClient:
                         est_new = sum(len(m.get("content") or "") for m in messages) // 4
                         await on_metrics(est_new, self._provider.context_window)
             elif action.verdict == TurnVerdict.NUDGE:
+                _log_harness_message(
+                    kind="nudge",
+                    key=action.nudge_key or "nudge.unspecified",
+                    content=action.message,
+                    level=action.log_level,
+                    turn=turn,
+                )
                 messages.append({"role": "user", "content": action.message})
                 # Classify the nudge — reminder is the only kind that
                 # fires on a turn that had tool calls; the text-only
@@ -845,10 +911,19 @@ class LLMClient:
                 )
                 from lean_ai.llm.prompt_registry import registry
 
+                claim_nudge = registry.get("nudge.claim_verification")
+                _log_harness_message(
+                    kind="nudge",
+                    key="nudge.claim_verification",
+                    content=claim_nudge,
+                    level=logging.WARNING,
+                    turn=turn,
+                    recent_test_failures=state.recent_test_failures,
+                )
                 messages.append(
                     {
                         "role": "user",
-                        "content": registry.get("nudge.claim_verification"),
+                        "content": claim_nudge,
                     }
                 )
                 _fire_in_loop_event(
@@ -878,10 +953,18 @@ class LLMClient:
                 )
                 from lean_ai.llm.prompt_registry import registry
 
+                confidence_nudge = registry.get("nudge.confidence_verification")
+                _log_harness_message(
+                    kind="nudge",
+                    key="nudge.confidence_verification",
+                    content=confidence_nudge,
+                    level=logging.INFO,
+                    turn=turn,
+                )
                 messages.append(
                     {
                         "role": "user",
-                        "content": registry.get("nudge.confidence_verification"),
+                        "content": confidence_nudge,
                     }
                 )
         else:
@@ -935,6 +1018,8 @@ class LLMClient:
                 return TurnAction(
                     verdict=TurnVerdict.NUDGE,
                     message=registry.get("nudge.truncation"),
+                    nudge_key="nudge.truncation",
+                    log_level=logging.WARNING,
                 )
 
             state.consecutive_truncated = 0
@@ -950,11 +1035,18 @@ class LLMClient:
 
             if text_only_nudge:
                 nudge = text_only_nudge
+                nudge_key = "nudge.text_only.custom"
             else:
                 from lean_ai.llm.prompt_registry import registry
 
                 nudge = registry.get("nudge.text_only")
-            return TurnAction(verdict=TurnVerdict.NUDGE, message=nudge)
+                nudge_key = "nudge.text_only"
+            return TurnAction(
+                verdict=TurnVerdict.NUDGE,
+                message=nudge,
+                nudge_key=nudge_key,
+                log_level=logging.INFO,
+            )
 
         # ── Context refresh (event-driven by token threshold) ─────
         if on_context_refresh and prompt_tokens is not None:
@@ -979,6 +1071,8 @@ class LLMClient:
                         "add_journal_entry, then write the single best next action to "
                         "update_scratchpad so it can be resumed after refresh."
                     ),
+                    nudge_key="nudge.pre_context_refresh",
+                    log_level=logging.WARNING,
                 )
             if prompt_tokens >= limit:
                 state.pre_refresh_nudge_sent = False
@@ -994,12 +1088,12 @@ class LLMClient:
             and turn + 1 < max_turns
         ):
             reminder_text = task_reminder() if callable(task_reminder) else task_reminder
-            logger.info(
-                "chat_with_tools: injecting task reminder at turn %d (%d chars)",
-                turn + 1,
-                len(reminder_text),
+            return TurnAction(
+                verdict=TurnVerdict.NUDGE,
+                message=reminder_text,
+                nudge_key="nudge.task_reminder",
+                log_level=logging.INFO,
             )
-            return TurnAction(verdict=TurnVerdict.NUDGE, message=reminder_text)
 
         return TurnAction(verdict=TurnVerdict.CONTINUE)
 
