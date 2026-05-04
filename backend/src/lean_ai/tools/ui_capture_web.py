@@ -67,6 +67,24 @@ def detect_system_browser_channel() -> str | None:
     return None
 
 
+def _system_browser_executables() -> list[str]:
+    """Return absolute executable candidates for Linux system browser fallback."""
+    if sys.platform != "linux":
+        return []
+    candidates = (
+        "chromium",
+        "chromium-browser",
+        "google-chrome",
+        "google-chrome-stable",
+    )
+    paths: list[str] = []
+    for name in candidates:
+        resolved = shutil.which(name)
+        if resolved:
+            paths.append(resolved)
+    return paths
+
+
 # ── Browser isolation ───────────────────────────────────────────────────
 
 
@@ -304,27 +322,39 @@ async def capture_web(
             # If the managed launch failed AND a system browser is available,
             # retry with the channel fallback before giving up.
             msg = str(e).lower()
-            if (
-                managed_installed
-                and system_channel
-                and ("does not support" in msg or "executable doesn't exist" in msg)
-            ):
+            managed_launch_known_error = (
+                "does not support" in msg or "executable doesn't exist" in msg
+            )
+            if managed_installed and managed_launch_known_error:
                 logger.warning(
-                    "Managed Chromium launch failed (%s); falling back to system %s",
+                    "Managed Chromium launch failed (%s); trying system browser fallback",
                     str(e).split(chr(10))[0][:120],
-                    system_channel,
                 )
-                try:
-                    browser = await pw.chromium.launch(
-                        headless=True,
-                        channel=system_channel,
-                    )
-                except Exception as retry_err:
-                    png_path.unlink(missing_ok=True)
-                    raise WebCaptureError(
-                        f"Failed to launch both managed Chromium and system "
-                        f"{system_channel}: {retry_err}"
-                    ) from retry_err
+                launch_errors: list[str] = []
+                retry_attempted = False
+                if system_channel:
+                    retry_attempted = True
+                    try:
+                        browser = await pw.chromium.launch(headless=True, channel=system_channel)
+                    except Exception as retry_err:
+                        launch_errors.append(f"channel={system_channel}: {retry_err}")
+                for executable in _system_browser_executables():
+                    retry_attempted = True
+                    try:
+                        browser = await pw.chromium.launch(
+                            headless=True,
+                            executable_path=executable,
+                        )
+                        break
+                    except Exception as retry_err:
+                        launch_errors.append(f"executable={executable}: {retry_err}")
+                else:
+                    if retry_attempted:
+                        png_path.unlink(missing_ok=True)
+                        raise WebCaptureError(
+                            "Failed to launch managed Chromium and all system-browser fallbacks. "
+                            f"Attempts: {' | '.join(launch_errors)}"
+                        ) from e
             else:
                 png_path.unlink(missing_ok=True)
                 if "executable doesn't exist" in msg or "browsers are not installed" in msg:

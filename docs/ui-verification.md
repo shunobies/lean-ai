@@ -66,7 +66,7 @@ curl -X POST http://localhost:8422/api/ui-verification/install \
 
 A system-wide install of Chromium or Google Chrome does **not** replace this step under normal conditions — Playwright pins specific browser versions for reproducibility.
 
-**Exception: system browser fallback.** If Playwright refuses to install Chromium because your OS isn't in its supported matrix (common on freshly released distros — e.g. Ubuntu 26.04 within a few days of release), the install command looks for a system-installed `chromium`, `chromium-browser`, or `google-chrome` on `PATH` and, if one is present, reports success with a note that the system browser will be used via Playwright's `channel=` parameter. `verify_web_ui` then launches that browser transparently. You can preempt the problem by running `sudo apt install chromium-browser` (or equivalent) before enabling the feature.
+**Exception: system browser fallback.** If Playwright refuses to install Chromium because your OS isn't in its supported matrix (common on freshly released distros — e.g. Ubuntu 26.04 within a few days of release), the install command looks for a system-installed `chromium`, `chromium-browser`, or `google-chrome` on `PATH` and, if one is present, reports success with a note that the system browser will be used. At runtime, `verify_web_ui` tries Playwright `channel=` first and then retries with explicit executable paths when needed, which is more resilient on Linux packaging variants. You can preempt the problem by running `sudo apt install chromium-browser` (or equivalent) before enabling the feature.
 
 The status endpoint's `system_browser_channel` field tells you which fallback Playwright will use when the managed install isn't present; `web_capture_available` is `true` whenever either the managed install or a system browser is usable.
 
@@ -251,7 +251,7 @@ Playwright ships browser binaries for a fixed list of OS/arch combinations. Very
 - If you see *"UI verification ready — will use a system-installed browser"* after the install, it worked via fallback. Nothing else to do.
 - If you see the install failure with a list of `apt install` commands, install one of them and run the command again. On Ubuntu/Debian: `sudo apt install chromium-browser`.
 
-Once a system browser is on `PATH`, `verify_web_ui` uses it via Playwright's `channel="chromium"` (or `channel="chrome"`). Watch Playwright's release notes — they usually catch up within a release or two.
+Once a system browser is on `PATH`, `verify_web_ui` uses it via Playwright fallback launch paths (`channel="chromium"` / `channel="chrome"` first, then executable path retries on Linux). Watch Playwright's release notes — they usually catch up within a release or two.
 
 ### `verify_desktop_ui` on macOS returns empty capture
 
