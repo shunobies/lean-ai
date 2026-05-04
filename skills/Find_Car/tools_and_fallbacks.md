@@ -4,7 +4,7 @@
 
 - `search_internet` for discovery
 - `fetch_url` for public page retrieval
-- `edit_file` and `create_file` for ledger updates
+- `edit_file` and `create_file` for report updates
 - `scratch_pad` for short-term state
 - `journal` for durable milestones
 
@@ -36,7 +36,7 @@ Allowed behavior:
 2. Use a normal browser-like user-agent.
 3. Do not bypass protections or restrictions.
 4. Save output to local evidence file for auditability.
-5. Immediately log fallback usage in ledger.
+5. Immediately log fallback usage in the report.
 
 Suggested pattern:
 
@@ -59,6 +59,6 @@ Hard rule:
 
 - Run at most 2 consecutive discovery/fetch calls.
 - Then perform recording steps:
-  - ledger append/replace (allowed sections only)
+  - append-safe report update (allowed sections only)
   - scratch_pad state update
 - Resume tooling only after recording.
