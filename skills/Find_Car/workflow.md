@@ -1,6 +1,6 @@
 # Workflow (Phase-Based, Mandatory)
 
-Follow phases in order. Do not skip required ledger/scratch updates.
+Follow phases in order. Do not skip required report/scratch updates.
 
 **Global state-event rule (applies to every phase):** whenever a phase starts/exits, a key decision is made, or control moves after a significant tool result, emit a typed event to `.lean_ai/state/{session_id}.jsonl` (phase/tool/checkpoint). The markdown file remains an auditable artifact, not the recovery source of truth.
 
@@ -32,7 +32,7 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 | `checkpoint` | Emit after each completed “max 2 external calls then record” cycle and after the intake recap/confirmation milestone. |
 | `context_refreshed` | Emit whenever refresh/recovery context is rebuilt during intake. |
 
-**Required ledger update:** none.
+**Required report update:** none.
 
 **Required scratch_pad update:** none.
 
@@ -46,7 +46,7 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 
 1. Check whether `hybrid_car_private_seller_research.md` exists.
 2. If missing, create it from template.
-3. Record ledger setup in scratch_pad and journal.
+3. Record report setup in scratch_pad and journal.
 
 **Required state event update:** emit phase/tool/checkpoint events for phase entry, key decisions, and phase exit.
 
@@ -58,11 +58,11 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 | `checkpoint` | Emit after each completed “max 2 external calls then record” cycle and at ledger-setup completion. |
 | `context_refreshed` | Emit whenever refresh/recovery context is rebuilt during setup. |
 
-**Required ledger update:** create file only if missing.
+**Required report update:** create file only if missing.
 
 **Required scratch_pad update:** record file existence/creation and next phase.
 
-**Exit condition:** ledger exists and setup is logged.
+**Exit condition:** report exists and setup is logged.
 
 ## Phase 2: Source Discovery
 
@@ -84,7 +84,7 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 | `checkpoint` | Emit after each completed “max 2 external calls then record” cycle and when source-candidate set is ready for fetch. |
 | `context_refreshed` | Emit whenever refresh/recovery context is rebuilt during discovery. |
 
-**Required ledger update:** none yet.
+**Required report update:** none yet.
 
 **Required scratch_pad update:** summarize discovered source candidates and next fetch target.
 
@@ -111,7 +111,7 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 | `checkpoint` | Emit after each completed “max 2 external calls then record” cycle and when crawl tracking tables are reconciled for the current batch. |
 | `context_refreshed` | Emit whenever refresh/recovery context is rebuilt during crawl tracking. |
 
-**Required ledger update:** append rows/bullets in tracked sections.
+**Required report update:** append rows/bullets in tracked sections.
 
 **Required scratch_pad update:** counts and next crawl action.
 
@@ -137,7 +137,7 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 | `checkpoint` | Emit after each completed “max 2 external calls then record” cycle and when pending-queue thresholds/milestones are evaluated. |
 | `context_refreshed` | Emit whenever refresh/recovery context is rebuilt during candidate collection. |
 
-**Required ledger update:** append to pending table.
+**Required report update:** append to pending table.
 
 **Required scratch_pad update:** pending count and verification queue.
 
@@ -165,7 +165,7 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 | `checkpoint` | Emit after each completed “max 2 external calls then record” cycle and after each classification reconciliation milestone (accepted/rejected + pending marker). |
 | `context_refreshed` | Emit whenever refresh/recovery context is rebuilt during verification. |
 
-**Required ledger update:** one classification row + pending cleanup marker.
+**Required report update:** one classification row + pending cleanup marker.
 
 **Required scratch_pad update:** decision rationale, updated counts, next candidate.
 
@@ -192,11 +192,11 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 | `checkpoint` | Emit after each reconciliation milestone (counts synced, pending reviewed, limitations finalized, numbering verified). |
 | `context_refreshed` | Emit whenever refresh/recovery context is rebuilt during reconciliation. |
 
-**Required ledger update:** counts + final limitation text.
+**Required report update:** counts + final limitation text.
 
 **Required scratch_pad update:** final totals and uncertainty.
 
-**Exit condition:** ledger internally consistent.
+**Exit condition:** report internally consistent.
 
 ## Phase 7: Final Response
 
@@ -205,7 +205,7 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 **Actions:**
 
 1. Report qualifying listing count.
-2. Report ledger filename.
+2. Report filename.
 3. Report biggest uncertainty.
 4. Report local-only vs nationwide expansion.
 5. Report useful sources and blocked sources.
@@ -219,7 +219,7 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 | `checkpoint` | Emit after each reconciliation milestone reflected in the final user summary and after final response delivery. |
 | `context_refreshed` | Emit whenever refresh/recovery context is rebuilt during final response preparation. |
 
-**Required ledger update:** none.
+**Required report update:** none.
 
 **Required scratch_pad update:** none.
 
@@ -231,14 +231,14 @@ Never run long search/fetch loops without state updates.
 
 - Maximum batch: 2 tool calls that gather external data (`search_internet` or `fetch_url`).
 - After that batch, record updates in:
-  - machine state ledger (`.lean_ai/state/{session_id}.jsonl`) with typed tool/checkpoint events
-  - reporting ledger (`edit_file` on markdown) when any report-relevant fact was found
+  - machine event ledger (`.lean_ai/state/{session_id}.jsonl`) with typed tool/checkpoint events
+  - report ledger (`edit_file` on markdown) when any report-relevant fact was found
   - `scratch_pad` always
 - If no useful data was found, still append a `Search Notes` bullet and scratch_pad note.
 
 ## Safe Targeting Rule for File Edits
 
-When using `grep`/`find`/`edit_file` to update ledger sections:
+When using `grep`/`find`/`edit_file` to update report sections:
 
 1. Locate the exact section anchor comment (for example, `<!-- ANCHOR:QUALIFYING_LISTINGS -->`).
 2. Apply the smallest possible edit under that anchor section only.

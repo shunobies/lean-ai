@@ -1,11 +1,16 @@
 # Memory and Reporting
 
-## Append-Only Ledger Editing Rules
+## Append-Safe Report Update Rules
 
-To reduce wrong-line matches from `grep`/`find`/`edit_file`, use unique section anchors in the ledger.
+## Event Ledger vs Report Ledger
+
+- **Event ledger** = machine recovery/state continuity in `.lean_ai/state/{session_id}.jsonl` (JSONL typed events).
+- **Report ledger** = user-facing evidence/reporting in `hybrid_car_private_seller_research.md` (markdown).
+
+To reduce wrong-line matches from `grep`/`find`/`edit_file`, use unique section anchors in the report file.
 Match the exact anchor comment first, then edit the nearest table/bullet block.
 
-Never rewrite the whole ledger for a single update. Target only one section per edit.
+Never rewrite the whole report for a single update. Target only one section per edit.
 
 Allowed edits to `hybrid_car_private_seller_research.md`:
 
@@ -19,10 +24,10 @@ Forbidden unless user explicitly requests:
 
 - Rewriting entire sections
 - Reordering or deleting prior accepted/rejected rows
-- Regenerating the full ledger file
+- Regenerating the full report file
 - Changing heading structure
 
-## Ledger Anchor Map (Use Exact Anchor Strings)
+## Report Anchor Map (Use Exact Anchor Strings)
 
 - `<!-- ANCHOR:CURRENT_COUNTS -->`
 - `<!-- ANCHOR:QUALIFYING_LISTINGS -->`
@@ -83,14 +88,14 @@ Editing rule:
 ### Current Counts
 
 - Replace only numeric values.
-- Must reflect ledger tables after reconciliation.
+- Must reflect report tables after reconciliation.
 
 ### Search Limitation
 
 - Replace full section text only in reconciliation.
 - Use concrete limitations, not vague statements.
 
-## Correct vs Incorrect Ledger Edits
+## Correct vs Incorrect Report Edits
 
 ### Correct (append one qualifying row)
 
@@ -114,7 +119,7 @@ Editing rule:
 
 Update after:
 
-- ledger creation/existence check
+- report creation/existence check
 - each tool batch (max 2 discovery/fetch calls)
 - candidate queue growth
 - accept/reject decisions
@@ -127,7 +132,7 @@ Keep concise and action-oriented.
 
 Update after:
 
-- ledger setup
+- report setup
 - every 5 accepted listings
 - every 10 rejected listings
 - completion of a major source
