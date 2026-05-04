@@ -225,13 +225,12 @@ class TestDatabase:
     @pytest.fixture
     async def db(self, tmp_path):
         """Create an in-memory-like temp database."""
-        import aiosqlite
-
         from lean_ai.integrations.db import _SCHEMA
+        from lean_ai.sqlite_compat import SQLITE_ROW_FACTORY, connect as connect_sqlite
 
         db_path = tmp_path / "test_integrations.db"
-        db = await aiosqlite.connect(str(db_path))
-        db.row_factory = aiosqlite.Row
+        db = await connect_sqlite(str(db_path))
+        db.row_factory = SQLITE_ROW_FACTORY
         await db.execute("PRAGMA foreign_keys = ON")
         await db.executescript(_SCHEMA)
         yield db

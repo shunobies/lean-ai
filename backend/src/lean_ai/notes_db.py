@@ -12,6 +12,8 @@ from pathlib import Path
 
 import aiosqlite
 
+from lean_ai.sqlite_compat import SQLITE_ROW_FACTORY, SQLiteConnection, connect as connect_sqlite
+
 logger = logging.getLogger(__name__)
 
 _NOTES_DIR = Path.home() / ".lean_ai" / "notes"
@@ -43,10 +45,10 @@ def _db_path() -> Path:
     return _NOTES_DIR / "notes.db"
 
 
-async def get_notes_db() -> aiosqlite.Connection:
+async def get_notes_db() -> SQLiteConnection:
     """Open (or create) the global notes database."""
-    db = await aiosqlite.connect(str(_db_path()))
-    db.row_factory = aiosqlite.Row
+    db = await connect_sqlite(str(_db_path()))
+    db.row_factory = SQLITE_ROW_FACTORY
     await db.execute("PRAGMA journal_mode = WAL")
     await db.execute("PRAGMA busy_timeout = 5000")
     await db.execute("PRAGMA foreign_keys = ON")

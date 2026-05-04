@@ -6,6 +6,7 @@ implementations, grouped by concern.
 
 from fastapi import APIRouter
 
+from lean_ai.routers.architecture import architecture_router
 from lean_ai.routers.chat import chat_router
 from lean_ai.routers.dependencies import llm_client  # noqa: F401
 from lean_ai.routers.diffs import diffs_router
@@ -25,6 +26,7 @@ from lean_ai.routers.workflow import workflow_router
 from lean_ai.routers.workspace import workspace_router
 
 router = APIRouter()
+router.include_router(architecture_router)
 router.include_router(sessions_router)
 router.include_router(workflow_router)
 router.include_router(generation_router)

@@ -577,12 +577,14 @@ export async function chat(
         active_selection?: string;
     },
     userName?: string,
+    chatMode?: "architecture_review",
 ): Promise<{ reply: string; tokens_per_second?: number | null; eval_count?: number | null }> {
     const body: Record<string, unknown> = { message, history };
     if (workspace) {
         body.workspace = workspace;
     }
     if (userName) { body.user_name = userName; }
+    if (chatMode) { body.chat_mode = chatMode; }
     const data = (await postJson("/api/chat", body)) as {
         reply: string;
         tokens_per_second?: number | null;
@@ -621,6 +623,7 @@ export function chatStream(
     onToolCall?: (name: string, description: string) => void,
     onToolResult?: (name: string, success: boolean) => void,
     extendedTurns?: number,
+    chatMode?: "architecture_review",
 ): Promise<{ receivedDone: boolean }> {
     return new Promise((resolve, reject) => {
         const fullUrl = new URL(`${baseUrl}/api/chat/stream`);
@@ -635,6 +638,7 @@ export function chatStream(
         if (typeof extendedTurns === "number" && extendedTurns > 0) {
             body.extended_turns = extendedTurns;
         }
+        if (chatMode) { body.chat_mode = chatMode; }
         const postData = JSON.stringify(body);
 
         const options: http.RequestOptions = {

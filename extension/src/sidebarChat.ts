@@ -297,6 +297,10 @@ export interface HandleChatOptions {
      * call. Backend caps at 40.
      */
     extendedTurns?: number;
+    /**
+     * Optional backend chat-mode override for specialized review flows.
+     */
+    chatMode?: "architecture_review";
 }
 
 export async function handleChatMessage(
@@ -363,7 +367,7 @@ export async function handleChatMessage(
             ctx.postMessage({ type: "chatToolActivity", name, description });
         }, (name, success) => {
             ctx.postMessage({ type: "chatToolResult", name, success });
-        }, options?.extendedTurns));
+        }, options?.extendedTurns, options?.chatMode));
     } finally {
         ctx.sessionTreeProvider?.resumeRefresh();
     }

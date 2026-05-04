@@ -216,6 +216,7 @@ Type these in the chat panel:
 | `/init` | Index workspace, generate project context, and index reference library |
 | `/agent <task>` | Send a task to the full planning pipeline |
 | `/fix <task>` | Skip planning — the agent explores and fixes directly |
+| `/improve-codebase-architecture [focus]` | Review the codebase for deepening opportunities using code, context, session history, memories, and recorded decisions |
 | `/approve` | Merge the current session's branch |
 | `/reject` | Discard the current session's branch |
 | `/style` | Generate style guide from CSS/template files |

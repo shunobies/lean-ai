@@ -696,8 +696,16 @@ export class BackendClient {
             active_selection?: string;
         },
         userName?: string,
+        chatMode?: "architecture_review",
     ) {
-        return _chat((p, b) => this._postJsonNoTimeout(p, b), message, history, workspace, userName);
+        return _chat(
+            (p, b) => this._postJsonNoTimeout(p, b),
+            message,
+            history,
+            workspace,
+            userName,
+            chatMode,
+        );
     }
 
     chatStream(
@@ -719,11 +727,12 @@ export class BackendClient {
         onToolCall?: (name: string, description: string) => void,
         onToolResult?: (name: string, success: boolean) => void,
         extendedTurns?: number,
+        chatMode?: "architecture_review",
     ) {
         return _chatStream(
             this.baseUrl, message, history, workspace, onToken,
             attachments, onThinking, userName, skipWebSearch,
-            onVisionDescription, onToolCall, onToolResult, extendedTurns,
+            onVisionDescription, onToolCall, onToolResult, extendedTurns, chatMode,
         );
     }
 

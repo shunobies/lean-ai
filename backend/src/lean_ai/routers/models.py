@@ -116,6 +116,7 @@ class ChatRequest(BaseModel):
     attachments: list[Attachment] = []
     user_name: str | None = None
     skip_web_search: bool = False
+    chat_mode: str | None = None
     # Optional per-request override of the tool-turn budget. Used by the
     # ``/mock-interview`` extension command where 10 scored rounds need
     # more than the default ``_CHAT_MAX_TURNS``. Backend caps at

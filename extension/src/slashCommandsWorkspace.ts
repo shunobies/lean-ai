@@ -695,6 +695,48 @@ export async function handleRequestCommand(
     await ctx.handleAgentMessage(`/request ${prompt}`);
 }
 
+// ── /improve-codebase-architecture — architecture review workflow ───
+
+export async function handleImproveCodebaseArchitectureCommand(
+    ctx: SlashCommandContext,
+    args: string,
+): Promise<void> {
+    const ws = ctx.getWs();
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ctx.postMessage({
+            type: "error",
+            text: "An agent workflow is already running. Wait for it to complete, or start a new chat first.",
+        });
+        return;
+    }
+
+    const focus = args.trim();
+    const prompt = focus
+        ? (
+            "Review this codebase for architecture deepening opportunities.\n\n"
+            `Focus area: ${focus}`
+        )
+        : "Review this codebase for architecture deepening opportunities.";
+
+    ctx.postMessage({
+        type: "reply",
+        text: (
+            focus
+                ? `Starting architecture review with a focus on \`${focus}\`.`
+                : "Starting architecture review for this codebase."
+        ),
+        cls: "msg-system",
+    });
+
+    // Architecture review benefits from a larger exploration budget so it can
+    // read project context, recent sessions, memories, and code before
+    // surfacing deepening candidates.
+    await ctx.handleChatDispatch(prompt, {
+        extendedTurns: 40,
+        chatMode: "architecture_review",
+    });
+}
+
 // ── /interview-prep — tailored resume + cover letter workflow ────────
 
 /**
@@ -1441,6 +1483,7 @@ export async function handleHelpCommand(
         "- `/agent <task>` — Full plan → approve → execute workflow.",
         "- `/fix <description>` — Skip planning, diagnose and fix directly.",
         "- `/request <task>` — Skip planning, open-ended task with full tool access.",
+        "- `/improve-codebase-architecture [focus]` — Review the codebase for deepening opportunities using project context, session history, memories, and recorded decisions.",
         "- `/approve` — Merge the agent branch into base after completion.",
         "- `/reject` — Abandon the agent branch.",
         "- `/resume [session_id]` — Resume a previous session.",

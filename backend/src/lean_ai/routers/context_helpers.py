@@ -17,6 +17,21 @@ PLANNING_CONTEXT_PERCENT = 0.15  # 15% of context window for planning prompts
 CUSTOM_DOCS_SHARE = 0.4  # 40% of budget reserved for custom steering docs
 
 
+def _read_text_file(path: Path, max_chars: int | None = None) -> str | None:
+    """Read a text file with optional truncation."""
+    if not path.is_file():
+        return None
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return None
+    if not content.strip():
+        return None
+    if max_chars is not None and len(content) > max_chars:
+        return content[:max_chars] + "\n... (truncated)"
+    return content
+
+
 def ensure_gitignore_entries(repo_root: str, entries: list[str]) -> list[str]:
     """Ensure entries are present in .gitignore."""
     gitignore_path = Path(repo_root) / ".gitignore"
@@ -88,6 +103,75 @@ def read_project_context(workspace_root: str, max_chars: int = 20_000) -> str | 
         except Exception:
             pass
     return "\n\n".join(parts) if parts else None
+
+
+def read_architecture_reference_context(
+    workspace_root: str,
+    max_chars: int = 12_000,
+) -> str | None:
+    """Read durable architecture docs relevant to architecture review."""
+    repo_root = Path(workspace_root)
+    parts: list[str] = []
+    used = 0
+
+    def _append_section(label: str, path: Path) -> None:
+        nonlocal used
+        remaining = max_chars - used
+        if remaining < 300:
+            return
+        content = _read_text_file(path, remaining)
+        if not content:
+            return
+        section = f"## {label}: {path.relative_to(repo_root)}\n{content}"
+        parts.append(section)
+        used += len(section) + 2
+
+    for name in ("CONTEXT-MAP.md", "CONTEXT.md"):
+        _append_section("Context", repo_root / name)
+
+    adr_dir = repo_root / "docs" / "adr"
+    if adr_dir.is_dir():
+        for path in sorted(adr_dir.glob("*.md")):
+            _append_section("ADR", path)
+
+    for rel_path in (
+        "docs/architecture.md",
+        "docs/example-flow.md",
+        "docs/workflow-flow.md",
+        "docs/extension.md",
+    ):
+        _append_section("Architecture Doc", repo_root / rel_path)
+
+    return "\n\n".join(parts) if parts else None
+
+
+def read_architecture_plan_debug_context(
+    workspace_root: str,
+    max_chars: int = 6000,
+) -> str | None:
+    """Read the latest debug planning artifact as low-confidence context."""
+    if not settings.debug_planning:
+        return None
+
+    debug_root = Path(workspace_root) / ".lean_ai" / "plan_debug"
+    if not debug_root.is_dir():
+        return None
+
+    candidates = sorted(
+        debug_root.glob("*/phase_4_plan_markdown.md"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    for path in candidates:
+        content = _read_text_file(path, max_chars=max_chars)
+        if content:
+            session_id = path.parent.name
+            return (
+                f"Recent planning artifact from session {session_id}. "
+                "Treat this as speculative recent intent, not settled architecture.\n\n"
+                f"{content}"
+            )
+    return None
 
 
 def load_custom_steering_docs(repo_root: str) -> str:
@@ -275,7 +359,9 @@ def extract_urls(text: str) -> list[str]:
     return urls
 
 
-def build_chat_system_prompt(
+def _build_contextual_system_prompt(
+    *,
+    base_prompt: str,
     workspace: WorkspaceContext | None = None,
     file_tree: list[str] | None = None,
     active_file_content: str | None = None,
@@ -286,19 +372,17 @@ def build_chat_system_prompt(
     reference_context: str | None = None,
     user_name: str | None = None,
     recent_sessions: str | None = None,
+    extra_sections: list[tuple[str, str]] | None = None,
     max_context_chars: int = 30000,
-    max_turns: int = 20,
 ) -> str:
-    """Build the chat system prompt with budget-gated context injection.
+    """Build a context-rich system prompt with budget-gated sections.
 
     Dynamic context sections are appended in priority order until
     *max_context_chars* is reached.  Lower-priority sections are
     dropped or truncated to keep the prompt within budget for smaller
     models (e.g. 20B request model).
     """
-    parts = [
-        registry.format("chat.system", CHAT_MAX_TURNS=str(max_turns)),
-    ]
+    parts = [base_prompt]
 
     if user_name:
         parts.append("")
@@ -380,15 +464,21 @@ def build_chat_system_prompt(
             sr_parts.append(f"```\n{result['content']}\n```")
         _try_append("=== CODE SEARCH RESULTS ===", "\n".join(sr_parts))
 
-    # Priority 4: Project architecture — truncated to fit
+    # Priority 4: Mode-specific context blocks
+    if extra_sections and budget > 0:
+        for header, content in extra_sections:
+            if content and budget > 0:
+                _try_append(header, content)
+
+    # Priority 5: Project architecture — truncated to fit
     if project_context and budget > 0:
         _try_append("=== PROJECT ARCHITECTURE ===", project_context)
 
-    # Priority 5: Web search results
+    # Priority 6: Web search results
     if web_search_results and budget > 0:
         _try_append("=== WEB SEARCH RESULTS ===", web_search_results)
 
-    # Priority 6: Fetched pages
+    # Priority 7: Fetched pages
     if fetched_pages and budget > 0:
         for page in fetched_pages:
             if budget <= 0:
@@ -398,12 +488,90 @@ def build_chat_system_prompt(
                 page["content"],
             )
 
-    # Priority 7: File tree (drop if over budget)
+    # Priority 8: File tree (drop if over budget)
     if file_tree and budget > 0:
         _try_append("=== PROJECT FILES ===", "\n".join(file_tree))
 
-    # Priority 8: Reference material (drop if over budget)
+    # Priority 9: Reference material (drop if over budget)
     if reference_context and budget > 0:
         _try_append("=== REFERENCE MATERIAL ===", reference_context)
 
     return "\n".join(parts)
+
+
+def build_chat_system_prompt(
+    workspace: WorkspaceContext | None = None,
+    file_tree: list[str] | None = None,
+    active_file_content: str | None = None,
+    search_results: list[dict] | None = None,
+    project_context: str | None = None,
+    fetched_pages: list[dict] | None = None,
+    web_search_results: str | None = None,
+    reference_context: str | None = None,
+    user_name: str | None = None,
+    recent_sessions: str | None = None,
+    max_context_chars: int = 30000,
+    max_turns: int = 20,
+) -> str:
+    """Build the standard chat system prompt."""
+    return _build_contextual_system_prompt(
+        base_prompt=registry.format("chat.system", CHAT_MAX_TURNS=str(max_turns)),
+        workspace=workspace,
+        file_tree=file_tree,
+        active_file_content=active_file_content,
+        search_results=search_results,
+        project_context=project_context,
+        fetched_pages=fetched_pages,
+        web_search_results=web_search_results,
+        reference_context=reference_context,
+        user_name=user_name,
+        recent_sessions=recent_sessions,
+        max_context_chars=max_context_chars,
+    )
+
+
+def build_architecture_review_system_prompt(
+    workspace: WorkspaceContext | None = None,
+    file_tree: list[str] | None = None,
+    active_file_content: str | None = None,
+    search_results: list[dict] | None = None,
+    project_context: str | None = None,
+    fetched_pages: list[dict] | None = None,
+    web_search_results: str | None = None,
+    reference_context: str | None = None,
+    user_name: str | None = None,
+    recent_sessions: str | None = None,
+    decision_context: str | None = None,
+    architecture_reference_context: str | None = None,
+    plan_debug_context: str | None = None,
+    max_context_chars: int = 30000,
+    max_turns: int = 20,
+) -> str:
+    """Build the architecture-review chat system prompt."""
+    extra_sections: list[tuple[str, str]] = []
+    if decision_context:
+        extra_sections.append(("=== DURABLE PROJECT DECISIONS ===", decision_context))
+    if architecture_reference_context:
+        extra_sections.append(
+            ("=== ARCHITECTURE REFERENCE DOCS ===", architecture_reference_context)
+        )
+    if plan_debug_context:
+        extra_sections.append(
+            ("=== RECENT PLANNING ARTIFACTS (LOW CONFIDENCE) ===", plan_debug_context)
+        )
+
+    return _build_contextual_system_prompt(
+        base_prompt=registry.format("chat.architecture_review", CHAT_MAX_TURNS=str(max_turns)),
+        workspace=workspace,
+        file_tree=file_tree,
+        active_file_content=active_file_content,
+        search_results=search_results,
+        project_context=project_context,
+        fetched_pages=fetched_pages,
+        web_search_results=web_search_results,
+        reference_context=reference_context,
+        user_name=user_name,
+        recent_sessions=recent_sessions,
+        extra_sections=extra_sections,
+        max_context_chars=max_context_chars,
+    )

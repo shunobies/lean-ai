@@ -11,6 +11,7 @@ Run it fully local with [Ollama](https://ollama.com), or connect to OpenAI and A
 - **No prompt engineering needed** — describe what you want in plain English. A built-in chat assistant helps you refine your idea into a detailed task before the 6-phase planning pipeline takes over.
 - **Plan first, then execute** — a 6-phase planning pipeline reads your codebase, traces data flow, and produces a structured plan. You approve before anything changes. Thinking and content tokens stream live during each phase so you can watch the agent reason in real-time.
 - **Three workflow modes** — `/agent` for full planning, `/fix` for quick bug fixes, `/request` for open-ended research and documentation tasks.
+- **Architecture review mode** — `/improve-codebase-architecture` reviews the current repo using code, project context, session history, memories, and recorded decisions to suggest high-leverage deepening opportunities.
 - **Multi-provider** — Ollama (free, local), OpenAI, and Anthropic. Switch from the settings panel without restarting.
 - **Dual-model pipeline** — use a fast local model for exploration and implementation, hand off to a cloud model for reasoning-heavy planning phases.
 - **Built-in code quality** — auto-runs your linter and tests after every change, with LLM self-correction on failure.
@@ -53,6 +54,7 @@ If you prefer to manage the backend yourself, set `lean-ai.backendDir` or `lean-
 | `/agent` | Full planning pipeline for features and refactors |
 | `/fix` | Skip planning, fix directly with full tool access |
 | `/request <task>` | Skip planning, open-ended task with full tool access |
+| `/improve-codebase-architecture [focus]` | Review the codebase for high-leverage architecture improvements |
 | `/style` | Generate a style guide for the current codebase |
 | `/resume [session_id]` | Resume a previous session |
 | `/help` | Show this help |

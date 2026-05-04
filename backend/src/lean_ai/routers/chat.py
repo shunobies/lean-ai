@@ -14,9 +14,12 @@ from lean_ai.config import settings
 from lean_ai.llm.refiner import RefinerResult
 from lean_ai.llm.tool_definitions import build_chat_tools
 from lean_ai.routers.context_helpers import (
+    build_architecture_review_system_prompt,
     build_chat_system_prompt,
     extract_urls,
     get_file_tree,
+    read_architecture_plan_debug_context,
+    read_architecture_reference_context,
     read_active_file,
     read_project_context,
     search_workspace,
@@ -110,6 +113,9 @@ def _make_chat_tool_executor(repo_root: str | None = None):
                 "list_recent_sessions",
                 "get_session_summary",
                 "search_workspace_memory",
+                "search_architecture_decisions",
+                "get_architecture_decision",
+                "record_architecture_decision",
             )
             and not repo_root
         ):
@@ -233,6 +239,65 @@ def _make_chat_tool_executor(repo_root: str | None = None):
             if memories and "No memories found" not in memories:
                 parts.append(memories)
             return "\n\n".join(parts) if parts else f"No results for '{query}'."
+        elif name == "search_architecture_decisions":
+            from lean_ai.architecture.decision_db import (
+                list_architecture_decisions,
+                render_architecture_decisions_for_llm,
+            )
+            from lean_ai.db import get_db
+
+            query = arguments.get("query", "")
+            db = await get_db(repo_root)
+            try:
+                decisions = await list_architecture_decisions(
+                    db,
+                    status=arguments.get("status", "active"),
+                    query=query,
+                    limit=arguments.get("limit", 5),
+                )
+            finally:
+                await db.close()
+            return render_architecture_decisions_for_llm(decisions, query=query)
+        elif name == "get_architecture_decision":
+            from lean_ai.architecture.decision_db import (
+                get_architecture_decision,
+                render_architecture_decision_for_llm,
+            )
+            from lean_ai.db import get_db
+
+            db = await get_db(repo_root)
+            try:
+                decision = await get_architecture_decision(
+                    db,
+                    arguments.get("decision_id", ""),
+                )
+            finally:
+                await db.close()
+            return render_architecture_decision_for_llm(decision)
+        elif name == "record_architecture_decision":
+            from lean_ai.architecture.decision_db import (
+                create_architecture_decision,
+                render_architecture_decision_for_llm,
+            )
+            from lean_ai.db import get_db
+
+            db = await get_db(repo_root)
+            try:
+                decision = await create_architecture_decision(
+                    db,
+                    title=arguments.get("title", "").strip(),
+                    summary=arguments.get("summary", "").strip(),
+                    rationale=arguments.get("rationale", "").strip(),
+                    tags=arguments.get("tags"),
+                    source_session_id=arguments.get("source_session_id"),
+                    source_memory_id=arguments.get("source_memory_id"),
+                    source_plan_decision_ref=arguments.get("source_plan_decision_ref"),
+                )
+            finally:
+                await db.close()
+            return "Architecture decision recorded.\n" + render_architecture_decision_for_llm(
+                decision
+            )
 
         # ── Search tools (no workspace needed) ──
         elif name == "search_internet":
@@ -347,6 +412,9 @@ async def _build_chat_messages(
     project_context: str | None = None
     fetched_pages: list[dict] = []
     refiner_result: RefinerResult | None = None
+    decision_context: str | None = None
+    architecture_reference_context: str | None = None
+    plan_debug_context: str | None = None
 
     async def _refine_message():
         nonlocal refiner_result
@@ -388,6 +456,50 @@ async def _build_chat_messages(
                 )
         except Exception as e:
             logger.warning("Chat workspace context failed (non-fatal): %s", e)
+
+    async def _gather_architecture_context():
+        nonlocal decision_context, architecture_reference_context, plan_debug_context
+        if request.chat_mode != "architecture_review":
+            return
+        if not (workspace and workspace.workspace_root):
+            return
+
+        repo_root = workspace.workspace_root
+        architecture_reference_context = await asyncio.to_thread(
+            read_architecture_reference_context,
+            repo_root,
+        )
+        plan_debug_context = await asyncio.to_thread(
+            read_architecture_plan_debug_context,
+            repo_root,
+        )
+
+        try:
+            from lean_ai.architecture.decision_db import (
+                list_architecture_decisions,
+                render_architecture_decisions_for_llm,
+            )
+            from lean_ai.db import get_db
+
+            db = await get_db(repo_root)
+            try:
+                decisions = await list_architecture_decisions(
+                    db,
+                    query=request.message,
+                    limit=5,
+                )
+                if not decisions:
+                    decisions = await list_architecture_decisions(db, limit=5)
+            finally:
+                await db.close()
+
+            if decisions:
+                decision_context = render_architecture_decisions_for_llm(
+                    decisions,
+                    query=request.message if request.message.strip() else None,
+                )
+        except Exception:
+            logger.debug("Architecture decision lookup failed (non-fatal)", exc_info=True)
 
     async def _fetch_urls():
         nonlocal fetched_pages
@@ -470,6 +582,7 @@ async def _build_chat_messages(
 
     await asyncio.gather(
         _gather_workspace_context(),
+        _gather_architecture_context(),
         _gather_session_context(),
         _fetch_urls(),
         _refine_message(),
@@ -484,18 +597,35 @@ async def _build_chat_messages(
     if refiner_result and refiner_result.reference_context:
         reference_ctx = refiner_result.reference_context
 
-    system_prompt = build_chat_system_prompt(
-        workspace=workspace,
-        file_tree=file_tree,
-        active_file_content=active_file_content,
-        search_results=search_results,
-        project_context=project_context,
-        fetched_pages=fetched_pages or None,
-        reference_context=reference_ctx,
-        user_name=request.user_name,
-        recent_sessions=recent_activity or None,
-        max_turns=_resolve_max_turns(request.extended_turns),
-    )
+    if request.chat_mode == "architecture_review":
+        system_prompt = build_architecture_review_system_prompt(
+            workspace=workspace,
+            file_tree=file_tree,
+            active_file_content=active_file_content,
+            search_results=search_results,
+            project_context=project_context,
+            fetched_pages=fetched_pages or None,
+            reference_context=reference_ctx,
+            user_name=request.user_name,
+            recent_sessions=recent_activity or None,
+            decision_context=decision_context,
+            architecture_reference_context=architecture_reference_context,
+            plan_debug_context=plan_debug_context,
+            max_turns=_resolve_max_turns(request.extended_turns),
+        )
+    else:
+        system_prompt = build_chat_system_prompt(
+            workspace=workspace,
+            file_tree=file_tree,
+            active_file_content=active_file_content,
+            search_results=search_results,
+            project_context=project_context,
+            fetched_pages=fetched_pages or None,
+            reference_context=reference_ctx,
+            user_name=request.user_name,
+            recent_sessions=recent_activity or None,
+            max_turns=_resolve_max_turns(request.extended_turns),
+        )
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
     # Append image descriptions to the user message (describe branch).

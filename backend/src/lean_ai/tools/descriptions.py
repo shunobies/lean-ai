@@ -58,6 +58,12 @@ def humanize_tool_call(name: str, args: dict) -> str:
         return "Getting session summary"
     if name == "search_workspace_memory":
         return f"Searching memory: {args.get('query', '...')}"
+    if name == "search_architecture_decisions":
+        return f"Searching architecture decisions: {args.get('query', '...')}"
+    if name == "get_architecture_decision":
+        return f"Loading architecture decision {args.get('decision_id', '...')}"
+    if name == "record_architecture_decision":
+        return f"Recording architecture decision: {args.get('title', '...')}"
     if name == "query_project_context":
         parts = []
         if args.get("section"):

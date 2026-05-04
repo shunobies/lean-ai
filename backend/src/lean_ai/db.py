@@ -12,6 +12,8 @@ from pathlib import Path
 
 import aiosqlite
 
+from lean_ai.sqlite_compat import SQLITE_ROW_FACTORY, SQLiteConnection, connect as connect_sqlite
+
 logger = logging.getLogger(__name__)
 
 _SCHEMA = """
@@ -65,6 +67,26 @@ CREATE TABLE IF NOT EXISTS session_memories (
     source_task TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS architecture_decisions (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    rationale TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    tags TEXT,
+    source_session_id TEXT,
+    source_memory_id TEXT,
+    source_plan_decision_ref TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_architecture_decisions_status
+ON architecture_decisions(status);
+
+CREATE INDEX IF NOT EXISTS idx_architecture_decisions_created_at
+ON architecture_decisions(created_at);
 """
 
 
@@ -75,10 +97,10 @@ def _db_path(repo_root: str) -> Path:
     return p / "lean_ai.db"
 
 
-async def get_db(repo_root: str) -> aiosqlite.Connection:
+async def get_db(repo_root: str) -> SQLiteConnection:
     """Open (or create) the database and ensure schema exists."""
-    db = await aiosqlite.connect(str(_db_path(repo_root)))
-    db.row_factory = aiosqlite.Row
+    db = await connect_sqlite(str(_db_path(repo_root)))
+    db.row_factory = SQLITE_ROW_FACTORY
     await db.execute("PRAGMA journal_mode = WAL")
     await db.execute("PRAGMA busy_timeout = 5000")
     await db.executescript(_SCHEMA)

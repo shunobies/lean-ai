@@ -11,6 +11,8 @@ from pathlib import Path
 
 import aiosqlite
 
+from lean_ai.sqlite_compat import SQLITE_ROW_FACTORY, SQLiteConnection, connect as connect_sqlite
+
 logger = logging.getLogger(__name__)
 
 _SECTION_ORDER = [
@@ -47,10 +49,10 @@ def _db_path(repo_root: str) -> Path:
     return p / "context.db"
 
 
-async def get_context_db(repo_root: str) -> aiosqlite.Connection:
+async def get_context_db(repo_root: str) -> SQLiteConnection:
     """Open (or create) the per-workspace context database."""
-    db = await aiosqlite.connect(str(_db_path(repo_root)))
-    db.row_factory = aiosqlite.Row
+    db = await connect_sqlite(str(_db_path(repo_root)))
+    db.row_factory = SQLITE_ROW_FACTORY
     await db.execute("PRAGMA journal_mode = WAL")
     await db.execute("PRAGMA busy_timeout = 5000")
     await db.executescript(_SCHEMA)

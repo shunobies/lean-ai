@@ -1105,6 +1105,100 @@ CHAT_TOOLS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_architecture_decisions",
+            "description": (
+                "Search durable architecture decisions that were previously "
+                "recorded for this workspace. Use when evaluating whether a "
+                "proposal conflicts with past reasoning or settled design constraints."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query for architecture decisions.",
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Optional decision status filter such as active or superseded.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max decisions to return (default 5).",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_architecture_decision",
+            "description": (
+                "Get the full details for one recorded architecture decision."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "decision_id": {
+                        "type": "string",
+                        "description": "The architecture decision id to inspect.",
+                    },
+                },
+                "required": ["decision_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "record_architecture_decision",
+            "description": (
+                "Record a new durable architecture decision for this workspace. "
+                "Only use after the user explicitly asks you to record or promote "
+                "the decision so future reviews can rely on it."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Short decision title.",
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "One-paragraph summary of the decision.",
+                    },
+                    "rationale": {
+                        "type": "string",
+                        "description": "Why this decision exists, including tradeoffs or constraints.",
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional tags for later retrieval.",
+                    },
+                    "source_session_id": {
+                        "type": "string",
+                        "description": "Optional source session id.",
+                    },
+                    "source_memory_id": {
+                        "type": "string",
+                        "description": "Optional source memory id.",
+                    },
+                    "source_plan_decision_ref": {
+                        "type": "string",
+                        "description": "Optional reference to a planning decision artifact.",
+                    },
+                },
+                "required": ["title", "summary", "rationale"],
+            },
+        },
+    },
 ]
 
 

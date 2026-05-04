@@ -20,6 +20,7 @@ import {
     handleAgentCommand,
     handleFixCommand,
     handleRequestCommand,
+    handleImproveCodebaseArchitectureCommand,
     handleInterviewPrepCommand,
     handleThankYouCommand,
     handleRecruiterReplyCommand,
@@ -43,7 +44,10 @@ export interface SlashCommandContext {
     ensureSession(): Promise<string>;
     ensureWebSocket(sessionId: string): WebSocket;
     handleAgentMessage(text: string): Promise<void>;
-    handleChatDispatch(text: string, opts?: { extendedTurns?: number }): Promise<void>;
+    handleChatDispatch(
+        text: string,
+        opts?: { extendedTurns?: number; chatMode?: "architecture_review" },
+    ): Promise<void>;
     getWs(): WebSocket | undefined;
     getLastCompletedSessionId(): string | undefined;
     setSessionId(id: string | undefined): void;
@@ -63,6 +67,7 @@ export function createSlashCommands(
     map.set("/agent",    (args) => handleAgentCommand(ctx, args));
     map.set("/fix",      (args) => handleFixCommand(ctx, args));
     map.set("/request",  (args) => handleRequestCommand(ctx, args));
+    map.set("/improve-codebase-architecture", (args) => handleImproveCodebaseArchitectureCommand(ctx, args));
     map.set("/style",    (args) => handleStyleCommand(ctx, args));
     map.set("/reboot",   (args) => handleRebootCommand(ctx, args));
     map.set("/approve",  (args) => handleApproveCommand(ctx, args));
