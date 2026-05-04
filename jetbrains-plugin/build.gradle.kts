@@ -16,10 +16,15 @@ repositories {
 
 dependencies {
     intellijPlatform {
-        create(
-            providers.gradleProperty("platformType").get(),
-            providers.gradleProperty("platformVersion").get()
-        )
+        val platformType = providers.gradleProperty("platformType").get()
+        val platformVersion = providers.gradleProperty("platformVersion").get()
+
+        when (platformType) {
+            "IC" -> intellijIdeaCommunity(platformVersion)
+            "IU" -> intellijIdeaUltimate(platformVersion)
+            else -> create(platformType, platformVersion)
+        }
+
         bundledPlugins(listOf<String>())
         instrumentationTools()
         pluginVerifier()
