@@ -2,6 +2,8 @@
 
 Follow phases in order. Do not skip required ledger/scratch updates.
 
+**Global state-event rule (applies to every phase):** whenever a phase starts/exits, a key decision is made, or control moves after a significant tool result, emit a typed event to `.lean_ai/state/{session_id}.jsonl` (phase/tool/checkpoint). The markdown file remains an auditable artifact, not the recovery source of truth.
+
 ## Phase 0: Intake
 
 **Allowed tools:** user chat only.
@@ -22,6 +24,8 @@ Follow phases in order. Do not skip required ledger/scratch updates.
    - preserve existing hybrid/price/mileage defaults
 3. Recap interpreted requirements and wait for confirmation.
 
+**Required state event update:** emit phase/tool/checkpoint events for phase entry, key decisions, and phase exit.
+
 **Required ledger update:** none.
 
 **Required scratch_pad update:** none.
@@ -38,6 +42,8 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 2. If missing, create it from template.
 3. Record ledger setup in scratch_pad and journal.
 
+**Required state event update:** emit phase/tool/checkpoint events for phase entry, key decisions, and phase exit.
+
 **Required ledger update:** create file only if missing.
 
 **Required scratch_pad update:** record file existence/creation and next phase.
@@ -53,6 +59,8 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 1. Run broad + source-specific searches.
 2. Use known listing URL patterns to discover likely listing paths.
 3. Do not stop just because first results lack direct listing URLs.
+
+**Required state event update:** emit phase/tool/checkpoint events for phase entry, key decisions, and phase exit.
 
 **Required ledger update:** none yet.
 
@@ -71,6 +79,8 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 3. Append each fetched page to `Crawled Pages`.
 4. Append blocked/JS-only/limited findings to `Search Notes`.
 
+**Required state event update:** emit phase/tool/checkpoint events for phase entry, key decisions, and phase exit.
+
 **Required ledger update:** append rows/bullets in tracked sections.
 
 **Required scratch_pad update:** counts and next crawl action.
@@ -86,6 +96,8 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 1. Append candidate listing URLs to `Pending Candidate URLs`.
 2. Batch discovery before deep verification when many candidates exist.
 3. If pending count exceeds limit, stop discovery and move to verification.
+
+**Required state event update:** emit phase/tool/checkpoint events for phase entry, key decisions, and phase exit.
 
 **Required ledger update:** append to pending table.
 
@@ -105,6 +117,8 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 4. Append exactly one row to `Qualifying Listings` or `Rejected Listings`.
 5. Mark pending row as reviewed per allowed rule.
 
+**Required state event update:** emit phase/tool/checkpoint events for phase entry, key decisions, and phase exit.
+
 **Required ledger update:** one classification row + pending cleanup marker.
 
 **Required scratch_pad update:** decision rationale, updated counts, next candidate.
@@ -121,6 +135,8 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 2. Ensure pending URLs reviewed/marked.
 3. Update `Search Limitation` with concrete blockers or `None`.
 4. Renumber accepted listings only if numbering drifted.
+
+**Required state event update:** emit phase/tool/checkpoint events for phase entry, key decisions, and phase exit.
 
 **Required ledger update:** counts + final limitation text.
 
@@ -141,6 +157,8 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 5. Report useful sources and blocked sources.
 6. Report next steps.
 
+**Required state event update:** emit phase/tool/checkpoint events for phase entry, key decisions, and phase exit.
+
 **Required ledger update:** none.
 
 **Required scratch_pad update:** none.
@@ -153,7 +171,8 @@ Never run long search/fetch loops without state updates.
 
 - Maximum batch: 2 tool calls that gather external data (`search_internet` or `fetch_url`).
 - After that batch, record updates in:
-  - ledger (`edit_file`) when any ledger-relevant fact was found
+  - machine state ledger (`.lean_ai/state/{session_id}.jsonl`) with typed tool/checkpoint events
+  - reporting ledger (`edit_file` on markdown) when any report-relevant fact was found
   - `scratch_pad` always
 - If no useful data was found, still append a `Search Notes` bullet and scratch_pad note.
 
