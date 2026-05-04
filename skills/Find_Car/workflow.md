@@ -26,6 +26,12 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 
 **Required state event update:** emit phase/tool/checkpoint events for phase entry, key decisions, and phase exit.
 
+| Event type | Required emissions in this phase |
+| --- | --- |
+| `phase_transition` | Emit on entry to Phase 0 and on exit from Phase 0. |
+| `checkpoint` | Emit after each completed “max 2 external calls then record” cycle and after the intake recap/confirmation milestone. |
+| `context_refreshed` | Emit whenever refresh/recovery context is rebuilt during intake. |
+
 **Required ledger update:** none.
 
 **Required scratch_pad update:** none.
@@ -44,6 +50,14 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 
 **Required state event update:** emit phase/tool/checkpoint events for phase entry, key decisions, and phase exit.
 
+| Event type | Required emissions in this phase |
+| --- | --- |
+| `phase_transition` | Emit on entry to Phase 1 and on exit from Phase 1. |
+| `tool_called` | Emit for each file update operation attempt (`create_file`, `edit_file`, or equivalent ledger/scratch updates). |
+| `tool_succeeded` / `tool_failed` | Emit outcome for each file update operation attempt recorded by `tool_called`. |
+| `checkpoint` | Emit after each completed “max 2 external calls then record” cycle and at ledger-setup completion. |
+| `context_refreshed` | Emit whenever refresh/recovery context is rebuilt during setup. |
+
 **Required ledger update:** create file only if missing.
 
 **Required scratch_pad update:** record file existence/creation and next phase.
@@ -61,6 +75,14 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 3. Do not stop just because first results lack direct listing URLs.
 
 **Required state event update:** emit phase/tool/checkpoint events for phase entry, key decisions, and phase exit.
+
+| Event type | Required emissions in this phase |
+| --- | --- |
+| `phase_transition` | Emit on entry to Phase 2 and on exit from Phase 2. |
+| `tool_called` | Emit before each `search_internet` call. |
+| `tool_succeeded` / `tool_failed` | Emit outcome after each `search_internet` call. |
+| `checkpoint` | Emit after each completed “max 2 external calls then record” cycle and when source-candidate set is ready for fetch. |
+| `context_refreshed` | Emit whenever refresh/recovery context is rebuilt during discovery. |
 
 **Required ledger update:** none yet.
 
@@ -81,6 +103,14 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 
 **Required state event update:** emit phase/tool/checkpoint events for phase entry, key decisions, and phase exit.
 
+| Event type | Required emissions in this phase |
+| --- | --- |
+| `phase_transition` | Emit on entry to Phase 3 and on exit from Phase 3. |
+| `tool_called` | Emit before each `fetch_url` call and each file update operation attempt (`edit_file`). |
+| `tool_succeeded` / `tool_failed` | Emit outcome after each `fetch_url` call and each `edit_file` update attempt. |
+| `checkpoint` | Emit after each completed “max 2 external calls then record” cycle and when crawl tracking tables are reconciled for the current batch. |
+| `context_refreshed` | Emit whenever refresh/recovery context is rebuilt during crawl tracking. |
+
 **Required ledger update:** append rows/bullets in tracked sections.
 
 **Required scratch_pad update:** counts and next crawl action.
@@ -98,6 +128,14 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 3. If pending count exceeds limit, stop discovery and move to verification.
 
 **Required state event update:** emit phase/tool/checkpoint events for phase entry, key decisions, and phase exit.
+
+| Event type | Required emissions in this phase |
+| --- | --- |
+| `phase_transition` | Emit on entry to Phase 4 and on exit from Phase 4. |
+| `tool_called` | Emit before each `fetch_url` call and each file update operation attempt (`edit_file`). |
+| `tool_succeeded` / `tool_failed` | Emit outcome after each `fetch_url` call and each `edit_file` update attempt. |
+| `checkpoint` | Emit after each completed “max 2 external calls then record” cycle and when pending-queue thresholds/milestones are evaluated. |
+| `context_refreshed` | Emit whenever refresh/recovery context is rebuilt during candidate collection. |
 
 **Required ledger update:** append to pending table.
 
@@ -119,6 +157,14 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 
 **Required state event update:** emit phase/tool/checkpoint events for phase entry, key decisions, and phase exit.
 
+| Event type | Required emissions in this phase |
+| --- | --- |
+| `phase_transition` | Emit on entry to Phase 5 and on exit from Phase 5. |
+| `tool_called` | Emit before each `fetch_url` call and each file update operation attempt (`edit_file`). |
+| `tool_succeeded` / `tool_failed` | Emit outcome after each `fetch_url` call and each `edit_file` update attempt. |
+| `checkpoint` | Emit after each completed “max 2 external calls then record” cycle and after each classification reconciliation milestone (accepted/rejected + pending marker). |
+| `context_refreshed` | Emit whenever refresh/recovery context is rebuilt during verification. |
+
 **Required ledger update:** one classification row + pending cleanup marker.
 
 **Required scratch_pad update:** decision rationale, updated counts, next candidate.
@@ -137,6 +183,14 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 4. Renumber accepted listings only if numbering drifted.
 
 **Required state event update:** emit phase/tool/checkpoint events for phase entry, key decisions, and phase exit.
+
+| Event type | Required emissions in this phase |
+| --- | --- |
+| `phase_transition` | Emit on entry to Phase 6 and on exit from Phase 6. |
+| `tool_called` | Emit for each file update operation attempt (`edit_file`) used for counts/limitations/renumbering reconciliation. |
+| `tool_succeeded` / `tool_failed` | Emit outcome for each reconciliation file update attempt. |
+| `checkpoint` | Emit after each reconciliation milestone (counts synced, pending reviewed, limitations finalized, numbering verified). |
+| `context_refreshed` | Emit whenever refresh/recovery context is rebuilt during reconciliation. |
 
 **Required ledger update:** counts + final limitation text.
 
@@ -158,6 +212,12 @@ Follow phases in order. Do not skip required ledger/scratch updates.
 6. Report next steps.
 
 **Required state event update:** emit phase/tool/checkpoint events for phase entry, key decisions, and phase exit.
+
+| Event type | Required emissions in this phase |
+| --- | --- |
+| `phase_transition` | Emit on entry to Phase 7 and on exit from Phase 7. |
+| `checkpoint` | Emit after each reconciliation milestone reflected in the final user summary and after final response delivery. |
+| `context_refreshed` | Emit whenever refresh/recovery context is rebuilt during final response preparation. |
 
 **Required ledger update:** none.
 
