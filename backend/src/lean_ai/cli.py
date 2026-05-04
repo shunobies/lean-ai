@@ -18,7 +18,20 @@ from pathlib import Path
 from lean_ai.crypto import decrypt_value, encrypt_value, is_encrypted
 
 # Fields in the Settings class that hold API keys / secrets.
-_SECRET_FIELDS = frozenset({"openai_api_key", "anthropic_api_key", "search_api_key"})
+_SECRET_FIELDS = frozenset(
+    {
+        "openai_api_key",
+        "anthropic_api_key",
+        "gemini_api_key",
+        "serve_api_key",
+        "github_api_token",
+        "search_api_key",
+        "jira_api_token",
+        "servicenow_password",
+        "wiki_password",
+        "export_api_key",
+    }
+)
 
 # Env var prefix stripped when converting to YAML field names.
 _ENV_PREFIX = "LEAN_AI_"

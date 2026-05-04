@@ -1504,7 +1504,7 @@ export function getSettingsPanelHtml(): string {
         <input type="checkbox" id="enableIntegrations">
         <div>
             <label for="enableIntegrations">Enable Integrations</label>
-            <span class="hint">Enable external service integrations (Jira, ServiceNow, etc.) for two-way task sync</span>
+            <span class="hint">Enable external service integrations (GitHub, Jira, ServiceNow, etc.) for two-way task sync</span>
         </div>
     </div>
     <div class="field-check">
@@ -1513,6 +1513,31 @@ export function getSettingsPanelHtml(): string {
             <label for="integrationAutoPush">Auto-push session summaries</label>
             <span class="hint">Automatically push session data to linked external tasks on completion</span>
         </div>
+    </div>
+
+    <h3 style="margin-top:16px;margin-bottom:8px;opacity:0.9;">GitHub</h3>
+    <div class="field">
+        <label>GitHub Repository <span class="hint">Target repo for issue/PR comments, e.g. owner/repo</span></label>
+        <input type="text" id="githubRepo" placeholder="owner/repo">
+    </div>
+    <div class="field">
+        <label>GitHub API Token</label>
+        <div id="github-key-widget"></div>
+    </div>
+    <div class="field-check">
+        <input type="checkbox" id="githubCoauthorEnabled">
+        <div>
+            <label for="githubCoauthorEnabled">Add Lean AI as a Git co-author</label>
+            <span class="hint">Appends a <code>Co-authored-by</code> trailer using the built-in LeanAI bot identity by default.</span>
+        </div>
+    </div>
+    <div class="field">
+        <label>Co-author Name <span class="hint">Shown in the git trailer</span></label>
+        <input type="text" id="githubCoauthorName" placeholder="LeanAI">
+    </div>
+    <div class="field">
+        <label>Co-author Email <span class="hint">Defaults to LeanAI's verified GitHub email for commit credit</span></label>
+        <input type="text" id="githubCoauthorEmail" placeholder="leanai@timcomp.com">
     </div>
 
     <h3 style="margin-top:16px;margin-bottom:8px;opacity:0.9;">Jira Cloud</h3>
@@ -1803,6 +1828,7 @@ export function getSettingsPanelHtml(): string {
     renderKeyWidget('anthropic-key-widget', 'anthropic');
     renderKeyWidget('gemini-key-widget', 'gemini');
     renderKeyWidget('serve-key-widget', 'serve');
+    renderKeyWidget('github-key-widget', 'github');
     renderKeyWidget('jira-key-widget', 'jira');
     renderKeyWidget('servicenow-key-widget', 'servicenow');
     renderKeyWidget('wiki-key-widget', 'wiki');
@@ -2183,6 +2209,10 @@ export function getSettingsPanelHtml(): string {
             // Integrations
             enableIntegrations:    val('enableIntegrations'),
             integrationAutoPush:   val('integrationAutoPush'),
+            githubRepo:            val('githubRepo'),
+            githubCoauthorEnabled: val('githubCoauthorEnabled'),
+            githubCoauthorName:    val('githubCoauthorName'),
+            githubCoauthorEmail:   val('githubCoauthorEmail'),
             jiraUrl:               val('jiraUrl'),
             jiraEmail:             val('jiraEmail'),
             servicenowUrl:         val('servicenowUrl'),
@@ -2457,12 +2487,20 @@ export function getSettingsPanelHtml(): string {
         // Integrations
         setVal('enableIntegrations',       v.enableIntegrations);
         setVal('integrationAutoPush',      v.integrationAutoPush);
+        setVal('githubRepo',               v.githubRepo);
+        setVal('githubCoauthorEnabled',    v.githubCoauthorEnabled);
+        setVal('githubCoauthorName',       v.githubCoauthorName);
+        setVal('githubCoauthorEmail',      v.githubCoauthorEmail);
         setVal('jiraUrl',                  v.jiraUrl);
         setVal('jiraEmail',                v.jiraEmail);
         setVal('servicenowUrl',            v.servicenowUrl);
         setVal('servicenowUsername',        v.servicenowUsername);
         setVal('servicenowTable',          v.servicenowTable);
 
+        // GitHub key widget
+        if (v.githubKeySet) {
+            document.getElementById('github-key-widget')._renderSet();
+        }
         // Jira key widget
         if (v.jiraKeySet) {
             document.getElementById('jira-key-widget')._renderSet();

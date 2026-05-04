@@ -48,6 +48,7 @@ def test_migrate_env_command(tmp_path):
         "LEAN_AI_OLLAMA_URL=http://localhost:11434\n"
         "LEAN_AI_OLLAMA_MODEL=test-model\n"
         "LEAN_AI_OPENAI_API_KEY=sk-secret\n"
+        "LEAN_AI_GITHUB_API_TOKEN=ghp-secret\n"
     )
     keyfile = tmp_path / ".lean_ai" / ".keyfile"
     result = _run_cli(
@@ -67,8 +68,10 @@ def test_migrate_env_command(tmp_path):
     assert "ollama_model: test-model" in yaml_content
     # API key should be encrypted (quoted because enc: contains ":")
     assert 'openai_api_key: "enc:' in yaml_content
+    assert 'github_api_token: "enc:' in yaml_content
     # Should not contain the raw key
     assert "sk-secret" not in yaml_content
+    assert "ghp-secret" not in yaml_content
 
 
 def test_migrate_env_missing_file(tmp_path):

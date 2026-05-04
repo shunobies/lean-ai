@@ -17,7 +17,7 @@ Run it fully local with [Ollama](https://ollama.com), or connect to OpenAI and A
 - **Built-in code quality** — auto-runs your linter and tests after every change, with LLM self-correction on failure.
 - **Reference library** — drop internal docs (PDF, EPUB, Word, Markdown) into `.lean_ai/reference/` for context-aware plans.
 - **MediaWiki integration** — connect to an internal wiki so the agent can search and read company documentation while working on tasks. Supports authenticated and public wikis.
-- **Integrations** — two-way sync with Jira and ServiceNow for session summaries and task linking.
+- **Integrations** — two-way sync with GitHub, Jira, and ServiceNow for session summaries, task linking, and optional commit attribution.
 - **Git-native** — every task runs on its own branch. Approve to merge, reject to discard.
 - **19 scaffold recipes** — bootstrap new projects with `/scaffold`.
 - **Notes & TODOs** — save notes from chat with `/note`, and the LLM can save notes and track project TODOs via built-in tools. Notes are auto-categorized by project with tags and searchable from the Notes panel.
@@ -162,11 +162,11 @@ Open the settings panel (gear icon in the chat header) to configure:
 - **Post-validation** — lint, test, and format commands
 - **Search provider** — DuckDuckGo, SearXNG, Google, or Bing
 - **MediaWiki** — connect to an internal wiki instance (URL, API path, optional authentication)
-- **Integrations** — Jira Cloud and ServiceNow for two-way task sync
+- **Integrations** — GitHub, Jira Cloud, and ServiceNow for two-way task sync and optional Lean AI co-author trailers
 - **Vision model** — Ollama vision-language model for image understanding
 - **Voice** — STT, TTS, and wake word settings
 
-Settings are saved to `backend/config.yaml`. API keys for OpenAI and Anthropic are stored securely in your OS keychain — never written to config files. For standalone backend usage, API keys can be [encrypted](https://github.com/shunobies/lean-ai/blob/main/docs/configuration.md#encrypted-api-keys) in the YAML file.
+Settings are saved to `backend/config.yaml`. API keys and integration tokens are stored securely in your OS keychain — never written to config files. For standalone backend usage, secrets can be [encrypted](https://github.com/shunobies/lean-ai/blob/main/docs/configuration.md#encrypted-api-keys) in the YAML file.
 
 ## Requirements
 

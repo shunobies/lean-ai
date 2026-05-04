@@ -20,6 +20,18 @@ async def _auto_init_integrations() -> None:
     if not settings.enable_integrations:
         return
 
+    # GitHub
+    if settings.github_repo and settings.github_api_token:
+        provider = await init_integration(
+            "github",
+            repo_full_name=settings.github_repo,
+            api_token=settings.github_api_token,
+        )
+        if provider:
+            logger.info("GitHub integration auto-initialized")
+        else:
+            logger.warning("GitHub integration failed to initialize")
+
     # Jira Cloud
     if settings.jira_url and settings.jira_email and settings.jira_api_token:
         provider = await init_integration(

@@ -24,6 +24,7 @@ from lean_ai.integrations.base import (
     TaskStatus,
     WebhookEvent,
 )
+from lean_ai.integrations.formatting import build_plain_session_summary_lines
 from lean_ai.integrations.registry import register_integration
 
 logger = logging.getLogger(__name__)
@@ -301,23 +302,8 @@ class ServiceNowProvider(IntegrationProvider):
             logger.warning("Could not resolve ServiceNow ID: %s", external_id)
             return False
 
-        lines = [
-            f"[Lean AI Session: {summary.session_id}]",
-            f"Task: {summary.task_description}",
-            f"Status: {summary.status}",
-        ]
-        if summary.branch_name:
-            lines.append(f"Branch: {summary.branch_name}")
-        if summary.files_changed:
-            lines.append(f"Files changed: {', '.join(summary.files_changed[:10])}")
-        if summary.commits:
-            shas = [c.get("commit_sha", "")[:8] for c in summary.commits[:5]]
-            lines.append(f"Commits: {', '.join(shas)}")
-        if summary.duration_seconds > 0:
-            mins = summary.duration_seconds / 60
-            lines.append(f"Duration: {mins:.1f} minutes")
-        if summary.tool_calls_count:
-            lines.append(f"Tool calls: {summary.tool_calls_count}")
+        lines = build_plain_session_summary_lines(summary)
+        lines[0] = f"[{lines[0]}]"
 
         work_note = "\n".join(lines)
 

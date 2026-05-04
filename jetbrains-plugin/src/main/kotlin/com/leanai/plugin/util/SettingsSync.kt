@@ -156,6 +156,10 @@ object SettingsSync {
         // Integrations
         putBool("LEAN_AI_ENABLE_INTEGRATIONS", s.enableIntegrations)
         putBool("LEAN_AI_INTEGRATION_AUTO_PUSH", s.integrationAutoPush)
+        putIfSet("LEAN_AI_GITHUB_REPO", s.githubRepo)
+        putBool("LEAN_AI_GITHUB_COAUTHOR_ENABLED", s.githubCoauthorEnabled)
+        putIfSet("LEAN_AI_GITHUB_COAUTHOR_NAME", s.githubCoauthorName)
+        putIfSet("LEAN_AI_GITHUB_COAUTHOR_EMAIL", s.githubCoauthorEmail)
         putIfSet("LEAN_AI_JIRA_URL", s.jiraUrl)
         putIfSet("LEAN_AI_JIRA_EMAIL", s.jiraEmail)
         putIfSet("LEAN_AI_SERVICENOW_URL", s.servicenowUrl)
@@ -184,6 +188,7 @@ object SettingsSync {
         ANTHROPIC_API_KEY("LeanAI", "anthropic_api_key", "LEAN_AI_ANTHROPIC_API_KEY"),
         GEMINI_API_KEY("LeanAI", "gemini_api_key", "LEAN_AI_GEMINI_API_KEY"),
         SERVE_API_KEY("LeanAI", "serve_api_key", "LEAN_AI_SERVE_API_KEY"),
+        GITHUB_API_TOKEN("LeanAI", "github_api_token", "LEAN_AI_GITHUB_API_TOKEN"),
         JIRA_API_TOKEN("LeanAI", "jira_api_token", "LEAN_AI_JIRA_API_TOKEN"),
         SERVICENOW_PASSWORD("LeanAI", "servicenow_password", "LEAN_AI_SERVICENOW_PASSWORD"),
         WIKI_PASSWORD("LeanAI", "wiki_password", "LEAN_AI_WIKI_PASSWORD"),

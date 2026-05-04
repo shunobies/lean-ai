@@ -2,6 +2,11 @@
 
 import logging
 
+from lean_ai.config import (
+    DEFAULT_GITHUB_COAUTHOR_EMAIL,
+    DEFAULT_GITHUB_COAUTHOR_NAME,
+    settings,
+)
 from lean_ai.tools.executor import ToolResult
 from lean_ai.tools.subprocess_utils import run_subprocess
 
@@ -11,6 +16,22 @@ logger = logging.getLogger(__name__)
 async def _run_git(args: list[str], cwd: str) -> ToolResult:
     """Run a git command and capture output."""
     return await run_subprocess(["git", *args], cwd, merge_stderr=False)
+
+
+def _with_coauthor_trailer(message: str) -> str:
+    """Append an optional Co-authored-by trailer to Lean AI commits."""
+    if not settings.github_coauthor_enabled:
+        return message
+    name = settings.github_coauthor_name.strip() or DEFAULT_GITHUB_COAUTHOR_NAME
+    email = settings.github_coauthor_email.strip() or DEFAULT_GITHUB_COAUTHOR_EMAIL
+
+    trailer = f"Co-authored-by: {name} <{email}>"
+    stripped = message.rstrip()
+    if trailer in stripped:
+        return stripped
+    if not stripped:
+        return trailer
+    return f"{stripped}\n\n{trailer}"
 
 
 async def git_commit(
@@ -29,7 +50,7 @@ async def git_commit(
         if not result.success:
             return result
 
-    return await _run_git(["commit", "-m", message], cwd=repo_root)
+    return await _run_git(["commit", "-m", _with_coauthor_trailer(message)], cwd=repo_root)
 
 
 async def git_status(repo_root: str = ".") -> ToolResult:
@@ -132,4 +153,4 @@ async def git_add_and_commit(message: str, repo_root: str = ".") -> ToolResult:
     status = await _run_git(["diff", "--cached", "--stat"], cwd=repo_root)
     if not status.output.strip():
         return ToolResult(success=True, output="Nothing to commit")
-    return await _run_git(["commit", "-m", message], cwd=repo_root)
+    return await _run_git(["commit", "-m", _with_coauthor_trailer(message)], cwd=repo_root)

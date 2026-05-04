@@ -16,6 +16,7 @@ export const SECRET_KEYS = {
     anthropicApiKey:    "lean-ai.anthropicApiKey",
     geminiApiKey:       "lean-ai.geminiApiKey",
     serveApiKey:        "lean-ai.serveApiKey",
+    githubApiToken:     "lean-ai.githubApiToken",
     jiraApiToken:       "lean-ai.jiraApiToken",
     servicenowPassword: "lean-ai.servicenowPassword",
     wikiPassword:       "lean-ai.wikiPassword",
@@ -189,6 +190,10 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     // Integrations
     "lean-ai.enableIntegrations":       "LEAN_AI_ENABLE_INTEGRATIONS",
     "lean-ai.integrationAutoPush":      "LEAN_AI_INTEGRATION_AUTO_PUSH",
+    "lean-ai.githubRepo":               "LEAN_AI_GITHUB_REPO",
+    "lean-ai.githubCoauthorEnabled":    "LEAN_AI_GITHUB_COAUTHOR_ENABLED",
+    "lean-ai.githubCoauthorName":       "LEAN_AI_GITHUB_COAUTHOR_NAME",
+    "lean-ai.githubCoauthorEmail":      "LEAN_AI_GITHUB_COAUTHOR_EMAIL",
     "lean-ai.jiraUrl":                  "LEAN_AI_JIRA_URL",
     "lean-ai.jiraEmail":                "LEAN_AI_JIRA_EMAIL",
     "lean-ai.servicenowUrl":            "LEAN_AI_SERVICENOW_URL",
@@ -298,6 +303,7 @@ export async function buildFullBackendEnv(
     const anthropicKey    = await secrets.get(SECRET_KEYS.anthropicApiKey);
     const geminiKey       = await secrets.get(SECRET_KEYS.geminiApiKey);
     const serveKey        = await secrets.get(SECRET_KEYS.serveApiKey);
+    const githubToken     = await secrets.get(SECRET_KEYS.githubApiToken);
     const jiraToken       = await secrets.get(SECRET_KEYS.jiraApiToken);
     const servicenowPass  = await secrets.get(SECRET_KEYS.servicenowPassword);
     const wikiPass        = await secrets.get(SECRET_KEYS.wikiPassword);
@@ -305,6 +311,7 @@ export async function buildFullBackendEnv(
     if (anthropicKey)    { env["LEAN_AI_ANTHROPIC_API_KEY"]    = anthropicKey; }
     if (geminiKey)       { env["LEAN_AI_GEMINI_API_KEY"]       = geminiKey; }
     if (serveKey)        { env["LEAN_AI_SERVE_API_KEY"]        = serveKey; }
+    if (githubToken)     { env["LEAN_AI_GITHUB_API_TOKEN"]     = githubToken; }
     if (jiraToken)       { env["LEAN_AI_JIRA_API_TOKEN"]       = jiraToken; }
     if (servicenowPass)  { env["LEAN_AI_SERVICENOW_PASSWORD"]  = servicenowPass; }
     if (wikiPass)        { env["LEAN_AI_WIKI_PASSWORD"]        = wikiPass; }

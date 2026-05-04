@@ -121,6 +121,10 @@ class LeanAiSettings : PersistentStateComponent<LeanAiSettings.State> {
         // ── Integrations ─────────────────────────────────────────────────
         var enableIntegrations: Boolean = false,
         var integrationAutoPush: Boolean = true,
+        var githubRepo: String = "",
+        var githubCoauthorEnabled: Boolean = false,
+        var githubCoauthorName: String = "LeanAI",
+        var githubCoauthorEmail: String = "leanai@timcomp.com",
         var jiraUrl: String = "",
         var jiraEmail: String = "",
         var servicenowUrl: String = "",

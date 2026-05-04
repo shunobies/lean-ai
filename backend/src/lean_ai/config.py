@@ -33,6 +33,9 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, Settings
 
 from lean_ai.crypto import decrypt_value
 
+DEFAULT_GITHUB_COAUTHOR_NAME = "LeanAI"
+DEFAULT_GITHUB_COAUTHOR_EMAIL = "leanai@timcomp.com"
+
 # Fields that accept the k-shorthand notation.
 _CONTEXT_WINDOW_FIELDS = frozenset(
     {
@@ -127,6 +130,7 @@ class _DecryptingYamlSource(PydanticBaseSettingsSource):
             "anthropic_api_key",
             "gemini_api_key",
             "serve_api_key",
+            "github_api_token",
             "search_api_key",
             "jira_api_token",
             "servicenow_password",
@@ -510,6 +514,13 @@ class Settings(BaseSettings):
     # ── Integrations (Jira, ServiceNow, etc.) ──
     enable_integrations: bool = False  # Master switch for external integrations
     integration_auto_push: bool = True  # Auto-push session summaries on completion
+
+    # GitHub
+    github_repo: str = ""  # e.g. "owner/repo"
+    github_api_token: str = ""  # Personal access token or fine-grained token
+    github_coauthor_enabled: bool = False  # Append Co-authored-by trailer to Lean AI commits
+    github_coauthor_name: str = DEFAULT_GITHUB_COAUTHOR_NAME
+    github_coauthor_email: str = DEFAULT_GITHUB_COAUTHOR_EMAIL  # LeanAI bot email
 
     # Jira Cloud
     jira_url: str = ""  # e.g. "https://yourcompany.atlassian.net"

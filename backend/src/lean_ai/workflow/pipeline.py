@@ -66,6 +66,7 @@ async def run_workflow(
     # carrying the exact model layout used. Consumers need this to
     # partition training data by model + provider before fine-tuning.
     try:
+        from lean_ai.routers.dependencies import worker_llm_client
         from lean_ai.workflow.hooks import fire_workflow_event
 
         fire_workflow_event(
@@ -89,6 +90,14 @@ async def run_workflow(
                 "request_provider": (
                     getattr(request_llm_client, "provider_name", None)
                     if request_llm_client
+                    else None
+                ),
+                "worker_model": (
+                    getattr(worker_llm_client, "model_name", None) if worker_llm_client else None
+                ),
+                "worker_provider": (
+                    getattr(worker_llm_client, "provider_name", None)
+                    if worker_llm_client
                     else None
                 ),
                 "context_window": getattr(

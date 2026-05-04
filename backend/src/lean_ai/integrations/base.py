@@ -47,15 +47,27 @@ class ExternalTask:
 
 
 @dataclass
+class ModelUsage:
+    """One model/provider role used during a Lean AI session."""
+
+    role: str
+    provider: str
+    model: str
+    is_local: bool = False
+
+
+@dataclass
 class SessionSummary:
     """Summary of a Lean AI session for pushing to external services."""
 
     session_id: str
     task_description: str
     status: str  # "completed", "merged", "abandoned"
+    workflow_mode: str = ""
     branch_name: str = ""
     files_changed: list[str] = field(default_factory=list)
     commits: list[dict] = field(default_factory=list)
+    models_used: list[ModelUsage] = field(default_factory=list)
     duration_seconds: float = 0.0
     tool_calls_count: int = 0
     created_at: str = ""

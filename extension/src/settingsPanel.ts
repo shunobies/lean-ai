@@ -147,6 +147,7 @@ export class SettingsPanel {
                     anthropic: SECRET_KEYS.anthropicApiKey,
                     gemini: SECRET_KEYS.geminiApiKey,
                     serve: SECRET_KEYS.serveApiKey,
+                    github: SECRET_KEYS.githubApiToken,
                     jira: SECRET_KEYS.jiraApiToken,
                     servicenow: SECRET_KEYS.servicenowPassword,
                     wiki: SECRET_KEYS.wikiPassword,
@@ -166,6 +167,7 @@ export class SettingsPanel {
                     anthropic: SECRET_KEYS.anthropicApiKey,
                     gemini: SECRET_KEYS.geminiApiKey,
                     serve: SECRET_KEYS.serveApiKey,
+                    github: SECRET_KEYS.githubApiToken,
                     jira: SECRET_KEYS.jiraApiToken,
                     servicenow: SECRET_KEYS.servicenowPassword,
                     wiki: SECRET_KEYS.wikiPassword,
@@ -296,6 +298,10 @@ export class SettingsPanel {
             searchDelay:              "lean-ai.searchDelay",
             enableIntegrations:       "lean-ai.enableIntegrations",
             integrationAutoPush:      "lean-ai.integrationAutoPush",
+            githubRepo:               "lean-ai.githubRepo",
+            githubCoauthorEnabled:    "lean-ai.githubCoauthorEnabled",
+            githubCoauthorName:       "lean-ai.githubCoauthorName",
+            githubCoauthorEmail:      "lean-ai.githubCoauthorEmail",
             jiraUrl:                  "lean-ai.jiraUrl",
             jiraEmail:                "lean-ai.jiraEmail",
             servicenowUrl:            "lean-ai.servicenowUrl",
@@ -414,6 +420,7 @@ export class SettingsPanel {
 
         const booleanFields = new Set([
             "enableEmbeddings", "enableIntegrations", "integrationAutoPush",
+            "githubCoauthorEnabled",
             "enableTdd", "enablePostValidation",
             "enableRequiredCitations", "debugPlanning", "enableThinking",
             "enableThinkingExpert", "enableThinkingRequest", "enableThinkingWorker",
@@ -493,6 +500,7 @@ export class SettingsPanel {
         const anthropicKeySet   = !!(await this._context.secrets.get(SECRET_KEYS.anthropicApiKey));
         const geminiKeySet      = !!(await this._context.secrets.get(SECRET_KEYS.geminiApiKey));
         const serveKeySet       = !!(await this._context.secrets.get(SECRET_KEYS.serveApiKey));
+        const githubKeySet      = !!(await this._context.secrets.get(SECRET_KEYS.githubApiToken));
         const jiraKeySet        = !!(await this._context.secrets.get(SECRET_KEYS.jiraApiToken));
         const servicenowKeySet  = !!(await this._context.secrets.get(SECRET_KEYS.servicenowPassword));
         const wikiKeySet        = !!(await this._context.secrets.get(SECRET_KEYS.wikiPassword));
@@ -653,6 +661,11 @@ export class SettingsPanel {
             // Integrations
             enableIntegrations:        config.get("lean-ai.enableIntegrations", false),
             integrationAutoPush:       config.get("lean-ai.integrationAutoPush", true),
+            githubKeySet,
+            githubRepo:                config.get("lean-ai.githubRepo", ""),
+            githubCoauthorEnabled:     config.get("lean-ai.githubCoauthorEnabled", false),
+            githubCoauthorName:        config.get("lean-ai.githubCoauthorName", "LeanAI"),
+            githubCoauthorEmail:       config.get("lean-ai.githubCoauthorEmail", "leanai@timcomp.com"),
             jiraKeySet,
             jiraUrl:                   config.get("lean-ai.jiraUrl", ""),
             jiraEmail:                 config.get("lean-ai.jiraEmail", ""),

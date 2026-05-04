@@ -729,12 +729,32 @@
         "lean-ai.enableIntegrations": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "**Integrations** — Enable external service integrations (Jira, ServiceNow, etc.) for two-way task sync and time tracking. Default: `false`"
+          "markdownDescription": "**Integrations** — Enable external service integrations (GitHub, Jira, ServiceNow, etc.) for two-way task sync and time tracking. Default: `false`"
         },
         "lean-ai.integrationAutoPush": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "**Integrations** — Automatically push session summaries (duration, files changed, commits) to linked external tasks when a session completes. Default: `true`"
+        },
+        "lean-ai.githubRepo": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Integrations / GitHub** — Target repository for GitHub issue and pull-request comments, e.g. `owner/repo`"
+        },
+        "lean-ai.githubCoauthorEnabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Integrations / GitHub** — Append a `Co-authored-by` trailer to Lean AI-generated git commits using the built-in LeanAI bot identity by default. Default: `false`"
+        },
+        "lean-ai.githubCoauthorName": {
+          "type": "string",
+          "default": "LeanAI",
+          "markdownDescription": "**Integrations / GitHub** — Display name used in the Git co-author trailer."
+        },
+        "lean-ai.githubCoauthorEmail": {
+          "type": "string",
+          "default": "leanai@timcomp.com",
+          "markdownDescription": "**Integrations / GitHub** — LeanAI bot email used in the `Co-authored-by` trailer for GitHub credit."
         },
         "lean-ai.jiraUrl": {
           "type": "string",
