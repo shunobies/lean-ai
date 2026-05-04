@@ -22,6 +22,7 @@ dependencies {
         )
         bundledPlugins(listOf<String>())
         instrumentationTools()
+        pluginVerifier()
     }
 
     // HTTP + WebSocket client
