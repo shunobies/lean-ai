@@ -280,6 +280,10 @@ The plugin monitors the backend with a health check every 20 seconds. After 3 co
 # Run plugin verifier (checks API compatibility)
 ./gradlew verifyPlugin
 
+# Note: verifier provisioning is managed by Gradle via intellijPlatform {
+#   dependencies { pluginVerifier() }
+# }, so CI and local runs do not need a manually installed verifier binary.
+
 # Publish to JetBrains Marketplace (requires token)
 ./gradlew publishPlugin -Pintellij.publish.token=YOUR_TOKEN
 ```
