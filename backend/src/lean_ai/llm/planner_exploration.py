@@ -702,7 +702,15 @@ async def _run_serial_exploration(
     from lean_ai.tools import scratchpad
     from lean_ai.tools.journal import read_journal
     from lean_ai.tools.observations import read_observations
+    from lean_ai.tools.state_ledger import append_event, summarize_recent_events
     from lean_ai.workflow.ws_handler import ws_send_nowait
+
+    append_event(
+        repo_root=repo_root,
+        session_id=session_id,
+        event_type="phase_transition",
+        payload={"phase": "planning.phase2"},
+    )
 
     # Inject existing scratchpad + journal (crash recovery)
     if session_id:
@@ -755,6 +763,9 @@ async def _run_serial_exploration(
             refresh_parts.append(f"SESSION JOURNAL (permanent findings):\n{jrnl}")
         if pad:
             refresh_parts.append(f"SCRATCHPAD (current state):\n{pad}")
+        ledger_summary = summarize_recent_events(repo_root, session_id)
+        if ledger_summary:
+            refresh_parts.append(f"RECENT STATE LEDGER (machine events):\n{ledger_summary}")
         if obs or pad or jrnl:
             # Build an "already explored" summary from observations
             explored_files = []
@@ -776,7 +787,8 @@ async def _run_serial_exploration(
                 "you ALREADY completed before the refresh.\n"
                 "2. Do NOT re-read or re-explore files that are already recorded in observations.\n"
                 "3. If you need to explore new files, add them to your journal as you go.\n"
-                "4. Resume from where you left off — check the scratchpad for your last known state."
+                "4. Resume from where you left off — check the scratchpad for your "
+                "last known state."
             )
             if explored_files:
                 refresh_parts.append(
@@ -805,6 +817,12 @@ async def _run_serial_exploration(
                     "message": "Phase 2 context refreshed.",
                 },
             )
+        append_event(
+            repo_root=repo_root,
+            session_id=session_id,
+            event_type="context_refreshed",
+            payload={"phase": "planning.phase2"},
+        )
         return new_messages
 
     base_reminder = registry.format(
