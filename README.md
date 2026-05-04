@@ -116,6 +116,7 @@ See [Architecture](docs/architecture.md) for the full breakdown.
 | `/approve` | Merge the agent's branch |
 | `/reject` | Discard the agent's branch |
 | `/style` | Generate style guide from CSS/templates |
+| `/skill <name> <task>` | Load a local skill from `.lean_ai/skills/<name>/instructions.md` and apply it to the task |
 | `/request <task>` | Skip planning, open-ended task with full tool access |
 | `/resume [session_id]` | Resume a previous session |
 | `/help` | Show this help |
@@ -201,6 +202,7 @@ See the [full configuration reference](docs/configuration.md) for all options.
 | [Extension Guide](docs/extension.md) | VSCode/VSCodium setup, commands, and settings |
 | [JetBrains Plugin](jetbrains-plugin/README.md) | IntelliJ, PyCharm, WebStorm, CLion, and all JetBrains IDEs |
 | [Prompt Customization](docs/prompt-customization.md) | Customizing LLM prompts per project |
+| [Skills Guide](docs/skills.md) | How `/skill` works and how to author high-quality skills |
 | [Modelfile Guide](docs/modelfile.md) | Customizing Ollama models with persistent rules |
 | [llama-server Guide](docs/llama-server.md) | Using llama.cpp as an alternative to Ollama |
 | [Regulated Environments](docs/regulated-environments.md) | Self-hosted deployment for HIPAA, SOX, GDPR, ITAR, and air-gapped networks |
