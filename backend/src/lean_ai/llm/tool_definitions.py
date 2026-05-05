@@ -573,6 +573,11 @@ def build_implementation_tools() -> list[dict]:
     return tools
 
 
+def build_request_tools() -> list[dict]:
+    """Request-mode tools = implementation tools + user clarification."""
+    return [*build_implementation_tools(), REQUEST_CLARIFICATION_TOOL]
+
+
 # ── TDD-specific tool ────────────────────────────────────────────────────────
 
 REQUEST_TEST_CHANGE_TOOL: dict = {

@@ -898,11 +898,11 @@ export async function handleInterviewPrepCommand(
 
     const jobUrlLine = jobUrl.trim()
         ? `- Job posting: ${jobUrl.trim()} (fetch it with fetch_url before anything else).`
-        : "- No job URL was provided — ask me to paste the job description before you begin research.";
+        : "- No job URL was provided — use `request_clarification` to ask me to paste the job description before you begin research.";
 
     const jobStep2 = jobUrl.trim()
         ? `2. Fetch the job posting at ${jobUrl.trim()} with fetch_url and note the key requirements and ATS-relevant keywords.`
-        : "2. Ask me to paste the job description. Wait for my reply before moving on.";
+        : "2. Use `request_clarification` to ask me to paste the job description. Wait for the tool result before moving on.";
 
     const prompt = [
         `I have an interview with ${company.trim()} for the ${jobTitle.trim()} role.`,
@@ -919,10 +919,10 @@ export async function handleInterviewPrepCommand(
         jobStep2,
         `3. Research ${company.trim()} using search_internet and fetch_url — mission, core products/services, recent news, culture signals. Save a concise summary to \`${researchFile}\` (company overview, why it matters for THIS role, 3-5 talking points you would surface in the interview, and any red flags you noticed).`,
         "4. Compare my resume against the job requirements. Identify gaps, strengths to emphasise, and ATS-relevant keywords missing from my resume.",
-        "5. WHERE YOU HAVE IDEAS BUT LACK REAL INFORMATION, ASK ME CLARIFYING QUESTIONS in your text response before writing anything to disk. Examples:",
+        "5. WHERE YOU HAVE IDEAS BUT LACK REAL INFORMATION, USE `request_clarification` BEFORE writing anything to disk. Ask ONE concrete question at a time, let the tool pause the workflow, and resume only after you have my reply. Do not bury the question in normal prose and keep going. Examples:",
         "   - \"Your resume mentions Python — did you use Django or Flask at Acme? The job description emphasises Django.\"",
         "   - \"I see five years of backend work but no leadership signal. Have you led any projects or mentored juniors?\"",
-        "   Wait for my answers before updating the resume. My chat replies will be injected as normal messages.",
+        "   My chat reply will be returned as the tool result. Wait for it before updating the resume.",
         `6. Once you have enough real information, update \`${resumeFile}\` in place — keep every factual claim truthful (no invented experience), but re-order, re-word, and re-weight to emphasise what matters for this role. Work ATS-relevant keywords in naturally where they are honestly supported.`,
         `7. Write \`${coverFile}\` — a cover letter tied to the research and the clarifications I provided; use the STAR method where appropriate and pull from \`star_stories.md\` if available.`,
         `8. Write \`${questionsFile}\` — interview preparation with AT LEAST 20 questions total, grouped into sections:`,
@@ -932,7 +932,7 @@ export async function handleInterviewPrepCommand(
         "   - **Company-specific questions** (minimum 3) — grounded in the research from step 3.",
         "   - **Questions I should ask THEM** (minimum 5) — substantive, specific, tied to the research. Avoid generic \"what's the culture like?\" questions.",
         "   For each prep question, include a one-paragraph suggested answer outline (not a word-for-word script — just the key points and which experience from my resume to reach for).",
-        `9. If \`applications.md\` exists at the workspace root, append one row to its markdown table with today's date (${today}), the company, the role, source (LinkedIn / company website / referral / other — ask if unclear), status "applied", last contact "—", next action "Follow up in 7 days", and folder "\`${appDir}/\`". Preserve the existing table formatting.`,
+        `9. If \`applications.md\` exists at the workspace root, append one row to its markdown table with today's date (${today}), the company, the role, source (LinkedIn / company website / referral / other — use \`request_clarification\` if unclear), status "applied", last contact "—", next action "Follow up in 7 days", and folder "\`${appDir}/\`". Preserve the existing table formatting.`,
         "",
         "DO NOT fabricate experience. If something is missing from my resume and I have not confirmed it in chat, leave it out. The goal is an honest, well-tailored application — not a creative-writing exercise.",
     ].join("\n");

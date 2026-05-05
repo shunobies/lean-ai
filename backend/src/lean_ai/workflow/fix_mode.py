@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING
 from fastapi import WebSocket
 
 from lean_ai.config import settings
-from lean_ai.llm.tool_definitions import build_implementation_tools, build_investigation_tools
+from lean_ai.llm.tool_definitions import (
+    build_implementation_tools,
+    build_investigation_tools,
+    build_request_tools,
+)
 from lean_ai.routers.context_helpers import load_condensed_context
 from lean_ai.tools import scratchpad
 from lean_ai.tools.journal import read_journal
@@ -380,7 +384,7 @@ async def _run_fix(
 
     executed, explanation = await active_client.chat_with_tools(
         messages=messages,
-        tools=build_implementation_tools(),
+        tools=(build_request_tools() if is_request else build_implementation_tools()),
         tool_executor_fn=tool_executor,
         max_turns=settings.implementation_max_turns,
         max_tokens=settings.implementation_max_tokens,

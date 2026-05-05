@@ -351,6 +351,8 @@ export function mockInterviewPrompt(opts: {
         "Mode: " + DIFFICULTY_LABELS[difficulty] + ".",
         DIFFICULTY_GUIDANCE[difficulty],
         `Number of questions: ${questionCount}.`,
+        `Question numbering format: every question MUST start with \`### Question N of ${questionCount}\` where N starts at 1 and increments by exactly 1 each round.`,
+        "Never repeat a question you have already asked, and never ask a semantically equivalent rephrase of an earlier question.",
         "",
         "Context files to read BEFORE asking the first question:",
         `- \`applications/${slug}/resume.md\` — my tailored resume`,
@@ -379,7 +381,7 @@ export function mockInterviewPrompt(opts: {
         "=== PROTOCOL ===",
         "",
         "Step 1: Read all the context files listed above that exist. Use read_file. Do NOT skip this.",
-        "Step 2: Pick a question appropriate for " + DIFFICULTY_LABELS[difficulty] + ". Ask it in one or two sentences. Then STOP — don't answer your own question, don't pre-empt my reply.",
+        "Step 2: Before asking each new question, scan the prior assistant turns in this conversation and keep an internal ledger of the question numbers and topics already used. Then pick a NEW question appropriate for " + DIFFICULTY_LABELS[difficulty] + ". Ask it in one or two sentences under the exact heading `### Question N of " + questionCount + "`. Then STOP — don't answer your own question, don't pre-empt my reply.",
         "Step 3: Wait for my answer.",
         "Step 4: Score my answer using the rubric. Format the score block EXACTLY as:",
         "",
@@ -392,7 +394,7 @@ export function mockInterviewPrompt(opts: {
         "    ",
         "    **One improvement:** [specific, actionable sentence]",
         "",
-        "Step 5: Ask the next question. Adapt based on my previous answer:",
+        "Step 5: Ask the next question under the exact heading `### Question N of " + questionCount + "`. The number must increase by exactly one from the previous round, and the question must be materially different from every earlier question in the session. Adapt based on my previous answer:",
         "   - If a dimension scored low, the next question should probe a related area so I can redeem it.",
         "   - If a dimension scored high, the next question should go deeper on the same theme (push on the follow-up).",
         "   - If the answer was very short, the next question should explicitly invite more detail.",
@@ -409,7 +411,7 @@ export function mockInterviewPrompt(opts: {
         "    2. [actionable]",
         "    3. [actionable]",
         "",
-        "Begin now: read the files, then ask question 1.",
+        "Begin now: read the files, then ask `### Question 1 of " + questionCount + "`.",
     ].join("\n");
 }
 
@@ -473,4 +475,3 @@ export const BATCH_QUEUE_TEMPLATE = `# Batch interview-prep queue
 # BigCo | Backend Engineer | https://bigco.example/jobs/456
 
 `;
-

@@ -36,4 +36,8 @@ async def test_request_clarification_emits_waits_and_returns_answer(tmp_path):
     await task
 
     assert result == "Use PostgreSQL only."
-    assert any(m.get("type") == "clarification_needed" for m in ws.sent)
+    clarification = next((m for m in ws.sent if m.get("type") == "clarification_needed"), None)
+    assert clarification is not None
+    assert clarification.get("questions") == [
+        "Should we support SQLite or only PostgreSQL?",
+    ]

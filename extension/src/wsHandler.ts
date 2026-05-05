@@ -173,7 +173,12 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
         // --- Clarification pauses and asks the user ---
         case "clarification_needed": {
             ctx.postMessage({ type: "thinking", show: false });
-            const questions = (raw.questions as string[]) || [];
+            const rawQuestions = raw.questions;
+            const questions = Array.isArray(rawQuestions)
+                ? rawQuestions.filter((q): q is string => typeof q === "string" && q.trim().length > 0)
+                : (typeof rawQuestions === "string" && rawQuestions.trim().length > 0)
+                    ? [rawQuestions]
+                    : [];
             const improved = (raw.improved_prompt as string) || "";
             let text = "**Clarification needed:**\n";
             for (const q of questions) {

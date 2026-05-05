@@ -18,6 +18,7 @@ from lean_ai.workflow.ws_messages import (
     send_test_result,
     send_tool_approval_required,
 )
+from lean_ai.workflow.ws_handler import ws_send
 
 if TYPE_CHECKING:
     from lean_ai.llm.facade import LLMClient
@@ -1076,7 +1077,7 @@ def make_tool_executor(
             await ws_send(
                 ws,
                 "clarification_needed",
-                {"questions": question},
+                {"questions": [question]},
             )
             if dispatcher is None:
                 return (
