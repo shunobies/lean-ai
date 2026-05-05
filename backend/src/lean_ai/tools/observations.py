@@ -24,6 +24,9 @@ from lean_ai.tools.executor import ToolResult
 
 logger = logging.getLogger(__name__)
 
+_MAX_KEY_SNIPPETS = 4
+_MAX_KEY_SNIPPET_CHARS = 3000
+
 
 def observations_path(repo_root: str, session_id: str) -> Path:
     """Return the absolute path to the per-session observations file."""
@@ -50,6 +53,49 @@ def _load_all(path: Path) -> list[dict]:
             exc_info=True,
         )
         return []
+
+
+def _snippet_to_text(value: object) -> str:
+    """Coerce a model-provided snippet value into bounded text."""
+    if isinstance(value, str):
+        text = value
+    elif isinstance(value, (dict, list)):
+        text = json.dumps(value, ensure_ascii=False)
+    else:
+        text = str(value)
+    text = text.strip()
+    if len(text) > _MAX_KEY_SNIPPET_CHARS:
+        text = text[:_MAX_KEY_SNIPPET_CHARS].rstrip() + "\n... [truncated]"
+    return text
+
+
+def _normalize_key_snippets(key_snippets: object) -> list[str]:
+    """Normalize LLM tool args so one malformed snippet cannot flood Phase 2."""
+    if not key_snippets:
+        return []
+    if isinstance(key_snippets, str):
+        raw_snippets: list[object] = [key_snippets]
+    elif isinstance(key_snippets, list):
+        # Older model calls sometimes passed one string where the schema
+        # expected a list, and the previous implementation split it into
+        # characters. Collapse an already-split char list back into text.
+        if len(key_snippets) > 8 and all(
+            isinstance(item, str) and len(item) <= 2 for item in key_snippets
+        ):
+            raw_snippets = ["".join(key_snippets)]
+        else:
+            raw_snippets = list(key_snippets)
+    else:
+        raw_snippets = [key_snippets]
+
+    normalized: list[str] = []
+    for item in raw_snippets:
+        text = _snippet_to_text(item)
+        if text:
+            normalized.append(text)
+        if len(normalized) >= _MAX_KEY_SNIPPETS:
+            break
+    return normalized
 
 
 async def record_observation(
@@ -95,7 +141,7 @@ async def record_observation(
         "role": role,
         "reason": reason.strip(),
         "relevant_sections": (relevant_sections or "").strip(),
-        "key_snippets": list(key_snippets or []),
+        "key_snippets": _normalize_key_snippets(key_snippets),
     }
 
     replaced = False

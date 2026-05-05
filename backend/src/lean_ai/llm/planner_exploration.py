@@ -430,6 +430,9 @@ async def run_phase2_exploration(
     file_summary_obj: FileSummary | None = None
 
     if settings.num_parallel >= 2:
+        # TODO(parallel-phase2): parallel exploration still returns a prose
+        # handoff and skips the observation-backed FileSummary contract. Keep
+        # this deferred while the single-model Phase 2 path is hardened first.
         file_identification = await _run_parallel_exploration(
             task=task,
             scope=scope,

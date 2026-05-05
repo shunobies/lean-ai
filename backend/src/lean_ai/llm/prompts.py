@@ -80,12 +80,17 @@ def _compose(key: str) -> str:
 
     # Standalone testing-environment awareness for Phase 2's
     # exploration system prompt (where the strict contract block
-    # would be off-topic but the detection guidance still applies).
+    # would be off-topic but lightweight detection guidance still applies).
     testing_environment_awareness = ""
     if settings.enable_strict_test_contract:
-        testing_environment_awareness = registry.get(
-            "policy.testing_environment_awareness",
-        )
+        if key == "planning.exploration_system":
+            testing_environment_awareness = registry.get(
+                "policy.testing_environment_snapshot",
+            )
+        else:
+            testing_environment_awareness = registry.get(
+                "policy.testing_environment_awareness",
+            )
 
     subs = _MissingKey(
         {
