@@ -350,7 +350,7 @@ All settings are also available via VSCode's native settings UI (**Settings** > 
 | `lean-ai.integrationAutoPush` | `true` | Auto-push session summaries to linked tasks |
 | `lean-ai.githubRepo` | *(empty)* | Target GitHub repository for issue/PR comments |
 | `lean-ai.githubCoauthorEnabled` | `false` | Append a `Co-authored-by` trailer to Lean AI-generated commits |
-| `lean-ai.githubCoauthorName` | `LeanAI` | Co-author display name used in git trailers |
+| `lean-ai.githubCoauthorName` | `LeanAI-bot` | Co-author display name used in git trailers |
 | `lean-ai.githubCoauthorEmail` | `leanai@timcomp.com` | LeanAI bot email used in git trailers for GitHub credit |
 | `lean-ai.jiraUrl` | *(empty)* | Jira instance URL |
 | `lean-ai.jiraEmail` | *(empty)* | Jira account email |

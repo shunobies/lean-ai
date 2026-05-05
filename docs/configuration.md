@@ -692,7 +692,7 @@ External service integrations enable two-way sync between Lean AI sessions and t
 | `LEAN_AI_GITHUB_REPO` | *(empty)* | Target GitHub repository for issue/PR comments, e.g. `owner/repo` |
 | `LEAN_AI_GITHUB_API_TOKEN` | *(empty)* | GitHub personal access token or fine-grained token with issue/PR comment access |
 | `LEAN_AI_GITHUB_COAUTHOR_ENABLED` | `false` | Append a `Co-authored-by` trailer to Lean AI-generated commits |
-| `LEAN_AI_GITHUB_COAUTHOR_NAME` | `LeanAI` | Display name used in the co-author trailer |
+| `LEAN_AI_GITHUB_COAUTHOR_NAME` | `LeanAI-bot` | Display name used in the co-author trailer |
 | `LEAN_AI_GITHUB_COAUTHOR_EMAIL` | `leanai@timcomp.com` | LeanAI bot email used in the co-author trailer for GitHub credit |
 
 When `LEAN_AI_GITHUB_REPO` and `LEAN_AI_GITHUB_API_TOKEN` are configured and integrations are enabled, the GitHub provider auto-initializes at startup. The co-author trailer settings work independently of task-link integrations, so you can enable commit attribution without turning on linked GitHub comments.

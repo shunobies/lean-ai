@@ -123,7 +123,7 @@ class LeanAiSettings : PersistentStateComponent<LeanAiSettings.State> {
         var integrationAutoPush: Boolean = true,
         var githubRepo: String = "",
         var githubCoauthorEnabled: Boolean = false,
-        var githubCoauthorName: String = "LeanAI",
+        var githubCoauthorName: String = "LeanAI-bot",
         var githubCoauthorEmail: String = "leanai@timcomp.com",
         var jiraUrl: String = "",
         var jiraEmail: String = "",

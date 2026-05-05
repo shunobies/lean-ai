@@ -33,7 +33,7 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, Settings
 
 from lean_ai.crypto import decrypt_value
 
-DEFAULT_GITHUB_COAUTHOR_NAME = "LeanAI"
+DEFAULT_GITHUB_COAUTHOR_NAME = "LeanAI-bot"
 DEFAULT_GITHUB_COAUTHOR_EMAIL = "leanai@timcomp.com"
 
 # Fields that accept the k-shorthand notation.

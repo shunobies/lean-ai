@@ -1533,7 +1533,7 @@ export function getSettingsPanelHtml(): string {
     </div>
     <div class="field">
         <label>Co-author Name <span class="hint">Shown in the git trailer</span></label>
-        <input type="text" id="githubCoauthorName" placeholder="LeanAI">
+        <input type="text" id="githubCoauthorName" placeholder="LeanAI-bot">
     </div>
     <div class="field">
         <label>Co-author Email <span class="hint">Defaults to LeanAI's verified GitHub email for commit credit</span></label>

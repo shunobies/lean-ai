@@ -748,7 +748,7 @@
         },
         "lean-ai.githubCoauthorName": {
           "type": "string",
-          "default": "LeanAI",
+          "default": "LeanAI-bot",
           "markdownDescription": "**Integrations / GitHub** — Display name used in the Git co-author trailer."
         },
         "lean-ai.githubCoauthorEmail": {

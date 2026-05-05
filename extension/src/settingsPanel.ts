@@ -664,7 +664,7 @@ export class SettingsPanel {
             githubKeySet,
             githubRepo:                config.get("lean-ai.githubRepo", ""),
             githubCoauthorEnabled:     config.get("lean-ai.githubCoauthorEnabled", false),
-            githubCoauthorName:        config.get("lean-ai.githubCoauthorName", "LeanAI"),
+            githubCoauthorName:        config.get("lean-ai.githubCoauthorName", "LeanAI-bot"),
             githubCoauthorEmail:       config.get("lean-ai.githubCoauthorEmail", "leanai@timcomp.com"),
             jiraKeySet,
             jiraUrl:                   config.get("lean-ai.jiraUrl", ""),
