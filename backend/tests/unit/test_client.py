@@ -123,6 +123,24 @@ async def _noop_executor(name: str, args: dict) -> str:
     return f"OK: {name}"
 
 
+class FakeDispatcher:
+    """Minimal dispatcher stub for interrupt-injection tests."""
+
+    def __init__(self, pending_checks: set[int] | None = None, message: str = ""):
+        self.pending_checks = pending_checks or set()
+        self.message = message
+        self.check_count = 0
+
+    def check_cancelled(self) -> None:
+        return None
+
+    def get_pending_message(self) -> str | None:
+        self.check_count += 1
+        if self.check_count in self.pending_checks:
+            return self.message
+        return None
+
+
 @pytest.mark.asyncio
 async def test_chat_structured_emits_metrics_and_reset_callbacks():
     fake = StructuredFakeProvider([])
@@ -186,6 +204,51 @@ async def test_chat_with_tools_emits_metrics_reset_at_start_and_refresh():
     )
 
     assert resets == ["reset", "reset"]
+
+
+@pytest.mark.asyncio
+async def test_user_interrupt_stops_remaining_same_turn_tool_calls():
+    responses = [
+        (
+            "",
+            [
+                ToolCallInfo(name="edit_file", arguments={"path": "a.py"}),
+                ToolCallInfo(name="run_tests", arguments={"command": "pytest"}),
+            ],
+            LLMMetrics(),
+        ),
+        _make_task_complete_response(),
+    ]
+
+    client, fake = _build_client(responses)
+    executed_names: list[str] = []
+    dispatcher = FakeDispatcher(
+        pending_checks={2},
+        message="Stop and fix the plan before running tests.",
+    )
+
+    async def executor(name: str, args: dict) -> str:
+        executed_names.append(name)
+        return f"OK: {name}"
+
+    await client.chat_with_tools(
+        messages=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "do stuff"},
+        ],
+        tools=[],
+        tool_executor_fn=executor,
+        dispatcher=dispatcher,
+        max_turns=3,
+    )
+
+    assert executed_names == ["edit_file"]
+    second_call_messages = fake.messages_at_each_call[1]
+    assert any(
+        "[USER INTERRUPT]" in (m.get("content") or "")
+        for m in second_call_messages
+        if m.get("role") == "user"
+    )
 
 
 @pytest.mark.asyncio

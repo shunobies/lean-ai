@@ -81,7 +81,7 @@ class BackendClient {
 
     data class CreateSessionRequest(
         val mode: String = "plan",
-        val workspace_path: String? = null,
+        val repo_root: String? = null,
         val task: String? = null
     )
 
@@ -343,10 +343,17 @@ class BackendClient {
     }
 
     /** Send a user message via WebSocket. */
-    fun wsSendUserMessage(text: String, attachments: List<Map<String, Any>>? = null) {
+    fun wsSendUserMessage(
+        text: String,
+        repoRoot: String? = null,
+        attachments: List<Map<String, Any>>? = null
+    ) {
         val payload = JsonObject().apply {
             addProperty("type", "user_message")
-            addProperty("text", text)
+            addProperty("content", text)
+            if (repoRoot != null) {
+                addProperty("repo_root", repoRoot)
+            }
             if (attachments != null) {
                 add("attachments", gson.toJsonTree(attachments))
             }
@@ -365,11 +372,7 @@ class BackendClient {
 
     /** Send rejection via WebSocket. */
     fun wsSendReject(feedback: String) {
-        val payload = JsonObject().apply {
-            addProperty("type", "reject")
-            addProperty("feedback", feedback)
-        }
-        webSocket?.send(payload.toString())
+        wsSendUserMessage(feedback)
     }
 
     /** Send cancel via WebSocket. */

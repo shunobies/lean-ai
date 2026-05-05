@@ -111,6 +111,41 @@ async def test_wait_for_approval_returns_message():
 
 
 @pytest.mark.asyncio
+async def test_listener_normalizes_legacy_user_message_text_field():
+    """Legacy clients using ``text`` still land on the user-message path."""
+    ws = FakeWebSocket()
+    dispatcher = WSMessageDispatcher(ws)
+
+    await dispatcher.start()
+    try:
+        ws.inject({"type": "user_message", "text": "please revise"})
+        await asyncio.sleep(0.05)
+
+        msg = dispatcher._approval_queue.get_nowait()
+        assert msg["type"] == "user_message"
+        assert msg["content"] == "please revise"
+    finally:
+        await dispatcher.stop()
+
+
+@pytest.mark.asyncio
+async def test_listener_normalizes_reject_feedback_into_execution_interrupt():
+    """Legacy reject messages become immediate execution interrupts."""
+    ws = FakeWebSocket()
+    dispatcher = WSMessageDispatcher(ws)
+    dispatcher.enter_execution_mode()
+
+    await dispatcher.start()
+    try:
+        ws.inject({"type": "reject", "feedback": "stop using that approach"})
+        await asyncio.sleep(0.05)
+
+        assert dispatcher.get_pending_message() == "stop using that approach"
+    finally:
+        await dispatcher.stop()
+
+
+@pytest.mark.asyncio
 async def test_wait_for_approval_raises_on_cancel_message():
     """A cancel message in the queue raises WorkflowCancelledError."""
     ws = FakeWebSocket()

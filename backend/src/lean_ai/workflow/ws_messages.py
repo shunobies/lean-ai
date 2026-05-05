@@ -259,6 +259,16 @@ ServerMessageType = Literal[
 class UserMessage(TypedDict, total=False):
     type: Literal["user_message"]  # pyright: ignore[reportGeneralTypeIssues]
     content: str
+    text: str
+    repo_root: str
+    workspace_path: str
+
+
+class RejectMessage(TypedDict, total=False):
+    type: Literal["reject"]  # pyright: ignore[reportGeneralTypeIssues]
+    feedback: str
+    content: str
+    text: str
 
 
 class CancelMessage(TypedDict):
@@ -306,6 +316,7 @@ class SaveMemoryManualMessage(TypedDict, total=False):
 
 ClientMessageType = Literal[
     "user_message",
+    "reject",
     "cancel",
     "approve",
     "approve_tool",

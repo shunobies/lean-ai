@@ -238,6 +238,17 @@ async def run_workflow(
 # ── Phase 3: Approval ──────────────────────────────────────────────
 
 
+def _approval_feedback(msg: dict) -> str | None:
+    """Extract user feedback from approval-phase messages."""
+    if msg.get("type") not in ("user_message", "reject", "feedback"):
+        return None
+    for key in ("content", "feedback", "text", "message"):
+        value = msg.get(key)
+        if isinstance(value, str):
+            return value
+    return ""
+
+
 async def _wait_for_approval(
     plan: ExecutionPlan,
     task: str,
@@ -311,9 +322,9 @@ async def _wait_for_approval(
                 )
             return plan
 
-        if msg.get("type") == "user_message":
+        feedback = _approval_feedback(msg)
+        if feedback is not None:
             # User sent feedback — revise the plan
-            feedback = msg.get("content", "")
             revision_count += 1
             # Capture pre-revision state for later memory extraction
             # if the next revision is eventually approved.

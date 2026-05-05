@@ -1,10 +1,10 @@
 """Pydantic request/response models for all API endpoints."""
 
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, Field
 
 
 class CreateSessionRequest(BaseModel):
-    repo_root: str
+    repo_root: str = Field(validation_alias=AliasChoices("repo_root", "workspace_path"))
     task: str = ""
 
 

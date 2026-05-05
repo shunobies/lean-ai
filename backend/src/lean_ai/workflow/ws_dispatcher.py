@@ -13,6 +13,30 @@ from fastapi import WebSocket, WebSocketDisconnect
 logger = logging.getLogger(__name__)
 
 
+def _extract_message_text(data: dict) -> str:
+    """Return the best-effort free-form text payload from a client message."""
+    for key in ("content", "feedback", "text", "message"):
+        value = data.get(key)
+        if isinstance(value, str):
+            return value
+    return ""
+
+
+def _normalize_inbound_message(data: dict) -> dict:
+    """Normalize legacy client message shapes into the current protocol."""
+    msg_type = data.get("type")
+    if msg_type == "user_message":
+        normalized = dict(data)
+        normalized["content"] = _extract_message_text(data)
+        return normalized
+    if msg_type in ("reject", "feedback"):
+        normalized = dict(data)
+        normalized["type"] = "user_message"
+        normalized["content"] = _extract_message_text(data)
+        return normalized
+    return data
+
+
 class WorkflowCancelledError(Exception):
     """Raised when the user cancels the running workflow."""
 
@@ -103,7 +127,7 @@ class WSMessageDispatcher:
         """Read WS messages in a loop and dispatch to queues."""
         try:
             while True:
-                data = await self.ws.receive_json()
+                data = _normalize_inbound_message(await self.ws.receive_json())
                 msg_type = data.get("type")
 
                 if msg_type == "cancel":

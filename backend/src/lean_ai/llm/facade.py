@@ -171,6 +171,38 @@ def _log_harness_message(
     )
 
 
+def _build_user_interrupt_message(user_text: str) -> str:
+    """Format a queued user interrupt for prompt injection."""
+    return (
+        "[USER INTERRUPT] The user has sent you new "
+        "instructions. Read carefully and adjust your "
+        "approach:\n\n" + user_text
+    )
+
+
+def _inject_user_interrupt_message(
+    messages: list[dict],
+    *,
+    user_text: str,
+    turn: int,
+) -> None:
+    """Append a normalized user-interrupt message and log it."""
+    interrupt_message = _build_user_interrupt_message(user_text)
+    _log_harness_message(
+        kind="interrupt",
+        key="user_interrupt",
+        content=interrupt_message,
+        level=logging.INFO,
+        turn=turn,
+    )
+    messages.append(
+        {
+            "role": "user",
+            "content": interrupt_message,
+        }
+    )
+
+
 class LLMClient:
     """Unified LLM interface that delegates to a provider.
 
@@ -486,23 +518,10 @@ class LLMClient:
                 dispatcher.check_cancelled()
                 pending = dispatcher.get_pending_message()
                 if pending:
-                    interrupt_message = (
-                        "[USER INTERRUPT] The user has sent you new "
-                        "instructions. Read carefully and adjust your "
-                        "approach:\n\n" + pending
-                    )
-                    _log_harness_message(
-                        kind="interrupt",
-                        key="user_interrupt",
-                        content=interrupt_message,
-                        level=logging.INFO,
+                    _inject_user_interrupt_message(
+                        messages,
+                        user_text=pending,
                         turn=turn,
-                    )
-                    messages.append(
-                        {
-                            "role": "user",
-                            "content": interrupt_message,
-                        }
                     )
 
             logger.info(
@@ -641,7 +660,8 @@ class LLMClient:
                 # task_complete_validator (if provided) sees the side
                 # effects of same-turn observation/scratchpad writes.
                 pending_complete_calls: list[ToolCallInfo] = []
-                for tc in tool_calls:
+                interrupt_injected = False
+                for idx, tc in enumerate(tool_calls):
                     if tc.name == "task_complete":
                         pending_complete_calls.append(tc)
                         continue
@@ -678,6 +698,26 @@ class LLMClient:
                         result_str,
                     )
                     messages.extend(result_msgs)
+
+                    if dispatcher:
+                        dispatcher.check_cancelled()
+                        pending = dispatcher.get_pending_message()
+                        if pending:
+                            _inject_user_interrupt_message(
+                                messages,
+                                user_text=pending,
+                                turn=turn,
+                            )
+                            messages[:] = _sanitize_messages(messages)
+                            logger.info(
+                                "chat_with_tools: user interrupt received mid-turn; "
+                                "deferring %d remaining tool call(s)",
+                                max(0, len(tool_calls) - idx - 1) + len(pending_complete_calls),
+                            )
+                            completion_call = None
+                            pending_complete_calls = []
+                            interrupt_injected = True
+                            break
 
                     # Track test/lint failure streak for claim verification
                     if tc.name in ("run_tests", "run_lint"):
@@ -737,6 +777,27 @@ class LLMClient:
                                 },
                             )
                             state.consecutive_same_tool = 0
+
+                if not interrupt_injected and pending_complete_calls and dispatcher:
+                    dispatcher.check_cancelled()
+                    pending = dispatcher.get_pending_message()
+                    if pending:
+                        _inject_user_interrupt_message(
+                            messages,
+                            user_text=pending,
+                            turn=turn,
+                        )
+                        messages[:] = _sanitize_messages(messages)
+                        logger.info(
+                            "chat_with_tools: user interrupt received before deferred "
+                            "task completion; deferring completion to the next turn"
+                        )
+                        completion_call = None
+                        pending_complete_calls = []
+                        interrupt_injected = True
+
+                if interrupt_injected:
+                    continue
 
                 # Emit deferred task_complete results AFTER every other
                 # tool in this turn has run.  When a

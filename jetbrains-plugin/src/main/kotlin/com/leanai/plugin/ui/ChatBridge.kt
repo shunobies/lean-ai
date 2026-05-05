@@ -224,7 +224,7 @@ class ChatBridge(private val project: Project) {
             val session = client.createSession(
                 BackendClient.CreateSessionRequest(
                     mode = wsMode,
-                    workspace_path = workspacePath,
+                    repo_root = workspacePath,
                     task = task
                 )
             )
@@ -246,7 +246,7 @@ class ChatBridge(private val project: Project) {
                 }
                 override fun onConnected() {
                     // Send the initial user message to start the workflow
-                    client.wsSendUserMessage(task)
+                    client.wsSendUserMessage(task, repoRoot = workspacePath)
                 }
                 override fun onDisconnected() {
                     sendToWebview("statusMessage", mapOf("text" to "Disconnected from backend."))

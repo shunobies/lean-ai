@@ -47,6 +47,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
     Client messages:
       - {"type": "user_message", "content": "...", "repo_root": "..."}
         Start the agentic workflow with a task.
+        Compatibility: ``text`` and ``workspace_path`` are also accepted.
       - {"type": "cancel"} — stop the running workflow
       - {"type": "approve_tool", ...} — approve a pending shell command
       - {"type": "ping"} — keepalive
@@ -74,8 +75,8 @@ async def session_stream(websocket: WebSocket, session_id: str):
             msg_type = data.get("type")
 
             if msg_type == "user_message":
-                content = data.get("content", "")
-                repo_root = data.get("repo_root", "")
+                content = data.get("content", data.get("text", ""))
+                repo_root = data.get("repo_root") or data.get("workspace_path") or ""
                 attachments = data.get("attachments", [])
 
                 if not repo_root:
