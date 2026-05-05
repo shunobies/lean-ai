@@ -80,6 +80,29 @@ class TestBuildStepGroups:
         groups = _build_step_groups(steps)
         assert len(groups) == 2
 
+    def test_context_reference_creates_dependency(self):
+        """Planner-supplied context mentioning another file must serialize the steps."""
+        steps = [
+            PlanStep(
+                step_number=1,
+                tool="edit_file",
+                file_path="src/models.py",
+                instruction="add model",
+                reason="",
+                context="",
+            ),
+            PlanStep(
+                step_number=2,
+                tool="edit_file",
+                file_path="src/views.py",
+                instruction="wire view",
+                reason="",
+                context="Follow the serializer pattern from src/models.py",
+            ),
+        ]
+        groups = _build_step_groups(steps)
+        assert len(groups) == 2
+
     def test_no_false_positive_from_substring(self):
         """Step A edits 'a.py', Step B mentions 'baa.py' -> parallel."""
         steps = [

@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING
 from fastapi import WebSocket
 
 from lean_ai.config import settings
+from lean_ai.indexer.tree import list_repo_tree
+from lean_ai.llm.base import ToolCall
 from lean_ai.llm.plan_schema import (
     ExecutionPlan,
     PlanStep,
@@ -63,6 +65,9 @@ _BARRIER_TOOLS = frozenset(
         "run_command",
     }
 )
+_FILE_WRITE_TOOLS = frozenset({"create_file", "edit_file"})
+_IMPLICIT_MUTATION_TOOLS = frozenset({"run_command", "format_code"})
+_INCOMPLETE_REL_PATH = ".lean_ai/incomplete.md"
 
 
 def _normalize_path(p: str) -> str:
@@ -85,6 +90,174 @@ def _path_mentioned_in(fpath: str, text: str) -> bool:
     # Trailing boundary excludes '.' to prevent config.py matching config.py.bak
     pattern = r"(?:^|[\s`\"'(,\[])" + escaped + r"(?:[\s`\"')\],;:\n]|$)"
     return bool(re.search(pattern, text))
+
+
+def _tool_result_failed(result: str) -> bool:
+    """Return True when a tool result represents an execution failure."""
+    if not isinstance(result, str):
+        return False
+    return result.lstrip().upper().startswith(("ERROR:", "FAILED"))
+
+
+def _step_scope_error(
+    step: PlanStep,
+    tool_name: str,
+    arguments: dict,
+) -> str | None:
+    """Return an executor-side scope violation for the current step, if any.
+
+    Keep the tool catalog stable for the LLM, but reject mutating actions that
+    drift outside the current plan step. Read-only helpers remain available.
+    """
+    if tool_name == "request_test_change":
+        return None
+
+    if tool_name in _FILE_WRITE_TOOLS:
+        if step.tool not in _FILE_WRITE_TOOLS:
+            return (
+                f"ERROR: This is a `{step.tool}` step, not a direct file-write step. "
+                "Use read-only helpers if needed, then finish the current step with "
+                f"`{step.tool}` and call task_complete."
+            )
+        target_path = _normalize_path(arguments.get("path", ""))
+        expected_path = _normalize_path(step.file_path)
+        if expected_path and target_path != expected_path:
+            return (
+                f"ERROR: This step may only modify `{step.file_path}`. "
+                f"You tried to modify `{arguments.get('path', '')}`. "
+                "Stay on the planned target file for this step."
+            )
+        return None
+
+    if tool_name in _IMPLICIT_MUTATION_TOOLS and tool_name != step.tool:
+        return (
+            f"ERROR: This is a `{step.tool}` step, so `{tool_name}` is out of scope here. "
+            "Use read-only helpers if you need context, then perform the planned step and "
+            "call task_complete when it is actually done."
+        )
+
+    return None
+
+
+def _step_primary_action_done(
+    step: PlanStep,
+    *,
+    successful_calls: list[ToolCall],
+    attempted_calls: list[ToolCall],
+) -> bool:
+    """Return True when the step's required primary action has happened."""
+    expected_path = _normalize_path(step.file_path)
+
+    if step.tool == "read_file":
+        return any(
+            tc.tool_name == "read_file"
+            and _normalize_path(tc.parameters.get("path", "")) == expected_path
+            for tc in successful_calls
+        )
+
+    if step.tool in _FILE_WRITE_TOOLS:
+        return any(
+            tc.tool_name in _FILE_WRITE_TOOLS
+            and _normalize_path(tc.parameters.get("path", "")) == expected_path
+            for tc in successful_calls
+        )
+
+    return any(tc.tool_name == step.tool for tc in attempted_calls)
+
+
+def _step_completion_error(
+    step: PlanStep,
+    *,
+    task_complete_seen: bool,
+    successful_calls: list[ToolCall],
+    attempted_calls: list[ToolCall],
+) -> str | None:
+    """Return a human-readable reason the step is still incomplete."""
+    if not _step_primary_action_done(
+        step,
+        successful_calls=successful_calls,
+        attempted_calls=attempted_calls,
+    ):
+        if step.file_path:
+            return f"Step never completed its primary action: `{step.tool}` for `{step.file_path}`."
+        return f"Step never completed its primary action: `{step.tool}`."
+
+    if not task_complete_seen:
+        return (
+            "Step ended without task_complete, so the executor cannot safely treat it as finished."
+        )
+
+    return None
+
+
+def _clear_incomplete_file(repo_root: str) -> None:
+    """Remove stale incomplete state from a previous execution run."""
+    incomplete_path = Path(repo_root) / _INCOMPLETE_REL_PATH
+    try:
+        incomplete_path.unlink(missing_ok=True)
+    except Exception:
+        logger.debug("Failed to clear stale incomplete.md", exc_info=True)
+
+
+def _append_incomplete_entry(
+    repo_root: str,
+    *,
+    step_label: str,
+    detail: str,
+) -> None:
+    """Append one current-run failure entry to ``.lean_ai/incomplete.md``."""
+    incomplete_path = Path(repo_root) / _INCOMPLETE_REL_PATH
+    incomplete_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = f"## {step_label}\n{detail.strip()}\n\n"
+    with incomplete_path.open("a", encoding="utf-8") as handle:
+        handle.write(payload)
+
+
+def _snapshot_repo_state(repo_root: str) -> dict[str, tuple[int, int]]:
+    """Capture a gitignore-aware text-file snapshot of the repository."""
+    root = Path(repo_root)
+    snapshot: dict[str, tuple[int, int]] = {}
+    for entry in list_repo_tree(repo_root):
+        full_path = root / entry.path
+        try:
+            stat = full_path.stat()
+        except OSError:
+            continue
+        snapshot[entry.path] = (stat.st_size, stat.st_mtime_ns)
+    return snapshot
+
+
+def _diff_repo_state(
+    before: dict[str, tuple[int, int]],
+    after: dict[str, tuple[int, int]],
+) -> list[str]:
+    """Return repo-relative text-file paths added/changed/deleted between snapshots."""
+    changed: set[str] = set()
+    for path, meta in after.items():
+        if before.get(path) != meta:
+            changed.add(path)
+    for path in before:
+        if path not in after:
+            changed.add(path)
+    return sorted(changed)
+
+
+def _collect_tdd_review_files(steps: list[PlanStep]) -> list[str]:
+    """Return all changed test-file paths that should enter TDD review."""
+    from lean_ai.tools.test_file_utils import is_test_file_path
+
+    review_files: list[str] = []
+    seen: set[str] = set()
+    for step in steps:
+        if not step.file_path:
+            continue
+        if not is_test_file_path(step.file_path):
+            continue
+        if step.file_path in seen:
+            continue
+        seen.add(step.file_path)
+        review_files.append(step.file_path)
+    return review_files
 
 
 def _build_step_groups(
@@ -136,7 +309,16 @@ def _build_step_groups(
 
         # Cross-file reference: check if instruction/context mentions
         # any previously-touched file (boundary-aware)
-        searchable = (step.instruction or "") + " " + (step.file_path or "")
+        searchable = " ".join(
+            part
+            for part in (
+                step.instruction or "",
+                step.reason or "",
+                step.context or "",
+                step.file_path or "",
+            )
+            if part
+        )
         for fpath, dep_step in file_owners.items():
             if _path_mentioned_in(fpath, searchable):
                 max_dep_group = max(max_dep_group, group_idx[dep_step])
@@ -171,6 +353,7 @@ async def execute_plan(
     dispatcher: WSMessageDispatcher | None = None,
 ) -> str:
     """Execute each plan step sequentially with a constrained LLM."""
+    _clear_incomplete_file(repo_root)
     if dispatcher:
         dispatcher.enter_execution_mode()
     # Shared telemetry context for all per-step calls. Mutated in place by
@@ -190,11 +373,12 @@ async def execute_plan(
         dispatcher=dispatcher,
         telemetry_context=exec_telemetry,
     )
-    total_steps = len(plan.steps)
-    all_executed = []
+    total_steps = len(plan.steps) + len(getattr(plan, "tdd_test_steps", None) or [])
+    all_executed: list[ToolCall] = []
     step_explanations: list[str] = []
     completed_descriptions: list[str] = []
     step_artifacts: dict[str, str] = {}  # {relative_path: file_content}
+    implicit_modified_files: set[str] = set()
     _artifacts_lock = asyncio.Lock()
 
     # Send execution checklist to the extension for progress UI
@@ -256,7 +440,7 @@ async def execute_plan(
         sys_prompt,
         label_prefix: str = "",
         telemetry: dict | None = None,
-    ):
+    ) -> bool:
         """Execute one plan step, collecting artifacts and progress."""
         step_label = f"{label_prefix}Step {step.step_number}"
         logger.info(
@@ -289,6 +473,11 @@ async def execute_plan(
             {"role": "system", "content": sys_prompt},
             {"role": "user", "content": user_msg},
         ]
+        attempted_calls: list[ToolCall] = []
+        successful_calls: list[ToolCall] = []
+        task_complete_seen = False
+        pre_step_snapshot: dict[str, tuple[int, int]] | None = None
+        implicit_changed_paths: list[str] = []
 
         def _build_step_refresh(
             current_messages: list[dict],
@@ -350,14 +539,57 @@ async def execute_plan(
             parts.append(f"Instruction: {step.instruction}")
             return "\n".join(parts)
 
-        executed, explanation = await client.chat_with_tools(
+        def _build_step_text_only_nudge() -> str:
+            target = f" on `{step.file_path}`" if step.file_path else ""
+            return (
+                f"This is still {step_label}. Use tools to do the work before replying with prose. "
+                f"You must perform the planned primary action `{step.tool}`{target}, then call "
+                "task_complete when the step is truly finished."
+            )
+
+        async def _step_executor(name: str, arguments: dict) -> str:
+            nonlocal pre_step_snapshot, implicit_changed_paths
+
+            scope_error = _step_scope_error(step, name, arguments)
+            if scope_error:
+                return scope_error
+
+            if name in _IMPLICIT_MUTATION_TOOLS and pre_step_snapshot is None:
+                pre_step_snapshot = await asyncio.to_thread(_snapshot_repo_state, repo_root)
+
+            result = await executor(name, arguments)
+
+            call = ToolCall(
+                tool_name=name,
+                parameters=arguments,
+                description=f"{name} {arguments.get('path', arguments.get('command', ''))}",
+            )
+            attempted_calls.append(call)
+
+            if not _tool_result_failed(result):
+                successful_calls.append(call)
+
+            return result
+
+        def _validate_step_completion() -> str | None:
+            nonlocal task_complete_seen
+            task_complete_seen = True
+            return _step_completion_error(
+                step,
+                task_complete_seen=True,
+                successful_calls=successful_calls,
+                attempted_calls=attempted_calls,
+            )
+
+        _, explanation = await client.chat_with_tools(
             messages=messages,
             tools=tools,
-            tool_executor_fn=executor,
+            tool_executor_fn=_step_executor,
             max_turns=settings.implementation_max_turns,
             max_tokens=settings.implementation_max_tokens,
             task_reminder=_build_step_reminder,
             reminder_interval=1,
+            text_only_nudge=_build_step_text_only_nudge(),
             on_tool_call=cb.on_tool_call,
             on_tool_result=cb.on_tool_result,
             on_content=cb.on_content,
@@ -366,32 +598,73 @@ async def execute_plan(
             on_context_refresh=_build_step_refresh,
             dispatcher=dispatcher,
             telemetry_context=telemetry or exec_telemetry,
+            task_complete_validator=_validate_step_completion,
         )
+
+        if pre_step_snapshot is not None:
+            post_step_snapshot = await asyncio.to_thread(_snapshot_repo_state, repo_root)
+            implicit_changed_paths = _diff_repo_state(
+                pre_step_snapshot,
+                post_step_snapshot,
+            )
+
+        completion_error = _step_completion_error(
+            step,
+            task_complete_seen=task_complete_seen,
+            successful_calls=successful_calls,
+            attempted_calls=attempted_calls,
+        )
+        if completion_error:
+            detail = completion_error
+            if explanation.strip():
+                detail += f"\n\nModel output:\n{explanation.strip()}"
+            await asyncio.to_thread(
+                _append_incomplete_entry,
+                repo_root,
+                step_label=step_label,
+                detail=detail,
+            )
+            await ws_send(
+                ws,
+                "checkpoint",
+                {
+                    "step_index": step.step_number - 1,
+                    "step_description": (f"{step_label}: {step.instruction[:100]}"),
+                    "status": "failed",
+                    "head_commit_sha": None,
+                },
+            )
+            logger.warning("%s failed validation: %s", step_label, completion_error)
+            return False
 
         # Update shared state under lock for parallel safety
         async with _artifacts_lock:
-            all_executed.extend(executed)
+            all_executed.extend(successful_calls)
             if explanation.strip():
                 step_explanations.append(f"{step_label}: {explanation.strip()}")
             completed_descriptions.append(f"{step_label}: {step.instruction}")
 
             # Collect files created/modified for cross-step context
             artifact_budget = int(settings._active_context_window * 0.10 * 3.5)
-            for tc in executed:
-                if tc.tool_name in ("create_file", "edit_file"):
-                    fpath = tc.parameters.get("path", "")
-                    if fpath:
-                        full = os.path.join(repo_root, fpath)
-                        try:
-                            if os.path.isfile(full):
-                                content = await asyncio.to_thread(
-                                    Path(full).read_text,
-                                    encoding="utf-8",
-                                    errors="replace",
-                                )
-                                step_artifacts[fpath] = content
-                        except Exception:
-                            pass
+            changed_paths = {
+                tc.parameters.get("path", "")
+                for tc in successful_calls
+                if tc.tool_name in ("create_file", "edit_file") and tc.parameters.get("path")
+            }
+            changed_paths.update(implicit_changed_paths)
+            implicit_modified_files.update(implicit_changed_paths)
+            for fpath in sorted(p for p in changed_paths if p):
+                full = os.path.join(repo_root, fpath)
+                try:
+                    if os.path.isfile(full):
+                        content = await asyncio.to_thread(
+                            Path(full).read_text,
+                            encoding="utf-8",
+                            errors="replace",
+                        )
+                        step_artifacts[fpath] = content
+                except Exception:
+                    pass
 
             while sum(len(c) for c in step_artifacts.values()) > artifact_budget and step_artifacts:
                 oldest_key = next(iter(step_artifacts))
@@ -407,6 +680,7 @@ async def execute_plan(
                 "head_commit_sha": None,
             },
         )
+        return True
 
     # ── TDD three-phase execution ─────────────────────────────────
     tdd_active = (
@@ -416,8 +690,10 @@ async def execute_plan(
         and settings._active_context_window > 32768
     )
 
+    halted_early = False
+
     if tdd_active:
-        await _run_tdd_execution(
+        halted_early = not await _run_tdd_execution(
             plan=plan,
             repo_root=repo_root,
             ws=ws,
@@ -436,13 +712,18 @@ async def execute_plan(
         for group in step_groups:
             if len(group) == 1 or settings.num_parallel <= 1:
                 for step in group:
-                    await _run_step(
+                    step_ok = await _run_step(
                         step,
                         llm_client,
                         build_implementation_tools(),
                         tool_executor,
                         system_prompt,
                     )
+                    if not step_ok:
+                        halted_early = True
+                        break
+                if halted_early:
+                    break
             else:
                 # Run independent steps concurrently
                 logger.info(
@@ -450,7 +731,7 @@ async def execute_plan(
                     len(group),
                     ", ".join(s.file_path or s.tool for s in group),
                 )
-                await asyncio.gather(
+                group_results = await asyncio.gather(
                     *[
                         _run_step(
                             step,
@@ -462,14 +743,18 @@ async def execute_plan(
                         for step in group
                     ]
                 )
+                if not all(group_results):
+                    halted_early = True
+                    break
 
     # ── All steps done ───────────────────────────────────────────
-    files_modified = list(
+    files_modified = sorted(
         {
             tc.parameters.get("path", "")
             for tc in all_executed
             if tc.tool_name in ("create_file", "edit_file") and tc.parameters.get("path")
         }
+        | implicit_modified_files
     )
 
     # ── Post-execution validation ──
@@ -511,12 +796,15 @@ async def execute_plan(
         except Exception:
             pass
 
+    completed_step_count = len(completed_descriptions)
     summary = (
-        f"Completed {len(plan.steps)} plan steps, "
+        f"Completed {completed_step_count}/{total_steps} plan steps, "
         f"{len(all_executed)} tool calls. "
         f"Files modified: "
         f"{', '.join(files_modified) if files_modified else 'none'}."
     )
+    if halted_early:
+        summary += "\n\n⚠️ Execution halted early because a plan step did not complete cleanly."
     if step_explanations:
         summary += "\n\n" + "\n".join(step_explanations)
     if incomplete_content:
@@ -632,7 +920,7 @@ async def _run_tdd_execution(
     cb,
     step_artifacts: dict[str, str],
     run_step: Callable,
-) -> None:
+) -> bool:
     """TDD three-phase execution: expert tests → review → implement."""
     from lean_ai.workflow.tdd import evaluate_test_dispute
 
@@ -695,7 +983,7 @@ async def _run_tdd_execution(
     )
 
     for step in plan.tdd_test_steps:
-        await run_step(
+        step_ok = await run_step(
             step,
             expert_llm_client,
             build_implementation_tools(),
@@ -709,6 +997,17 @@ async def _run_tdd_execution(
                 "role": "expert",
             },
         )
+        if not step_ok:
+            await ws_send(
+                ws,
+                "stage_status",
+                {
+                    "stage": "tdd_test_writing",
+                    "status": "done",
+                    "summary": "TDD: Test writing halted because a step did not complete cleanly.",
+                },
+            )
+            return False
 
     await ws_send(
         ws,
@@ -720,10 +1019,9 @@ async def _run_tdd_execution(
         },
     )
 
-    # Identify test files created for the review phase
-    tdd_test_files = [
-        s.file_path for s in plan.tdd_test_steps if s.file_path and s.tool == "create_file"
-    ]
+    # Identify all test files changed during the writing phase, including
+    # edited shared fixtures or conftest files.
+    tdd_test_files = _collect_tdd_review_files(plan.tdd_test_steps)
 
     # ── Phase B: Primary reviews tests (read-only) ───────────
     if tdd_test_files:
@@ -777,12 +1075,24 @@ async def _run_tdd_execution(
             {"role": "system", "content": review_prompt},
             {"role": "user", "content": "\n".join(review_parts)},
         ]
+        review_complete_seen = False
+
+        def _validate_review_completion() -> None:
+            nonlocal review_complete_seen
+            review_complete_seen = True
+            return None
+
         await llm_client.chat_with_tools(
             messages=review_messages,
             tools=build_tdd_implementation_tools(),
             tool_executor_fn=review_executor,
             max_turns=settings.implementation_max_turns,
             max_tokens=settings.implementation_max_tokens,
+            text_only_nudge=(
+                "This is the TDD review phase. Read the changed test files, use "
+                "request_test_change for any flawed test, and call task_complete "
+                "when review is complete."
+            ),
             on_tool_call=cb.on_tool_call,
             on_tool_result=cb.on_tool_result,
             on_content=cb.on_content,
@@ -790,7 +1100,28 @@ async def _run_tdd_execution(
             on_metrics=cb.on_metrics,
             dispatcher=dispatcher,
             telemetry_context=review_telemetry,
+            task_complete_validator=_validate_review_completion,
         )
+        if not review_complete_seen:
+            await asyncio.to_thread(
+                _append_incomplete_entry,
+                repo_root,
+                step_label="[TDD Review]",
+                detail=(
+                    "TDD review ended without task_complete, so the changed test files were "
+                    "not positively accepted or disputed."
+                ),
+            )
+            await ws_send(
+                ws,
+                "stage_status",
+                {
+                    "stage": "tdd_test_review",
+                    "status": "done",
+                    "summary": "TDD: Test review halted because the review did not complete cleanly.",
+                },
+            )
+            return False
 
         await ws_send(
             ws,
@@ -839,7 +1170,7 @@ async def _run_tdd_execution(
             },
         )
 
-        await run_step(
+        step_ok = await run_step(
             step,
             llm_client,
             build_tdd_implementation_tools(),
@@ -853,6 +1184,17 @@ async def _run_tdd_execution(
                 "role": "primary",
             },
         )
+        if not step_ok:
+            await ws_send(
+                ws,
+                "stage_status",
+                {
+                    "stage": "tdd_implementation",
+                    "status": "done",
+                    "summary": "TDD: Implementation halted because a step did not complete cleanly.",
+                },
+            )
+            return False
 
     await ws_send(
         ws,
@@ -863,6 +1205,7 @@ async def _run_tdd_execution(
             "summary": "TDD: Implementation complete.",
         },
     )
+    return True
 
 
 async def _update_project_context(

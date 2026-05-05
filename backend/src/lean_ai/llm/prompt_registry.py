@@ -1994,6 +1994,8 @@ def _register_defaults(reg: PromptRegistry) -> None:
                 "read_file or grep_files to verify before editing.\n"
                 "- If the step cannot be completed as specified, create or append to "
                 ".lean_ai/incomplete.md documenting what went wrong, then stop.\n\n"
+                "PROGRESS:\n"
+                "{SCRATCHPAD_POLICY}\n\n"
                 "CONSISTENCY: Before creating or modifying entities, verify your assumptions "
                 "about existing names, paths, and signatures. Duplicated files, mismatched "
                 "names, and inconsistent references are the hardest bugs to find.\n\n"
@@ -2003,6 +2005,7 @@ def _register_defaults(reg: PromptRegistry) -> None:
                 "TOOL_POLICY",
                 "QUALITY_RULES",
                 "WEB_SEARCH_POLICY",
+                "SCRATCHPAD_POLICY",
                 "COMPLETION_CONTRACT",
             ],
         )
