@@ -444,6 +444,8 @@ async def _synthesize_scope(
     explorer: "LLMClient",
     phase_max_tokens: int,
     on_thinking: "Callable | None" = None,
+    on_metrics: "Callable | None" = None,
+    on_metrics_reset: "Callable | None" = None,
 ) -> tuple[ScopeDocument, str, bool]:
     """Coerce the Phase 1 exploration prose into a validated ScopeDocument.
 
@@ -490,6 +492,8 @@ async def _synthesize_scope(
             schema=ScopeDocument,
             max_tokens=phase_max_tokens,
             thinking_callback=on_thinking,
+            on_metrics=on_metrics,
+            on_metrics_reset=on_metrics_reset,
         )
 
     try:
@@ -577,6 +581,8 @@ async def _revise_plan(
     ws: WebSocket | None = None,
     expert_llm_client: "LLMClient | None" = None,
     on_thinking: "Callable | None" = None,
+    on_metrics: "Callable | None" = None,
+    on_metrics_reset: "Callable | None" = None,
 ) -> ExecutionPlan:
     """Revise an existing plan based on user feedback.
 
@@ -629,6 +635,8 @@ async def _revise_plan(
         schema=ExecutionPlan,
         max_tokens=plan_max_tokens,
         thinking_callback=on_thinking,
+        on_metrics=on_metrics,
+        on_metrics_reset=on_metrics_reset,
     )
     # Safety: strip non-implementation steps (same as Phase 4)
     impl_steps = [s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS]

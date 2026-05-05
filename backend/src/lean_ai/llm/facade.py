@@ -262,10 +262,15 @@ class LLMClient:
         max_tokens: int | None = None,
         *,
         thinking_callback=None,
+        on_metrics: Callable | None = None,
+        on_metrics_reset: Callable | None = None,
     ) -> BaseModel:
         kwargs = {}
         if thinking_callback is not None:
             kwargs["thinking_callback"] = thinking_callback
+
+        if on_metrics_reset:
+            await on_metrics_reset()
 
         result, metrics = await self._provider.chat_structured(
             messages,
@@ -275,6 +280,8 @@ class LLMClient:
             **kwargs,
         )
         self.last_chat_metrics = _metrics_to_dict(metrics)
+        if on_metrics and metrics.prompt_tokens:
+            await on_metrics(metrics.prompt_tokens, self._provider.context_window)
         return result
 
     async def chat_stream(
@@ -415,6 +422,7 @@ class LLMClient:
         on_content: Callable | None = None,
         on_thinking: Callable | None = None,
         on_metrics: Callable | None = None,
+        on_metrics_reset: Callable | None = None,
         on_context_refresh: Callable | None = None,
         on_budget_interrupt: Callable | None = None,
         dispatcher: "WSMessageDispatcher | None" = None,
@@ -468,6 +476,9 @@ class LLMClient:
             telemetry_context.setdefault("last_trace_uuid", None)
 
         messages[:] = _sanitize_messages(messages)
+
+        if on_metrics_reset:
+            await on_metrics_reset()
 
         for turn in range(effective_max):
             # ── Check for cancel / user interrupt ─────────────────
@@ -861,6 +872,8 @@ class LLMClient:
                             "context_window": self._provider.context_window,
                         },
                     )
+                    if on_metrics_reset:
+                        await on_metrics_reset()
                     if on_metrics:
                         est_new = sum(len(m.get("content") or "") for m in messages) // 4
                         await on_metrics(est_new, self._provider.context_window)

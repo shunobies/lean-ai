@@ -1671,6 +1671,15 @@ export function getWebviewHtml(chatFontSize: number): string {
         runtimeStart = null;
     }
 
+    function resetMetricsToZero() {
+        stopRuntime();
+        ctxBadge.textContent = 'Ctx 0%';
+        ctxBadge.classList.add('visible');
+        ctxBadge.classList.remove('warning', 'critical');
+        timeBadge.classList.remove('visible');
+        runtimeStart = null;
+    }
+
     let sendTimeout = null;
     function send() {
         const text = inputEl.value.trim();
@@ -2108,7 +2117,7 @@ export function getWebviewHtml(chatFontSize: number): string {
                 break;
 
             case 'metricsReset':
-                resetMetrics();
+                resetMetricsToZero();
                 break;
 
             case 'executionChecklist': {

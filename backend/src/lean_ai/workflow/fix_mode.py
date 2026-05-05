@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 _REFRESH_PAD_MAX_CHARS = 2000
 _REFRESH_JOURNAL_MAX_CHARS = 1600
+_INVESTIGATION_SUMMARY_MAX_CHARS = 2000
 
 
 def _tail(text: str, max_chars: int) -> str:
@@ -120,9 +121,75 @@ async def _run_fix(
         conversation_logger=conversation_logger,
     )
 
+    def _build_implementation_messages(
+        *,
+        investigation_summary: str = "",
+    ) -> list[dict]:
+        """Create a fresh implementation prompt rooted in durable state."""
+        new_messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": task},
+        ]
+
+        if session_id:
+            existing_journal = read_journal(repo_root, session_id)
+            if existing_journal:
+                new_messages.append(
+                    {
+                        "role": "user",
+                        "content": (f"[JOURNAL FROM PREVIOUS EXECUTION]\n{existing_journal}"),
+                    }
+                )
+            existing_pad = scratchpad.read_scratchpad(repo_root, session_id)
+            if existing_pad:
+                new_messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "[SCRATCHPAD FROM PREVIOUS EXECUTION — resume from here]\n"
+                            f"{existing_pad}"
+                        ),
+                    }
+                )
+
+        investigation_summary = investigation_summary.strip()
+        if investigation_summary:
+            if len(investigation_summary) > _INVESTIGATION_SUMMARY_MAX_CHARS:
+                investigation_summary = (
+                    investigation_summary[:_INVESTIGATION_SUMMARY_MAX_CHARS]
+                    + "\n[TRUNCATED INVESTIGATION SUMMARY]"
+                )
+            new_messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "[INVESTIGATION HANDOFF]\n"
+                        "Treat the journal and scratchpad as the source of truth. "
+                        "Use this summary only as a compact reminder of what the "
+                        "investigation phase found:\n"
+                        f"{investigation_summary}"
+                    ),
+                }
+            )
+
+        new_messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "MODE: IMPLEMENTATION\n"
+                    "All tools now available: create_file, edit_file, "
+                    "run_command, format_code (plus all investigation tools).\n"
+                    "Use your scratchpad diagnosis. Make the minimal fix. "
+                    "Do not continue investigating."
+                ),
+            }
+        )
+        return new_messages
+
     # ── Investigation phase (fix mode only) ───────────────────────
     # Run read-only tools first so the LLM gathers context before editing.
     executed_investigation: list = []
+    investigation_summary = ""
     if not is_request and settings.enable_fix_investigation:
         await ws_send(ws, "stage_change", {"stage": "investigating"})
 
@@ -197,7 +264,7 @@ async def _run_fix(
 
         investigation_telemetry = dict(fix_telemetry)
         investigation_telemetry["phase"] = "fix.investigate"
-        executed_investigation, _ = await active_client.chat_with_tools(
+        executed_investigation, investigation_summary = await active_client.chat_with_tools(
             messages=messages,
             tools=build_investigation_tools(),
             tool_executor_fn=tool_executor,
@@ -208,52 +275,19 @@ async def _run_fix(
             on_content=cb.on_content,
             on_thinking=cb.on_thinking,
             on_metrics=cb.on_metrics,
+            on_metrics_reset=cb.on_metrics_reset,
             on_context_refresh=_build_investigation_refresh,
             dispatcher=dispatcher,
             telemetry_context=investigation_telemetry,
         )
 
-        # Transition: swap system prompt, nudge LLM to start fixing
-        messages[0] = {"role": "system", "content": system_prompt}
-        messages.append(
-            {
-                "role": "user",
-                "content": (
-                    "MODE: IMPLEMENTATION\n"
-                    "All tools now available: create_file, edit_file, "
-                    "run_command, format_code (plus all investigation tools).\n"
-                    "Use your scratchpad diagnosis. Make the minimal fix. "
-                    "Do not continue investigating."
-                ),
-            }
+        # Transition: start implementation from a fresh prompt root so
+        # context budgets do not inherit the full investigation transcript.
+        messages = _build_implementation_messages(
+            investigation_summary=investigation_summary,
         )
     else:
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": task},
-        ]
-
-        # Inject existing journal + scratchpad for session recovery (resume after crash)
-        if session_id:
-            existing_journal = read_journal(repo_root, session_id)
-            if existing_journal:
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (f"[JOURNAL FROM PREVIOUS EXECUTION]\n{existing_journal}"),
-                    }
-                )
-            existing_pad = scratchpad.read_scratchpad(repo_root, session_id)
-            if existing_pad:
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "[SCRATCHPAD FROM PREVIOUS EXECUTION — resume from here]\n"
-                            f"{existing_pad}"
-                        ),
-                    }
-                )
+        messages = _build_implementation_messages()
 
     def _build_fix_reminder() -> str:
         parts = [f"REMINDER — Your task: {task}"]
@@ -358,6 +392,7 @@ async def _run_fix(
         on_content=cb.on_content,
         on_thinking=cb.on_thinking,
         on_metrics=cb.on_metrics,
+        on_metrics_reset=cb.on_metrics_reset,
         on_context_refresh=_build_context_refresh,
         dispatcher=dispatcher,
         telemetry_context=fix_telemetry,

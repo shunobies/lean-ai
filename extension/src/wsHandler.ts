@@ -489,6 +489,11 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
             break;
         }
 
+        case "metrics_reset": {
+            ctx.postMessage({ type: "metricsReset" });
+            break;
+        }
+
         // --- Context refreshed: conversation rebuilt from disk ---
         case "context_refreshed": {
             ctx.postMessage({

@@ -16,6 +16,7 @@ from fastapi import WebSocket
 from lean_ai.tools.descriptions import humanize_tool_call
 from lean_ai.workflow.ws_messages import (
     fire_assistant_content,
+    fire_metrics_reset,
     fire_metrics_update,
     fire_thinking_content,
     fire_tool_progress,
@@ -38,6 +39,7 @@ class WorkflowCallbacks(NamedTuple):
     on_content: Callable
     on_thinking: Callable | None
     on_metrics: Callable | None
+    on_metrics_reset: Callable | None
     on_budget_interrupt: Callable
 
 
@@ -134,6 +136,7 @@ def build_workflow_callbacks(
         on_thinking = _on_thinking
 
     on_metrics: Callable | None = None
+    on_metrics_reset: Callable | None = None
     if include_metrics:
 
         async def _on_metrics(prompt_tokens: int, context_window: int) -> None:
@@ -146,6 +149,11 @@ def build_workflow_callbacks(
             )
 
         on_metrics = _on_metrics
+
+        async def _on_metrics_reset() -> None:
+            fire_metrics_reset(ws)
+
+        on_metrics_reset = _on_metrics_reset
 
     async def on_budget_interrupt(thinking_token_count: int) -> None:
         """Emit a ``thinking_content`` marker so the extension renders a
@@ -164,5 +172,6 @@ def build_workflow_callbacks(
         on_content=on_content,
         on_thinking=on_thinking,
         on_metrics=on_metrics,
+        on_metrics_reset=on_metrics_reset,
         on_budget_interrupt=on_budget_interrupt,
     )

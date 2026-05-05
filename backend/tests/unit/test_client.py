@@ -3,6 +3,7 @@
 import logging
 
 import pytest
+from pydantic import BaseModel
 
 from lean_ai.llm.base import LLMMetrics, LLMProvider, ToolCallInfo
 from lean_ai.llm.client import _sanitize_messages
@@ -55,6 +56,16 @@ class FakeProvider(LLMProvider):
         return True
 
 
+class StructuredResult(BaseModel):
+    value: str
+
+
+class StructuredFakeProvider(FakeProvider):
+    async def chat_structured(self, messages, schema, temperature=None, max_tokens=None):
+        self.messages_at_each_call.append(list(messages))
+        return StructuredResult(value="ok"), LLMMetrics(prompt_tokens=123)
+
+
 def _make_tool_call_response(
     name: str,
     args: dict,
@@ -74,6 +85,20 @@ def _make_text_response(
 ) -> tuple[str, list[ToolCallInfo], LLMMetrics]:
     """Build a fake provider response with text only (no tool calls)."""
     return content, [], LLMMetrics(stop_reason=stop_reason)
+
+
+def _make_tool_call_response_with_metrics(
+    name: str,
+    args: dict,
+    *,
+    prompt_tokens: int,
+    content: str = "",
+) -> tuple[str, list[ToolCallInfo], LLMMetrics]:
+    return (
+        content,
+        [ToolCallInfo(name=name, arguments=args)],
+        LLMMetrics(prompt_tokens=prompt_tokens),
+    )
 
 
 def _make_task_complete_response(
@@ -96,6 +121,71 @@ def _build_client(responses: list) -> tuple[LLMClient, FakeProvider]:
 
 async def _noop_executor(name: str, args: dict) -> str:
     return f"OK: {name}"
+
+
+@pytest.mark.asyncio
+async def test_chat_structured_emits_metrics_and_reset_callbacks():
+    fake = StructuredFakeProvider([])
+    client = LLMClient(provider=fake)
+    events: list[object] = []
+
+    async def on_metrics(prompt_tokens: int, context_window: int) -> None:
+        events.append((prompt_tokens, context_window))
+
+    async def on_metrics_reset() -> None:
+        events.append("reset")
+
+    result = await client.chat_structured(
+        messages=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "task"},
+        ],
+        schema=StructuredResult,
+        on_metrics=on_metrics,
+        on_metrics_reset=on_metrics_reset,
+    )
+
+    assert result.value == "ok"
+    assert events == ["reset", (123, fake.context_window)]
+
+
+@pytest.mark.asyncio
+async def test_chat_with_tools_emits_metrics_reset_at_start_and_refresh():
+    responses = [
+        _make_tool_call_response_with_metrics(
+            "edit_file",
+            {"path": "f.py", "search": "a", "replace": "b"},
+            prompt_tokens=160,
+        ),
+        _make_task_complete_response(),
+    ]
+    client, fake = _build_client(responses)
+    fake._context_window_val = 200
+    resets: list[str] = []
+
+    async def on_metrics_reset() -> None:
+        resets.append("reset")
+
+    def on_refresh(_msgs):
+        return [
+            {"role": "system", "content": "Fresh system prompt"},
+            {"role": "user", "content": "Original task"},
+            {"role": "user", "content": "[CONTEXT REFRESHED]\nScratchpad"},
+        ]
+
+    await client.chat_with_tools(
+        messages=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "task"},
+        ],
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=3,
+        on_metrics_reset=on_metrics_reset,
+        on_context_refresh=on_refresh,
+    )
+
+    assert resets == ["reset", "reset"]
 
 
 @pytest.mark.asyncio

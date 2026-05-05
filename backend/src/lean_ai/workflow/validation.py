@@ -507,6 +507,7 @@ async def _run_validation_fix_loop(
             on_tool_result=cb.on_tool_result,
             on_content=cb.on_content,
             on_metrics=cb.on_metrics,
+            on_metrics_reset=cb.on_metrics_reset,
             on_context_refresh=_build_fix_refresh,
             dispatcher=dispatcher,
             telemetry_context=validation_telemetry,

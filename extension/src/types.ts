@@ -33,6 +33,7 @@ export type WSMessage =
     | MergeCompleteMessage
     | AssistantContentMessage
     | MetricsUpdateMessage
+    | MetricsResetMessage
     | ExecutionChecklistMessage;
 
 export interface TokenMessage {
@@ -174,6 +175,10 @@ export interface MetricsUpdateMessage {
     context_percent: number;
     prompt_tokens: number;
     context_window: number;
+}
+
+export interface MetricsResetMessage {
+    type: "metrics_reset";
 }
 
 export interface ContextRefreshedMessage {

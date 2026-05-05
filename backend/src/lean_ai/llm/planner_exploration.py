@@ -392,6 +392,7 @@ async def run_phase2_exploration(
     on_tool_call: Callable | None = None,
     on_tool_result: Callable | None = None,
     on_metrics: Callable | None = None,
+    on_metrics_reset: Callable | None = None,
 ) -> tuple[FileSummary | None, str, float]:
     """Run Phase 2: File identification + content reading.
 
@@ -448,6 +449,7 @@ async def run_phase2_exploration(
             on_tool_call=on_tool_call,
             on_tool_result=on_tool_result,
             on_metrics=on_metrics,
+            on_metrics_reset=on_metrics_reset,
             t0=t0,
         )
     else:
@@ -467,6 +469,7 @@ async def run_phase2_exploration(
             on_tool_call=on_tool_call,
             on_tool_result=on_tool_result,
             on_metrics=on_metrics,
+            on_metrics_reset=on_metrics_reset,
         )
 
         # Synthesis pass: coerce recorded observations + scratchpad +
@@ -483,6 +486,8 @@ async def run_phase2_exploration(
             explorer=explorer,
             phase_max_tokens=phase_max_tokens,
             on_thinking=on_thinking,
+            on_metrics=on_metrics,
+            on_metrics_reset=on_metrics_reset,
         )
 
         # Snapshot raw evidence + structured output for training. This
@@ -544,6 +549,7 @@ async def _run_parallel_exploration(
     on_tool_call: Callable | None,
     on_tool_result: Callable | None,
     on_metrics: Callable | None,
+    on_metrics_reset: Callable | None,
     t0: float,
 ) -> str:
     """Parallel Phase 2: fan-out scan then merge deep-dive reads."""
@@ -591,6 +597,7 @@ async def _run_parallel_exploration(
         on_content=on_content,
         on_thinking=on_thinking,
         on_metrics=on_metrics,
+        on_metrics_reset=on_metrics_reset,
     )
 
     _save_debug_phase(
@@ -697,6 +704,7 @@ async def _run_serial_exploration(
     on_tool_call: Callable | None,
     on_tool_result: Callable | None,
     on_metrics: Callable | None,
+    on_metrics_reset: Callable | None,
 ) -> str:
     """Serial Phase 2 (num_parallel=1) with scratchpad + context refresh."""
     import json as _json
@@ -889,6 +897,7 @@ async def _run_serial_exploration(
         on_content=on_content,
         on_thinking=on_thinking,
         on_metrics=on_metrics,
+        on_metrics_reset=on_metrics_reset,
         on_context_refresh=_build_phase2_refresh,
         telemetry_context={
             "repo_root": repo_root,
@@ -912,6 +921,8 @@ async def _synthesize_file_summary(
     explorer: LLMClient,
     phase_max_tokens: int,
     on_thinking: Callable | None = None,
+    on_metrics: Callable | None = None,
+    on_metrics_reset: Callable | None = None,
 ) -> tuple[FileSummary | None, str]:
     """Consolidate Phase 2 findings into a validated FileSummary and
     render it to markdown for downstream phases.
@@ -980,6 +991,8 @@ async def _synthesize_file_summary(
             schema=FileSummary,
             max_tokens=phase_max_tokens,
             thinking_callback=on_thinking,
+            on_metrics=on_metrics,
+            on_metrics_reset=on_metrics_reset,
         )
     except Exception:
         logger.warning(

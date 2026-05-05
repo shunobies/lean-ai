@@ -13,6 +13,7 @@ from lean_ai.workflow.ws_messages import (
     StageChangeMessage,
     ToolApprovalRequiredMessage,
     fire_assistant_content,
+    fire_metrics_reset,
     fire_tool_progress,
     send_diff,
     send_error,
@@ -181,6 +182,13 @@ class TestFireAndForgetHelpers:
         assert "streaming" not in ws.sent[0]
         assert "done" not in ws.sent[0]
 
+    @pytest.mark.asyncio
+    async def test_fire_metrics_reset(self):
+        ws = FakeWebSocket()
+        fire_metrics_reset(ws)
+        await asyncio.sleep(0.01)
+        assert ws.sent[0] == {"type": "metrics_reset"}
+
 
 # ── Type literal coverage ───────────────────────────────────────
 
@@ -195,6 +203,7 @@ class TestTypeLiteralCoverage:
         assert "stage_change" in args
         assert "complete" in args
         assert "error" in args
+        assert "metrics_reset" in args
         assert len(args) >= 15  # we have 22+ types
 
     def test_client_message_type_is_literal(self):

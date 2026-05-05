@@ -199,6 +199,7 @@ async def run_workflow(
         on_tool_call=planning_cb.on_tool_call,
         on_tool_result=planning_cb.on_tool_result,
         on_metrics=planning_cb.on_metrics,
+        on_metrics_reset=planning_cb.on_metrics_reset,
     )
 
     # ── Phase 3: Approve ─────────────────────────────────────────

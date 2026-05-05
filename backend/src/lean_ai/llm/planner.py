@@ -84,6 +84,7 @@ async def create_plan(
     on_tool_call: "Callable | None" = None,
     on_tool_result: "Callable | None" = None,
     on_metrics: "Callable | None" = None,
+    on_metrics_reset: "Callable | None" = None,
 ) -> ExecutionPlan:
     """Create a plan using 5-phase decomposed planning.
 
@@ -124,6 +125,8 @@ async def create_plan(
             ws,
             expert_llm_client=expert_llm_client,
             on_thinking=on_thinking,
+            on_metrics=on_metrics,
+            on_metrics_reset=on_metrics_reset,
         )
 
     # Explorer for phases 1–2 is always the primary model. The request
@@ -232,6 +235,7 @@ async def create_plan(
         on_content=on_content,
         on_thinking=on_thinking,
         on_metrics=on_metrics,
+        on_metrics_reset=on_metrics_reset,
         telemetry_context={
             "repo_root": repo_root,
             "session_id": session_id,
@@ -279,6 +283,8 @@ async def create_plan(
         explorer=explorer,
         phase_max_tokens=phase_max_tokens,
         on_thinking=on_thinking,
+        on_metrics=on_metrics,
+        on_metrics_reset=on_metrics_reset,
     )
     if not scope_synthesized:
         logger.warning(
@@ -327,6 +333,7 @@ async def create_plan(
         on_tool_call=on_tool_call,
         on_tool_result=on_tool_result,
         on_metrics=on_metrics,
+        on_metrics_reset=on_metrics_reset,
     )
 
     phase_timings["phase_2_file_identification"] = phase2_elapsed
@@ -450,6 +457,7 @@ async def create_plan(
         on_content=on_content,
         on_thinking=on_thinking,
         on_metrics=on_metrics,
+        on_metrics_reset=on_metrics_reset,
         telemetry_context={
             "repo_root": repo_root,
             "session_id": session_id,
@@ -470,6 +478,8 @@ async def create_plan(
         expert=expert,
         expert_max_tokens=expert_max_tokens,
         on_thinking=on_thinking,
+        on_metrics=on_metrics,
+        on_metrics_reset=on_metrics_reset,
     )
     design_and_risks = _format_design_and_risks(design_and_risks_obj)
     missing_files = _format_missing_files(design_and_risks_obj.missing_files)
@@ -553,6 +563,8 @@ async def create_plan(
         schema=ExecutionPlan,
         max_tokens=plan_assembly_max_tokens,
         thinking_callback=on_thinking,
+        on_metrics=on_metrics,
+        on_metrics_reset=on_metrics_reset,
     )
 
     phase_timings["phase_4_plan_assembly"] = time.monotonic() - t0
@@ -632,6 +644,8 @@ async def create_plan(
             ws=ws,
             expert_llm_client=expert_llm_client,
             on_thinking=on_thinking,
+            on_metrics=on_metrics,
+            on_metrics_reset=on_metrics_reset,
         )
         # Revision may re-introduce non-implementation tool steps —
         # strip again, renumber, then re-validate. On the second pass,
@@ -689,6 +703,8 @@ async def create_plan(
         repo_root=repo_root,
         session_id=session_id,
         on_thinking=on_thinking,
+        on_metrics=on_metrics,
+        on_metrics_reset=on_metrics_reset,
     )
     phase_timings["phase_5_verification"] = phase5_elapsed
 
@@ -732,6 +748,8 @@ async def _run_phase5_verification(
     repo_root: str,
     session_id: str,
     on_thinking: Callable | None,
+    on_metrics: Callable | None,
+    on_metrics_reset: Callable | None,
 ) -> float:
     """Run Phase 5: Verification step generation.
 
@@ -824,6 +842,8 @@ async def _run_phase5_verification(
         schema=VerificationPlan,
         max_tokens=plan_assembly_max_tokens,
         thinking_callback=on_thinking,
+        on_metrics=on_metrics,
+        on_metrics_reset=on_metrics_reset,
     )
 
     if tdd_mode:
@@ -966,6 +986,8 @@ async def _synthesize_design_and_risks(
     expert: "LLMClient",
     expert_max_tokens: int,
     on_thinking: "Callable | None" = None,
+    on_metrics: "Callable | None" = None,
+    on_metrics_reset: "Callable | None" = None,
 ) -> DesignAndRisks:
     """Coerce Phase 3's exploration prose + inputs into a DesignAndRisks.
 
@@ -997,6 +1019,8 @@ async def _synthesize_design_and_risks(
             schema=DesignAndRisks,
             max_tokens=expert_max_tokens,
             thinking_callback=on_thinking,
+            on_metrics=on_metrics,
+            on_metrics_reset=on_metrics_reset,
         )
     except Exception:
         logger.warning(

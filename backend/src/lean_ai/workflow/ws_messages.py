@@ -187,6 +187,10 @@ class MetricsUpdateMessage(TypedDict, total=False):
     context_percent: int
 
 
+class MetricsResetMessage(TypedDict):
+    type: Literal["metrics_reset"]
+
+
 class BranchCreatedMessage(TypedDict):
     type: Literal["branch_created"]
     branch_name: str
@@ -241,6 +245,7 @@ ServerMessageType = Literal[
     "assistant_content",
     "thinking_content",
     "metrics_update",
+    "metrics_reset",
     "branch_created",
     "pong",
     "vision_description",
@@ -497,6 +502,11 @@ def fire_metrics_update(
             "context_percent": context_percent,
         },
     )
+
+
+def fire_metrics_reset(ws: WebSocket) -> None:
+    """Fire-and-forget metrics reset (non-blocking)."""
+    ws_send_nowait(ws, "metrics_reset", {})
 
 
 def fire_memory_suggested(ws: WebSocket, *, memory: dict) -> None:
