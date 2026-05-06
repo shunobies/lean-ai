@@ -10,6 +10,7 @@ tree-sitter metadata in ``content.py``) and is parsed back into tuples by
 ``parse_skeleton_output()`` here.
 """
 
+import hashlib
 import logging
 from typing import Literal
 
@@ -74,7 +75,7 @@ class ContextExtractionResult(BaseModel):
 
 def parse_skeleton_output(
     text: str,
-) -> list[tuple[str, str, str, str]]:
+) -> list[tuple[str, str, str, str, str]]:
     """Parse a deterministic skeleton into DB entry tuples.
 
     Returns ``(section, file_path, content, "skeleton")`` tuples.
@@ -85,7 +86,7 @@ def parse_skeleton_output(
     if not text or not text.strip():
         return []
 
-    results: list[tuple[str, str, str, str]] = []
+    results: list[tuple[str, str, str, str, str]] = []
     current_section = ""
     current_subsection_path = ""
 
@@ -127,12 +128,18 @@ def parse_skeleton_output(
             if not entry_text:
                 continue
             file_path = _extract_file_path(entry_text) or current_subsection_path
-            results.append((current_section, file_path, entry_text, "skeleton"))
+            skeleton_hash = hashlib.sha256(
+                f"{current_section}:{file_path}:{entry_text}".encode("utf-8")
+            ).hexdigest()
+            results.append((current_section, file_path, entry_text, "skeleton", skeleton_hash))
             continue
 
         # Non-bullet content (e.g. "Entry points: `main.py`").
         if current_section and stripped:
-            results.append((current_section, "", stripped, "skeleton"))
+            non_bullet_hash = hashlib.sha256(
+                f"{current_section}:{}:{stripped}".encode("utf-8")
+            ).hexdigest()
+            results.append((current_section, "", stripped, "skeleton", non_bullet_hash))
 
     return results
 

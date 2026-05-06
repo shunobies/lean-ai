@@ -11,7 +11,8 @@ from pathlib import Path
 
 import aiosqlite
 
-from lean_ai.sqlite_compat import SQLITE_ROW_FACTORY, SQLiteConnection, connect as connect_sqlite
+from lean_ai.sqlite_compat import SQLITE_ROW_FACTORY, SQLiteConnection
+from lean_ai.sqlite_compat import connect as connect_sqlite
 
 logger = logging.getLogger(__name__)
 
@@ -25,21 +26,19 @@ _SECTION_ORDER = [
     "Conventions",
 ]
 
-_SCHEMA = """\
+_SCHEMA = """
 CREATE TABLE IF NOT EXISTS context_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     section TEXT NOT NULL,
     file_path TEXT NOT NULL,
     content TEXT NOT NULL,
     source TEXT NOT NULL DEFAULT 'llm',
+    content_hash TEXT,
     updated_at TEXT NOT NULL,
-    UNIQUE(section, file_path, content)
+    UNIQUE(section, file_path)
 );
-
-CREATE INDEX IF NOT EXISTS idx_context_section
-    ON context_entries(section);
-CREATE INDEX IF NOT EXISTS idx_context_file
-    ON context_entries(file_path);
+CREATE INDEX IF NOT EXISTS idx_context_entries_section ON context_entries(section);
+CREATE INDEX IF NOT EXISTS idx_context_entries_file_path ON context_entries(file_path);
 """
 
 
@@ -49,6 +48,19 @@ def _db_path(repo_root: str) -> Path:
     return p / "context.db"
 
 
+async def _ensure_columns(db: aiosqlite.Connection) -> None:
+    """Add any missing columns to the context_entries table.
+
+    Idempotent: silently ignores errors when a column already exists.
+    """
+    try:
+        await db.execute(
+            "ALTER TABLE context_entries ADD COLUMN content_hash TEXT"
+        )
+    except Exception:
+        pass  # Column already exists
+
+
 async def get_context_db(repo_root: str) -> SQLiteConnection:
     """Open (or create) the per-workspace context database."""
     db = await connect_sqlite(str(_db_path(repo_root)))
@@ -56,27 +68,30 @@ async def get_context_db(repo_root: str) -> SQLiteConnection:
     await db.execute("PRAGMA journal_mode = WAL")
     await db.execute("PRAGMA busy_timeout = 5000")
     await db.executescript(_SCHEMA)
+    await _ensure_columns(db)
+    await db.commit()
     return db
 
 
 async def upsert_entries_batch(
     db: aiosqlite.Connection,
-    entries: list[tuple[str, str, str, str]],
+    entries: list[tuple[str, str, str, str, str]],
 ) -> int:
-    """Batch insert entries: ``[(section, file_path, content, source), ...]``.
+    """Batch insert entries: ``[(section, file_path, content, source, content_hash), ...]``.
 
-    Uses ``INSERT OR IGNORE`` — exact duplicates (same section + file_path +
-    content) are silently skipped.  Returns count of new entries inserted.
+    Uses ``INSERT OR REPLACE`` — entries with the same section + file_path
+    are replaced (allowing updates when content changes).  Returns count of
+    new entries inserted.
     """
     if not entries:
         return 0
     now = datetime.now(timezone.utc).isoformat()
     before = db.total_changes
     await db.executemany(
-        "INSERT OR IGNORE INTO context_entries "
-        "(section, file_path, content, source, updated_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        [(s, fp, c, src, now) for s, fp, c, src in entries],
+        "INSERT OR REPLACE INTO context_entries "
+        "(section, file_path, content, source, content_hash, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        [(s, fp, c, src, ch, now) for s, fp, c, src, ch in entries],
     )
     await db.commit()
     return db.total_changes - before
@@ -106,6 +121,20 @@ async def clear_all(db: aiosqlite.Connection) -> None:
     """Delete all entries (full regeneration)."""
     await db.execute("DELETE FROM context_entries")
     await db.commit()
+
+
+async def get_existing_hashes(
+    db: aiosqlite.Connection,
+) -> dict[str, str]:
+    """Return a dict mapping file_path to content_hash for all existing entries with non-null hashes.
+
+    Testable seam: returns a pure dict that can be mocked in tests to simulate cached vs uncached states.
+    """
+    cursor = await db.execute(
+        "SELECT DISTINCT file_path, content_hash FROM context_entries WHERE content_hash IS NOT NULL"
+    )
+    rows = await cursor.fetchall()
+    return {row[0]: row[1] for row in rows}
 
 
 async def query_entries(

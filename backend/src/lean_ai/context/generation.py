@@ -16,6 +16,7 @@ Pipeline:
 """
 
 import asyncio
+import hashlib
 import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -34,10 +35,10 @@ from .content import (
     build_deterministic_skeleton,
 )
 from .context_db import (
-    clear_all,
     delete_entries_for_file,
     export_to_markdown,
     get_context_db,
+    get_existing_hashes,
     upsert_entries_batch,
 )
 from .extraction_parser import ContextExtractionResult, parse_skeleton_output
@@ -70,21 +71,38 @@ async def _emit_progress(
 # ---------------------------------------------------------------------------
 
 
+def _compute_content_hash(file_content: str) -> str | None:
+    """Compute SHA-256 hash of file content.
+
+    Returns None on failure for fail-safe fallback.
+    Testable seam: pure function that can be mocked in tests to control hash values.
+    """
+    try:
+        return hashlib.sha256(file_content.encode("utf-8")).hexdigest()
+    except Exception:
+        logger.warning("Failed to compute content hash, falling back to standard extraction")
+        return None
+
+
 async def _extract_single_file(
     file_path: str,
     file_content: str,
     client: "LLMClient",
     max_tokens: int,
     thinking_callback: Callable[[str], Awaitable[None]] | None = None,
-) -> list[tuple[str, str, str, str]]:
+) -> list[tuple[str, str, str, str, str]]:
     """Extract facts from a single source file via LLM.
 
-    Returns DB-ready ``(section, file_path, content, "llm")`` tuples.
+    Returns DB-ready ``(section, file_path, content, "llm", content_hash)`` tuples.
     Uses structured JSON output via ``chat_structured()`` — the response
     is a ``ContextExtractionResult`` validated against a Pydantic schema,
     which eliminates the heuristic markdown parsing the pipeline used
     previously.
     """
+    content_hash = _compute_content_hash(file_content)
+    if content_hash is None:
+        content_hash = ""  # Fallback to empty string when hashing fails
+
     user_msg = f"=== SOURCE FILE: {file_path} ===\n```\n{file_content}\n```"
     msgs = [
         {"role": "system", "content": _EXTRACTION_PROMPT},
@@ -96,11 +114,11 @@ async def _extract_single_file(
         max_tokens=max_tokens,
         thinking_callback=thinking_callback,
     )
-    tuples: list[tuple[str, str, str, str]] = []
+    tuples: list[tuple[str, str, str, str, str]] = []
     for entry in result.entries:
         entry_path = entry.file_path or file_path
         content = f"`{entry.symbol}` — {entry.description} (`{entry_path}`)"
-        tuples.append((entry.section, entry_path, content, "llm"))
+        tuples.append((entry.section, entry_path, content, "llm", content_hash))
     return tuples
 
 
@@ -221,9 +239,12 @@ async def generate_project_context(
     logger.info("Phase 0 (skeleton) complete: %d chars", len(skeleton))
 
     db = await get_context_db(repo_root)
-    try:
-        await clear_all(db)
 
+    # Load existing hashes for check-before-extract optimization
+    existing_hashes = await get_existing_hashes(db)
+    logger.info(f"Loaded {len(existing_hashes)} existing content hashes from cache")
+
+    try:
         # Insert skeleton entries into DB.
         skeleton_entries = parse_skeleton_output(skeleton)
         inserted = await upsert_entries_batch(db, skeleton_entries)
@@ -276,6 +297,7 @@ async def generate_project_context(
                 repo_root,
                 thinking_callback,
                 progress_callback,
+                existing_hashes=existing_hashes,
             )
         else:
             await _phase1_sequential(
@@ -285,7 +307,18 @@ async def generate_project_context(
                 db,
                 thinking_callback,
                 progress_callback,
+                existing_hashes=existing_hashes,
             )
+
+        # Cleanup: remove entries for files no longer in the repository
+        current_file_paths = {fp for fp, _ in candidates}
+        all_db_paths = set(existing_hashes.keys())
+        stale_paths = all_db_paths - current_file_paths
+        if stale_paths:
+            for stale_path in stale_paths:
+                await delete_entries_for_file(db, stale_path)
+                logger.info(f"Removed stale entry for deleted file: {stale_path}")
+            logger.info(f"Cleaned up {len(stale_paths)} stale entries")
 
         # ── Phase 2: export + optional condensation ─────────────────
         await _emit_progress(
@@ -329,10 +362,20 @@ async def _phase1_sequential(
     db: "object",
     thinking_callback: Callable[[str], Awaitable[None]] | None = None,
     progress_callback: ProgressCallback | None = None,
+    existing_hashes: dict[str, str] | None = None,
 ) -> None:
     """Process files sequentially, inserting into the shared DB connection."""
     total = len(candidates)
     for idx, (file_path, file_content) in enumerate(candidates):
+        # Check-before-extract: skip if hash matches
+        if existing_hashes is not None:
+            current_hash = _compute_content_hash(file_content)
+            if current_hash and file_path in existing_hashes and existing_hashes[file_path] == current_hash:
+                logger.info(f"Skipping extraction for {file_path} (hash matches)")
+                if progress_callback:
+                    await progress_callback(idx + 1, total, file_path)
+                continue
+
         await _emit_progress(
             progress_callback,
             phase="extraction",
@@ -369,8 +412,23 @@ async def _phase1_parallel(
     repo_root: str,
     thinking_callback: Callable[[str], Awaitable[None]] | None = None,
     progress_callback: ProgressCallback | None = None,
+    existing_hashes: dict[str, str] | None = None,
 ) -> None:
     """Process files in parallel, each using its own DB connection for WAL safety."""
+    # Pre-filter candidates against hash cache
+    filtered_candidates: list[tuple[str, str]] = []
+    for file_path, file_content in candidates:
+        if existing_hashes is not None:
+            current_hash = _compute_content_hash(file_content)
+            if current_hash and file_path in existing_hashes and existing_hashes[file_path] == current_hash:
+                logger.info(f"Skipping extraction for {file_path} (hash matches)")
+                continue
+        filtered_candidates.append((file_path, file_content))
+
+    if not filtered_candidates:
+        logger.info("All files already cached, skipping LLM extraction phase")
+        return
+
     total = len(candidates)
     completed = 0
 
@@ -413,7 +471,7 @@ async def _phase1_parallel(
 
     # Semaphore in chat_raw() throttles actual LLM concurrency.
     await asyncio.gather(
-        *(_process_one(i, fp, fc) for i, (fp, fc) in enumerate(candidates)),
+        *(_process_one(i, fp, fc) for i, (fp, fc) in enumerate(filtered_candidates)),
     )
 
     logger.info("Phase 1 complete: processed %d files in parallel", total)
@@ -511,3 +569,12 @@ async def update_project_context(
     path = write_project_context(repo_root, content)
     logger.info("update_project_context: done (%d chars)", len(content))
     return path
+
+
+def _test_hash_skip_logic(file_content: str) -> str | None:
+    """Test harness entry point for verifying hash computation and skip logic.
+
+    Phase 5 tests can call this directly to verify hash computation determinism
+    without needing full LLM infrastructure.
+    """
+    return _compute_content_hash(file_content)
