@@ -246,19 +246,19 @@
         },
         "lean-ai.ollamaTemperature": {
           "type": "number",
-          "markdownDescription": "**Ollama** — Sampling temperature (0.0–2.0). Higher = more creative, lower = more deterministic. Default: `0.7`"
+          "markdownDescription": "**Ollama** — Sampling temperature (0.0–2.0). Higher = more creative, lower = more deterministic. Leave blank to omit and use the model's Ollama/Modelfile default."
         },
         "lean-ai.ollamaTopP": {
           "type": "number",
-          "markdownDescription": "**Ollama** — Nucleus sampling threshold (0.0–1.0). Keeps the top tokens whose cumulative probability reaches this value. Default: `0.8`"
+          "markdownDescription": "**Ollama** — Nucleus sampling threshold (0.0–1.0). Keeps the top tokens whose cumulative probability reaches this value. Leave blank to omit and use the model's Ollama/Modelfile default."
         },
         "lean-ai.ollamaTopK": {
           "type": "number",
-          "markdownDescription": "**Ollama** — Top-k sampling: only the top K tokens are considered at each step. Default: `20`"
+          "markdownDescription": "**Ollama** — Top-k sampling: only the top K tokens are considered at each step. Leave blank to omit and use the model's Ollama/Modelfile default."
         },
         "lean-ai.ollamaRepeatPenalty": {
           "type": "number",
-          "markdownDescription": "**Ollama** — Penalty applied to repeated tokens to reduce repetition (1.0 = no penalty). Default: `1.05`"
+          "markdownDescription": "**Ollama** — Penalty applied to repeated tokens to reduce repetition (1.0 = no penalty). Leave blank to omit and use the model's Ollama/Modelfile default."
         },
         "lean-ai.ollamaMinP": {
           "type": "number",
@@ -470,31 +470,31 @@
         },
         "lean-ai.ollamaWorkerTemperature": {
           "type": "number",
-          "markdownDescription": "**Ollama Worker Model** — Temperature. Defaults to primary."
+          "markdownDescription": "**Ollama Worker Model** — Temperature. Leave blank to omit for the worker model."
         },
         "lean-ai.ollamaWorkerTopP": {
           "type": "number",
-          "markdownDescription": "**Ollama Worker Model** — Top-p. Defaults to primary."
+          "markdownDescription": "**Ollama Worker Model** — Top-p. Leave blank to omit for the worker model."
         },
         "lean-ai.ollamaWorkerTopK": {
           "type": "number",
-          "markdownDescription": "**Ollama Worker Model** — Top-k. Defaults to primary."
+          "markdownDescription": "**Ollama Worker Model** — Top-k. Leave blank to omit for the worker model."
         },
         "lean-ai.ollamaWorkerRepeatPenalty": {
           "type": "number",
-          "markdownDescription": "**Ollama Worker Model** — Repeat penalty. Defaults to primary."
+          "markdownDescription": "**Ollama Worker Model** — Repeat penalty. Leave blank to omit for the worker model."
         },
         "lean-ai.ollamaWorkerMinP": {
           "type": "number",
           "minimum": 0,
           "maximum": 1,
-          "markdownDescription": "**Ollama Worker Model** — Minimum probability cutoff. Leave blank to inherit from primary."
+          "markdownDescription": "**Ollama Worker Model** — Minimum probability cutoff. Leave blank to omit for the worker model."
         },
         "lean-ai.ollamaWorkerPresencePenalty": {
           "type": "number",
           "minimum": 0,
           "maximum": 2,
-          "markdownDescription": "**Ollama Worker Model** — Presence penalty. Leave blank to inherit from primary."
+          "markdownDescription": "**Ollama Worker Model** — Presence penalty. Leave blank to omit for the worker model."
         },
         "lean-ai.ollamaWorkerMaxTokens": {
           "type": "number",
@@ -913,31 +913,31 @@
         },
         "lean-ai.ollamaExpertTemperature": {
           "type": "number",
-          "markdownDescription": "**Ollama Expert Model** — Sampling temperature. Leave empty to inherit from the primary model."
+          "markdownDescription": "**Ollama Expert Model** — Sampling temperature. Leave blank to omit for the expert model."
         },
         "lean-ai.ollamaExpertTopP": {
           "type": "number",
-          "markdownDescription": "**Ollama Expert Model** — Nucleus sampling threshold (top-p). Leave empty to inherit from the primary model."
+          "markdownDescription": "**Ollama Expert Model** — Nucleus sampling threshold (top-p). Leave blank to omit for the expert model."
         },
         "lean-ai.ollamaExpertTopK": {
           "type": "number",
-          "markdownDescription": "**Ollama Expert Model** — Top-k sampling. Leave empty to inherit from the primary model."
+          "markdownDescription": "**Ollama Expert Model** — Top-k sampling. Leave blank to omit for the expert model."
         },
         "lean-ai.ollamaExpertRepeatPenalty": {
           "type": "number",
-          "markdownDescription": "**Ollama Expert Model** — Repeat penalty. Leave empty to inherit from the primary model."
+          "markdownDescription": "**Ollama Expert Model** — Repeat penalty. Leave blank to omit for the expert model."
         },
         "lean-ai.ollamaExpertMinP": {
           "type": "number",
           "minimum": 0,
           "maximum": 1,
-          "markdownDescription": "**Ollama Expert Model** — Minimum probability cutoff. Leave blank to inherit from primary (which itself may be blank → omitted)."
+          "markdownDescription": "**Ollama Expert Model** — Minimum probability cutoff. Leave blank to omit for the expert model."
         },
         "lean-ai.ollamaExpertPresencePenalty": {
           "type": "number",
           "minimum": 0,
           "maximum": 2,
-          "markdownDescription": "**Ollama Expert Model** — Presence penalty. Leave blank to inherit from primary (which itself may be blank → omitted)."
+          "markdownDescription": "**Ollama Expert Model** — Presence penalty. Leave blank to omit for the expert model."
         },
         "lean-ai.ollamaExpertMaxTokens": {
           "type": "number",
@@ -949,31 +949,31 @@
         },
         "lean-ai.ollamaRequestTemperature": {
           "type": "number",
-          "markdownDescription": "**Ollama Request Model** — Sampling temperature. Leave empty to inherit from the primary model."
+          "markdownDescription": "**Ollama Request Model** — Sampling temperature. Leave blank to omit for the request model."
         },
         "lean-ai.ollamaRequestTopP": {
           "type": "number",
-          "markdownDescription": "**Ollama Request Model** — Nucleus sampling threshold (top-p). Leave empty to inherit from the primary model."
+          "markdownDescription": "**Ollama Request Model** — Nucleus sampling threshold (top-p). Leave blank to omit for the request model."
         },
         "lean-ai.ollamaRequestTopK": {
           "type": "number",
-          "markdownDescription": "**Ollama Request Model** — Top-k sampling. Leave empty to inherit from the primary model."
+          "markdownDescription": "**Ollama Request Model** — Top-k sampling. Leave blank to omit for the request model."
         },
         "lean-ai.ollamaRequestRepeatPenalty": {
           "type": "number",
-          "markdownDescription": "**Ollama Request Model** — Repeat penalty. Leave empty to inherit from the primary model."
+          "markdownDescription": "**Ollama Request Model** — Repeat penalty. Leave blank to omit for the request model."
         },
         "lean-ai.ollamaRequestMinP": {
           "type": "number",
           "minimum": 0,
           "maximum": 1,
-          "markdownDescription": "**Ollama Request Model** — Minimum probability cutoff. Leave blank to inherit from primary (which itself may be blank → omitted)."
+          "markdownDescription": "**Ollama Request Model** — Minimum probability cutoff. Leave blank to omit for the request model."
         },
         "lean-ai.ollamaRequestPresencePenalty": {
           "type": "number",
           "minimum": 0,
           "maximum": 2,
-          "markdownDescription": "**Ollama Request Model** — Presence penalty. Leave blank to inherit from primary."
+          "markdownDescription": "**Ollama Request Model** — Presence penalty. Leave blank to omit for the request model."
         },
         "lean-ai.ollamaRequestMaxTokens": {
           "type": "number",
@@ -1028,7 +1028,7 @@
             "high",
             "max"
           ],
-          "markdownDescription": "**Reasoning Effort** — As above, for the **expert** model. Inherits from primary when blank."
+          "markdownDescription": "**Reasoning Effort** — As above, for the **expert** model. Leave blank to use the provider default for this model."
         },
         "lean-ai.reasoningEffortRequest": {
           "type": "string",
@@ -1040,7 +1040,7 @@
             "high",
             "max"
           ],
-          "markdownDescription": "**Reasoning Effort** — As above, for the **request** model."
+          "markdownDescription": "**Reasoning Effort** — As above, for the **request** model. Leave blank to use the provider default for this model."
         },
         "lean-ai.reasoningEffortWorker": {
           "type": "string",
@@ -1052,7 +1052,7 @@
             "high",
             "max"
           ],
-          "markdownDescription": "**Reasoning Effort** — As above, for the **worker** model."
+          "markdownDescription": "**Reasoning Effort** — As above, for the **worker** model. Leave blank to use the provider default for this model."
         },
         "lean-ai.maxThinkingTokens": {
           "type": "number",

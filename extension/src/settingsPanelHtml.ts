@@ -512,24 +512,24 @@ export function getSettingsPanelHtml(): string {
                 <input type="text" id="ollamaContextWindow" placeholder="131072">
             </div>
             <div class="field">
-                <label>Temperature <span class="hint">0–2, Qwen3 recommends 0.7</span></label>
-                <input type="number" id="ollamaTemperature" min="0" max="2" step="0.05" placeholder="0.7">
+                <label>Temperature <span class="hint">blank = Ollama default</span></label>
+                <input type="number" id="ollamaTemperature" min="0" max="2" step="0.05" placeholder="">
             </div>
         </div>
         <div class="field-row">
             <div class="field">
-                <label>Top P <span class="hint">0–1, Qwen3 recommends 0.8</span></label>
-                <input type="number" id="ollamaTopP" min="0" max="1" step="0.05" placeholder="0.8">
+                <label>Top P <span class="hint">blank = Ollama default</span></label>
+                <input type="number" id="ollamaTopP" min="0" max="1" step="0.05" placeholder="">
             </div>
             <div class="field">
-                <label>Top K <span class="hint">Qwen3 recommends 20</span></label>
-                <input type="number" id="ollamaTopK" min="0" step="1" placeholder="20">
+                <label>Top K <span class="hint">blank = Ollama default</span></label>
+                <input type="number" id="ollamaTopK" min="0" step="1" placeholder="">
             </div>
         </div>
         <div class="field-row">
             <div class="field">
-                <label>Repeat Penalty <span class="hint">1.05 recommended</span></label>
-                <input type="number" id="ollamaRepeatPenalty" min="0" step="0.01" placeholder="1.05">
+                <label>Repeat Penalty <span class="hint">blank = Ollama default</span></label>
+                <input type="number" id="ollamaRepeatPenalty" min="0" step="0.01" placeholder="">
             </div>
             <div class="field">
                 <label>Max Tokens <span class="hint">0 = auto (25% of context window)</span></label>
@@ -749,21 +749,21 @@ export function getSettingsPanelHtml(): string {
                 </div>
                 <div class="field-row">
                     <div class="field">
-                        <label>Temperature <span class="hint">leave empty to inherit</span></label>
+                        <label>Temperature <span class="hint">blank = Ollama default</span></label>
                         <input type="number" id="ollamaExpertTemperature" min="0" max="2" step="0.05" placeholder="">
                     </div>
                     <div class="field">
-                        <label>Top P <span class="hint">leave empty to inherit</span></label>
+                        <label>Top P <span class="hint">blank = Ollama default</span></label>
                         <input type="number" id="ollamaExpertTopP" min="0" max="1" step="0.05" placeholder="">
                     </div>
                 </div>
                 <div class="field-row">
                     <div class="field">
-                        <label>Top K <span class="hint">leave empty to inherit</span></label>
+                        <label>Top K <span class="hint">blank = Ollama default</span></label>
                         <input type="number" id="ollamaExpertTopK" min="0" step="1" placeholder="">
                     </div>
                     <div class="field">
-                        <label>Repeat Penalty <span class="hint">leave empty to inherit</span></label>
+                        <label>Repeat Penalty <span class="hint">blank = Ollama default</span></label>
                         <input type="number" id="ollamaExpertRepeatPenalty" min="0" step="0.01" placeholder="">
                     </div>
                 </div>
@@ -777,11 +777,11 @@ export function getSettingsPanelHtml(): string {
                 </div>
                 <div class="field-row">
                     <div class="field">
-                        <label>Min P <span class="hint">leave blank to inherit from primary</span></label>
+                        <label>Min P <span class="hint">blank = omit for expert</span></label>
                         <input type="number" id="ollamaExpertMinP" min="0" max="1" step="0.01" placeholder="">
                     </div>
                     <div class="field">
-                        <label>Presence Penalty <span class="hint">leave blank to inherit from primary</span></label>
+                        <label>Presence Penalty <span class="hint">blank = omit for expert</span></label>
                         <input type="number" id="ollamaExpertPresencePenalty" min="0" max="2" step="0.1" placeholder="">
                     </div>
                 </div>
@@ -851,9 +851,9 @@ export function getSettingsPanelHtml(): string {
         </div>
         <div class="field-row">
             <div class="field">
-                <label>Reasoning effort <span class="hint">blank = inherit from primary</span></label>
+                <label>Reasoning effort <span class="hint">blank = provider default</span></label>
                 <select id="reasoningEffortExpert">
-                    <option value="">Inherit from primary</option>
+                    <option value="">Provider default</option>
                     <option value="low">Low — ~768 tokens</option>
                     <option value="medium">Medium — ~3072 tokens</option>
                     <option value="high">High — ~8192 tokens</option>
@@ -916,21 +916,21 @@ export function getSettingsPanelHtml(): string {
                 </div>
                 <div class="field-row">
                     <div class="field">
-                        <label>Temperature <span class="hint">leave empty to inherit</span></label>
+                        <label>Temperature <span class="hint">blank = Ollama default</span></label>
                         <input type="number" id="ollamaRequestTemperature" min="0" max="2" step="0.05" placeholder="">
                     </div>
                     <div class="field">
-                        <label>Top P <span class="hint">leave empty to inherit</span></label>
+                        <label>Top P <span class="hint">blank = Ollama default</span></label>
                         <input type="number" id="ollamaRequestTopP" min="0" max="1" step="0.05" placeholder="">
                     </div>
                 </div>
                 <div class="field-row">
                     <div class="field">
-                        <label>Top K <span class="hint">leave empty to inherit</span></label>
+                        <label>Top K <span class="hint">blank = Ollama default</span></label>
                         <input type="number" id="ollamaRequestTopK" min="0" step="1" placeholder="">
                     </div>
                     <div class="field">
-                        <label>Repeat Penalty <span class="hint">leave empty to inherit</span></label>
+                        <label>Repeat Penalty <span class="hint">blank = Ollama default</span></label>
                         <input type="number" id="ollamaRequestRepeatPenalty" min="0" step="0.01" placeholder="">
                     </div>
                 </div>
@@ -944,11 +944,11 @@ export function getSettingsPanelHtml(): string {
                 </div>
                 <div class="field-row">
                     <div class="field">
-                        <label>Min P <span class="hint">leave blank to inherit from primary</span></label>
+                        <label>Min P <span class="hint">blank = omit for request</span></label>
                         <input type="number" id="ollamaRequestMinP" min="0" max="1" step="0.01" placeholder="">
                     </div>
                     <div class="field">
-                        <label>Presence Penalty <span class="hint">leave blank to inherit from primary</span></label>
+                        <label>Presence Penalty <span class="hint">blank = omit for request</span></label>
                         <input type="number" id="ollamaRequestPresencePenalty" min="0" max="2" step="0.1" placeholder="">
                     </div>
                 </div>
@@ -1018,9 +1018,9 @@ export function getSettingsPanelHtml(): string {
         </div>
         <div class="field-row">
             <div class="field">
-                <label>Reasoning effort <span class="hint">blank = inherit from primary</span></label>
+                <label>Reasoning effort <span class="hint">blank = provider default</span></label>
                 <select id="reasoningEffortRequest">
-                    <option value="">Inherit from primary</option>
+                    <option value="">Provider default</option>
                     <option value="low">Low — ~768 tokens</option>
                     <option value="medium">Medium — ~3072 tokens</option>
                     <option value="high">High — ~8192 tokens</option>
@@ -1083,21 +1083,21 @@ export function getSettingsPanelHtml(): string {
                 </div>
                 <div class="field-row">
                     <div class="field">
-                        <label>Temperature <span class="hint">leave empty to inherit</span></label>
+                        <label>Temperature <span class="hint">blank = Ollama default</span></label>
                         <input type="number" id="ollamaWorkerTemperature" min="0" max="2" step="0.05" placeholder="">
                     </div>
                     <div class="field">
-                        <label>Top P <span class="hint">leave empty to inherit</span></label>
+                        <label>Top P <span class="hint">blank = Ollama default</span></label>
                         <input type="number" id="ollamaWorkerTopP" min="0" max="1" step="0.05" placeholder="">
                     </div>
                 </div>
                 <div class="field-row">
                     <div class="field">
-                        <label>Top K <span class="hint">leave empty to inherit</span></label>
+                        <label>Top K <span class="hint">blank = Ollama default</span></label>
                         <input type="number" id="ollamaWorkerTopK" min="0" step="1" placeholder="">
                     </div>
                     <div class="field">
-                        <label>Repeat Penalty <span class="hint">leave empty to inherit</span></label>
+                        <label>Repeat Penalty <span class="hint">blank = Ollama default</span></label>
                         <input type="number" id="ollamaWorkerRepeatPenalty" min="0" step="0.01" placeholder="">
                     </div>
                 </div>
@@ -1111,11 +1111,11 @@ export function getSettingsPanelHtml(): string {
                 </div>
                 <div class="field-row">
                     <div class="field">
-                        <label>Min P <span class="hint">leave blank to inherit from primary</span></label>
+                        <label>Min P <span class="hint">blank = omit for worker</span></label>
                         <input type="number" id="ollamaWorkerMinP" min="0" max="1" step="0.01" placeholder="">
                     </div>
                     <div class="field">
-                        <label>Presence Penalty <span class="hint">leave blank to inherit from primary</span></label>
+                        <label>Presence Penalty <span class="hint">blank = omit for worker</span></label>
                         <input type="number" id="ollamaWorkerPresencePenalty" min="0" max="2" step="0.1" placeholder="">
                     </div>
                 </div>
@@ -1185,9 +1185,9 @@ export function getSettingsPanelHtml(): string {
         </div>
         <div class="field-row">
             <div class="field">
-                <label>Reasoning effort <span class="hint">blank = inherit from primary</span></label>
+                <label>Reasoning effort <span class="hint">blank = provider default</span></label>
                 <select id="reasoningEffortWorker">
-                    <option value="">Inherit from primary</option>
+                    <option value="">Provider default</option>
                     <option value="low">Low — ~768 tokens</option>
                     <option value="medium">Medium — ~3072 tokens</option>
                     <option value="high">High — ~8192 tokens</option>

@@ -187,10 +187,14 @@ class Settings(BaseSettings):
     # ── Ollama — primary model ──
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3-coder:30b"
-    ollama_temperature: float = 0.7  # Qwen3 warns against greedy decoding (0.0)
-    ollama_top_p: float = 0.8
-    ollama_top_k: int = 20
-    ollama_repeat_penalty: float = 1.05
+    # Optional sampling params — None means "omit from the Ollama options
+    # dict" so the model's own Modelfile/Ollama defaults apply.  Different
+    # model families (Gemma, gpt-oss, Qwen, etc.) often want different knobs,
+    # so role-specific fields below do not inherit these values.
+    ollama_temperature: float | None = None
+    ollama_top_p: float | None = None
+    ollama_top_k: int | None = None
+    ollama_repeat_penalty: float | None = None
     ollama_context_window: int = 131072  # Accepts shorthand: 128 = 128k = 131072
     ollama_max_tokens: int | None = None  # Derived: 25% of context window
     # Optional sampling params — blank/None means "omit from options dict"
@@ -200,14 +204,14 @@ class Settings(BaseSettings):
 
     # ── Ollama — expert model (reasoning-heavy phases) ──
     ollama_model_expert: str = ""  # Empty = use standard model everywhere
-    ollama_expert_temperature: float | None = None  # Falls back to ollama_temperature
-    ollama_expert_top_p: float | None = None  # Falls back to ollama_top_p
-    ollama_expert_top_k: int | None = None  # Falls back to ollama_top_k
-    ollama_expert_repeat_penalty: float | None = None  # Falls back to ollama_repeat_penalty
+    ollama_expert_temperature: float | None = None  # None = omit for expert
+    ollama_expert_top_p: float | None = None  # None = omit for expert
+    ollama_expert_top_k: int | None = None  # None = omit for expert
+    ollama_expert_repeat_penalty: float | None = None  # None = omit for expert
     ollama_expert_context_window: int | None = None  # Accepts shorthand; falls back
     ollama_expert_max_tokens: int | None = None  # Derived: 25% of expert context window
-    ollama_expert_min_p: float | None = None  # Falls back to ollama_min_p (None = omit)
-    ollama_expert_presence_penalty: float | None = None  # Falls back; None = omit
+    ollama_expert_min_p: float | None = None  # None = omit for expert
+    ollama_expert_presence_penalty: float | None = None  # None = omit for expert
 
     # ── OpenAI ──
     openai_api_key: str = ""
@@ -262,28 +266,28 @@ class Settings(BaseSettings):
     # ── Request model — for /request mode ──
     request_llm_provider: str = ""  # "ollama", "openai", "anthropic", "serve", or "" (auto-detect)
     ollama_model_request: str = ""  # e.g. "qwen3.5:27b"
-    ollama_request_temperature: float | None = None  # Falls back to ollama_temperature
-    ollama_request_top_p: float | None = None  # Falls back to ollama_top_p
-    ollama_request_top_k: int | None = None  # Falls back to ollama_top_k
-    ollama_request_repeat_penalty: float | None = None  # Falls back to ollama_repeat_penalty
+    ollama_request_temperature: float | None = None  # None = omit for request
+    ollama_request_top_p: float | None = None  # None = omit for request
+    ollama_request_top_k: int | None = None  # None = omit for request
+    ollama_request_repeat_penalty: float | None = None  # None = omit for request
     ollama_request_context_window: int | None = None  # Accepts shorthand; falls back
     ollama_request_max_tokens: int | None = None  # Derived: 25% of request context window
-    ollama_request_min_p: float | None = None  # Falls back to ollama_min_p (None = omit)
-    ollama_request_presence_penalty: float | None = None  # Falls back; None = omit
+    ollama_request_min_p: float | None = None  # None = omit for request
+    ollama_request_presence_penalty: float | None = None  # None = omit for request
     openai_request_model: str = ""
     anthropic_request_model: str = ""
 
     # ── Worker model — lightweight auxiliary tasks (summarization, compression) ──
     worker_llm_provider: str = ""  # ollama/openai/anthropic/gemini/serve/""
     ollama_model_worker: str = ""  # e.g. "qwen3.5:2b-q8_0". Empty = falls back to primary
-    ollama_worker_temperature: float | None = None  # Falls back to ollama_temperature
-    ollama_worker_top_p: float | None = None  # Falls back to ollama_top_p
-    ollama_worker_top_k: int | None = None  # Falls back to ollama_top_k
-    ollama_worker_repeat_penalty: float | None = None  # Falls back to ollama_repeat_penalty
+    ollama_worker_temperature: float | None = None  # None = omit for worker
+    ollama_worker_top_p: float | None = None  # None = omit for worker
+    ollama_worker_top_k: int | None = None  # None = omit for worker
+    ollama_worker_repeat_penalty: float | None = None  # None = omit for worker
     ollama_worker_context_window: int | None = None  # Accepts shorthand; falls back
     ollama_worker_max_tokens: int | None = None  # Derived: 25% of worker context window
-    ollama_worker_min_p: float | None = None  # Falls back to ollama_min_p (None = omit)
-    ollama_worker_presence_penalty: float | None = None  # Falls back; None = omit
+    ollama_worker_min_p: float | None = None  # None = omit for worker
+    ollama_worker_presence_penalty: float | None = None  # None = omit for worker
     openai_worker_model: str = ""  # Falls back to openai_model when empty
     anthropic_worker_model: str = ""  # Falls back to anthropic_model when empty
     gemini_worker_model: str = ""  # Falls back to gemini_model when empty
@@ -626,10 +630,14 @@ class Settings(BaseSettings):
 
     # ── Internal helpers for DRY config resolution ──
 
-    def _ollama_param_with_fallback(self, role: str, param: str):
-        """Return ``ollama_{role}_{param}`` if set, else ``ollama_{param}``."""
-        val = getattr(self, f"ollama_{role}_{param}", None)
-        return val if val is not None else getattr(self, f"ollama_{param}")
+    def _ollama_role_param(self, role: str, param: str):
+        """Return the role-specific Ollama option exactly as configured.
+
+        ``None`` means "omit the option" rather than "inherit from primary";
+        model families vary enough that fallback sampling settings are
+        surprising and can actively hurt quality.
+        """
+        return getattr(self, f"ollama_{role}_{param}", None)
 
     def _provider_context_window(self, provider: str) -> int:
         """Return context window for the named provider."""
@@ -674,30 +682,28 @@ class Settings(BaseSettings):
         return self.vision_ollama_url or self.ollama_url
 
     @property
-    def effective_expert_temperature(self) -> float:
-        return self._ollama_param_with_fallback("expert", "temperature")
+    def effective_expert_temperature(self) -> float | None:
+        return self._ollama_role_param("expert", "temperature")
 
     @property
-    def effective_expert_top_p(self) -> float:
-        return self._ollama_param_with_fallback("expert", "top_p")
+    def effective_expert_top_p(self) -> float | None:
+        return self._ollama_role_param("expert", "top_p")
 
     @property
-    def effective_expert_top_k(self) -> int:
-        return self._ollama_param_with_fallback("expert", "top_k")
+    def effective_expert_top_k(self) -> int | None:
+        return self._ollama_role_param("expert", "top_k")
 
     @property
-    def effective_expert_repeat_penalty(self) -> float:
-        return self._ollama_param_with_fallback("expert", "repeat_penalty")
+    def effective_expert_repeat_penalty(self) -> float | None:
+        return self._ollama_role_param("expert", "repeat_penalty")
 
     @property
     def effective_expert_min_p(self) -> float | None:
-        """Returns None when neither role nor primary set it — caller should omit."""
-        return self._ollama_param_with_fallback("expert", "min_p")
+        return self._ollama_role_param("expert", "min_p")
 
     @property
     def effective_expert_presence_penalty(self) -> float | None:
-        """Returns None when neither role nor primary set it — caller should omit."""
-        return self._ollama_param_with_fallback("expert", "presence_penalty")
+        return self._ollama_role_param("expert", "presence_penalty")
 
     @property
     def effective_expert_context_window(self) -> int:
@@ -716,28 +722,28 @@ class Settings(BaseSettings):
         return self._provider_max_tokens(ep)
 
     @property
-    def effective_request_temperature(self) -> float:
-        return self._ollama_param_with_fallback("request", "temperature")
+    def effective_request_temperature(self) -> float | None:
+        return self._ollama_role_param("request", "temperature")
 
     @property
-    def effective_request_top_p(self) -> float:
-        return self._ollama_param_with_fallback("request", "top_p")
+    def effective_request_top_p(self) -> float | None:
+        return self._ollama_role_param("request", "top_p")
 
     @property
-    def effective_request_top_k(self) -> int:
-        return self._ollama_param_with_fallback("request", "top_k")
+    def effective_request_top_k(self) -> int | None:
+        return self._ollama_role_param("request", "top_k")
 
     @property
-    def effective_request_repeat_penalty(self) -> float:
-        return self._ollama_param_with_fallback("request", "repeat_penalty")
+    def effective_request_repeat_penalty(self) -> float | None:
+        return self._ollama_role_param("request", "repeat_penalty")
 
     @property
     def effective_request_min_p(self) -> float | None:
-        return self._ollama_param_with_fallback("request", "min_p")
+        return self._ollama_role_param("request", "min_p")
 
     @property
     def effective_request_presence_penalty(self) -> float | None:
-        return self._ollama_param_with_fallback("request", "presence_penalty")
+        return self._ollama_role_param("request", "presence_penalty")
 
     @property
     def effective_request_max_tokens(self) -> int:
@@ -748,36 +754,34 @@ class Settings(BaseSettings):
         return self._provider_max_tokens(rp)
 
     @property
-    def effective_worker_temperature(self) -> float:
-        return self._ollama_param_with_fallback("worker", "temperature")
+    def effective_worker_temperature(self) -> float | None:
+        return self._ollama_role_param("worker", "temperature")
 
     @property
-    def effective_worker_top_p(self) -> float:
-        return self._ollama_param_with_fallback("worker", "top_p")
+    def effective_worker_top_p(self) -> float | None:
+        return self._ollama_role_param("worker", "top_p")
 
     @property
-    def effective_worker_top_k(self) -> int:
-        return self._ollama_param_with_fallback("worker", "top_k")
+    def effective_worker_top_k(self) -> int | None:
+        return self._ollama_role_param("worker", "top_k")
 
     @property
-    def effective_worker_repeat_penalty(self) -> float:
-        return self._ollama_param_with_fallback("worker", "repeat_penalty")
+    def effective_worker_repeat_penalty(self) -> float | None:
+        return self._ollama_role_param("worker", "repeat_penalty")
 
     @property
     def effective_worker_min_p(self) -> float | None:
-        return self._ollama_param_with_fallback("worker", "min_p")
+        return self._ollama_role_param("worker", "min_p")
 
     @property
     def effective_worker_presence_penalty(self) -> float | None:
-        return self._ollama_param_with_fallback("worker", "presence_penalty")
+        return self._ollama_role_param("worker", "presence_penalty")
 
     # ── Reasoning effort effective fallback (string field, custom chain) ──
 
     def _effective_reasoning_effort(self, role: str) -> str:
-        val = getattr(self, f"reasoning_effort_{role}", "")
-        if val:
-            return val
-        return self.reasoning_effort_primary
+        """Return the role's own reasoning effort; blank means provider default."""
+        return getattr(self, f"reasoning_effort_{role}", "")
 
     @property
     def effective_expert_reasoning_effort(self) -> str:

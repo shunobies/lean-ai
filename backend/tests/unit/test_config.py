@@ -115,40 +115,40 @@ class TestExpertConfig:
         assert s.ollama_expert_context_window == 131072
         assert s.ollama_expert_max_tokens == 131072 // 4
 
-    def test_expert_temperature_fallback(self):
-        """Expert temperature falls back to standard when not set."""
+    def test_expert_temperature_blank_omits_instead_of_fallback(self):
+        """Expert temperature stays blank even when primary has a value."""
         s = Settings(ollama_temperature=0.5)
-        assert s.effective_expert_temperature == 0.5
+        assert s.effective_expert_temperature is None
 
     def test_expert_temperature_override(self):
         """Expert temperature overrides when explicitly set."""
         s = Settings(ollama_temperature=0.5, ollama_expert_temperature=0.3)
         assert s.effective_expert_temperature == 0.3
 
-    def test_expert_top_p_fallback(self):
-        """Expert top_p falls back to standard when not set."""
+    def test_expert_top_p_blank_omits_instead_of_fallback(self):
+        """Expert top_p stays blank even when primary has a value."""
         s = Settings(ollama_top_p=0.9)
-        assert s.effective_expert_top_p == 0.9
+        assert s.effective_expert_top_p is None
 
     def test_expert_top_p_override(self):
         """Expert top_p overrides when explicitly set."""
         s = Settings(ollama_top_p=0.9, ollama_expert_top_p=0.7)
         assert s.effective_expert_top_p == 0.7
 
-    def test_expert_top_k_fallback(self):
-        """Expert top_k falls back to standard when not set."""
+    def test_expert_top_k_blank_omits_instead_of_fallback(self):
+        """Expert top_k stays blank even when primary has a value."""
         s = Settings(ollama_top_k=30)
-        assert s.effective_expert_top_k == 30
+        assert s.effective_expert_top_k is None
 
     def test_expert_top_k_override(self):
         """Expert top_k overrides when explicitly set."""
         s = Settings(ollama_top_k=30, ollama_expert_top_k=15)
         assert s.effective_expert_top_k == 15
 
-    def test_expert_repeat_penalty_fallback(self):
-        """Expert repeat_penalty falls back to standard when not set."""
+    def test_expert_repeat_penalty_blank_omits_instead_of_fallback(self):
+        """Expert repeat_penalty stays blank even when primary has a value."""
         s = Settings(ollama_repeat_penalty=1.1)
-        assert s.effective_expert_repeat_penalty == 1.1
+        assert s.effective_expert_repeat_penalty is None
 
     def test_expert_repeat_penalty_override(self):
         """Expert repeat_penalty overrides when explicitly set."""
@@ -184,33 +184,33 @@ class TestRequestConfig:
         assert s.ollama_request_context_window == 131072
         assert s.ollama_request_max_tokens == 131072 // 4
 
-    def test_request_temperature_fallback(self):
+    def test_request_temperature_blank_omits_instead_of_fallback(self):
         s = Settings(ollama_temperature=0.5)
-        assert s.effective_request_temperature == 0.5
+        assert s.effective_request_temperature is None
 
     def test_request_temperature_override(self):
         s = Settings(ollama_temperature=0.5, ollama_request_temperature=0.3)
         assert s.effective_request_temperature == 0.3
 
-    def test_request_top_p_fallback(self):
+    def test_request_top_p_blank_omits_instead_of_fallback(self):
         s = Settings(ollama_top_p=0.9)
-        assert s.effective_request_top_p == 0.9
+        assert s.effective_request_top_p is None
 
     def test_request_top_p_override(self):
         s = Settings(ollama_top_p=0.9, ollama_request_top_p=0.7)
         assert s.effective_request_top_p == 0.7
 
-    def test_request_top_k_fallback(self):
+    def test_request_top_k_blank_omits_instead_of_fallback(self):
         s = Settings(ollama_top_k=30)
-        assert s.effective_request_top_k == 30
+        assert s.effective_request_top_k is None
 
     def test_request_top_k_override(self):
         s = Settings(ollama_top_k=30, ollama_request_top_k=15)
         assert s.effective_request_top_k == 15
 
-    def test_request_repeat_penalty_fallback(self):
+    def test_request_repeat_penalty_blank_omits_instead_of_fallback(self):
         s = Settings(ollama_repeat_penalty=1.1)
-        assert s.effective_request_repeat_penalty == 1.1
+        assert s.effective_request_repeat_penalty is None
 
     def test_request_repeat_penalty_override(self):
         s = Settings(ollama_repeat_penalty=1.1, ollama_request_repeat_penalty=1.0)

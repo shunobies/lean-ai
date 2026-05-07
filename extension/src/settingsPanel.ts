@@ -395,22 +395,14 @@ export class SettingsPanel {
             "maxThinkingTokens",
         ]);
 
-        // Numeric fields where 0 means "inherit/auto-derive" — treat 0 as unset
-        // so the backend receives None and falls back to the primary model's value.
-        // min_p / presence_penalty use "blank = omit". They're NOT in
-        // zeroMeansInherit because 0 is a valid explicit value distinct
-        // from "unset" — settingsPanelHtml's val() returns '' when the
-        // input is empty, which becomes undefined below → backend None.
-        // These names intentionally live only in numericFields (above) so
-        // a literal 0 is preserved.
+        // Numeric fields where 0 means "auto-derive" — treat 0 as unset.
+        // Sampling fields are deliberately excluded: blank means omit, while
+        // a literal 0 is a valid explicit value for several Ollama options.
 
         const zeroMeansInherit = new Set([
-            "ollamaExpertTemperature", "ollamaExpertTopP", "ollamaExpertTopK",
-            "ollamaExpertRepeatPenalty", "ollamaExpertContextWindow", "ollamaExpertMaxTokens",
-            "ollamaRequestTemperature", "ollamaRequestTopP", "ollamaRequestTopK",
-            "ollamaRequestRepeatPenalty", "ollamaRequestContextWindow", "ollamaRequestMaxTokens",
-            "ollamaWorkerTemperature", "ollamaWorkerTopP", "ollamaWorkerTopK",
-            "ollamaWorkerRepeatPenalty", "ollamaWorkerContextWindow", "ollamaWorkerMaxTokens",
+            "ollamaExpertContextWindow", "ollamaExpertMaxTokens",
+            "ollamaRequestContextWindow", "ollamaRequestMaxTokens",
+            "ollamaWorkerContextWindow", "ollamaWorkerMaxTokens",
             "ollamaMaxTokens", "ollamaContextWindow",
             "openaiContextWindow", "anthropicContextWindow",
             "geminiContextWindow",

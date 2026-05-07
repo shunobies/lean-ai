@@ -221,38 +221,21 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
 // ── Zero-value filtering ─────────────────────────────────────────────────────
 
 // Numeric VSCode settings where 0 means "not configured — let the backend use
-// its own default".  VSCode returns 0 for number-typed settings that have no
-// explicit default in package.json, so we filter these out to avoid overriding
-// the backend's real defaults via env vars.
+// its own default". Sampling settings are intentionally excluded because
+// values like temperature=0 and min_p=0 are valid explicit choices.
 const ZERO_MEANS_UNSET: ReadonlySet<string> = new Set([
     // Primary Ollama model
     "lean-ai.ollamaContextWindow",
     "lean-ai.ollamaMaxTokens",
-    "lean-ai.ollamaTemperature",
-    "lean-ai.ollamaTopP",
-    "lean-ai.ollamaTopK",
-    "lean-ai.ollamaRepeatPenalty",
-    // Expert Ollama model (0 = inherit from primary)
+    // Expert Ollama model
     "lean-ai.ollamaExpertContextWindow",
     "lean-ai.ollamaExpertMaxTokens",
-    "lean-ai.ollamaExpertTemperature",
-    "lean-ai.ollamaExpertTopP",
-    "lean-ai.ollamaExpertTopK",
-    "lean-ai.ollamaExpertRepeatPenalty",
-    // Request Ollama model (0 = inherit from primary)
+    // Request Ollama model
     "lean-ai.ollamaRequestContextWindow",
     "lean-ai.ollamaRequestMaxTokens",
-    "lean-ai.ollamaRequestTemperature",
-    "lean-ai.ollamaRequestTopP",
-    "lean-ai.ollamaRequestTopK",
-    "lean-ai.ollamaRequestRepeatPenalty",
-    // Worker Ollama model (0 = inherit from primary)
+    // Worker Ollama model
     "lean-ai.ollamaWorkerContextWindow",
     "lean-ai.ollamaWorkerMaxTokens",
-    "lean-ai.ollamaWorkerTemperature",
-    "lean-ai.ollamaWorkerTopP",
-    "lean-ai.ollamaWorkerTopK",
-    "lean-ai.ollamaWorkerRepeatPenalty",
     // OpenAI
     "lean-ai.openaiContextWindow",
     "lean-ai.openaiTemperature",
@@ -270,6 +253,40 @@ const ZERO_MEANS_UNSET: ReadonlySet<string> = new Set([
     "lean-ai.embeddingContextWindow",
 ]);
 
+const OPTIONAL_NUMERIC_SETTINGS: ReadonlySet<string> = new Set([
+    "lean-ai.ollamaTemperature",
+    "lean-ai.ollamaTopP",
+    "lean-ai.ollamaTopK",
+    "lean-ai.ollamaRepeatPenalty",
+    "lean-ai.ollamaMinP",
+    "lean-ai.ollamaPresencePenalty",
+    "lean-ai.ollamaExpertTemperature",
+    "lean-ai.ollamaExpertTopP",
+    "lean-ai.ollamaExpertTopK",
+    "lean-ai.ollamaExpertRepeatPenalty",
+    "lean-ai.ollamaExpertMinP",
+    "lean-ai.ollamaExpertPresencePenalty",
+    "lean-ai.ollamaRequestTemperature",
+    "lean-ai.ollamaRequestTopP",
+    "lean-ai.ollamaRequestTopK",
+    "lean-ai.ollamaRequestRepeatPenalty",
+    "lean-ai.ollamaRequestMinP",
+    "lean-ai.ollamaRequestPresencePenalty",
+    "lean-ai.ollamaWorkerTemperature",
+    "lean-ai.ollamaWorkerTopP",
+    "lean-ai.ollamaWorkerTopK",
+    "lean-ai.ollamaWorkerRepeatPenalty",
+    "lean-ai.ollamaWorkerMinP",
+    "lean-ai.ollamaWorkerPresencePenalty",
+]);
+
+function hasExplicitConfiguration(config: vscode.WorkspaceConfiguration, key: string): boolean {
+    const inspected = config.inspect(key);
+    return inspected?.globalValue !== undefined ||
+        inspected?.workspaceValue !== undefined ||
+        inspected?.workspaceFolderValue !== undefined;
+}
+
 // ── Env building helpers ─────────────────────────────────────────────────────
 
 /**
@@ -283,6 +300,9 @@ export function buildBackendEnv(): Record<string, string> {
         const val = config.get<unknown>(key);
         if (val !== undefined && val !== null && val !== "") {
             if (val === 0 && ZERO_MEANS_UNSET.has(key)) {
+                continue;
+            }
+            if (val === 0 && OPTIONAL_NUMERIC_SETTINGS.has(key) && !hasExplicitConfiguration(config, key)) {
                 continue;
             }
             env[envVar] = String(val);

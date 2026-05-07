@@ -7,7 +7,9 @@ is a valid explicit value and must be preserved.
 
 from __future__ import annotations
 
+from lean_ai.config import settings
 from lean_ai.llm.client import OllamaProvider
+from lean_ai.routers.client_factory import RoleConfig, create_role_client
 
 
 def _provider(*, min_p=None, presence_penalty=None, preserve_thinking=False):
@@ -25,6 +27,23 @@ def _provider(*, min_p=None, presence_penalty=None, preserve_thinking=False):
         presence_penalty=presence_penalty,
         enable_thinking=False,
         preserve_thinking=preserve_thinking,
+    )
+
+
+def _provider_without_sampling():
+    """Factory with sampling fields explicitly blank."""
+    return OllamaProvider(
+        ollama_url="http://localhost:11434",
+        model="test",
+        max_tokens=1024,
+        context_window=8192,
+        temperature=None,
+        top_p=None,
+        top_k=None,
+        repeat_penalty=None,
+        min_p=None,
+        presence_penalty=None,
+        enable_thinking=False,
     )
 
 
@@ -73,10 +92,76 @@ def test_build_options_carries_standard_keys():
     assert opts["num_ctx"] == 8192
 
 
+def test_build_options_omits_blank_sampling_keys():
+    """Blank sampling values let Ollama/Modelfile defaults apply."""
+    opts = _provider_without_sampling().build_options_for_test()
+    assert "temperature" not in opts
+    assert "top_p" not in opts
+    assert "top_k" not in opts
+    assert "repeat_penalty" not in opts
+    assert opts["num_ctx"] == 8192
+
+
 def test_build_options_both_params_set():
     opts = _provider(min_p=0.1, presence_penalty=0.5).build_options_for_test()
     assert opts["min_p"] == 0.1
     assert opts["presence_penalty"] == 0.5
+
+
+def test_role_client_blank_sampling_does_not_inherit_primary_settings():
+    saved = (
+        settings.ollama_temperature,
+        settings.ollama_top_p,
+        settings.ollama_top_k,
+        settings.ollama_repeat_penalty,
+        settings.ollama_min_p,
+        settings.ollama_presence_penalty,
+    )
+    try:
+        settings.ollama_temperature = 0.7
+        settings.ollama_top_p = 0.8
+        settings.ollama_top_k = 20
+        settings.ollama_repeat_penalty = 1.05
+        settings.ollama_min_p = 0.05
+        settings.ollama_presence_penalty = 1.5
+
+        client = create_role_client(
+            RoleConfig(
+                role_name="Request",
+                provider_setting="ollama",
+                enable_thinking=False,
+                ollama_model="role-model",
+                ollama_max_tokens=1024,
+                ollama_context_window=8192,
+                ollama_temperature=None,
+                ollama_top_p=None,
+                ollama_top_k=None,
+                ollama_repeat_penalty=None,
+                ollama_min_p=None,
+                ollama_presence_penalty=None,
+            )
+        )
+
+        assert client is not None
+        opts = client._provider.build_options_for_test()  # type: ignore[attr-defined]
+        for key in (
+            "temperature",
+            "top_p",
+            "top_k",
+            "repeat_penalty",
+            "min_p",
+            "presence_penalty",
+        ):
+            assert key not in opts
+    finally:
+        (
+            settings.ollama_temperature,
+            settings.ollama_top_p,
+            settings.ollama_top_k,
+            settings.ollama_repeat_penalty,
+            settings.ollama_min_p,
+            settings.ollama_presence_penalty,
+        ) = saved
 
 
 # ── chat_template_kwargs for preserve_thinking ─────────────────────────

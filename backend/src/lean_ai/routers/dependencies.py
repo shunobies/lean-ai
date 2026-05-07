@@ -23,6 +23,9 @@ def _create_provider():
             max_tokens=settings.ollama_max_tokens,
             context_window=settings.ollama_context_window,
             temperature=settings.ollama_temperature,
+            top_p=settings.ollama_top_p,
+            top_k=settings.ollama_top_k,
+            repeat_penalty=settings.ollama_repeat_penalty,
             min_p=settings.ollama_min_p,
             presence_penalty=settings.ollama_presence_penalty,
             enable_thinking=settings.enable_thinking,
@@ -120,6 +123,12 @@ _inline_client: LLMClient = (
             model=settings.inline_model,
             max_tokens=settings.inline_max_tokens,
             context_window=settings.inline_context_window,
+            temperature=None,
+            top_p=None,
+            top_k=None,
+            repeat_penalty=None,
+            min_p=None,
+            presence_penalty=None,
             enable_thinking=False,
         )
     )
@@ -140,6 +149,9 @@ if (
             max_tokens=settings.ollama_max_tokens,
             context_window=settings.ollama_context_window,
             temperature=settings.ollama_temperature,
+            top_p=settings.ollama_top_p,
+            top_k=settings.ollama_top_k,
+            repeat_penalty=settings.ollama_repeat_penalty,
             enable_thinking=settings.enable_thinking,
         )
         refiner = PromptRefiner(

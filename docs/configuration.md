@@ -159,9 +159,8 @@ encouraging topic breadth. Example value `1.5`. Same blank-= omit
 semantics. Literal `0` is a valid explicit "no penalty" value distinct
 from blank.
 
-Both fields fall back to the primary value when a role's own is blank,
-so you can set `LEAN_AI_OLLAMA_MIN_P=0.05` once and every role inherits.
-`expert`/`request`/`worker` can override.
+All Ollama sampling fields are per-role. Blank means omitted for that
+model; no role inherits sampling settings from the primary model.
 
 **`preserve_thinking`** (`LEAN_AI_PRESERVE_THINKING_{role}`, default
 `false`) — retains the model's previous-turn chain-of-thought in the
@@ -287,11 +286,11 @@ When the Ollama client-side check trips:
    loop exits cleanly with whatever content has accumulated rather than
    looping forever.
 
-### Per-role inheritance
+### Per-role defaults
 
-Expert / Request / Worker each fall back to primary when their setting
-is `""`. Pattern matches the existing `ollama_expert_temperature` →
-`ollama_temperature` chain.
+Expert / Request / Worker each use their own reasoning-effort value.
+Blank means the provider default for that model; it does not inherit the
+primary model's setting.
 
 ### Priority order
 
@@ -315,10 +314,10 @@ Switch providers at any time by changing this value and restarting the server (o
 |---|---|---|
 | `LEAN_AI_OLLAMA_URL` | `http://localhost:11434` | Ollama API endpoint |
 | `LEAN_AI_OLLAMA_MODEL` | `qwen3-coder:30b` | Primary model for chat and planning |
-| `LEAN_AI_OLLAMA_TEMPERATURE` | `0.7` | Sampling temperature (Qwen3 recommends 0.7 — avoid 0.0) |
-| `LEAN_AI_OLLAMA_TOP_P` | `0.8` | Nucleus sampling threshold |
-| `LEAN_AI_OLLAMA_TOP_K` | `20` | Top-k sampling |
-| `LEAN_AI_OLLAMA_REPEAT_PENALTY` | `1.05` | Repetition penalty |
+| `LEAN_AI_OLLAMA_TEMPERATURE` | *(blank)* | Sampling temperature. Blank = omit and use the model's Ollama/Modelfile default |
+| `LEAN_AI_OLLAMA_TOP_P` | *(blank)* | Nucleus sampling threshold. Blank = omit |
+| `LEAN_AI_OLLAMA_TOP_K` | *(blank)* | Top-k sampling. Blank = omit |
+| `LEAN_AI_OLLAMA_REPEAT_PENALTY` | *(blank)* | Repetition penalty. Blank = omit |
 | `LEAN_AI_OLLAMA_CONTEXT_WINDOW` | `128` (131072) | Context window size — [shorthand](#context-window-shorthand) accepted |
 | `LEAN_AI_OLLAMA_MAX_TOKENS` | *25% of context window* | Max output tokens per response |
 
@@ -356,10 +355,10 @@ When using OpenAI, Anthropic, Gemini, or Lean AI Serve as the expert provider, t
 | Variable | Default | Description |
 |---|---|---|
 | `LEAN_AI_OLLAMA_MODEL_EXPERT` | *(empty — disabled)* | Ollama expert model name (e.g. `qwen3-coder:80b`) |
-| `LEAN_AI_OLLAMA_EXPERT_TEMPERATURE` | *(falls back to OLLAMA_TEMPERATURE)* | Expert model temperature |
-| `LEAN_AI_OLLAMA_EXPERT_TOP_P` | *(falls back to OLLAMA_TOP_P)* | Expert model top-p |
-| `LEAN_AI_OLLAMA_EXPERT_TOP_K` | *(falls back to OLLAMA_TOP_K)* | Expert model top-k |
-| `LEAN_AI_OLLAMA_EXPERT_REPEAT_PENALTY` | *(falls back to OLLAMA_REPEAT_PENALTY)* | Expert model repetition penalty |
+| `LEAN_AI_OLLAMA_EXPERT_TEMPERATURE` | *(blank)* | Expert model temperature. Blank = omit |
+| `LEAN_AI_OLLAMA_EXPERT_TOP_P` | *(blank)* | Expert model top-p. Blank = omit |
+| `LEAN_AI_OLLAMA_EXPERT_TOP_K` | *(blank)* | Expert model top-k. Blank = omit |
+| `LEAN_AI_OLLAMA_EXPERT_REPEAT_PENALTY` | *(blank)* | Expert model repetition penalty. Blank = omit |
 | `LEAN_AI_OLLAMA_EXPERT_CONTEXT_WINDOW` | *(falls back to OLLAMA_CONTEXT_WINDOW)* | Expert model context window — [shorthand](#context-window-shorthand) accepted |
 | `LEAN_AI_OLLAMA_EXPERT_MAX_TOKENS` | *(derived: 25% of expert context window)* | Expert model max output tokens |
 
@@ -445,14 +444,15 @@ If not configured, the primary model handles chat and `/request` mode as well.
 | Variable | Default | Description |
 |---|---|---|
 | `LEAN_AI_OLLAMA_MODEL_REQUEST` | *(empty — disabled)* | Ollama request model name (e.g. `qwen3.5:27b`) |
-| `LEAN_AI_OLLAMA_REQUEST_TEMPERATURE` | *(falls back to OLLAMA_TEMPERATURE)* | Request model temperature |
-| `LEAN_AI_OLLAMA_REQUEST_TOP_P` | *(falls back to OLLAMA_TOP_P)* | Request model top-p |
-| `LEAN_AI_OLLAMA_REQUEST_TOP_K` | *(falls back to OLLAMA_TOP_K)* | Request model top-k |
-| `LEAN_AI_OLLAMA_REQUEST_REPEAT_PENALTY` | *(falls back to OLLAMA_REPEAT_PENALTY)* | Request model repetition penalty |
+| `LEAN_AI_OLLAMA_REQUEST_TEMPERATURE` | *(blank)* | Request model temperature. Blank = omit |
+| `LEAN_AI_OLLAMA_REQUEST_TOP_P` | *(blank)* | Request model top-p. Blank = omit |
+| `LEAN_AI_OLLAMA_REQUEST_TOP_K` | *(blank)* | Request model top-k. Blank = omit |
+| `LEAN_AI_OLLAMA_REQUEST_REPEAT_PENALTY` | *(blank)* | Request model repetition penalty. Blank = omit |
 | `LEAN_AI_OLLAMA_REQUEST_CONTEXT_WINDOW` | *(falls back to OLLAMA_CONTEXT_WINDOW)* | Request model context window — [shorthand](#context-window-shorthand) accepted |
 | `LEAN_AI_OLLAMA_REQUEST_MAX_TOKENS` | *(derived: 25% of request context window)* | Request model max output tokens |
 
-All Ollama request settings inherit from the primary model when not explicitly set.
+Ollama request sampling settings are independent. Blank values are
+omitted for the request model instead of inheriting from primary.
 
 ## Thinking Mode
 

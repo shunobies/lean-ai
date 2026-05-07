@@ -52,16 +52,16 @@ def test_gemini_budget_mapping():
     assert reasoning_effort_to_gemini_budget("high") == 16384
 
 
-# ── Effective fallback chain ────────────────────────────────────────
+# ── Per-role values are independent ─────────────────────────────────
 
 
-def test_effective_expert_reasoning_effort_falls_back_to_primary():
+def test_effective_expert_reasoning_effort_does_not_fallback_to_primary():
     saved_p = settings.reasoning_effort_primary
     saved_e = settings.reasoning_effort_expert
     try:
         settings.reasoning_effort_primary = "high"
         settings.reasoning_effort_expert = ""
-        assert settings.effective_expert_reasoning_effort == "high"
+        assert settings.effective_expert_reasoning_effort == ""
 
         settings.reasoning_effort_expert = "low"
         assert settings.effective_expert_reasoning_effort == "low"
@@ -70,13 +70,13 @@ def test_effective_expert_reasoning_effort_falls_back_to_primary():
         settings.reasoning_effort_expert = saved_e
 
 
-def test_effective_request_reasoning_effort_falls_back():
+def test_effective_request_reasoning_effort_does_not_fallback_to_primary():
     saved_p = settings.reasoning_effort_primary
     saved_r = settings.reasoning_effort_request
     try:
         settings.reasoning_effort_primary = "medium"
         settings.reasoning_effort_request = ""
-        assert settings.effective_request_reasoning_effort == "medium"
+        assert settings.effective_request_reasoning_effort == ""
 
         settings.reasoning_effort_primary = ""
         settings.reasoning_effort_request = ""
@@ -86,13 +86,13 @@ def test_effective_request_reasoning_effort_falls_back():
         settings.reasoning_effort_request = saved_r
 
 
-def test_effective_worker_reasoning_effort_falls_back():
+def test_effective_worker_reasoning_effort_does_not_fallback_to_primary():
     saved_p = settings.reasoning_effort_primary
     saved_w = settings.reasoning_effort_worker
     try:
         settings.reasoning_effort_primary = "low"
         settings.reasoning_effort_worker = ""
-        assert settings.effective_worker_reasoning_effort == "low"
+        assert settings.effective_worker_reasoning_effort == ""
     finally:
         settings.reasoning_effort_primary = saved_p
         settings.reasoning_effort_worker = saved_w

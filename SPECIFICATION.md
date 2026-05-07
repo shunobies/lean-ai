@@ -318,10 +318,10 @@ class Settings(BaseSettings):
 |-------|------|---------|-------------|
 | `ollama_url` | str | `"http://localhost:11434"` | Ollama API endpoint |
 | `ollama_model` | str | `"qwen3-coder:30b"` | Primary model name |
-| `ollama_temperature` | float | `0.7` | Sampling temperature |
-| `ollama_top_p` | float | `0.8` | Nucleus sampling threshold |
-| `ollama_top_k` | int | `20` | Top-k sampling |
-| `ollama_repeat_penalty` | float | `1.05` | Repetition penalty |
+| `ollama_temperature` | float \| None | None | Sampling temperature. None = omit from Ollama options |
+| `ollama_top_p` | float \| None | None | Nucleus sampling threshold. None = omit |
+| `ollama_top_k` | int \| None | None | Top-k sampling. None = omit |
+| `ollama_repeat_penalty` | float \| None | None | Repetition penalty. None = omit |
 | `ollama_context_window` | int | `131072` | Context window (accepts shorthand) |
 | `ollama_max_tokens` | int \| None | None | Derived: 25% of context_window |
 
@@ -330,10 +330,10 @@ class Settings(BaseSettings):
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `ollama_model_expert` | str | `""` | Expert model name. Empty = use primary |
-| `ollama_expert_temperature` | float \| None | None | Falls back to `ollama_temperature` |
-| `ollama_expert_top_p` | float \| None | None | Falls back to `ollama_top_p` |
-| `ollama_expert_top_k` | int \| None | None | Falls back to `ollama_top_k` |
-| `ollama_expert_repeat_penalty` | float \| None | None | Falls back to `ollama_repeat_penalty` |
+| `ollama_expert_temperature` | float \| None | None | None = omit for expert; does not inherit primary |
+| `ollama_expert_top_p` | float \| None | None | None = omit for expert; does not inherit primary |
+| `ollama_expert_top_k` | int \| None | None | None = omit for expert; does not inherit primary |
+| `ollama_expert_repeat_penalty` | float \| None | None | None = omit for expert; does not inherit primary |
 | `ollama_expert_context_window` | int \| None | None | Falls back to `ollama_context_window` |
 | `ollama_expert_max_tokens` | int \| None | None | Derived: 25% of expert context_window |
 
@@ -351,10 +351,10 @@ class Settings(BaseSettings):
 |-------|------|---------|-------------|
 | `request_llm_provider` | str | `""` | `"ollama"`, `"openai"`, `"anthropic"`, or `""` (auto-detect) |
 | `ollama_model_request` | str | `""` | e.g. `"qwen3.5:27b"`. Empty = use primary |
-| `ollama_request_temperature` | float \| None | None | Falls back to `ollama_temperature` |
-| `ollama_request_top_p` | float \| None | None | Falls back to `ollama_top_p` |
-| `ollama_request_top_k` | int \| None | None | Falls back to `ollama_top_k` |
-| `ollama_request_repeat_penalty` | float \| None | None | Falls back to `ollama_repeat_penalty` |
+| `ollama_request_temperature` | float \| None | None | None = omit for request; does not inherit primary |
+| `ollama_request_top_p` | float \| None | None | None = omit for request; does not inherit primary |
+| `ollama_request_top_k` | int \| None | None | None = omit for request; does not inherit primary |
+| `ollama_request_repeat_penalty` | float \| None | None | None = omit for request; does not inherit primary |
 | `ollama_request_context_window` | int \| None | None | Falls back to `ollama_context_window` |
 | `ollama_request_max_tokens` | int \| None | None | Derived: 25% of request context_window |
 | `openai_request_model` | str | `""` | OpenAI model for /request mode |
@@ -594,16 +594,16 @@ Properties that resolve optional values through fallback chains:
 | `effective_inline_url` | `inline_ollama_url` → `ollama_url` |
 | `effective_embedding_url` | `embedding_ollama_url` → `ollama_url` |
 | `effective_vision_url` | `vision_ollama_url` → `ollama_url` |
-| `effective_expert_temperature` | `ollama_expert_temperature` → `ollama_temperature` |
-| `effective_expert_top_p` | `ollama_expert_top_p` → `ollama_top_p` |
-| `effective_expert_top_k` | `ollama_expert_top_k` → `ollama_top_k` |
-| `effective_expert_repeat_penalty` | `ollama_expert_repeat_penalty` → `ollama_repeat_penalty` |
+| `effective_expert_temperature` | `ollama_expert_temperature` only; None = omit |
+| `effective_expert_top_p` | `ollama_expert_top_p` only; None = omit |
+| `effective_expert_top_k` | `ollama_expert_top_k` only; None = omit |
+| `effective_expert_repeat_penalty` | `ollama_expert_repeat_penalty` only; None = omit |
 | `effective_expert_context_window` | Per-provider: openai→`openai_context_window`, anthropic→`anthropic_context_window`, else `ollama_expert_context_window` → `ollama_context_window` |
 | `effective_expert_max_tokens` | Per-provider: openai→`openai_max_tokens`, anthropic→`anthropic_max_tokens`, else `ollama_expert_max_tokens` → derived |
-| `effective_request_temperature` | `ollama_request_temperature` → `ollama_temperature` |
-| `effective_request_top_p` | `ollama_request_top_p` → `ollama_top_p` |
-| `effective_request_top_k` | `ollama_request_top_k` → `ollama_top_k` |
-| `effective_request_repeat_penalty` | `ollama_request_repeat_penalty` → `ollama_repeat_penalty` |
+| `effective_request_temperature` | `ollama_request_temperature` only; None = omit |
+| `effective_request_top_p` | `ollama_request_top_p` only; None = omit |
+| `effective_request_top_k` | `ollama_request_top_k` only; None = omit |
+| `effective_request_repeat_penalty` | `ollama_request_repeat_penalty` only; None = omit |
 | `effective_request_max_tokens` | Per-provider: openai→`openai_max_tokens`, anthropic→`anthropic_max_tokens`, else `ollama_request_max_tokens` → derived |
 | `effective_refiner_url` | `refiner_ollama_url` → `ollama_url` |
 | `effective_refiner_model` | `refiner_model` → `ollama_model` |
@@ -826,12 +826,15 @@ class LLMProvider(ABC):
 **Options dict** passed to every Ollama call:
 ```python
 {
+    "num_predict": int,   # max output tokens
+    "num_ctx": int,       # context window
+    # Optional sampling keys are present only when configured:
     "temperature": float,
     "top_p": float,
     "top_k": int,
     "repeat_penalty": float,
-    "num_predict": int,   # max output tokens
-    "num_ctx": int,       # context window
+    "min_p": float,
+    "presence_penalty": float,
 }
 ```
 

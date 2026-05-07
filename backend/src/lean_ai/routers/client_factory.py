@@ -33,7 +33,7 @@ class RoleConfig:
     ollama_model: str  # e.g. settings.ollama_model_expert
     ollama_max_tokens: int
     ollama_context_window: int
-    ollama_temperature: float
+    ollama_temperature: float | None = None
     ollama_top_p: float | None = None
     ollama_top_k: int | None = None
     ollama_repeat_penalty: float | None = None
@@ -258,19 +258,14 @@ def create_role_client(
                 "max_tokens": cfg.ollama_max_tokens,
                 "context_window": cfg.ollama_context_window or settings.ollama_context_window,
                 "temperature": cfg.ollama_temperature,
+                "top_p": cfg.ollama_top_p,
+                "top_k": cfg.ollama_top_k,
+                "repeat_penalty": cfg.ollama_repeat_penalty,
+                "min_p": cfg.ollama_min_p,
+                "presence_penalty": cfg.ollama_presence_penalty,
                 "enable_thinking": cfg.enable_thinking,
                 "preserve_thinking": cfg.preserve_thinking,
             }
-            if cfg.ollama_top_p is not None:
-                ollama_kw["top_p"] = cfg.ollama_top_p
-            if cfg.ollama_top_k is not None:
-                ollama_kw["top_k"] = cfg.ollama_top_k
-            if cfg.ollama_repeat_penalty is not None:
-                ollama_kw["repeat_penalty"] = cfg.ollama_repeat_penalty
-            if cfg.ollama_min_p is not None:
-                ollama_kw["min_p"] = cfg.ollama_min_p
-            if cfg.ollama_presence_penalty is not None:
-                ollama_kw["presence_penalty"] = cfg.ollama_presence_penalty
             if cfg.reasoning_effort:
                 ollama_kw["reasoning_effort"] = cfg.reasoning_effort
 

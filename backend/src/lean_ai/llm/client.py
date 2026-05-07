@@ -21,6 +21,7 @@ from lean_ai.llm.base import (
 logger = logging.getLogger(__name__)
 
 _TRANSIENT_ERRORS = (ConnectionError, TimeoutError, OSError)
+_UNSET = object()
 
 
 def _inject_schema_into_messages(
@@ -152,12 +153,12 @@ class OllamaProvider(LLMProvider):
         model: str | None = None,
         max_tokens: int | None = None,
         context_window: int | None = None,
-        temperature: float | None = None,
-        top_p: float | None = None,
-        top_k: int | None = None,
-        repeat_penalty: float | None = None,
-        min_p: float | None = None,
-        presence_penalty: float | None = None,
+        temperature: float | None | object = _UNSET,
+        top_p: float | None | object = _UNSET,
+        top_k: int | None | object = _UNSET,
+        repeat_penalty: float | None | object = _UNSET,
+        min_p: float | None | object = _UNSET,
+        presence_penalty: float | None | object = _UNSET,
         enable_thinking: bool | None = None,
         preserve_thinking: bool = False,
         reasoning_effort: str = "",
@@ -170,17 +171,15 @@ class OllamaProvider(LLMProvider):
         self._context_window_val = (
             context_window if context_window is not None else settings.ollama_context_window
         )
-        self._temperature = temperature if temperature is not None else settings.ollama_temperature
-        self._top_p = top_p if top_p is not None else settings.ollama_top_p
-        self._top_k = top_k if top_k is not None else settings.ollama_top_k
+        self._temperature = settings.ollama_temperature if temperature is _UNSET else temperature
+        self._top_p = settings.ollama_top_p if top_p is _UNSET else top_p
+        self._top_k = settings.ollama_top_k if top_k is _UNSET else top_k
         self._repeat_penalty = (
-            repeat_penalty if repeat_penalty is not None else settings.ollama_repeat_penalty
+            settings.ollama_repeat_penalty if repeat_penalty is _UNSET else repeat_penalty
         )
-        # Optional params — if both the constructor arg and the settings
-        # value are None, stays None so _build_options omits the key.
-        self._min_p = min_p if min_p is not None else settings.ollama_min_p
+        self._min_p = settings.ollama_min_p if min_p is _UNSET else min_p
         self._presence_penalty = (
-            presence_penalty if presence_penalty is not None else settings.ollama_presence_penalty
+            settings.ollama_presence_penalty if presence_penalty is _UNSET else presence_penalty
         )
         self._enable_thinking = (
             enable_thinking if enable_thinking is not None else settings.enable_thinking
@@ -222,18 +221,24 @@ class OllamaProvider(LLMProvider):
     ) -> dict:
         """Build the Ollama options dict.
 
-        ``min_p`` and ``presence_penalty`` are only added when explicitly
-        configured — blank (None) means "omit from options" so models that
-        don't support the parameter aren't confused.
+        Sampling params are only added when explicitly configured.  Blank
+        (None) means "omit from options" so each model can use its own
+        Ollama/Modelfile defaults.
         """
+        effective_temperature = temperature if temperature is not None else self._temperature
+        effective_max_tokens = max_tokens if max_tokens is not None else self._max_tokens_val
         opts: dict = {
-            "temperature": temperature if temperature is not None else self._temperature,
-            "top_p": self._top_p,
-            "top_k": self._top_k,
-            "repeat_penalty": self._repeat_penalty,
-            "num_predict": max_tokens if max_tokens is not None else self._max_tokens_val,
+            "num_predict": effective_max_tokens,
             "num_ctx": self._context_window_val,
         }
+        if effective_temperature is not None:
+            opts["temperature"] = effective_temperature
+        if self._top_p is not None:
+            opts["top_p"] = self._top_p
+        if self._top_k is not None:
+            opts["top_k"] = self._top_k
+        if self._repeat_penalty is not None:
+            opts["repeat_penalty"] = self._repeat_penalty
         if self._min_p is not None:
             opts["min_p"] = self._min_p
         if self._presence_penalty is not None:
@@ -325,10 +330,10 @@ class OllamaProvider(LLMProvider):
         tokens = max_tokens if max_tokens is not None else self._max_tokens_val
 
         logger.info(
-            "LLM chat_raw: model=%s messages=%d temp=%.1f max_tokens=%d streaming=%s",
+            "LLM chat_raw: model=%s messages=%d temp=%s max_tokens=%d streaming=%s",
             self._model,
             len(messages),
-            temp,
+            temp if temp is not None else "ollama-default",
             tokens,
             bool(stream_callback or thinking_callback),
         )
