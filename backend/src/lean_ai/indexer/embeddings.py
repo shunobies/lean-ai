@@ -17,7 +17,7 @@ class EmbeddingStore:
         self._dir = Path(index_dir)
         self._bin_path = self._dir / ".embeddings.bin"
         self._idx_path = self._dir / ".embeddings_index.json"
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._index: dict[str, dict] | None = None
 
     def _load_index(self) -> dict[str, dict]:
@@ -50,11 +50,22 @@ class EmbeddingStore:
         content_hashes: list[str] | None = None,
     ) -> None:
         """Append a batch of embeddings to storage."""
-        if not chunk_ids or not embeddings:
+        if not chunk_ids and not embeddings:
             return
+        if len(chunk_ids) != len(embeddings):
+            raise ValueError("chunk_ids and embeddings must have the same length")
+        if content_hashes is not None and len(content_hashes) != len(chunk_ids):
+            raise ValueError("content_hashes must match chunk_ids length")
 
         dim = len(embeddings[0])
+        if dim == 0:
+            raise ValueError("embeddings must not be empty vectors")
+        for vec in embeddings:
+            if len(vec) != dim:
+                raise ValueError("all embeddings in a batch must have the same dimension")
+
         with self._lock:
+            self._dir.mkdir(parents=True, exist_ok=True)
             index = self._load_index()
             with open(self._bin_path, "ab") as f:
                 for i, (chunk_id, vec) in enumerate(
@@ -71,7 +82,8 @@ class EmbeddingStore:
     def flush_index(self) -> None:
         """Write the JSON index to disk."""
         with self._lock:
-            if self._index:
+            if self._index is not None:
+                self._dir.mkdir(parents=True, exist_ok=True)
                 self._idx_path.write_text(json.dumps(self._index))
 
     def get_embedding(self, chunk_id: str) -> list[float] | None:

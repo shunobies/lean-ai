@@ -205,6 +205,27 @@ function killProcessOnPort(port: string, channel: vscode.OutputChannel): void {
     }
 }
 
+function killTrackedBackendProcess(channel: vscode.OutputChannel): boolean {
+    if (!serverProcess?.pid) {
+        return false;
+    }
+
+    try {
+        if (process.platform === "win32") {
+            execSync(
+                `powershell.exe -Command "Stop-Process -Id ${serverProcess.pid} -Force -ErrorAction SilentlyContinue"`,
+                { timeout: 5000 },
+            );
+        } else {
+            serverProcess.kill("SIGTERM");
+        }
+    } catch {
+        // Process may have already exited.
+    }
+    serverProcess = undefined;
+    return true;
+}
+
 async function pollHealth(url: string): Promise<boolean> {
     for (let i = 0; i < HEALTH_POLL_MAX_ATTEMPTS; i++) {
         try {
@@ -480,12 +501,17 @@ export async function startBackend(
         resolvedCwd = backendDir;
     }
 
-    // Kill any zombie process on the port from a previous session
-    channel.appendLine(`[Lean AI] Cleaning up port ${port}...`);
-    killProcessOnPort(port, channel);
-
-    // Brief pause to let the port fully release
-    await new Promise((r) => setTimeout(r, 500));
+    if (killTrackedBackendProcess(channel)) {
+        channel.appendLine(`[Lean AI] Stopped previously tracked backend process on port ${port}.`);
+        await new Promise((r) => setTimeout(r, 500));
+    } else {
+        if (managedPort === port) {
+            managedPort = undefined;
+        }
+        channel.appendLine(
+            `[Lean AI] Skipping port cleanup for ${port}; this window has no tracked backend process.`,
+        );
+    }
 
     channel.appendLine(`[Lean AI] Starting backend in: ${resolvedCwd}`);
     channel.appendLine(`[Lean AI] Python: ${resolvedPython}`);
@@ -512,7 +538,6 @@ export async function startBackend(
             // No shell: true — we want the actual uvicorn PID
         },
     );
-    managedPort = port;
 
     serverProcess.stdout?.on("data", (data: Buffer) => {
         channel.append(data.toString());
@@ -556,6 +581,7 @@ export async function startBackend(
     const ready = await pollHealth(backendUrl);
 
     if (ready) {
+        managedPort = port;
         channel.appendLine("[Lean AI] Backend is ready.");
         vscode.window.showInformationMessage("Lean AI backend started successfully.");
         startHealthMonitor();
@@ -579,25 +605,16 @@ export function stopBackend(): void {
     channel.appendLine("[Lean AI] Stopping backend server...");
 
     // First: try to kill by PID if we have a tracked process
-    if (serverProcess && serverProcess.pid) {
-        try {
-            if (process.platform === "win32") {
-                execSync(
-                    `powershell.exe -Command "Stop-Process -Id ${serverProcess.pid} -Force -ErrorAction SilentlyContinue"`,
-                    { timeout: 5000 },
-                );
-            } else {
-                serverProcess.kill("SIGTERM");
-            }
-        } catch {
-            // Process may have already exited
-        }
-        serverProcess = undefined;
-    }
+    const killedTrackedProcess = killTrackedBackendProcess(channel);
 
     // Second: kill by port as a safety net (catches zombie processes)
-    if (managedPort) {
+    if (managedPort && killedTrackedProcess) {
         killProcessOnPort(managedPort, channel);
+        managedPort = undefined;
+    } else if (managedPort) {
+        channel.appendLine(
+            `[Lean AI] Skipping port fallback for ${managedPort}; no tracked backend process remains.`,
+        );
         managedPort = undefined;
     }
 

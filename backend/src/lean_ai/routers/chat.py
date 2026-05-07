@@ -18,9 +18,9 @@ from lean_ai.routers.context_helpers import (
     build_chat_system_prompt,
     extract_urls,
     get_file_tree,
+    read_active_file,
     read_architecture_plan_debug_context,
     read_architecture_reference_context,
-    read_active_file,
     read_project_context,
     search_workspace,
 )
@@ -43,6 +43,8 @@ _CHAT_MAX_TURNS = 20
 # Hard cap when ChatRequest.extended_turns is supplied (used by the
 # /mock-interview extension command for multi-round scored Q&A).
 _CHAT_EXTENDED_TURNS_MAX = 40
+_MAX_DIRECTORY_ENTRIES = 500
+_MAX_DIRECTORY_DEPTH = 25
 
 
 def _resolve_max_turns(extended: int | None) -> int:
@@ -89,6 +91,31 @@ def _get_chat_max_tokens() -> int:
     return settings.effective_request_max_tokens
 
 
+def _coerce_int_arg(
+    value: object,
+    default: int,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int:
+    """Coerce a tool integer argument and clamp it to a safe range."""
+    try:
+        coerced = int(value) if value is not None else default
+    except (TypeError, ValueError):
+        coerced = default
+    return max(minimum, min(maximum, coerced))
+
+
+def _resolve_workspace_path(repo_root: str, path: object) -> tuple[Path | None, str]:
+    """Resolve a chat tool path and reject traversal outside the workspace."""
+    raw_path = str(path or "")
+    root = Path(repo_root).resolve()
+    resolved = (root / raw_path).resolve()
+    if not resolved.is_relative_to(root):
+        return None, raw_path
+    return resolved, raw_path
+
+
 # ── Read-only tool executor for chat ────────────────────────────────
 
 
@@ -122,17 +149,17 @@ def _make_chat_tool_executor(repo_root: str | None = None):
             return f"ERROR: {name} requires an open workspace."
 
         from lean_ai.tools.file_ops import grep_files, read_file
-        from lean_ai.workflow.tool_executor import _is_external_path
 
         if name == "read_file":
             target_path = arguments.get("path", "")
-            external = _is_external_path(target_path, repo_root)
+            target, raw_path = _resolve_workspace_path(repo_root, target_path)
+            if target is None:
+                return f"ERROR: read_file path escapes workspace: {raw_path}"
             result = await read_file(
                 path=target_path,
                 repo_root=repo_root,
                 start_line=arguments.get("start_line"),
                 end_line=arguments.get("end_line"),
-                allow_external=external,
             )
             return result.output if result.success else result.error or "Error"
         elif name == "grep_files":
@@ -143,10 +170,17 @@ def _make_chat_tool_executor(repo_root: str | None = None):
             )
             return result.output if result.success else result.error or "Error"
         elif name == "list_directory":
-            target = Path(repo_root) / arguments.get("path", "")
+            target, raw_path = _resolve_workspace_path(repo_root, arguments.get("path", ""))
+            if target is None:
+                return f"ERROR: list_directory path escapes workspace: {raw_path}"
             if not target.is_dir():
                 return f"Not a directory: {arguments.get('path', '')}"
-            max_entries = arguments.get("max_entries", 100)
+            max_entries = _coerce_int_arg(
+                arguments.get("max_entries"),
+                100,
+                minimum=1,
+                maximum=_MAX_DIRECTORY_ENTRIES,
+            )
             entries = sorted(target.iterdir())[:max_entries]
             lines = []
             for e in entries:
@@ -157,9 +191,16 @@ def _make_chat_tool_executor(repo_root: str | None = None):
             from lean_ai.indexer.tree import list_repo_tree
 
             sub_path = arguments.get("path", "")
-            tree_root = f"{repo_root}/{sub_path}" if sub_path else repo_root
-            tree_entries = list_repo_tree(tree_root)
-            max_depth = arguments.get("max_depth", 3)
+            tree_root, raw_path = _resolve_workspace_path(repo_root, sub_path)
+            if tree_root is None:
+                return f"ERROR: directory_tree path escapes workspace: {raw_path}"
+            tree_entries = list_repo_tree(str(tree_root))
+            max_depth = _coerce_int_arg(
+                arguments.get("max_depth"),
+                3,
+                minimum=0,
+                maximum=_MAX_DIRECTORY_DEPTH,
+            )
             lines = []
             for e in tree_entries[:200]:
                 depth = e.path.count("/")

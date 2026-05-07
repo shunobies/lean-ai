@@ -39,12 +39,16 @@ async def git_commit(
     files: list[str] | None = None,
     repo_root: str = ".",
 ) -> ToolResult:
-    """Stage files and commit."""
+    """Commit changes, optionally limited to the supplied paths."""
     if files:
         for f in files:
             result = await _run_git(["add", f], cwd=repo_root)
             if not result.success:
                 return result
+        return await _run_git(
+            ["commit", "--only", "-m", _with_coauthor_trailer(message), "--", *files],
+            cwd=repo_root,
+        )
     else:
         result = await _run_git(["add", "-A"], cwd=repo_root)
         if not result.success:
@@ -139,9 +143,24 @@ async def git_stash_push(repo_root: str = ".") -> bool:
     return result.success
 
 
+async def _find_lean_ai_stash(repo_root: str = ".") -> str | None:
+    """Return the newest Lean AI auto-stash ref, if one exists."""
+    result = await _run_git(["stash", "list", "--format=%gd%x00%s"], cwd=repo_root)
+    if not result.success:
+        return None
+    for line in result.output.splitlines():
+        ref, sep, subject = line.partition("\x00")
+        if sep and "lean-ai: auto-stash" in subject:
+            return ref
+    return None
+
+
 async def git_stash_pop(repo_root: str = ".") -> ToolResult:
-    """Pop the latest stash."""
-    return await _run_git(["stash", "pop"], cwd=repo_root)
+    """Pop the newest Lean AI auto-stash without touching user-created stashes."""
+    stash_ref = await _find_lean_ai_stash(repo_root)
+    if stash_ref is None:
+        return ToolResult(success=True, output="No Lean AI auto-stash found")
+    return await _run_git(["stash", "pop", stash_ref], cwd=repo_root)
 
 
 async def git_add_and_commit(message: str, repo_root: str = ".") -> ToolResult:

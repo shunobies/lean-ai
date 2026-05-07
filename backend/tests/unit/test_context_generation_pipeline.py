@@ -128,12 +128,13 @@ async def test_extract_single_file():
     )
     result = await _extract_single_file("src/main.py", "def main(): pass", client, 4096)
     assert len(result) == 1
-    section, file_path, content, source = result[0]
+    section, file_path, content, source, content_hash = result[0]
     assert section == "Architecture Overview"
     assert file_path == "src/main.py"
     assert "main" in content
     assert "Fact 1" in content
     assert source == "llm"
+    assert content_hash
 
 
 @pytest.mark.asyncio

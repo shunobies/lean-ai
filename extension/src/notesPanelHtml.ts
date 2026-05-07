@@ -425,14 +425,14 @@ export function getNotesPanelHtml(): string {
         });
 
         let html = '<button class="project-btn' + (!activeProject ? ' active' : '') +
-            '" onclick="filterProject(null)">All Notes <span class="project-count">(' +
+            '" data-project="">All Notes <span class="project-count">(' +
             allNotes.length + ')</span></button>';
 
         allProjects.forEach(p => {
             const count = projectCounts[p] || 0;
             const isActive = activeProject === p;
             html += '<button class="project-btn' + (isActive ? ' active' : '') +
-                '" onclick="filterProject(\\''+escapeHtml(p)+'\\')">'+escapeHtml(p)+
+                '" data-project="'+escapeHtml(p)+'">'+escapeHtml(p)+
                 ' <span class="project-count">(' + count + ')</span></button>';
         });
 
@@ -441,11 +441,17 @@ export function getNotesPanelHtml(): string {
         if (uncatCount > 0) {
             const isActive = activeProject === "__uncategorized__";
             html += '<button class="project-btn' + (isActive ? ' active' : '') +
-                '" onclick="filterProject(\\'__uncategorized__\\')">Uncategorized' +
+                '" data-project="__uncategorized__">Uncategorized' +
                 ' <span class="project-count">(' + uncatCount + ')</span></button>';
         }
 
         nav.innerHTML = html;
+        nav.querySelectorAll("[data-project]").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const project = btn.getAttribute("data-project") || null;
+                filterProject(project);
+            });
+        });
     }
 
     function filterProject(project) {

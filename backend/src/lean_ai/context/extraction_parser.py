@@ -129,7 +129,7 @@ def parse_skeleton_output(
                 continue
             file_path = _extract_file_path(entry_text) or current_subsection_path
             skeleton_hash = hashlib.sha256(
-                f"{current_section}:{file_path}:{entry_text}".encode("utf-8")
+                f"{current_section}:{file_path}:{entry_text}".encode()
             ).hexdigest()
             results.append((current_section, file_path, entry_text, "skeleton", skeleton_hash))
             continue
@@ -137,7 +137,7 @@ def parse_skeleton_output(
         # Non-bullet content (e.g. "Entry points: `main.py`").
         if current_section and stripped:
             non_bullet_hash = hashlib.sha256(
-                f"{current_section}:{}:{stripped}".encode("utf-8")
+                f"{current_section}::{stripped}".encode()
             ).hexdigest()
             results.append((current_section, "", stripped, "skeleton", non_bullet_hash))
 

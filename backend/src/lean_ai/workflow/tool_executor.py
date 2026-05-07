@@ -13,12 +13,12 @@ from lean_ai.config import settings
 from lean_ai.tools import file_ops, scratchpad, shell
 from lean_ai.tools.command_safety import CommandRisk, check_command
 from lean_ai.tools.state_ledger import append_event
+from lean_ai.workflow.ws_handler import ws_send
 from lean_ai.workflow.ws_messages import (
     send_diff,
     send_test_result,
     send_tool_approval_required,
 )
-from lean_ai.workflow.ws_handler import ws_send
 
 if TYPE_CHECKING:
     from lean_ai.llm.facade import LLMClient
@@ -33,6 +33,8 @@ _INLINE_LIMIT = 2000  # chars — fits comfortably in a single tool result
 
 _TOOL_OUTPUT_DIR = ".lean_ai/tool_output"
 _MAX_AGE_SECONDS = 3600  # auto-delete files older than 1 hour
+_MAX_DIRECTORY_ENTRIES = 500
+_MAX_DIRECTORY_DEPTH = 25
 
 
 def _save_tool_output(
@@ -94,6 +96,31 @@ def _is_external_path(path: str, repo_root: str) -> bool:
     """Return True if *path* resolves outside the repository root."""
     resolved = (Path(repo_root) / path).resolve()
     return not resolved.is_relative_to(Path(repo_root).resolve())
+
+
+def _resolve_workspace_path(repo_root: str, path: object) -> tuple[Path | None, str]:
+    """Resolve a tool path and reject traversal outside the workspace."""
+    raw_path = str(path or "")
+    root = Path(repo_root).resolve()
+    resolved = (root / raw_path).resolve()
+    if not resolved.is_relative_to(root):
+        return None, raw_path
+    return resolved, raw_path
+
+
+def _coerce_int_arg(
+    value: object,
+    default: int,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int:
+    """Coerce a tool integer argument and clamp it to a safe range."""
+    try:
+        coerced = int(value) if value is not None else default
+    except (TypeError, ValueError):
+        coerced = default
+    return max(minimum, min(maximum, coerced))
 
 
 async def _request_tool_approval(
@@ -768,10 +795,17 @@ def make_tool_executor(
                 )
 
         elif name == "list_directory":
-            target = Path(repo_root) / arguments.get("path", "")
+            target, raw_path = _resolve_workspace_path(repo_root, arguments.get("path", ""))
+            if target is None:
+                return f"ERROR: list_directory path escapes workspace: {raw_path}"
             if not target.is_dir():
                 return f"ERROR: Not a directory: {arguments.get('path', '')}"
-            max_entries = arguments.get("max_entries", 100)
+            max_entries = _coerce_int_arg(
+                arguments.get("max_entries"),
+                100,
+                minimum=1,
+                maximum=_MAX_DIRECTORY_ENTRIES,
+            )
             all_entries = sorted(target.iterdir())
             total = len(all_entries)
             entries = all_entries[:max_entries]
@@ -809,11 +843,18 @@ def make_tool_executor(
             from lean_ai.indexer.tree import list_repo_tree
 
             sub_path = arguments.get("path", "")
-            tree_root = f"{repo_root}/{sub_path}" if sub_path else repo_root
-            entries = list_repo_tree(tree_root)
+            tree_root, raw_path = _resolve_workspace_path(repo_root, sub_path)
+            if tree_root is None:
+                return f"ERROR: directory_tree path escapes workspace: {raw_path}"
+            entries = list_repo_tree(str(tree_root))
             total = len(entries)
             max_entries = 200
-            max_depth = arguments.get("max_depth", 3)
+            max_depth = _coerce_int_arg(
+                arguments.get("max_depth"),
+                3,
+                minimum=0,
+                maximum=_MAX_DIRECTORY_DEPTH,
+            )
             lines = []
             for e in entries[:max_entries]:
                 depth = e.path.count("/")

@@ -5,6 +5,7 @@ Per-workspace database at ``.lean_ai/context.db``, separate from the main
 extraction.
 """
 
+import hashlib
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,7 +36,7 @@ CREATE TABLE IF NOT EXISTS context_entries (
     source TEXT NOT NULL DEFAULT 'llm',
     content_hash TEXT,
     updated_at TEXT NOT NULL,
-    UNIQUE(section, file_path)
+    UNIQUE(section, file_path, content)
 );
 CREATE INDEX IF NOT EXISTS idx_context_entries_section ON context_entries(section);
 CREATE INDEX IF NOT EXISTS idx_context_entries_file_path ON context_entries(file_path);
@@ -61,6 +62,49 @@ async def _ensure_columns(db: aiosqlite.Connection) -> None:
         pass  # Column already exists
 
 
+async def _unique_index_columns(db: aiosqlite.Connection) -> list[list[str]]:
+    """Return column names for every unique index on context_entries."""
+    cursor = await db.execute("PRAGMA index_list(context_entries)")
+    indexes = await cursor.fetchall()
+    unique_columns: list[list[str]] = []
+    for row in indexes:
+        if not row["unique"]:
+            continue
+        index_name = str(row["name"]).replace("'", "''")
+        index_cursor = await db.execute(f"PRAGMA index_info('{index_name}')")
+        columns = [info["name"] for info in await index_cursor.fetchall()]
+        unique_columns.append(columns)
+    return unique_columns
+
+
+async def _ensure_unique_constraint(db: aiosqlite.Connection) -> None:
+    """Migrate old DBs that only allowed one entry per section/file."""
+    unique_columns = await _unique_index_columns(db)
+    has_current_unique = ["section", "file_path", "content"] in unique_columns
+    has_old_unique = ["section", "file_path"] in unique_columns
+    if has_current_unique or not has_old_unique:
+        return
+
+    await db.execute("ALTER TABLE context_entries RENAME TO context_entries_old")
+    await db.executescript(_SCHEMA)
+    await db.execute(
+        "INSERT OR IGNORE INTO context_entries "
+        "(id, section, file_path, content, source, content_hash, updated_at) "
+        "SELECT id, section, file_path, content, source, content_hash, updated_at "
+        "FROM context_entries_old"
+    )
+    await db.execute("DROP TABLE context_entries_old")
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_context_entries_section "
+        "ON context_entries(section)"
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_context_entries_file_path "
+        "ON context_entries(file_path)"
+    )
+    await db.commit()
+
+
 async def get_context_db(repo_root: str) -> SQLiteConnection:
     """Open (or create) the per-workspace context database."""
     db = await connect_sqlite(str(_db_path(repo_root)))
@@ -69,29 +113,56 @@ async def get_context_db(repo_root: str) -> SQLiteConnection:
     await db.execute("PRAGMA busy_timeout = 5000")
     await db.executescript(_SCHEMA)
     await _ensure_columns(db)
+    await _ensure_unique_constraint(db)
     await db.commit()
     return db
 
 
+def _entry_content_hash(section: str, file_path: str, content: str, source: str) -> str:
+    """Derive a stable fallback hash for legacy 4-field entries."""
+    raw = f"{section}\0{file_path}\0{content}\0{source}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _normalize_entry(
+    entry: tuple[str, ...],
+) -> tuple[str, str, str, str, str]:
+    """Accept legacy 4-tuples and current 5-tuples for context entries."""
+    if len(entry) == 5:
+        section, file_path, content, source, content_hash = entry
+        return section, file_path, content, source, content_hash
+    if len(entry) == 4:
+        section, file_path, content, source = entry
+        return (
+            section,
+            file_path,
+            content,
+            source,
+            _entry_content_hash(section, file_path, content, source),
+        )
+    raise ValueError("context entries must contain 4 or 5 fields")
+
+
 async def upsert_entries_batch(
     db: aiosqlite.Connection,
-    entries: list[tuple[str, str, str, str, str]],
+    entries: list[tuple[str, str, str, str] | tuple[str, str, str, str, str]],
 ) -> int:
-    """Batch insert entries: ``[(section, file_path, content, source, content_hash), ...]``.
+    """Batch insert context entries.
 
-    Uses ``INSERT OR REPLACE`` — entries with the same section + file_path
-    are replaced (allowing updates when content changes).  Returns count of
-    new entries inserted.
+    Accepts current ``(section, file_path, content, source, content_hash)``
+    tuples and legacy 4-tuples. Exact duplicate facts are ignored; distinct
+    facts from the same file and section are preserved.
     """
     if not entries:
         return 0
     now = datetime.now(timezone.utc).isoformat()
     before = db.total_changes
+    normalized = [_normalize_entry(tuple(entry)) for entry in entries]
     await db.executemany(
-        "INSERT OR REPLACE INTO context_entries "
+        "INSERT OR IGNORE INTO context_entries "
         "(section, file_path, content, source, content_hash, updated_at) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        [(s, fp, c, src, ch, now) for s, fp, c, src, ch in entries],
+        [(s, fp, c, src, ch, now) for s, fp, c, src, ch in normalized],
     )
     await db.commit()
     return db.total_changes - before
@@ -126,12 +197,14 @@ async def clear_all(db: aiosqlite.Connection) -> None:
 async def get_existing_hashes(
     db: aiosqlite.Connection,
 ) -> dict[str, str]:
-    """Return a dict mapping file_path to content_hash for all existing entries with non-null hashes.
+    """Return file_path to content_hash for existing entries with hashes.
 
-    Testable seam: returns a pure dict that can be mocked in tests to simulate cached vs uncached states.
+    Testable seam: returns a pure dict that can be mocked in tests to
+    simulate cached vs uncached states.
     """
     cursor = await db.execute(
-        "SELECT DISTINCT file_path, content_hash FROM context_entries WHERE content_hash IS NOT NULL"
+        "SELECT DISTINCT file_path, content_hash FROM context_entries "
+        "WHERE content_hash IS NOT NULL"
     )
     rows = await cursor.fetchall()
     return {row[0]: row[1] for row in rows}

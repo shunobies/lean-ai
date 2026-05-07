@@ -15,6 +15,81 @@ logger = logging.getLogger(__name__)
 _MAX_READ_BYTES = 2 * 1024 * 1024
 
 
+def _max_display_lines() -> int:
+    """Return the current read_file display cap."""
+    return max(100, min(500, settings._active_context_window // 260))
+
+
+def _coerce_line_number(value: object) -> int | None:
+    """Return a positive line number, or None for absent/invalid values."""
+    try:
+        line = int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+    if line is None or line <= 0:
+        return None
+    return line
+
+
+def _format_numbered_lines(
+    selected: list[str],
+    *,
+    start_line: int,
+    truncated: bool,
+    truncation_note: str,
+) -> str:
+    """Format selected text lines using read_file's numbered output."""
+    numbered = [f"{start_line + i:>4} | {line}" for i, line in enumerate(selected)]
+    output = "\n".join(numbered)
+    if truncated:
+        output += truncation_note
+    return output
+
+
+def _read_large_text_range(
+    file_path: Path,
+    display_path: str,
+    *,
+    start_line: int | None,
+    end_line: int | None,
+    max_display: int,
+) -> ToolResult:
+    """Read a requested line range from a large text file without loading it all."""
+    start = start_line or 1
+    selected: list[str] = []
+    truncated = False
+
+    try:
+        with file_path.open("r", encoding="utf-8") as f:
+            for line_number, line in enumerate(f, start=1):
+                if line_number < start:
+                    continue
+                if end_line is not None and line_number > end_line:
+                    break
+                if len(selected) >= max_display:
+                    truncated = True
+                    break
+                selected.append(line.rstrip("\n").rstrip("\r"))
+    except UnicodeDecodeError:
+        return ToolResult(success=False, error=f"Cannot read binary file: {display_path}")
+    except OSError as e:
+        return ToolResult(success=False, error=f"Failed to read {display_path}: {e}")
+
+    note = (
+        f"\n\n[FILE TRUNCATED at {max_display} lines of requested range. "
+        "Use start_line/end_line to read more.]"
+    )
+    return ToolResult(
+        success=True,
+        output=_format_numbered_lines(
+            selected,
+            start_line=start,
+            truncated=truncated,
+            truncation_note=note,
+        ),
+    )
+
+
 def _safe_resolve(
     path: str,
     repo_root: str,
@@ -152,12 +227,33 @@ async def read_file(
     except OSError:
         return ToolResult(success=False, error=f"Cannot stat file: {path}")
 
-    if size > _MAX_READ_BYTES:
+    start_line_num = _coerce_line_number(start_line)
+    end_line_num = _coerce_line_number(end_line)
+    max_display = _max_display_lines()
+
+    if size > _MAX_READ_BYTES and file_path.suffix.lower() != ".docx":
+        if start_line_num is not None or end_line_num is not None:
+            return _read_large_text_range(
+                file_path,
+                path,
+                start_line=start_line_num,
+                end_line=end_line_num,
+                max_display=max_display,
+            )
         return ToolResult(
             success=False,
             error=(
                 f"File too large ({size:,} bytes, limit {_MAX_READ_BYTES:,}). "
                 f"Use start_line/end_line to read a portion."
+            ),
+        )
+
+    if size > _MAX_READ_BYTES:
+        return ToolResult(
+            success=False,
+            error=(
+                f"File too large ({size:,} bytes, limit {_MAX_READ_BYTES:,}). "
+                "Large .docx files cannot be paged by line range."
             ),
         )
 
@@ -189,27 +285,28 @@ async def read_file(
     total = len(lines)
 
     # Apply line range if specified
-    start = (start_line - 1) if start_line and start_line > 0 else 0
-    end = end_line if end_line and end_line <= total else total
+    start = (start_line_num - 1) if start_line_num else 0
+    end = end_line_num if end_line_num and end_line_num <= total else total
 
     selected = lines[start:end]
-    # Scale display limit with context window: 500 at 128k, ~123 at 32k
-    max_display = max(100, min(500, settings._active_context_window // 260))
     truncated = len(selected) > max_display
 
     if truncated:
         selected = selected[:max_display]
 
-    numbered = [f"{start + i + 1:>4} | {line}" for i, line in enumerate(selected)]
-    output = "\n".join(numbered)
-
-    if truncated:
-        output += (
-            f"\n\n[FILE TRUNCATED at {max_display} lines — "
-            f"total {total} lines. Use start_line/end_line to read more.]"
-        )
-
-    return ToolResult(success=True, output=output)
+    note = (
+        f"\n\n[FILE TRUNCATED at {max_display} lines — "
+        f"total {total} lines. Use start_line/end_line to read more.]"
+    )
+    return ToolResult(
+        success=True,
+        output=_format_numbered_lines(
+            selected,
+            start_line=start + 1,
+            truncated=truncated,
+            truncation_note=note,
+        ),
+    )
 
 
 def _fuzzy_search_replace(

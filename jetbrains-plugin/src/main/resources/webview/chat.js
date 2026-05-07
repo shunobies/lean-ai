@@ -111,10 +111,10 @@
 
     function renderContent(text) {
         // Basic markdown rendering (code blocks, bold, italic, links)
-        return text
+        return escapeHtml(text)
             // Code blocks
             .replace(/```(\w*)\n([\s\S]*?)```/g, function (_, lang, code) {
-                return '<pre><code class="language-' + escapeHtml(lang) + '">' + escapeHtml(code) + '</code></pre>';
+                return '<pre><code class="language-' + sanitizeClassName(lang) + '">' + code + '</code></pre>';
             })
             // Inline code
             .replace(/`([^`]+)`/g, '<code>$1</code>')
@@ -123,14 +123,28 @@
             // Italic
             .replace(/\*([^*]+)\*/g, '<em>$1</em>')
             // Links
-            .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
+            .replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_, label, href) {
+                return '<a href="' + sanitizeHref(href) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>';
+            })
             // Line breaks
             .replace(/\n/g, '<br>');
     }
 
     function escapeHtml(str) {
-        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function sanitizeClassName(value) {
+        return String(value || '').replace(/[^A-Za-z0-9_-]/g, '');
+    }
+
+    function sanitizeHref(value) {
+        var href = String(value || '').trim();
+        if (/^(https?:|mailto:)/i.test(href)) {
+            return href;
+        }
+        return '#';
     }
 
     function scrollToBottom() {
@@ -323,9 +337,15 @@
             (description ? '<p>' + escapeHtml(description) + '</p>' : '') +
             '<div class="command-display">' + escapeHtml(command) + '</div>' +
             '<div class="approval-buttons">' +
-            '  <button class="btn-approve" onclick="approveToolExec(this, \'' + escapeHtml(token) + '\')">Allow</button>' +
-            '  <button class="btn-reject" onclick="denyToolExec(this, \'' + escapeHtml(token) + '\')">Deny</button>' +
+            '  <button class="btn-approve">Allow</button>' +
+            '  <button class="btn-reject">Deny</button>' +
             '</div>';
+        card.querySelector('.btn-approve').addEventListener('click', function () {
+            approveToolExec(this, token);
+        });
+        card.querySelector('.btn-reject').addEventListener('click', function () {
+            denyToolExec(this, token);
+        });
         messagesEl.appendChild(card);
         scrollToBottom();
     }

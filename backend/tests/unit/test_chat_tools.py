@@ -76,7 +76,7 @@ def _tool_response(name: str, args: dict, content: str = "") -> tuple[str, list,
 
 
 def test_chat_tools_contains_expected_tools():
-    assert len(CHAT_TOOLS) == 11
+    assert len(CHAT_TOOLS) == 14
 
 
 def test_chat_tools_names():
@@ -93,6 +93,9 @@ def test_chat_tools_names():
         "list_recent_sessions",
         "get_session_summary",
         "search_workspace_memory",
+        "search_architecture_decisions",
+        "get_architecture_decision",
+        "record_architecture_decision",
     }
 
 
@@ -302,6 +305,28 @@ async def test_chat_executor_list_directory(tmp_path):
 
     assert "file_a.py" in result
     assert "subdir" in result
+
+
+@pytest.mark.asyncio
+async def test_chat_executor_rejects_paths_outside_workspace(tmp_path):
+    """Chat read-only filesystem tools must stay inside the open workspace."""
+    from lean_ai.routers.chat import _make_chat_tool_executor
+
+    repo = tmp_path / "repo"
+    outside = tmp_path / "outside"
+    repo.mkdir()
+    outside.mkdir()
+    (outside / "secret.txt").write_text("not workspace data")
+
+    executor = _make_chat_tool_executor(str(repo))
+
+    read_result = await executor("read_file", {"path": "../outside/secret.txt"})
+    list_result = await executor("list_directory", {"path": "../outside"})
+    tree_result = await executor("directory_tree", {"path": "../outside"})
+
+    assert "escapes workspace" in read_result
+    assert "escapes workspace" in list_result
+    assert "escapes workspace" in tree_result
 
 
 @pytest.mark.asyncio
