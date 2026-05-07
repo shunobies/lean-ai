@@ -67,6 +67,24 @@ _BARRIER_TOOLS = frozenset(
 )
 _FILE_WRITE_TOOLS = frozenset({"create_file", "edit_file"})
 _IMPLICIT_MUTATION_TOOLS = frozenset({"run_command", "format_code"})
+_MUTATION_TOOLS = _FILE_WRITE_TOOLS | _IMPLICIT_MUTATION_TOOLS
+_READ_ONLY_TOOLS = frozenset(
+    {
+        "read_file",
+        "list_directory",
+        "directory_tree",
+        "grep_files",
+        "query_project_context",
+        "search_reference",
+        "search_wiki",
+        "fetch_wiki_page",
+        "search_internet",
+        "fetch_url",
+        "update_scratchpad",
+        "add_journal_entry",
+    }
+)
+_COMPLETION_TOOL = "task_complete"
 _INCOMPLETE_REL_PATH = ".lean_ai/incomplete.md"
 
 
@@ -99,6 +117,43 @@ def _tool_result_failed(result: str) -> bool:
     return result.lstrip().upper().startswith(("ERROR:", "FAILED"))
 
 
+def _step_allowed_tool_names(step: PlanStep) -> set[str]:
+    allowed = {name for name in (getattr(step, "allowed_tools", None) or []) if name}
+    if getattr(step, "tool", ""):
+        allowed.add(step.tool)
+    allowed.add(_COMPLETION_TOOL)
+    return allowed
+
+
+def _step_may_change_paths(step: PlanStep) -> set[str]:
+    paths = {
+        _normalize_path(target.path)
+        for target in (getattr(step, "may_change", None) or [])
+        if getattr(target, "path", "").strip()
+    }
+    if getattr(step, "file_path", "") and getattr(step, "tool", "") in _MUTATION_TOOLS:
+        paths.add(_normalize_path(step.file_path))
+    return paths
+
+
+def _step_success_check_text(step: PlanStep) -> str:
+    parts: list[str] = []
+    for check in getattr(step, "success_checks", None) or []:
+        parts.append(check.description or "")
+        parts.append(check.tool or "")
+        parts.append(check.command or "")
+        parts.append(check.expected or "")
+    return " ".join(part for part in parts if part)
+
+
+def _step_primary_label(step: PlanStep) -> str:
+    job = getattr(step, "job", "") or getattr(step, "instruction", "") or "planned job"
+    paths = sorted(_step_may_change_paths(step))
+    if paths:
+        return f"{job} ({', '.join(paths)})"
+    return job
+
+
 def _step_scope_error(
     step: PlanStep,
     tool_name: str,
@@ -106,35 +161,35 @@ def _step_scope_error(
 ) -> str | None:
     """Return an executor-side scope violation for the current step, if any.
 
-    Keep the tool catalog stable for the LLM, but reject mutating actions that
-    drift outside the current plan step. Read-only helpers remain available.
+    Keep the tool catalog stable for the LLM, but reject actions outside the
+    current job contract. Read-only helpers are allowed only when the contract
+    includes them (or when an older plan omitted ``allowed_tools`` entirely).
     """
     if tool_name == "request_test_change":
         return None
 
+    allowed_tools = _step_allowed_tool_names(step)
+    if tool_name not in allowed_tools:
+        return (
+            f"ERROR: This step may use only these tools: {', '.join(sorted(allowed_tools))}. "
+            f"You tried to use `{tool_name}`. Stay inside the current job contract."
+        )
+
     if tool_name in _FILE_WRITE_TOOLS:
-        if step.tool not in _FILE_WRITE_TOOLS:
-            return (
-                f"ERROR: This is a `{step.tool}` step, not a direct file-write step. "
-                "Use read-only helpers if needed, then finish the current step with "
-                f"`{step.tool}` and call task_complete."
-            )
         target_path = _normalize_path(arguments.get("path", ""))
-        expected_path = _normalize_path(step.file_path)
-        if expected_path and target_path != expected_path:
+        allowed_paths = _step_may_change_paths(step)
+        if not allowed_paths:
             return (
-                f"ERROR: This step may only modify `{step.file_path}`. "
+                "ERROR: This step does not declare any `may_change` file targets, "
+                f"so `{tool_name}` cannot safely write `{arguments.get('path', '')}`."
+            )
+        if target_path not in allowed_paths:
+            return (
+                f"ERROR: This step may only modify: {', '.join(sorted(allowed_paths))}. "
                 f"You tried to modify `{arguments.get('path', '')}`. "
-                "Stay on the planned target file for this step."
+                "Stay inside the planned mutation boundary for this step."
             )
         return None
-
-    if tool_name in _IMPLICIT_MUTATION_TOOLS and tool_name != step.tool:
-        return (
-            f"ERROR: This is a `{step.tool}` step, so `{tool_name}` is out of scope here. "
-            "Use read-only helpers if you need context, then perform the planned step and "
-            "call task_complete when it is actually done."
-        )
 
     return None
 
@@ -145,24 +200,50 @@ def _step_primary_action_done(
     successful_calls: list[ToolCall],
     attempted_calls: list[ToolCall],
 ) -> bool:
-    """Return True when the step's required primary action has happened."""
-    expected_path = _normalize_path(step.file_path)
+    """Return True when the step's bounded job appears to have happened."""
+    allowed_paths = _step_may_change_paths(step)
+    allowed_tools = _step_allowed_tool_names(step)
 
-    if step.tool == "read_file":
+    if not allowed_paths and step.tool == "read_file":
         return any(
             tc.tool_name == "read_file"
-            and _normalize_path(tc.parameters.get("path", "")) == expected_path
+            and (
+                not step.file_path
+                or _normalize_path(tc.parameters.get("path", "")) == _normalize_path(step.file_path)
+            )
             for tc in successful_calls
         )
 
-    if step.tool in _FILE_WRITE_TOOLS:
+    if allowed_paths:
         return any(
             tc.tool_name in _FILE_WRITE_TOOLS
-            and _normalize_path(tc.parameters.get("path", "")) == expected_path
+            and _normalize_path(tc.parameters.get("path", "")) in allowed_paths
             for tc in successful_calls
+        ) or any(tc.tool_name in _IMPLICIT_MUTATION_TOOLS for tc in successful_calls)
+
+    command_checks = [
+        check
+        for check in getattr(step, "success_checks", None) or []
+        if check.tool in _BARRIER_TOOLS or check.tool == "run_command"
+    ]
+    if command_checks:
+        return all(
+            any(
+                tc.tool_name == check.tool
+                and (
+                    not check.command
+                    or tc.parameters.get("command", "").strip() == check.command.strip()
+                )
+                for tc in attempted_calls
+            )
+            for check in command_checks
         )
 
-    return any(tc.tool_name == step.tool for tc in attempted_calls)
+    mutating_allowed = allowed_tools & _MUTATION_TOOLS
+    if mutating_allowed:
+        return any(tc.tool_name in mutating_allowed for tc in successful_calls)
+
+    return True
 
 
 def _step_completion_error(
@@ -178,9 +259,25 @@ def _step_completion_error(
         successful_calls=successful_calls,
         attempted_calls=attempted_calls,
     ):
-        if step.file_path:
-            return f"Step never completed its primary action: `{step.tool}` for `{step.file_path}`."
-        return f"Step never completed its primary action: `{step.tool}`."
+        return f"Step never completed its required job action: {_step_primary_label(step)}."
+
+    for check in getattr(step, "success_checks", None) or []:
+        if not check.tool or check.tool not in _BARRIER_TOOLS | {"run_command"}:
+            continue
+        matched = any(
+            tc.tool_name == check.tool
+            and (
+                not check.command
+                or tc.parameters.get("command", "").strip() == check.command.strip()
+            )
+            for tc in attempted_calls
+        )
+        if not matched:
+            command = f" `{check.command}`" if check.command else ""
+            return (
+                f"Step did not run required success check `{check.tool}`{command}: "
+                f"{check.description}"
+            )
 
     if not task_complete_seen:
         return (
@@ -290,8 +387,8 @@ def _build_step_groups(
     for i, step in enumerate(steps):
         max_dep_group = min_group_after_barrier - 1
 
-        # Barrier tool: depends on everything before it
-        if step.tool in _BARRIER_TOOLS:
+        # Barrier tools: depend on everything before them
+        if step.tool in _BARRIER_TOOLS or bool(_step_allowed_tool_names(step) & _BARRIER_TOOLS):
             if group_idx:
                 max_dep_group = max(max_dep_group, max(group_idx))
             group_idx.append(max_dep_group + 1)
@@ -300,21 +397,27 @@ def _build_step_groups(
             file_owners.clear()
             continue
 
-        step_path = _normalize_path(step.file_path or "")
+        step_paths = _step_may_change_paths(step)
+        if not step_paths and step.file_path:
+            step_paths = {_normalize_path(step.file_path)}
 
         # Same file_path → sequential dependency
-        if step_path and step_path in file_owners:
-            dep_step = file_owners[step_path]
-            max_dep_group = max(max_dep_group, group_idx[dep_step])
+        for step_path in step_paths:
+            if step_path and step_path in file_owners:
+                dep_step = file_owners[step_path]
+                max_dep_group = max(max_dep_group, group_idx[dep_step])
 
         # Cross-file reference: check if instruction/context mentions
         # any previously-touched file (boundary-aware)
         searchable = " ".join(
             part
             for part in (
+                step.job or "",
                 step.instruction or "",
                 step.reason or "",
                 step.context or "",
+                step.output_shape or "",
+                _step_success_check_text(step),
                 step.file_path or "",
             )
             if part
@@ -325,8 +428,8 @@ def _build_step_groups(
 
         group_idx.append(max_dep_group + 1)
 
-        # Register this step's file
-        if step_path:
+        # Register this step's mutation targets
+        for step_path in step_paths:
             file_owners[step_path] = i
 
     # Collect groups
@@ -387,7 +490,7 @@ async def execute_plan(
         checklist_steps.append(
             {
                 "step_index": step.step_number - 1,
-                "description": step.instruction[:120],
+                "description": (step.job or step.instruction)[:120],
                 "tool": step.tool,
                 "file_path": step.file_path or "",
             }
@@ -444,12 +547,12 @@ async def execute_plan(
         """Execute one plan step, collecting artifacts and progress."""
         step_label = f"{label_prefix}Step {step.step_number}"
         logger.info(
-            "Executing %s/%d: %s %s — %s",
+                "Executing %s/%d: %s %s — %s",
             step_label,
             total_steps,
-            step.tool,
+            ",".join(sorted(_step_allowed_tool_names(step))),
             step.file_path,
-            step.instruction[:80],
+            (step.job or step.instruction)[:80],
         )
 
         await ws_send(
@@ -457,7 +560,7 @@ async def execute_plan(
             "checkpoint",
             {
                 "step_index": step.step_number - 1,
-                "step_description": (f"{step_label}: {step.instruction[:100]}"),
+                "step_description": (f"{step_label}: {(step.job or step.instruction)[:100]}"),
                 "status": "running",
                 "head_commit_sha": None,
             },
@@ -532,19 +635,27 @@ async def execute_plan(
         def _build_step_reminder() -> str:
             parts = [
                 f"REMINDER — STEP {step.step_number} OF {total_steps}",
-                f"Tool: {step.tool}",
+                f"Job: {step.job or step.instruction}",
+                f"Allowed tools: {', '.join(sorted(_step_allowed_tool_names(step)))}",
             ]
-            if step.file_path:
-                parts.append(f"File: {step.file_path}")
-            parts.append(f"Instruction: {step.instruction}")
+            paths = sorted(_step_may_change_paths(step))
+            if paths:
+                parts.append(f"May change: {', '.join(paths)}")
+            if step.must_not_change:
+                parts.append(f"Must not change: {', '.join(step.must_not_change)}")
+            if step.output_shape:
+                parts.append(f"Required output: {step.output_shape}")
+            if step.success_checks:
+                checks = "; ".join(check.description for check in step.success_checks)
+                parts.append(f"Success checks: {checks}")
             return "\n".join(parts)
 
         def _build_step_text_only_nudge() -> str:
             target = f" on `{step.file_path}`" if step.file_path else ""
             return (
                 f"This is still {step_label}. Use tools to do the work before replying with prose. "
-                f"You must perform the planned primary action `{step.tool}`{target}, then call "
-                "task_complete when the step is truly finished."
+                f"Complete the job contract{target}, satisfy its success checks, then call "
+                "task_complete when the step is truly finished. If blocked, follow the blocked protocol."
             )
 
         async def _step_executor(name: str, arguments: dict) -> str:
@@ -615,6 +726,16 @@ async def execute_plan(
             successful_calls=successful_calls,
             attempted_calls=attempted_calls,
         )
+        allowed_paths = _step_may_change_paths(step)
+        if not completion_error and allowed_paths and implicit_changed_paths:
+            out_of_scope = [
+                path for path in implicit_changed_paths if _normalize_path(path) not in allowed_paths
+            ]
+            if out_of_scope:
+                completion_error = (
+                    "Step changed files outside its `may_change` boundary: "
+                    f"{', '.join(out_of_scope)}. Allowed: {', '.join(sorted(allowed_paths))}."
+                )
         if completion_error:
             detail = completion_error
             if explanation.strip():
@@ -630,7 +751,7 @@ async def execute_plan(
                 "checkpoint",
                 {
                     "step_index": step.step_number - 1,
-                    "step_description": (f"{step_label}: {step.instruction[:100]}"),
+                    "step_description": (f"{step_label}: {(step.job or step.instruction)[:100]}"),
                     "status": "failed",
                     "head_commit_sha": None,
                 },
@@ -643,7 +764,7 @@ async def execute_plan(
             all_executed.extend(successful_calls)
             if explanation.strip():
                 step_explanations.append(f"{step_label}: {explanation.strip()}")
-            completed_descriptions.append(f"{step_label}: {step.instruction}")
+            completed_descriptions.append(f"{step_label}: {step.job or step.instruction}")
 
             # Collect files created/modified for cross-step context
             artifact_budget = int(settings._active_context_window * 0.10 * 3.5)
@@ -676,7 +797,7 @@ async def execute_plan(
             "checkpoint",
             {
                 "step_index": step.step_number - 1,
-                "step_description": (f"{step_label}: {step.instruction[:100]}"),
+                "step_description": (f"{step_label}: {(step.job or step.instruction)[:100]}"),
                 "status": "completed",
                 "head_commit_sha": None,
             },

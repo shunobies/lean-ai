@@ -416,12 +416,44 @@ def build_step_user_message(
         parts.append("")
 
     # Step details
-    parts.append(f"Tool: {step.tool}")
-    if step.file_path:
-        parts.append(f"File: {step.file_path}")
-    parts.append(f"Instruction: {step.instruction}")
+    parts.append(f"Job: {step.job or step.instruction}")
     if step.reason:
-        parts.append(f"Reason: {step.reason}")
+        parts.append(f"Why this job matters: {step.reason}")
+    if step.inputs:
+        parts.append("\nInputs available for this job:")
+        for inp in step.inputs:
+            detail = f" — {inp.details}" if inp.details else ""
+            parts.append(f"- {inp.source}{detail}")
+    if step.may_change:
+        parts.append("\nYou MAY change only these targets:")
+        for target in step.may_change:
+            detail = f" — {target.change}" if target.change else ""
+            parts.append(f"- {target.path}{detail}")
+    elif step.file_path:
+        parts.append(f"\nPrimary target: {step.file_path}")
+    if step.must_not_change:
+        parts.append("\nYou MUST NOT change:")
+        for item in step.must_not_change:
+            parts.append(f"- {item}")
+    if step.allowed_tools:
+        parts.append(f"\nAllowed tools for this job: {', '.join(step.allowed_tools)}")
+    if step.output_shape:
+        parts.append(f"\nRequired output shape:\n{step.output_shape}")
+    if step.success_checks:
+        parts.append("\nSuccess checks to satisfy before task_complete:")
+        for check in step.success_checks:
+            rendered = f"- {check.description}"
+            if check.tool:
+                rendered += f" [tool: {check.tool}]"
+            if check.command:
+                rendered += f" [command: {check.command}]"
+            if check.expected:
+                rendered += f" [expected: {check.expected}]"
+            parts.append(rendered)
+    if step.blocked_protocol:
+        parts.append(f"\nIf blocked:\n{step.blocked_protocol}")
+    if step.reason:
+        parts.append("")
 
     if step.context:
         ctx_text = step.context
@@ -434,7 +466,17 @@ def build_step_user_message(
     if step_artifacts:
         relevant: dict[str, str] = {}
         searchable = (
-            (step.instruction or "") + " " + (step.context or "") + " " + (step.file_path or "")
+            (step.job or "")
+            + " "
+            + (step.instruction or "")
+            + " "
+            + (step.context or "")
+            + " "
+            + (step.output_shape or "")
+            + " "
+            + " ".join(check.description for check in step.success_checks)
+            + " "
+            + (step.file_path or "")
         )
         relevant.update(
             {path: content for path, content in step_artifacts.items() if path in searchable}
@@ -456,17 +498,11 @@ def build_step_user_message(
                 parts.append(f"\n--- {path} ---\n```\n{truncated}\n```")
 
     # Explicit directive
-    if step.tool in ("run_tests", "run_lint", "format_code", "run_command"):
-        parts.append(f"\nCall {step.tool} with the command specified in the instruction.")
-    elif step.tool == "edit_file":
-        parts.append(
-            f"\nRead {step.file_path} first if the context above seems "
-            "incomplete, then call edit_file with accurate search/replace blocks."
-        )
-    elif step.tool == "create_file":
-        parts.append(
-            f"\nCall create_file to create {step.file_path} with the content "
-            "described in the instruction. Produce complete, working code."
-        )
+    parts.append(
+        "\nUse the allowed tools to complete this bounded job. Stay inside "
+        "`may_change`, preserve everything listed under `must_not_change`, "
+        "satisfy the success checks, then call task_complete. Do not stop at "
+        "prose unless the blocked protocol applies."
+    )
 
     return "\n".join(parts)

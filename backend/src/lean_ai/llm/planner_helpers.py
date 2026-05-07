@@ -9,11 +9,13 @@ Agent Prompt flow; the planner never asks the user clarifying questions.
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 from fastapi import WebSocket
+from pydantic import BaseModel
 
 from lean_ai.config import settings
+from lean_ai.llm.base import StructuredOutputError, format_validation_path
 from lean_ai.llm.plan_schema import (
     IMPLEMENTATION_STEP_TOOLS,
     ExecutionPlan,
@@ -27,6 +29,8 @@ if TYPE_CHECKING:
     from lean_ai.llm.facade import LLMClient
 
 logger = logging.getLogger(__name__)
+
+StructuredModelT = TypeVar("StructuredModelT", bound=BaseModel)
 
 # Phase 4/5 produce structured JSON plans with enriched step instructions
 # and context fields — give them 40% of the expert context window so
@@ -329,6 +333,121 @@ async def _send_content_done(
     ws_send_nowait(ws, "assistant_content", {"content": text, "done": True})
 
 
+def _format_structured_repair_details(error: StructuredOutputError) -> str:
+    """Render targeted repair feedback for a malformed structured response."""
+    if error.exact_json_error:
+        return f"Exact JSON error: {error.exact_json_error}"
+
+    lines: list[str] = []
+    for err in error.validation_errors[:3]:
+        path = format_validation_path(err.get("loc") or ())
+        msg = str(err.get("msg") or "invalid value")
+        lines.append(f"- {path}: {msg}")
+    if not lines:
+        return "Schema validation failed."
+    return "Validation issues:\n" + "\n".join(lines)
+
+
+def _build_structured_repair_prompt(
+    *,
+    schema_name: str,
+    error: StructuredOutputError,
+) -> str:
+    """Build a repair prompt that asks the model to minimally fix its JSON."""
+    return (
+        f"Your previous {schema_name} response did not validate.\n\n"
+        f"{_format_structured_repair_details(error)}\n\n"
+        "Return ONLY corrected JSON that matches the schema exactly. "
+        "Do not include markdown fences or commentary. Preserve the intended "
+        "plan and make only the minimal schema/format fixes needed.\n\n"
+        "Previous invalid JSON:\n"
+        "```json\n"
+        f"{error.cleaned_output}\n"
+        "```"
+    )
+
+
+def _structured_failure_message(
+    *,
+    artifact_label: str,
+    schema_name: str,
+) -> str:
+    return (
+        f"Failed to generate the {artifact_label} because the model returned malformed "
+        f"{schema_name} JSON twice. Please retry planning."
+    )
+
+
+async def _chat_structured_with_repair(
+    *,
+    messages: list[dict],
+    schema: type[StructuredModelT],
+    expert: "LLMClient",
+    max_tokens: int,
+    artifact_label: str,
+    ws: WebSocket | None = None,
+    phase: int | None = None,
+    on_thinking: Callable | None = None,
+    on_metrics: Callable | None = None,
+    on_metrics_reset: Callable | None = None,
+) -> StructuredModelT:
+    """Run one structured planning call with one targeted repair retry."""
+    try:
+        return await expert.chat_structured(
+            messages=messages,
+            schema=schema,
+            max_tokens=max_tokens,
+            thinking_callback=on_thinking,
+            on_metrics=on_metrics,
+            on_metrics_reset=on_metrics_reset,
+            retry_on_validation_error=False,
+        )
+    except StructuredOutputError as exc:
+        logger.warning(
+            "Structured planning output invalid for %s; requesting targeted repair: %s",
+            schema.__name__,
+            exc.summary,
+        )
+        await _send_stage(
+            ws,
+            f"Repairing malformed {schema.__name__} JSON...",
+            model=expert.model_name,
+            phase=phase,
+        )
+        repair_messages = list(messages)
+        repair_messages.append(
+            {
+                "role": "user",
+                "content": _build_structured_repair_prompt(
+                    schema_name=schema.__name__,
+                    error=exc,
+                ),
+            }
+        )
+        try:
+            return await expert.chat_structured(
+                messages=repair_messages,
+                schema=schema,
+                max_tokens=max_tokens,
+                thinking_callback=on_thinking,
+                on_metrics=on_metrics,
+                on_metrics_reset=on_metrics_reset,
+                retry_on_validation_error=False,
+            )
+        except StructuredOutputError as repair_exc:
+            logger.error(
+                "Structured planning repair failed for %s after targeted retry: %s",
+                schema.__name__,
+                repair_exc.summary,
+            )
+            raise RuntimeError(
+                _structured_failure_message(
+                    artifact_label=artifact_label,
+                    schema_name=schema.__name__,
+                )
+            ) from repair_exc
+
+
 async def _compact_file_summary(
     file_summary: str,
     llm_client: "LLMClient",
@@ -616,7 +735,7 @@ async def _revise_plan(
         model=expert.model_name,
     )
     logger.info("Plan revision")
-    plan = await expert.chat_structured(
+    plan = await _chat_structured_with_repair(
         messages=[
             {"role": "system", "content": PLAN_ASSEMBLY_SYSTEM_PROMPT},
             {
@@ -627,14 +746,20 @@ async def _revise_plan(
                     f"REVISION CONTEXT:\n{revision_context}\n\n"
                     "Revise the plan based on the user's feedback. "
                     "Make targeted edits — don't rewrite from scratch. "
-                    "Keep the same structured format with step_number, "
-                    "tool, file_path, instruction, and context fields."
+                    "Keep the Phase 4 job-contract format: each step needs "
+                    "job, inputs, may_change, must_not_change, allowed_tools, "
+                    "output_shape, success_checks, and blocked_protocol. "
+                    "Legacy tool/file_path/instruction/context may remain as "
+                    "short compatibility hints only."
                 ),
             },
         ],
         schema=ExecutionPlan,
+        expert=expert,
         max_tokens=plan_max_tokens,
-        thinking_callback=on_thinking,
+        artifact_label="revised structured plan",
+        ws=ws,
+        on_thinking=on_thinking,
         on_metrics=on_metrics,
         on_metrics_reset=on_metrics_reset,
     )

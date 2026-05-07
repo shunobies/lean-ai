@@ -1,15 +1,15 @@
-"""5-phase decomposed planning pipeline with structured output.
+"""4-phase decomposed planning pipeline with structured output.
 
 Phase 1: Scope analysis
 Phase 2: File identification + content reading (with codebase exploration via tools)
 Phase 3: Design + risk synthesis (change design, naming conventions, gap analysis)
-Phase 4: Structured plan assembly (produces ExecutionPlan via chat_structured)
-Phase 5: Verification step generation (test file creation + test execution)
+Phase 4: Structured plan assembly (produces ExecutionPlan via chat_structured,
+including per-step success checks)
 
 Each phase is a focused LLM call. The planner uses read-only tools
 (read_file, list_directory, directory_tree, grep_files) during Phase 2
 to explore the codebase and read every file it plans to modify.
-Phase 5 only runs when a test command is available.
+Verification is folded into each Phase 4 step's success checks.
 """
 
 import json
@@ -38,6 +38,7 @@ from lean_ai.llm.planner_exploration import (
 )
 from lean_ai.llm.planner_helpers import (
     PLAN_OUTPUT_PERCENT,
+    _chat_structured_with_repair,
     _compact_file_summary,
     _retrieve_session_memories,
     _revise_plan,
@@ -86,14 +87,14 @@ async def create_plan(
     on_metrics: "Callable | None" = None,
     on_metrics_reset: "Callable | None" = None,
 ) -> ExecutionPlan:
-    """Create a plan using 5-phase decomposed planning.
+    """Create a plan using decomposed planning.
 
     Phases 1–2 (scope + codebase exploration) run on the **primary** model
     because exploration benefits from a coder-tuned model that can read
     files precisely. The worker model already compresses large tool
     outputs before they re-enter the primary's context (see
     ``workflow/tool_executor.py``), so the primary isn't on its own.
-    Phases 3–5 (design + assembly + verification) run on the **expert**
+    Phases 3–4 (design + assembly) run on the **expert**
     model when configured. The **request** model is reserved for chat
     and ``/request`` mode — not planning.
 
@@ -105,8 +106,8 @@ async def create_plan(
         revision_context: If revising, the previous plan JSON + user feedback.
         ws: Optional WebSocket for streaming stage progress.
         refiner: Optional local refiner for privacy-stripping file summaries.
-        test_command: If set, planner includes test creation steps.
-        expert_llm_client: Optional expert model for phases 3–5 reasoning.
+        test_command: If set, planner folds test commands into success checks.
+        expert_llm_client: Optional expert model for phases 3–4 reasoning.
         on_content: Streaming callback for content tokens.
         on_thinking: Streaming callback for thinking tokens.
         on_tool_call: Callback for tool call events (phase 2).
@@ -135,7 +136,7 @@ async def create_plan(
     explorer = llm_client
     phase_max_tokens = settings.ollama_max_tokens
 
-    # Expert client for reasoning-heavy phases (3-5), falls back to standard
+    # Expert client for reasoning-heavy phases (3-4), falls back to standard
     expert = expert_llm_client or llm_client
     expert_max_tokens = (
         settings.effective_expert_max_tokens if expert_llm_client else phase_max_tokens
@@ -380,7 +381,7 @@ async def create_plan(
             model=expert_llm_client.model_name,
         )
         logger.info(
-            "Switching to expert model for phases 3-5: %s",
+            "Switching to expert model for phases 3-4: %s",
             expert_llm_client.model_name,
         )
     await _send_stage(
@@ -532,7 +533,15 @@ async def create_plan(
             expert_ctx,
         )
 
-    plan = await expert.chat_structured(
+    verification_targets = _build_verification_targets(
+        file_summary_obj,
+        design_and_risks_obj,
+    )
+    security_concerns = _build_security_concerns(design_and_risks_obj)
+    testing_inventory = _format_testing_inventory(file_summary_obj)
+    core_functionality = _format_core_functionality(design_and_risks_obj)
+
+    plan = await _chat_structured_with_repair(
         messages=[
             {"role": "system", "content": PLAN_ASSEMBLY_SYSTEM_PROMPT},
             {
@@ -557,12 +566,21 @@ async def create_plan(
                         if missing_files
                         else ""
                     ),
+                    test_command=test_command or "(none configured yet)",
+                    testing_inventory=testing_inventory,
+                    verification_targets=verification_targets or "(derive from affected behavioral files)",
+                    security_concerns=security_concerns or "(none identified by Phase 3)",
+                    core_functionality=core_functionality,
                 ),
             },
         ],
         schema=ExecutionPlan,
+        expert=expert,
         max_tokens=plan_assembly_max_tokens,
-        thinking_callback=on_thinking,
+        artifact_label="structured plan",
+        ws=ws,
+        phase=4,
+        on_thinking=on_thinking,
         on_metrics=on_metrics,
         on_metrics_reset=on_metrics_reset,
     )
@@ -606,6 +624,8 @@ async def create_plan(
             len(plan.steps),
             [s.tool for s in plan.steps],
         )
+
+    _sync_affected_files_from_steps(plan)
 
     # ── Phase 4 plan validation ────────────────────────────────────────
     # Set-membership checks over structured Phase 2 + Phase 3 outputs.
@@ -653,6 +673,7 @@ async def create_plan(
         plan.steps = [s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS]
         for i, step in enumerate(plan.steps, 1):
             step.step_number = i
+        _sync_affected_files_from_steps(plan)
         plan_warnings = _run_plan_validations(
             plan,
             file_summary_obj,
@@ -683,30 +704,6 @@ async def create_plan(
         model=expert.model_name,
         phase=4,
     )
-
-    # ── Phase 5: Verification (Layer 4 — always runs) ─────────────
-    # When test_command is empty, Phase 5 still runs and seeds test
-    # files on disk; it just omits the final run_tests step and the
-    # run_tests safety-net injection. This guarantees that every plan
-    # leaves the workspace better-tested than it found it, even before
-    # a test runner is configured.
-    phase5_elapsed = await _run_phase5_verification(
-        plan=plan,
-        task=task,
-        file_summary=file_summary,
-        file_summary_obj=file_summary_obj,
-        design_and_risks_obj=design_and_risks_obj,
-        test_command=test_command,
-        expert=expert,
-        plan_assembly_max_tokens=plan_assembly_max_tokens,
-        ws=ws,
-        repo_root=repo_root,
-        session_id=session_id,
-        on_thinking=on_thinking,
-        on_metrics=on_metrics,
-        on_metrics_reset=on_metrics_reset,
-    )
-    phase_timings["phase_5_verification"] = phase5_elapsed
 
     phase_timings["total"] = time.monotonic() - plan_start
 
@@ -834,14 +831,18 @@ async def _run_phase5_verification(
             run_tests_rule=run_tests_rule,
         )
 
-    verification = await expert.chat_structured(
+    verification = await _chat_structured_with_repair(
         messages=[
             {"role": "system", "content": PLAN_VERIFICATION_SYSTEM_PROMPT},
             {"role": "user", "content": user_content},
         ],
         schema=VerificationPlan,
+        expert=expert,
         max_tokens=plan_assembly_max_tokens,
-        thinking_callback=on_thinking,
+        artifact_label="verification plan",
+        ws=ws,
+        phase=5,
+        on_thinking=on_thinking,
         on_metrics=on_metrics,
         on_metrics_reset=on_metrics_reset,
     )
@@ -1159,7 +1160,13 @@ def _check_hallucinated_paths(
     """Flag any step.file_path that is not in the prior-phase path universe."""
     if not known_paths:
         return []
-    plan_paths = {s.file_path for s in plan.steps if s.file_path}
+    plan_paths: set[str] = set()
+    for step in plan.steps:
+        if step.file_path:
+            plan_paths.add(step.file_path)
+        for target in step.may_change:
+            if target.path:
+                plan_paths.add(target.path)
     return [f"invented path: {p}" for p in sorted(plan_paths - known_paths)]
 
 
@@ -1173,6 +1180,8 @@ def _uncovered_missing_files(
     ``.blocking`` (triggers auto-revision) versus non-blocking (warn only).
     """
     step_paths = {s.file_path for s in plan.steps}
+    for step in plan.steps:
+        step_paths.update(target.path for target in step.may_change if target.path)
     return [mf for mf in dar.missing_files if mf.file_path not in step_paths]
 
 
@@ -1190,12 +1199,116 @@ def _check_edit_create_consistency(
     to_create |= {mf.file_path for mf in dar.missing_files}
     warnings: list[str] = []
     for s in plan.steps:
-        if not s.file_path:
-            continue
-        if s.tool == "edit_file" and s.file_path not in to_modify:
-            warnings.append(f"edit_file on unknown-to-modify path: {s.file_path}")
-        elif s.tool == "create_file" and s.file_path not in to_create:
-            warnings.append(f"create_file on unknown-to-create path: {s.file_path}")
+        paths = [target.path for target in s.may_change if target.path]
+        if not paths and s.file_path:
+            paths = [s.file_path]
+        for path in paths:
+            if path in to_modify or path in to_create:
+                continue
+            if "edit_file" in s.allowed_tools or "create_file" in s.allowed_tools:
+                warnings.append(f"write target not found in prior-phase paths: {path}")
+    return warnings
+
+
+def _sync_affected_files_from_steps(plan: ExecutionPlan) -> None:
+    """Ensure affected_files includes every declared mutation target."""
+    seen = set(plan.affected_files)
+    for step in plan.steps:
+        if step.file_path and step.file_path not in seen and step.tool in IMPLEMENTATION_STEP_TOOLS:
+            plan.affected_files.append(step.file_path)
+            seen.add(step.file_path)
+        for target in step.may_change:
+            if target.path and target.path not in seen:
+                plan.affected_files.append(target.path)
+                seen.add(target.path)
+
+
+def _step_contract_haystack(step: PlanStep) -> str:
+    """Text surface for checking whether a job contract covers a path/entity."""
+    parts: list[str] = [
+        step.job or "",
+        step.instruction or "",
+        step.reason or "",
+        step.output_shape or "",
+        step.context or "",
+        step.file_path or "",
+    ]
+    parts.extend(f"{inp.source} {inp.details}" for inp in step.inputs)
+    parts.extend(f"{target.path} {target.change}" for target in step.may_change)
+    parts.extend(step.must_not_change)
+    for check in step.success_checks:
+        parts.extend([check.description, check.tool, check.command, check.expected])
+    return "\n".join(part for part in parts if part)
+
+
+def _check_success_checks_cover_affected_files(
+    plan: ExecutionPlan,
+    file_summary: FileSummary | None,
+) -> list[str]:
+    """Warn when executable affected files have no test/success-check contract."""
+    code_paths: set[str] = set()
+    if file_summary is not None:
+        for obs in file_summary.files_to_create:
+            if obs.file_path and _has_executable_extension(obs.file_path):
+                code_paths.add(obs.file_path)
+        for obs in file_summary.files_to_modify:
+            if obs.file_path and _has_executable_extension(obs.file_path):
+                code_paths.add(obs.file_path)
+    else:
+        for path in plan.affected_files:
+            if _has_executable_extension(path):
+                code_paths.add(path)
+
+    if not code_paths:
+        return []
+
+    warnings: list[str] = []
+    for code_path in sorted(code_paths):
+        filename = code_path.rsplit("/", 1)[-1]
+        covered = False
+        for step in plan.steps:
+            haystack = _step_contract_haystack(step)
+            if (code_path in haystack or filename in haystack) and step.success_checks:
+                covered = True
+                break
+        if not covered:
+            warnings.append(f"affected file has no success-check coverage: {code_path}")
+    return warnings
+
+
+def _check_core_functionality_success_checked(plan: ExecutionPlan) -> list[str]:
+    """Warn when core-functionality tags lack regression-oriented checks."""
+    tags = getattr(plan, "core_functionality", None) or []
+    if not tags:
+        return []
+
+    confidence_rank = {"low": 0, "medium": 1, "high": 2}
+    try:
+        min_rank = confidence_rank[settings.core_functionality_min_confidence]
+    except KeyError:
+        min_rank = confidence_rank["medium"]
+
+    enforced_tags = [t for t in tags if confidence_rank.get(t.confidence, 1) >= min_rank]
+    warnings: list[str] = []
+    for tag in enforced_tags:
+        entity = tag.entity.strip()
+        file_path = tag.file_path.strip()
+        covered = False
+        for step in plan.steps:
+            haystack = _step_contract_haystack(step).lower()
+            if (
+                ((entity and entity.lower() in haystack) or (file_path and file_path.lower() in haystack))
+                and "regression" in haystack
+                and step.success_checks
+            ):
+                covered = True
+                break
+        if not covered:
+            warnings.append(
+                f"core-functionality tag missing regression success check: "
+                f"'{entity}' in {file_path} "
+                f"[{tag.source_signal}, confidence={tag.confidence}]"
+            )
     return warnings
 
 
@@ -1213,6 +1326,8 @@ def _run_plan_validations(
     known = _collect_known_paths(file_summary, dar)
     warnings.extend(_check_hallucinated_paths(plan, known))
     warnings.extend(_check_edit_create_consistency(plan, file_summary, dar))
+    warnings.extend(_check_success_checks_cover_affected_files(plan, file_summary))
+    warnings.extend(_check_core_functionality_success_checked(plan))
     for mf in _uncovered_missing_files(plan, dar):
         tag = " [BLOCKING]" if mf.blocking else ""
         warnings.append(f"uncovered missing file: {mf.file_path} — {mf.purpose}{tag}")
@@ -1310,14 +1425,13 @@ def _format_testing_inventory(file_summary: FileSummary | None) -> str:
     return "\n".join(lines) if lines else "(empty)"
 
 
-def _format_core_functionality(plan: "ExecutionPlan") -> str:
-    """Render ``plan.core_functionality`` (Layer 9) for Phase 5.
+def _format_core_functionality(source: "ExecutionPlan | DesignAndRisks") -> str:
+    """Render core-functionality tags for planning prompts.
 
     Returns the ``(none)`` sentinel when no tags were detected or the
-    feature flag is disabled. Layer 9 populates the plan field; this
-    helper keeps the Phase 5 call site stable until then.
+    feature flag is disabled.
     """
-    tags = getattr(plan, "core_functionality", []) or []
+    tags = getattr(source, "core_functionality", []) or []
     if not tags:
         return "(none tagged — no mandatory regression tests required by Phase 3.)"
     lines: list[str] = []

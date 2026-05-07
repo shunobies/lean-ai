@@ -17,6 +17,7 @@ class FakeProvider(LLMProvider):
         self.responses = list(responses)
         self.call_count = 0
         self.messages_at_each_call: list[list[dict]] = []
+        self.structured_retry_flags: list[bool] = []
         self._context_window_val = 4096
         self._max_tokens_val = 1024
 
@@ -35,7 +36,16 @@ class FakeProvider(LLMProvider):
     async def chat_raw(self, messages, temperature=None, max_tokens=None):
         return "", LLMMetrics()
 
-    async def chat_structured(self, messages, schema, temperature=None, max_tokens=None):
+    async def chat_structured(
+        self,
+        messages,
+        schema,
+        temperature=None,
+        max_tokens=None,
+        *,
+        retry_on_validation_error=True,
+        **kwargs,
+    ):
         raise NotImplementedError
 
     async def chat_with_tools_single(
@@ -61,8 +71,18 @@ class StructuredResult(BaseModel):
 
 
 class StructuredFakeProvider(FakeProvider):
-    async def chat_structured(self, messages, schema, temperature=None, max_tokens=None):
+    async def chat_structured(
+        self,
+        messages,
+        schema,
+        temperature=None,
+        max_tokens=None,
+        *,
+        retry_on_validation_error=True,
+        **kwargs,
+    ):
         self.messages_at_each_call.append(list(messages))
+        self.structured_retry_flags.append(retry_on_validation_error)
         return StructuredResult(value="ok"), LLMMetrics(prompt_tokens=123)
 
 
@@ -165,6 +185,25 @@ async def test_chat_structured_emits_metrics_and_reset_callbacks():
 
     assert result.value == "ok"
     assert events == ["reset", (123, fake.context_window)]
+    assert fake.structured_retry_flags == [True]
+
+
+@pytest.mark.asyncio
+async def test_chat_structured_forwards_retry_override():
+    fake = StructuredFakeProvider([])
+    client = LLMClient(provider=fake)
+
+    result = await client.chat_structured(
+        messages=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "task"},
+        ],
+        schema=StructuredResult,
+        retry_on_validation_error=False,
+    )
+
+    assert result.value == "ok"
+    assert fake.structured_retry_flags == [False]
 
 
 @pytest.mark.asyncio

@@ -1,14 +1,15 @@
 """Structured plan schema for plan-driven execution.
 
-The planner produces an ExecutionPlan where each step maps to one tool call.
-The executor iterates through steps, feeding each to a constrained LLM
-that translates the detailed instruction into a single tool invocation.
+The planner produces an ExecutionPlan where each step is a bounded job
+contract: what to do, which inputs to use, what may and may not change,
+which tools may be used, what output shape is required, how success is
+checked, and what to do when blocked.
 """
 
 import logging
 from typing import Literal
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -403,23 +404,92 @@ IMPLEMENTATION_STEP_TOOLS = {
 ALL_VALID_STEP_TOOLS = IMPLEMENTATION_STEP_TOOLS
 
 
-class PlanStep(BaseModel):
-    """One discrete step in the execution plan.
+class StepInput(BaseModel):
+    """One piece of context the implementation model may rely on."""
 
-    Each step maps to roughly one tool call.  The ``instruction`` field
-    is detailed enough that a constrained LLM can translate it into the
-    exact tool invocation without exploring the codebase.
+    source: str
+    """Repo-relative path, prior-step artifact, test command, external docs URL,
+    or concise named input such as ``Phase 3 risk: auth bypass``."""
+
+    details: str = ""
+    """Brief details the executor needs from this input. Prefer facts,
+    signatures, invariants, or line ranges over pasted implementation code."""
+
+
+class StepChangeTarget(BaseModel):
+    """One file or repo surface the step is allowed to mutate."""
+
+    path: str
+    """Repo-relative file path or scoped target such as ``package metadata``."""
+
+    change: str = ""
+    """The kind of change allowed at this target."""
+
+
+class StepSuccessCheck(BaseModel):
+    """A concrete check the executor should use before completing a step."""
+
+    description: str
+    """What must be true when this step is complete."""
+
+    tool: str = ""
+    """Optional tool that should be used to check success, e.g. ``run_tests``,
+    ``run_lint``, ``run_command``, or ``read_file``. Empty means the check is
+    judged from the completed work and task_complete summary."""
+
+    command: str = ""
+    """Exact command when ``tool`` is command-like."""
+
+    expected: str = ""
+    """Expected result or observable signal."""
+
+
+class PlanStep(BaseModel):
+    """One bounded job contract in the execution plan.
+
+    The canonical fields describe a small implementation job, its inputs,
+    mutation boundary, available tools, required output shape, success checks,
+    and blocked protocol. Legacy ``tool`` / ``file_path`` / ``instruction`` /
+    ``context`` fields remain as compatibility hints for older plans and UI
+    surfaces, but new plans should not rely on the one-step/one-tool recipe
+    model.
     """
 
     step_number: int
-    tool: str
-    """Tool to call: ``create_file``, ``edit_file``, ``run_command``,
-    ``run_tests``, ``run_lint``, ``format_code``."""
+
+    job: str = ""
+    """What job this step is doing."""
+
+    inputs: list[StepInput] = Field(default_factory=list)
+    """Inputs available to the implementation model for this step."""
+
+    may_change: list[StepChangeTarget] = Field(default_factory=list)
+    """Files or scoped surfaces this step may mutate."""
+
+    must_not_change: list[str] = Field(default_factory=list)
+    """Files, tests, APIs, or behaviors this step must not mutate."""
+
+    allowed_tools: list[str] = Field(default_factory=list)
+    """Tools the implementation model may use while completing this job."""
+
+    output_shape: str = ""
+    """Required shape of the completed work, including any tests or contracts
+    that should exist after the job."""
+
+    success_checks: list[StepSuccessCheck] = Field(default_factory=list)
+    """Checks the executor should satisfy before calling task_complete."""
+
+    blocked_protocol: str = ""
+    """What the implementation model should do when blocked."""
+
+    # Compatibility hints for older stored plans and UI/progress surfaces.
+    tool: str = ""
+    """Legacy primary-tool hint. Prefer ``allowed_tools`` in new plans."""
 
     @field_validator("tool")
     @classmethod
     def warn_non_standard_tool(cls, v: str) -> str:
-        if v not in ALL_VALID_STEP_TOOLS:
+        if v and v not in ALL_VALID_STEP_TOOLS:
             logger.warning(
                 "PlanStep has non-standard tool '%s' — expected one of %s",
                 v,
@@ -427,54 +497,71 @@ class PlanStep(BaseModel):
             )
         return v
 
-    file_path: str
-    """Target file path (relative to repo root).
-    Empty string for ``run_command`` / ``run_tests`` / ``run_lint`` /
-    ``format_code``."""
+    file_path: str = ""
+    """Legacy primary-file hint. Prefer ``may_change`` in new plans."""
 
-    instruction: str
-    """Detailed natural-language instruction for this step.
-
-    For ``edit_file``: which section of the file to modify, what to find,
-    what to replace it with, line references, patterns to follow.
-
-    For ``create_file``: what the file should contain, imports, structure,
-    patterns to follow from existing files.
-
-    For ``run_command``: the exact command to run and why.
-
-    For ``run_tests`` / ``run_lint``: the exact command to run.
-    """
-
-    @field_validator("instruction")
-    @classmethod
-    def instruction_not_empty(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("PlanStep instruction must not be empty")
-        return v
+    instruction: str = ""
+    """Legacy instruction hint. Prefer ``job`` + ``output_shape`` in new plans."""
 
     reason: str = ""
-    """Why this change is needed — the problem it solves or the requirement
-    it satisfies.  The executor uses this to make informed decisions when the
-    exact instruction doesn't match the current file state."""
+    """Why this job is needed."""
 
-    context: str
-    """Relevant file content the planner read during investigation.
-
-    For ``edit_file``: the section of the file being modified (so the
-    executor can construct accurate search blocks without re-reading).
-
-    For ``create_file``: content from related files showing patterns
-    to follow.
-
-    Empty string for ``run_command`` / ``run_tests`` / ``run_lint`` /
-    ``format_code``.
-    """
+    context: str = ""
+    """Legacy context hint. Prefer structured ``inputs`` in new plans."""
 
     _FILE_TOOLS = frozenset({"create_file", "edit_file", "read_file"})
+    _MUTATING_TOOLS = frozenset({"create_file", "edit_file", "run_command", "format_code"})
 
     @model_validator(mode="after")
-    def warn_missing_file_path(self) -> "PlanStep":
+    def normalize_contract(self) -> "PlanStep":
+        if not self.job.strip() and self.instruction.strip():
+            self.job = self.instruction.strip()
+        if not self.instruction.strip() and self.job.strip():
+            self.instruction = self.job.strip()
+        if not self.job.strip() and not self.instruction.strip():
+            raise ValueError("PlanStep instruction must not be empty unless job is provided")
+
+        if self.file_path.strip() and not self.may_change and self.tool in self._MUTATING_TOOLS:
+            self.may_change.append(
+                StepChangeTarget(
+                    path=self.file_path.strip(),
+                    change=(self.reason or self.instruction or self.job).strip(),
+                )
+            )
+        if not self.file_path.strip() and self.may_change:
+            self.file_path = self.may_change[0].path
+
+        if not self.allowed_tools:
+            if self.tool:
+                self.allowed_tools = [self.tool]
+            else:
+                self.allowed_tools = ["read_file", "grep_files", "edit_file", "create_file"]
+        if "task_complete" not in self.allowed_tools:
+            self.allowed_tools.append("task_complete")
+        if self.tool and self.tool not in self.allowed_tools:
+            self.allowed_tools.insert(0, self.tool)
+        if not self.tool:
+            for candidate in (
+                "edit_file",
+                "create_file",
+                "run_command",
+                "run_tests",
+                "run_lint",
+                "format_code",
+                "read_file",
+            ):
+                if candidate in self.allowed_tools:
+                    self.tool = candidate
+                    break
+
+        if not self.output_shape.strip():
+            self.output_shape = "Complete the job described by this step and leave the workspace in a verifiable state."
+        if not self.blocked_protocol.strip():
+            self.blocked_protocol = (
+                "Use read-only tools to gather missing context. If still blocked, "
+                "record the blocker clearly and call task_complete with what is incomplete."
+            )
+
         if self.tool in self._FILE_TOOLS and not self.file_path.strip():
             logger.warning(
                 "PlanStep tool '%s' should have a file_path but got empty string (step %d)",
@@ -485,7 +572,12 @@ class PlanStep(BaseModel):
 
 
 class VerificationPlan(BaseModel):
-    """Verification steps to append after implementation."""
+    """Legacy verification-step container.
+
+    Phase 4 now carries verification requirements in each step's
+    ``success_checks``. This model remains for older debug artifacts and
+    targeted compatibility tests.
+    """
 
     steps: list[PlanStep]
 
@@ -522,11 +614,8 @@ class ExecutionPlan(BaseModel):
     """Ordered list of steps to execute.  Each step is one tool call."""
 
     tdd_test_steps: list[PlanStep] = []
-    """Test steps to execute BEFORE implementation (TDD mode only).
-
-    When TDD mode is enabled, these steps are separated from ``steps``
-    and executed first by the expert model.  Empty when TDD is disabled
-    — test steps remain inline in ``steps``."""
+    """Legacy TDD test steps. New plans fold verification expectations into
+    per-step ``success_checks`` instead of appending a separate Phase 5 plan."""
 
     affected_files: list[str]
     """All file paths that will be created or modified."""
@@ -609,15 +698,41 @@ def format_name_registry_for_prompt(
 
 def _render_step(parts: list[str], step: PlanStep, include_context: bool) -> None:
     """Render a single plan step as markdown lines."""
-    tool_label = step.tool.upper().replace("_", " ")
-    if step.file_path:
-        parts.append(
-            f"{step.step_number}. **{tool_label}** `{step.file_path}` — {step.instruction}"
-        )
-    else:
-        parts.append(f"{step.step_number}. **{tool_label}** — {step.instruction}")
+    tool_label = ", ".join(step.allowed_tools) if step.allowed_tools else step.tool
+    target_label = ""
+    if step.may_change:
+        target_label = " " + ", ".join(f"`{target.path}`" for target in step.may_change)
+    elif step.file_path:
+        target_label = f" `{step.file_path}`"
+    parts.append(f"{step.step_number}. **Job:** {step.job}{target_label}")
     if step.reason:
-        parts.append(f"   **Reason:** {step.reason}")
+        parts.append(f"   **Why:** {step.reason}")
+    if tool_label:
+        parts.append(f"   **Tools:** {tool_label}")
+    if step.inputs:
+        rendered_inputs = "; ".join(
+            f"{inp.source}: {inp.details}" if inp.details else inp.source for inp in step.inputs
+        )
+        parts.append(f"   **Inputs:** {rendered_inputs}")
+    if step.may_change:
+        rendered_changes = "; ".join(
+            f"{target.path}: {target.change}" if target.change else target.path
+            for target in step.may_change
+        )
+        parts.append(f"   **May change:** {rendered_changes}")
+    if step.must_not_change:
+        parts.append(f"   **Must not change:** {', '.join(step.must_not_change)}")
+    if step.output_shape:
+        parts.append(f"   **Output:** {step.output_shape}")
+    if step.success_checks:
+        checks = "; ".join(
+            check.description
+            + (f" ({check.tool}: {check.command})" if check.tool and check.command else "")
+            for check in step.success_checks
+        )
+        parts.append(f"   **Success checks:** {checks}")
+    if step.blocked_protocol:
+        parts.append(f"   **If blocked:** {step.blocked_protocol}")
     if include_context and step.context:
         parts.append(f"   ```\n{step.context}\n   ```")
 

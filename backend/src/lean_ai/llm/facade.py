@@ -296,10 +296,12 @@ class LLMClient:
         thinking_callback=None,
         on_metrics: Callable | None = None,
         on_metrics_reset: Callable | None = None,
+        retry_on_validation_error: bool = True,
     ) -> BaseModel:
         kwargs = {}
         if thinking_callback is not None:
             kwargs["thinking_callback"] = thinking_callback
+        kwargs["retry_on_validation_error"] = retry_on_validation_error
 
         if on_metrics_reset:
             await on_metrics_reset()

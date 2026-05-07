@@ -10,8 +10,9 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,112 @@ class CapabilityError(Exception):
     error and fall back to the dedicated path (``vision_model`` for image,
     faster-whisper for audio).
     """
+
+
+@dataclass
+class StructuredOutputError(Exception):
+    """Structured-output parsing failed after provider generation.
+
+    Carries both the original raw text and the cleaned JSON candidate so
+    callers can either retry blindly or ask the model to minimally repair
+    its own output without losing the original work.
+    """
+
+    schema_name: str
+    raw_output: str
+    cleaned_output: str
+    validation_errors: list[dict[str, Any]]
+    summary: str
+
+    def __post_init__(self) -> None:
+        super().__init__(self.summary)
+
+    @property
+    def is_json_syntax_error(self) -> bool:
+        return bool(self.validation_errors) and self.validation_errors[0].get("type") == "json_invalid"
+
+    @property
+    def exact_json_error(self) -> str | None:
+        if not self.is_json_syntax_error:
+            return None
+        msg = self.validation_errors[0].get("msg")
+        return str(msg) if msg else None
+
+
+def strip_json_code_fences(text: str) -> str:
+    """Remove surrounding markdown fences from a JSON payload if present."""
+    cleaned = text.strip()
+    if not cleaned.startswith("```"):
+        return cleaned
+
+    lines = cleaned.splitlines()
+    if not lines or not lines[0].strip().startswith("```"):
+        return cleaned
+
+    inner = lines[1:]
+    if inner and inner[-1].strip() == "```":
+        inner = inner[:-1]
+    return "\n".join(inner).strip()
+
+
+def format_validation_path(loc: tuple[Any, ...] | list[Any]) -> str:
+    if not loc:
+        return "<root>"
+
+    path = ""
+    for part in loc:
+        if isinstance(part, int):
+            path += f"[{part}]"
+            continue
+        token = str(part)
+        if not path or path == "<root>":
+            path = token
+        else:
+            path += f".{token}"
+    return path or "<root>"
+
+
+def summarize_validation_errors(
+    errors: list[dict[str, Any]],
+    *,
+    max_errors: int = 3,
+) -> str:
+    """Build a compact human-readable summary from Pydantic errors."""
+    if not errors:
+        return "Structured output validation failed."
+
+    first = errors[0]
+    if first.get("type") == "json_invalid":
+        msg = first.get("msg") or "Invalid JSON."
+        return str(msg)
+
+    chunks: list[str] = []
+    for err in errors[:max_errors]:
+        path = format_validation_path(err.get("loc") or ())
+        msg = str(err.get("msg") or "invalid value")
+        chunks.append(f"{path}: {msg}")
+    more = len(errors) - len(chunks)
+    suffix = f" (+{more} more)" if more > 0 else ""
+    return "Schema validation failed: " + "; ".join(chunks) + suffix
+
+
+def validate_structured_output(
+    raw_output: str,
+    schema: type[BaseModel],
+) -> tuple[BaseModel, str]:
+    """Parse structured model output after stripping obvious wrappers."""
+    cleaned = strip_json_code_fences(raw_output)
+    try:
+        return schema.model_validate_json(cleaned), cleaned
+    except ValidationError as exc:
+        errors = exc.errors()
+        raise StructuredOutputError(
+            schema_name=schema.__name__,
+            raw_output=raw_output,
+            cleaned_output=cleaned,
+            validation_errors=errors,
+            summary=summarize_validation_errors(errors),
+        ) from exc
 
 
 @dataclass
@@ -200,6 +307,7 @@ class LLMProvider(ABC):
         max_tokens: int | None = None,
         *,
         thinking_callback: StreamCallback | None = None,
+        retry_on_validation_error: bool = True,
     ) -> tuple[BaseModel, LLMMetrics]:
         """Send a conversation and parse the response into a Pydantic model.
 

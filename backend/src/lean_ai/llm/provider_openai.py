@@ -4,10 +4,17 @@ import json
 import logging
 from collections.abc import AsyncIterator
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from lean_ai.config import settings
-from lean_ai.llm.base import LLMMetrics, LLMProvider, ToolCallInfo, retry_with_backoff
+from lean_ai.llm.base import (
+    LLMMetrics,
+    LLMProvider,
+    StructuredOutputError,
+    ToolCallInfo,
+    retry_with_backoff,
+    validate_structured_output,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -262,6 +269,7 @@ class OpenAIProvider(LLMProvider):
         max_tokens: int | None = None,
         *,
         thinking_callback=None,
+        retry_on_validation_error: bool = True,
     ) -> tuple[BaseModel, LLMMetrics]:
         temp = temperature if temperature is not None else self._temperature
         tokens = max_tokens if max_tokens is not None else self._max_tokens_val
@@ -321,20 +329,21 @@ class OpenAIProvider(LLMProvider):
                     stop_reason=choice.finish_reason,
                 )
             try:
-                return schema.model_validate_json(raw), metrics
-            except ValidationError as exc:
+                parsed, _cleaned = validate_structured_output(raw, schema)
+                return parsed, metrics
+            except StructuredOutputError as exc:
                 last_error = exc
-                if attempt == 0:
+                if retry_on_validation_error and attempt == 0:
                     logger.warning(
                         "Schema validation failed for %s, retrying: %s",
                         schema.__name__,
-                        exc.errors(),
+                        exc.summary,
                     )
                     continue
                 logger.error(
                     "Schema validation failed after retry for %s. Raw: %s",
                     schema.__name__,
-                    raw[:1000],
+                    exc.cleaned_output[:1000],
                 )
                 raise
         raise last_error  # type: ignore[misc]
