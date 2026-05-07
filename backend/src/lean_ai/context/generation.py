@@ -279,6 +279,23 @@ async def generate_project_context(
             write_project_context(repo_root, content)
             return content
 
+        # Remove stale LLM facts for files whose content changed before we
+        # re-extract them. Unchanged files keep their cached entries.
+        changed_paths: list[str] = []
+        for file_path, file_content in candidates:
+            current_hash = _compute_content_hash(file_content)
+            cached_hash = existing_hashes.get(file_path)
+            if current_hash is None or cached_hash != current_hash:
+                changed_paths.append(file_path)
+
+        for changed_path in changed_paths:
+            await delete_entries_for_file(db, changed_path, source="llm")
+        if changed_paths:
+            logger.info(
+                "Phase 1 prep: cleared cached LLM entries for %d changed file(s)",
+                len(changed_paths),
+            )
+
         # ── Model resolution ────────────────────────────────────────
         # Use the request model (chatty, larger context) for extraction when
         # available, falling back to the primary model.  Condensation always
@@ -312,7 +329,8 @@ async def generate_project_context(
 
         # Cleanup: remove entries for files no longer in the repository
         current_file_paths = {fp for fp, _ in candidates}
-        all_db_paths = set(existing_hashes.keys())
+        cursor = await db.execute("SELECT DISTINCT file_path FROM context_entries")
+        all_db_paths = {row[0] for row in await cursor.fetchall() if row[0]}
         stale_paths = all_db_paths - current_file_paths
         if stale_paths:
             for stale_path in stale_paths:

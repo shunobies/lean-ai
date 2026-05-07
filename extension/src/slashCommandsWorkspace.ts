@@ -335,17 +335,25 @@ export async function handleInitCommand(
     };
 
     try {
-        const ctxResult = await ctx.client.generateProjectContext(repoRoot, force, thinkingCb, progressCb);
+        // `/init` should refresh project context incrementally on every run.
+        // The backend already skips unchanged files via per-file content hashes,
+        // so file-exists short-circuiting here only causes stale context.
+        const ctxResult = await ctx.client.generateProjectContext(
+            repoRoot,
+            true,
+            thinkingCb,
+            progressCb,
+        );
         if (ctxResult.skipped) {
             ctx.postMessage({
                 type: "reply",
-                text: `Project context already exists (${ctxResult.chars.toLocaleString()} bytes). Use \`/init --force\` to regenerate.`,
+                text: `Project context already up to date (${ctxResult.chars.toLocaleString()} bytes).`,
                 cls: "msg-system",
             });
         } else {
             ctx.postMessage({
                 type: "reply",
-                text: `Project context generated (${ctxResult.chars.toLocaleString()} chars).`,
+                text: `Project context updated (${ctxResult.chars.toLocaleString()} chars).`,
                 cls: "msg-system",
             });
         }
@@ -713,7 +721,7 @@ export async function handleImproveCodebaseArchitectureCommand(
     const focus = args.trim();
     const prompt = focus
         ? (
-            "Review this codebase for architecture deepening opportunities.\n\n"
+            "Review this codebase for architecture deepening opportunities.\n\n" +
             `Focus area: ${focus}`
         )
         : "Review this codebase for architecture deepening opportunities.";

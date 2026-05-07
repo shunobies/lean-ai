@@ -418,6 +418,45 @@ async def test_generate_project_context_db_entries(repo_root, mock_llm_client):
         await db.close()
 
 
+@pytest.mark.asyncio
+async def test_generate_project_context_rerun_replaces_modified_file_entries(repo_root):
+    async def chat_structured(messages, schema=None, max_tokens=None, **kwargs):
+        user_msg = messages[-1]["content"] if messages else ""
+        if "src/utils.py" in user_msg and "updated" in user_msg:
+            return ContextExtractionResult(
+                entries=[
+                    ContextExtractionEntry(
+                        section="Key Abstractions",
+                        symbol="helper()",
+                        description="returns an updated greeting string",
+                        file_path="src/utils.py",
+                    ),
+                ],
+            )
+        return _mock_chat_structured(messages, schema=schema, max_tokens=max_tokens, **kwargs)
+
+    client = AsyncMock()
+    client.chat_structured = AsyncMock(side_effect=chat_structured)
+    client.chat_raw = AsyncMock(side_effect=_mock_chat_raw_condense)
+
+    await generate_project_context(repo_root, client)
+
+    (Path(repo_root) / "src" / "utils.py").write_text(
+        'def helper():\n    """Return an updated greeting."""\n    return "updated"\n'
+    )
+
+    await generate_project_context(repo_root, client)
+
+    db = await get_context_db(repo_root)
+    try:
+        rows = await query_entries(db, file_path="src/utils.py", limit=100)
+        contents = [r["content"] for r in rows if r["source"] == "llm"]
+        assert any("updated greeting string" in content for content in contents)
+        assert not any("returns a greeting string" in content for content in contents)
+    finally:
+        await db.close()
+
+
 # ---------------------------------------------------------------------------
 # update_project_context
 # ---------------------------------------------------------------------------

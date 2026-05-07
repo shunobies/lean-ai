@@ -207,12 +207,79 @@ async def test_chat_structured_forwards_retry_override():
 
 
 @pytest.mark.asyncio
+async def test_chat_with_tools_ignores_tool_call_callback_exception(caplog):
+    responses = [
+        _make_tool_call_response("read_file", {"path": "f.py"}),
+        _make_task_complete_response(),
+    ]
+    client, fake = _build_client(responses)
+    caplog.set_level(logging.WARNING, logger="lean_ai.llm.facade")
+
+    async def bad_on_tool_call(_name: str, _args: dict) -> None:
+        raise RuntimeError("progress UI broke")
+
+    executed, _reply = await client.chat_with_tools(
+        messages=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "task"},
+        ],
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=3,
+        on_tool_call=bad_on_tool_call,
+    )
+
+    assert [tc.tool_name for tc in executed] == ["read_file"]
+    assert any(
+        msg.get("role") == "tool" and "OK: read_file" in str(msg.get("content"))
+        for msg in fake.messages_at_each_call[1]
+    )
+    assert "Non-critical callback on_tool_call failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_chat_with_tools_ignores_tool_result_callback_exception(caplog):
+    responses = [
+        _make_tool_call_response("read_file", {"path": "f.py"}),
+        _make_task_complete_response(),
+    ]
+    client, fake = _build_client(responses)
+    caplog.set_level(logging.WARNING, logger="lean_ai.llm.facade")
+
+    async def bad_on_tool_result(_name: str, _result: str) -> None:
+        raise RuntimeError("progress UI broke")
+
+    executed, _reply = await client.chat_with_tools(
+        messages=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "task"},
+        ],
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=3,
+        on_tool_result=bad_on_tool_result,
+    )
+
+    assert [tc.tool_name for tc in executed] == ["read_file"]
+    assert any(
+        msg.get("role") == "tool" and "OK: read_file" in str(msg.get("content"))
+        for msg in fake.messages_at_each_call[1]
+    )
+    assert "Non-critical callback on_tool_result failed" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_chat_with_tools_emits_metrics_reset_at_start_and_refresh():
     responses = [
         _make_tool_call_response_with_metrics(
             "edit_file",
             {"path": "f.py", "search": "a", "replace": "b"},
             prompt_tokens=160,
+        ),
+        _make_tool_call_response_with_metrics(
+            "read_file",
+            {"path": "f.py"},
+            prompt_tokens=200,
         ),
         _make_task_complete_response(),
     ]
@@ -237,7 +304,7 @@ async def test_chat_with_tools_emits_metrics_reset_at_start_and_refresh():
         ],
         tools=[],
         tool_executor_fn=_noop_executor,
-        max_turns=3,
+        max_turns=4,
         on_metrics_reset=on_metrics_reset,
         on_context_refresh=on_refresh,
     )

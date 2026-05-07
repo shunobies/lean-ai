@@ -38,7 +38,15 @@ export function handleStreamMessage(msg: WSMessage, callbacks: StreamCallbacks):
             callbacks.onApprovalRequired?.(msg.artifact_id, msg.artifact_type, msg.content_preview);
             break;
         case "tool_progress":
-            callbacks.onToolProgress?.(msg.tool_name, msg.status, msg.error);
+            callbacks.onToolProgress?.(
+                msg.tool_name ?? msg.tool ?? msg.description ?? "tool",
+                msg.status === "complete"
+                    ? "completed"
+                    : msg.status === "error"
+                        ? "failed"
+                        : msg.status,
+                msg.error ?? msg.output,
+            );
             break;
         case "diff":
             callbacks.onDiff?.(msg.file_path, msg.diff);
@@ -47,7 +55,7 @@ export function handleStreamMessage(msg: WSMessage, callbacks: StreamCallbacks):
             callbacks.onTestResult?.(msg.passed, msg.output);
             break;
         case "error":
-            callbacks.onError?.(msg.message, msg.recoverable);
+            callbacks.onError?.(msg.message, msg.recoverable ?? false);
             break;
         case "complete":
             callbacks.onComplete?.(msg.summary, msg.bundle_id, msg.files_modified);

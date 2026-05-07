@@ -171,6 +171,30 @@ def _log_harness_message(
     )
 
 
+async def _call_noncritical_callback(
+    name: str,
+    callback: Callable | None,
+    *args,
+    **kwargs,
+):
+    """Run a UI/telemetry callback without letting it abort the LLM loop.
+
+    Progress reporting is valuable, but the orchestration loop must keep
+    running even when a consumer-side callback has a bug or encounters a
+    transient transport issue.
+    """
+    if callback is None:
+        return None
+    try:
+        result = callback(*args, **kwargs)
+        if asyncio.iscoroutine(result):
+            return await result
+        return result
+    except Exception:
+        logger.warning("Non-critical callback %s failed", name, exc_info=True)
+        return None
+
+
 def _build_user_interrupt_message(user_text: str) -> str:
     """Format a queued user interrupt for prompt injection."""
     return (
@@ -304,7 +328,7 @@ class LLMClient:
         kwargs["retry_on_validation_error"] = retry_on_validation_error
 
         if on_metrics_reset:
-            await on_metrics_reset()
+            await _call_noncritical_callback("on_metrics_reset", on_metrics_reset)
 
         result, metrics = await self._provider.chat_structured(
             messages,
@@ -315,7 +339,12 @@ class LLMClient:
         )
         self.last_chat_metrics = _metrics_to_dict(metrics)
         if on_metrics and metrics.prompt_tokens:
-            await on_metrics(metrics.prompt_tokens, self._provider.context_window)
+            await _call_noncritical_callback(
+                "on_metrics",
+                on_metrics,
+                metrics.prompt_tokens,
+                self._provider.context_window,
+            )
         return result
 
     async def chat_stream(
@@ -512,7 +541,7 @@ class LLMClient:
         messages[:] = _sanitize_messages(messages)
 
         if on_metrics_reset:
-            await on_metrics_reset()
+            await _call_noncritical_callback("on_metrics_reset", on_metrics_reset)
 
         for turn in range(effective_max):
             # ── Check for cancel / user interrupt ─────────────────
@@ -544,7 +573,19 @@ class LLMClient:
             ) -> None:
                 _buf.append(token)
                 if on_content:
-                    await on_content(token)
+                    await _call_noncritical_callback(
+                        "on_content",
+                        on_content,
+                        token,
+                    )
+
+            async def _thinking_wrapper(token: str) -> None:
+                if on_thinking:
+                    await _call_noncritical_callback(
+                        "on_thinking",
+                        on_thinking,
+                        token,
+                    )
 
             # Snapshot the input messages before the provider call so the
             # per-turn capture records exactly what was sent, independent
@@ -560,7 +601,7 @@ class LLMClient:
                 tools,
                 max_tokens=tokens,
                 stream_callback=_stream_wrapper if _stream_cb else None,
-                thinking_callback=_think_cb,
+                thinking_callback=_thinking_wrapper if _think_cb else None,
             )
 
             # Fire per-turn training capture (fire-and-forget). Must
@@ -589,17 +630,30 @@ class LLMClient:
             last_prompt_tokens = metrics.prompt_tokens
 
             if on_metrics and last_prompt_tokens:
-                await on_metrics(last_prompt_tokens, self._provider.context_window)
+                await _call_noncritical_callback(
+                    "on_metrics",
+                    on_metrics,
+                    last_prompt_tokens,
+                    self._provider.context_window,
+                )
 
             # Deliver thinking in bulk when not streamed
             if not _think_cb and on_thinking and metrics.thinking:
-                await on_thinking(metrics.thinking)
+                await _call_noncritical_callback(
+                    "on_thinking",
+                    on_thinking,
+                    metrics.thinking,
+                )
 
             if content.strip():
                 explanation_parts.append(content.strip())
                 # Deliver content in bulk when not streamed
                 if not _stream_cb and on_content:
-                    await on_content(content.strip())
+                    await _call_noncritical_callback(
+                        "on_content",
+                        on_content,
+                        content.strip(),
+                    )
 
             # ── Process turn results ──────────────────────────────
             completion_call: ToolCallInfo | None = None
@@ -669,7 +723,12 @@ class LLMClient:
                         continue
 
                     if on_tool_call:
-                        await on_tool_call(tc.name, tc.arguments)
+                        await _call_noncritical_callback(
+                            "on_tool_call",
+                            on_tool_call,
+                            tc.name,
+                            tc.arguments,
+                        )
 
                     try:
                         result_str = await tool_executor_fn(tc.name, tc.arguments)
@@ -693,7 +752,12 @@ class LLMClient:
                     )
 
                     if on_tool_result:
-                        await on_tool_result(tc.name, result_str)
+                        await _call_noncritical_callback(
+                            "on_tool_result",
+                            on_tool_result,
+                            tc.name,
+                            result_str,
+                        )
 
                     result_msgs = self._provider.format_tool_result_messages(
                         tc,
@@ -892,7 +956,9 @@ class LLMClient:
                     }
                 )
                 if on_budget_interrupt:
-                    await on_budget_interrupt(
+                    await _call_noncritical_callback(
+                        "on_budget_interrupt",
+                        on_budget_interrupt,
                         getattr(metrics, "thinking_token_count", 0),
                     )
                 continue  # skip _evaluate_turn; start next iteration
@@ -936,7 +1002,10 @@ class LLMClient:
                         },
                     )
                     if on_metrics_reset:
-                        await on_metrics_reset()
+                        await _call_noncritical_callback(
+                            "on_metrics_reset",
+                            on_metrics_reset,
+                        )
                     if on_metrics:
                         est_new = sum(len(m.get("content") or "") for m in messages) // 4
                         await on_metrics(est_new, self._provider.context_window)

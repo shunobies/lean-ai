@@ -10,6 +10,7 @@ from lean_ai.context.context_db import (
     delete_entries_for_file,
     export_to_markdown,
     get_context_db,
+    get_existing_hashes,
     get_stats,
     query_entries,
     upsert_entries_batch,
@@ -223,6 +224,33 @@ async def test_query_entries_limit(db):
 
     rows = await query_entries(db, limit=3)
     assert len(rows) == 3
+
+
+# ---------------------------------------------------------------------------
+# get_existing_hashes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_existing_hashes_uses_latest_llm_hash_only(db):
+    await upsert_entries_batch(
+        db,
+        [
+            ("Architecture Overview", "src/main.py", "Skeleton fact", "skeleton"),
+            ("Architecture Overview", "src/main.py", "Old fact", "llm", "oldhash"),
+        ],
+    )
+    await asyncio.sleep(0.01)
+    await upsert_entries_batch(
+        db,
+        [
+            ("Module Map", "src/main.py", "New fact", "llm", "newhash"),
+        ],
+    )
+
+    hashes = await get_existing_hashes(db)
+
+    assert hashes == {"src/main.py": "newhash"}
 
 
 # ---------------------------------------------------------------------------

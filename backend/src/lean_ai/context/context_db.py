@@ -203,11 +203,17 @@ async def get_existing_hashes(
     simulate cached vs uncached states.
     """
     cursor = await db.execute(
-        "SELECT DISTINCT file_path, content_hash FROM context_entries "
-        "WHERE content_hash IS NOT NULL"
+        "SELECT file_path, content_hash FROM context_entries "
+        "WHERE source = 'llm' AND content_hash IS NOT NULL "
+        "ORDER BY updated_at DESC"
     )
     rows = await cursor.fetchall()
-    return {row[0]: row[1] for row in rows}
+    hashes: dict[str, str] = {}
+    for row in rows:
+        file_path = row[0]
+        if file_path not in hashes:
+            hashes[file_path] = row[1]
+    return hashes
 
 
 async def query_entries(

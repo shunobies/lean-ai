@@ -56,9 +56,12 @@ export interface ApprovalRequiredMessage {
 
 export interface ToolProgressMessage {
     type: "tool_progress";
-    tool_name: string;
-    status: "started" | "running" | "completed" | "failed";
+    tool_name?: string;
+    tool?: string;
+    description?: string;
+    status: "started" | "running" | "complete" | "completed" | "error" | "failed";
     error?: string;
+    output?: string;
 }
 
 export interface DiffMessage {
@@ -76,7 +79,7 @@ export interface TestResultMessage {
 export interface ErrorMessage {
     type: "error";
     message: string;
-    recoverable: boolean;
+    recoverable?: boolean;
 }
 
 export interface CompleteMessage {
