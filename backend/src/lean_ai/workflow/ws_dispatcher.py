@@ -44,11 +44,16 @@ class WorkflowCancelledError(Exception):
 class WSMessageDispatcher:
     """Route incoming WebSocket messages to typed async queues.
 
-    During clarification and plan-approval phases, ``user_message``
-    messages are routed to the approval queue (they are responses).
+    Incoming ``user_message`` payloads always land on the dedicated
+    user-message queue so active LLM loops can observe them during
+    planning and execution.  Approval-style waits also consume from
+    that queue until execution mode begins, which keeps clarification
+    replies and plan feedback working without a separate wire type.
+
     Call :meth:`enter_execution_mode` before the execution phase so
-    that subsequent ``user_message`` messages become mid-workflow
-    interrupts instead.
+    approval waits stop consuming free-form ``user_message`` payloads
+    and only react to control messages such as ``approve_tool`` /
+    ``deny_tool``.
 
     Lifecycle::
 
@@ -136,10 +141,12 @@ class WSMessageDispatcher:
                     # Also unblock anyone waiting on the approval queue
                     self._safe_put(self._approval_queue, {"type": "cancel"})
                 elif msg_type == "user_message":
-                    if self._execution_mode:
-                        self._safe_put(self._user_messages, data)
-                    else:
-                        self._safe_put(self._approval_queue, data)
+                    logger.info(
+                        "WSMessageDispatcher: received user_message (%d chars, execution_mode=%s)",
+                        len(data.get("content", "") or ""),
+                        self._execution_mode,
+                    )
+                    self._safe_put(self._user_messages, data)
                 elif msg_type == "ping":
                     # Handle keepalive inline — no need to route
                     try:
@@ -184,10 +191,14 @@ class WSMessageDispatcher:
         """Non-blocking check for a user interrupt message.
 
         Returns the message content string, or ``None`` if no message
-        is waiting.  Only returns messages when in execution mode.
+        is waiting.
         """
         try:
             msg = self._user_messages.get_nowait()
+            logger.info(
+                "WSMessageDispatcher: delivering pending user_message (%d chars)",
+                len(msg.get("content", "") or ""),
+            )
             return msg.get("content", "")
         except asyncio.QueueEmpty:
             return None
@@ -236,10 +247,18 @@ class WSMessageDispatcher:
 
         # Race: either a message arrives or cancel is signalled
         cancel_waiter = asyncio.ensure_future(self._cancel_event.wait())
-        queue_getter = asyncio.ensure_future(self._approval_queue.get())
+        approval_getter = asyncio.ensure_future(self._approval_queue.get())
+        user_getter = (
+            asyncio.ensure_future(self._user_messages.get())
+            if not self._execution_mode
+            else None
+        )
+        wait_set = {cancel_waiter, approval_getter}
+        if user_getter is not None:
+            wait_set.add(user_getter)
 
         done, pending = await asyncio.wait(
-            {cancel_waiter, queue_getter},
+            wait_set,
             return_when=asyncio.FIRST_COMPLETED,
         )
 
@@ -250,10 +269,24 @@ class WSMessageDispatcher:
             except (asyncio.CancelledError, Exception):
                 pass
 
-        if queue_getter in done:
-            msg = queue_getter.result()
+        if approval_getter in done:
+            msg = approval_getter.result()
             if msg.get("type") == "cancel":
                 raise WorkflowCancelledError()
+            logger.info(
+                "WSMessageDispatcher: wait_for_approval received %s from approval queue",
+                msg.get("type"),
+            )
+            return msg
+
+        if user_getter is not None and user_getter in done:
+            msg = user_getter.result()
+            if msg.get("type") == "cancel":
+                raise WorkflowCancelledError()
+            logger.info(
+                "WSMessageDispatcher: wait_for_approval received %s from user queue",
+                msg.get("type"),
+            )
             return msg
 
         # Cancel event won the race

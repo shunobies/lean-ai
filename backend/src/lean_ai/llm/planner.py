@@ -237,6 +237,7 @@ async def create_plan(
         on_thinking=on_thinking,
         on_metrics=on_metrics,
         on_metrics_reset=on_metrics_reset,
+        dispatcher=dispatcher,
         telemetry_context={
             "repo_root": repo_root,
             "session_id": session_id,
@@ -459,6 +460,7 @@ async def create_plan(
         on_thinking=on_thinking,
         on_metrics=on_metrics,
         on_metrics_reset=on_metrics_reset,
+        dispatcher=dispatcher,
         telemetry_context={
             "repo_root": repo_root,
             "session_id": session_id,

@@ -112,7 +112,7 @@ async def test_wait_for_approval_returns_message():
 
 @pytest.mark.asyncio
 async def test_listener_normalizes_legacy_user_message_text_field():
-    """Legacy clients using ``text`` still land on the user-message path."""
+    """Legacy clients using ``text`` still land on the interrupt queue."""
     ws = FakeWebSocket()
     dispatcher = WSMessageDispatcher(ws)
 
@@ -121,9 +121,7 @@ async def test_listener_normalizes_legacy_user_message_text_field():
         ws.inject({"type": "user_message", "text": "please revise"})
         await asyncio.sleep(0.05)
 
-        msg = dispatcher._approval_queue.get_nowait()
-        assert msg["type"] == "user_message"
-        assert msg["content"] == "please revise"
+        assert dispatcher.get_pending_message() == "please revise"
     finally:
         await dispatcher.stop()
 
@@ -133,7 +131,6 @@ async def test_listener_normalizes_reject_feedback_into_execution_interrupt():
     """Legacy reject messages become immediate execution interrupts."""
     ws = FakeWebSocket()
     dispatcher = WSMessageDispatcher(ws)
-    dispatcher.enter_execution_mode()
 
     await dispatcher.start()
     try:
@@ -214,3 +211,27 @@ async def test_wait_for_user_message_returns_execution_message():
     msg = await dispatcher.wait_for_user_message()
     assert msg["type"] == "user_message"
     assert msg["content"] == "answer"
+
+
+@pytest.mark.asyncio
+async def test_wait_for_approval_accepts_user_message_before_execution_mode():
+    ws = FakeWebSocket()
+    dispatcher = WSMessageDispatcher(ws)
+    dispatcher._user_messages.put_nowait({"type": "user_message", "content": "please revise"})
+
+    msg = await dispatcher.wait_for_approval()
+    assert msg["type"] == "user_message"
+    assert msg["content"] == "please revise"
+
+
+@pytest.mark.asyncio
+async def test_wait_for_approval_ignores_user_message_queue_in_execution_mode():
+    ws = FakeWebSocket()
+    dispatcher = WSMessageDispatcher(ws)
+    dispatcher.enter_execution_mode()
+    dispatcher._user_messages.put_nowait({"type": "user_message", "content": "do not consume"})
+    dispatcher._approval_queue.put_nowait({"type": "approve_tool"})
+
+    msg = await dispatcher.wait_for_approval()
+    assert msg["type"] == "approve_tool"
+    assert dispatcher.get_pending_message() == "do not consume"

@@ -558,6 +558,15 @@ class OllamaProvider(LLMProvider):
     ) -> tuple[str, list[ToolCallInfo], LLMMetrics]:
         tokens = max_tokens or self._max_tokens_val
 
+        logger.info(
+            "LLM chat_with_tools_single: model=%s messages=%d tools=%d max_tokens=%d streaming=%s",
+            self._model,
+            len(messages),
+            len(tools),
+            tokens,
+            bool(stream_callback or thinking_callback),
+        )
+
         if not stream_callback and not thinking_callback:
             # Non-streaming path (unchanged)
             async def _chat():
@@ -589,6 +598,11 @@ class OllamaProvider(LLMProvider):
                 )
                 for tc in raw_tool_calls
             ]
+            logger.info(
+                "LLM chat_with_tools_single response: content_chars=%d tool_calls=%d",
+                len(content),
+                len(tool_calls),
+            )
             return content, tool_calls, metrics
 
         # Streaming path — stream content/thinking tokens via callbacks
@@ -659,6 +673,11 @@ class OllamaProvider(LLMProvider):
             )
             for tc in raw_tool_calls
         ]
+        logger.info(
+            "LLM chat_with_tools_single response (streamed): content_chars=%d tool_calls=%d",
+            len(content),
+            len(tool_calls),
+        )
         return content, tool_calls, metrics
 
     async def chat_stream(

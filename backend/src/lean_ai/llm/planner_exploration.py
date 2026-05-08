@@ -443,6 +443,7 @@ async def run_phase2_exploration(
             explorer=explorer,
             phase_max_tokens=phase_max_tokens,
             ws=ws,
+            dispatcher=dispatcher,
             executor=executor,
             on_content=on_content,
             on_thinking=on_thinking,
@@ -462,6 +463,7 @@ async def run_phase2_exploration(
             explorer=explorer,
             phase_max_tokens=phase_max_tokens,
             ws=ws,
+            dispatcher=dispatcher,
             executor=executor,
             phase2_messages=phase2_messages,
             on_content=on_content,
@@ -543,6 +545,7 @@ async def _run_parallel_exploration(
     explorer: LLMClient,
     phase_max_tokens: int,
     ws: WebSocket | None,
+    dispatcher: WSMessageDispatcher | None,
     executor: Callable,
     on_content: Callable | None,
     on_thinking: Callable | None,
@@ -598,6 +601,7 @@ async def _run_parallel_exploration(
         on_thinking=on_thinking,
         on_metrics=on_metrics,
         on_metrics_reset=on_metrics_reset,
+        dispatcher=dispatcher,
     )
 
     _save_debug_phase(
@@ -653,6 +657,7 @@ async def _run_parallel_exploration(
             tool_executor_fn=executor,
             max_turns=max_turns,
             max_tokens=phase_max_tokens,
+            dispatcher=dispatcher,
         )
         return dive_output
 
@@ -697,6 +702,7 @@ async def _run_serial_exploration(
     explorer: LLMClient,
     phase_max_tokens: int,
     ws: WebSocket | None,
+    dispatcher: WSMessageDispatcher | None,
     executor: Callable,
     phase2_messages: list[dict],
     on_content: Callable | None,
@@ -898,6 +904,7 @@ async def _run_serial_exploration(
         on_thinking=on_thinking,
         on_metrics=on_metrics,
         on_metrics_reset=on_metrics_reset,
+        dispatcher=dispatcher,
         on_context_refresh=_build_phase2_refresh,
         telemetry_context={
             "repo_root": repo_root,
