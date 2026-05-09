@@ -14,6 +14,7 @@ from lean_ai.llm.plan_schema import (
     FileSummary,
     PlanStep,
     ScopeDocument,
+    StepSuccessCheck,
     VerificationPlan,
 )
 from lean_ai.llm.planner import _run_phase5_verification, create_plan
@@ -29,10 +30,17 @@ class FakeWebSocket:
 
 
 class FakeExpert:
-    def __init__(self, responses: list[object]) -> None:
+    def __init__(
+        self,
+        responses: list[object],
+        *,
+        tool_outputs: list[tuple[list, str]] | None = None,
+        model_name: str = "expert-test-model",
+    ) -> None:
         self.responses = list(responses)
+        self.tool_outputs = list(tool_outputs or [])
         self.calls: list[dict] = []
-        self.model_name = "expert-test-model"
+        self.model_name = model_name
 
     async def chat_structured(
         self,
@@ -56,6 +64,9 @@ class FakeExpert:
         if isinstance(response, Exception):
             raise response
         return response
+
+    async def chat_with_tools(self, *args, **kwargs):
+        return self.tool_outputs.pop(0)
 
 
 class FakePlannerClient:
@@ -165,7 +176,10 @@ async def test_revise_plan_uses_execution_plan_repair_flow():
 
     assert result == _execution_plan()
     assert len(expert.calls) == 2
-    assert "Revise the plan based on the user's feedback" in expert.calls[0]["messages"][1]["content"]
+    assert (
+        "Revise the plan based on the user's feedback"
+        in expert.calls[0]["messages"][1]["content"]
+    )
     assert "ExecutionPlan" in expert.calls[1]["messages"][-1]["content"]
 
 
@@ -247,7 +261,10 @@ async def test_revise_plan_falls_back_to_previous_plan_when_repair_crashes(monke
 
     assert result.steps == previous.steps
     assert result.affected_files == previous.affected_files
-    assert any("automatic plan revision failed" in warning for warning in result.plan_validation_warnings)
+    assert any(
+        "automatic plan revision failed" in warning
+        for warning in result.plan_validation_warnings
+    )
 
 
 @pytest.mark.asyncio
@@ -323,3 +340,126 @@ async def test_create_plan_returns_fallback_plan_when_phase4_aborts(monkeypatch)
     assert any("planning fallback:" in warning for warning in plan.plan_validation_warnings)
     assert "src/app.py" in plan.affected_files
     assert any(step.file_path == "src/app.py" for step in plan.steps)
+
+
+@pytest.mark.asyncio
+async def test_create_plan_retries_phase4_on_primary_when_expert_model_load_fails(
+    monkeypatch,
+):
+    def _validated_plan() -> ExecutionPlan:
+        return ExecutionPlan(
+            scope="Update the app handler.",
+            steps=[
+                PlanStep(
+                    step_number=1,
+                    job="Update the handler implementation.",
+                    may_change=[{"path": "src/app.py", "change": "Adjust handler behavior."}],
+                    allowed_tools=["read_file", "edit_file", "run_tests", "task_complete"],
+                    output_shape="src/app.py contains the updated handler behavior.",
+                    success_checks=[
+                        StepSuccessCheck(
+                            description="Handler tests cover src/app.py.",
+                            tool="run_tests",
+                            command="pytest tests/test_app.py -q",
+                            expected="Command exits successfully.",
+                        )
+                    ],
+                    blocked_protocol="Report blockers clearly.",
+                )
+            ],
+            affected_files=["src/app.py"],
+            test_strategy="Run pytest.",
+        )
+
+    async def _fake_scope(**kwargs):
+        scope = ScopeDocument(
+            problem="Update the handler.",
+            deliverables=["Handler change"],
+            in_scope=["Handler logic"],
+            out_of_scope=[],
+            downstream_consumers=[],
+            assumptions=[],
+            success_criteria=[],
+            risks=[],
+        )
+        return scope, "PROBLEM / PURPOSE:\nUpdate the handler.\n", True
+
+    async def _fake_phase2(**kwargs):
+        return (
+            FileSummary(
+                files_to_modify=[
+                    FileObservation(
+                        file_path="src/app.py",
+                        role="modify",
+                        reason="Handler implementation lives here.",
+                        relevant_sections="10-40",
+                        key_snippets=["def handler():\n    pass"],
+                    )
+                ]
+            ),
+            "FILES TO MODIFY:\n1. src/app.py — Handler implementation lives here.\n",
+            0.01,
+        )
+
+    async def _fake_design(**kwargs):
+        return DesignAndRisks(
+            change_designs=[
+                ChangeDesign(
+                    file_path="src/app.py",
+                    decisions="Update the handler logic without changing the public API.",
+                )
+            ]
+        )
+
+    assembly_calls: list[str] = []
+    expert_client = FakeExpert(
+        [],
+        tool_outputs=[([], "phase 3 prose")],
+        model_name="expert-model",
+    )
+
+    async def _fake_assembly(**kwargs):
+        assembly_calls.append(kwargs["expert"].model_name)
+        if kwargs["expert"] is expert_client:
+            exc = RuntimeError(
+                "model failed to load, this may be due to resource limitations "
+                "or an internal error, check ollama server logs for details "
+                "(status code: 500)"
+            )
+            exc.status_code = 500
+            raise exc
+        return _validated_plan()
+
+    async def _no_memory(*args, **kwargs):
+        return ""
+
+    monkeypatch.setattr("lean_ai.llm.planner._retrieve_session_memories", _no_memory)
+    monkeypatch.setattr("lean_ai.llm.planner._synthesize_scope", _fake_scope)
+    monkeypatch.setattr("lean_ai.llm.planner.run_phase2_exploration", _fake_phase2)
+    monkeypatch.setattr("lean_ai.llm.planner._synthesize_design_and_risks", _fake_design)
+    monkeypatch.setattr("lean_ai.llm.planner._chat_structured_with_repair", _fake_assembly)
+
+    primary_client = FakeExpert(
+        [],
+        tool_outputs=[([], "phase 1 prose")],
+        model_name="primary-model",
+    )
+    ws = FakeWebSocket()
+
+    plan = await create_plan(
+        task="Fix the handler",
+        repo_root=".",
+        llm_client=primary_client,
+        context="repo context",
+        ws=ws,
+        expert_llm_client=expert_client,
+    )
+
+    assert isinstance(plan, ExecutionPlan)
+    assert plan.plan_validation_warnings == []
+    assert assembly_calls == ["expert-model", "primary-model"]
+    assert any(
+        msg["summary"]
+        == "Expert model unavailable during Phase 4 plan assembly. Retrying on the primary model..."
+        for msg in ws.messages
+    )

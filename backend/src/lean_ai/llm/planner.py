@@ -69,6 +69,40 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _is_recoverable_planning_model_failure(exc: Exception) -> bool:
+    """Return True when a planner-phase model failure merits primary fallback.
+
+    The expert-model handoff is optional. If the dedicated expert model is
+    temporarily unavailable (for example Ollama returns a 500 while loading the
+    model, or the local server hits a transient resource error), we should
+    retry Phases 3-4 on the primary model instead of discarding all planning
+    work and emitting a generic fallback plan.
+    """
+    if isinstance(exc, (ConnectionError, TimeoutError, OSError)):
+        return True
+
+    status_code = getattr(exc, "status_code", None)
+    try:
+        if status_code is not None and int(status_code) >= 500:
+            return True
+    except (TypeError, ValueError):
+        pass
+
+    message_parts = [str(exc), str(getattr(exc, "error", ""))]
+    message = " ".join(part for part in message_parts if part).lower()
+    return any(
+        token in message
+        for token in (
+            "model failed to load",
+            "resource limitations",
+            "internal error",
+            "temporarily unavailable",
+            "connection refused",
+            "connection reset",
+        )
+    )
+
+
 async def create_plan(
     task: str,
     repo_root: str,
@@ -150,10 +184,6 @@ async def create_plan(
         if expert_llm_client
         else settings._active_context_window
     )
-    plan_assembly_max_tokens = max(
-        expert_max_tokens,
-        int(expert_ctx * PLAN_OUTPUT_PERCENT),
-    )
     plan_start = time.monotonic()
     phase_timings: dict[str, float] = {}
     scope = task
@@ -165,6 +195,23 @@ async def create_plan(
     # Reuse the context parameter (already loaded by the workflow router)
     # rather than re-reading from disk.
     project_context = context
+    has_distinct_expert = expert_llm_client is not None and expert_llm_client is not llm_client
+
+    def _planning_limits(
+        planner_client: "LLMClient",
+    ) -> tuple[int, int, int]:
+        """Return max_tokens, context_window, and assembly budget for a client."""
+        if has_distinct_expert and planner_client is expert_llm_client:
+            planner_max_tokens = expert_max_tokens
+            planner_ctx = expert_ctx
+        else:
+            planner_max_tokens = phase_max_tokens
+            planner_ctx = settings._active_context_window
+        planner_plan_max_tokens = max(
+            planner_max_tokens,
+            int(planner_ctx * PLAN_OUTPUT_PERCENT),
+        )
+        return planner_max_tokens, planner_ctx, planner_plan_max_tokens
 
     # ── Cross-session memory retrieval ──
     memory_context = ""
@@ -370,314 +417,434 @@ async def create_plan(
                 settings._active_context_window,
             )
 
-        if expert_llm_client:
+        async def _run_phase3(
+            planner_client: "LLMClient",
+            *,
+            announce_switch: bool,
+        ) -> tuple[DesignAndRisks, str, str]:
+            planner_max_tokens, _planner_ctx, _planner_plan_max_tokens = _planning_limits(
+                planner_client
+            )
+            if announce_switch and has_distinct_expert and planner_client is expert_llm_client:
+                await _send_stage(
+                    ws,
+                    f"Switching to expert model ({planner_client.model_name}) for design phases...",
+                    model=planner_client.model_name,
+                )
+                logger.info(
+                    "Switching to expert model for phases 3-4: %s",
+                    planner_client.model_name,
+                )
+
             await _send_stage(
                 ws,
-                f"Switching to expert model ({expert_llm_client.model_name}) for design phases...",
-                model=expert_llm_client.model_name,
+                "Phase 3: Designing changes and assessing risks...",
+                model=planner_client.model_name,
+                phase=3,
             )
-            logger.info(
-                "Switching to expert model for phases 3-4: %s",
-                expert_llm_client.model_name,
+            logger.info("Planning Phase 3: Design + risk synthesis")
+            t0 = time.monotonic()
+
+            phase3_project_context_block = (
+                f"PROJECT CONTEXT:\n{project_context}\n\n" if project_context else ""
             )
-        await _send_stage(
-            ws,
-            "Phase 3: Designing changes and assessing risks...",
-            model=expert.model_name,
-            phase=3,
-        )
-        logger.info("Planning Phase 3: Design + risk synthesis")
-        t0 = time.monotonic()
-
-        phase3_project_context_block = (
-            f"PROJECT CONTEXT:\n{project_context}\n\n" if project_context else ""
-        )
-        phase3_user_content = registry.format(
-            "planning.design_user",
-            task=task,
-            scope=scope,
-            project_context=phase3_project_context_block,
-            file_summary=file_summary,
-        )
-        if settings.enable_session_memory and getattr(
-            settings,
-            "enable_phase3_memory",
-            True,
-        ):
-            from lean_ai.llm.planner_helpers import retrieve_design_memories
-
-            design_memories = await retrieve_design_memories(repo_root, task)
-            if design_memories:
-                phase3_user_content += design_memories
-        phase3_messages = [
-            {"role": "system", "content": PLAN_DESIGN_SYSTEM_PROMPT},
-            {"role": "user", "content": phase3_user_content},
-        ]
-
-        async def _search_only_executor(name: str, arguments: dict) -> str:
-            """Execute search tools for Phase 3 design verification."""
-            if name == "search_internet":
-                from lean_ai.tools.internet import search_internet
-
-                result = await search_internet(
-                    query=arguments.get("query", ""),
-                    llm_client=expert,
-                )
-                return result.output if result.success else result.error or "Error"
-            if name == "fetch_url":
-                from lean_ai.tools.internet import fetch_url
-
-                result = await fetch_url(
-                    url=arguments.get("url", ""),
-                    repo_root=repo_root,
-                    llm_client=expert,
-                )
-                return result.output if result.success else result.error or "Error"
-            if name == "task_complete":
-                return "Design synthesis marked complete."
-            return f"Unknown tool: {name}"
-
-        _phase3_tool_calls, phase3_exploration_prose = await expert.chat_with_tools(
-            messages=phase3_messages,
-            tools=build_design_tools(),
-            tool_executor_fn=_search_only_executor,
-            max_turns=15,
-            max_tokens=expert_max_tokens,
-            text_only_exit_count=1,
-            on_tool_call=on_tool_call,
-            on_tool_result=on_tool_result,
-            on_content=on_content,
-            on_thinking=on_thinking,
-            on_metrics=on_metrics,
-            on_metrics_reset=on_metrics_reset,
-            dispatcher=dispatcher,
-            telemetry_context={
-                "repo_root": repo_root,
-                "session_id": session_id,
-                "phase": "planning.phase3",
-                "role": "expert",
-            },
-        )
-        if on_content:
-            await _send_content_done(ws, phase3_exploration_prose)
-
-        design_and_risks_obj = await _synthesize_design_and_risks(
-            task=task,
-            scope=scope,
-            project_context_block=phase3_project_context_block,
-            file_summary=file_summary,
-            exploration_prose=phase3_exploration_prose,
-            expert=expert,
-            expert_max_tokens=expert_max_tokens,
-            on_thinking=on_thinking,
-            on_metrics=on_metrics,
-            on_metrics_reset=on_metrics_reset,
-        )
-        design_and_risks = _format_design_and_risks(design_and_risks_obj)
-        missing_files = _format_missing_files(design_and_risks_obj.missing_files)
-
-        phase_timings["phase_3_design_and_risks"] = time.monotonic() - t0
-        _save_debug_phase(
-            repo_root,
-            session_id,
-            "phase_3_design_and_risks",
-            design_and_risks,
-            phase_timings["phase_3_design_and_risks"],
-        )
-        logger.info(
-            "Phase 3 synthesis: naming=%d designs=%d missing=%d deps=%d risks=%d citations=%d in %.1fs",
-            len(design_and_risks_obj.naming_conventions),
-            len(design_and_risks_obj.change_designs),
-            len(design_and_risks_obj.missing_files),
-            len(design_and_risks_obj.dependency_order),
-            len(design_and_risks_obj.critical_risks),
-            len(design_and_risks_obj.citations),
-            phase_timings["phase_3_design_and_risks"],
-        )
-        await _send_stage_done(
-            ws,
-            "Design and risk synthesis complete",
-            model=expert.model_name,
-            phase=3,
-        )
-
-        await _send_stage(
-            ws,
-            "Phase 4: Assembling structured plan...",
-            model=expert.model_name,
-            phase=4,
-        )
-        logger.info("Planning Phase 4: Structured plan assembly")
-        t0 = time.monotonic()
-
-        phase4_scope = scope
-        phase4_project_context = project_context
-        if expert_ctx <= 32768:
-            phase4_scope = ""
-            phase4_project_context = ""
-            logger.info(
-                "Phase 4: small context window (%d) — dropping scope and "
-                "project_context re-injection (already in design_and_risks)",
-                expert_ctx,
+            phase3_user_content = registry.format(
+                "planning.design_user",
+                task=task,
+                scope=scope,
+                project_context=phase3_project_context_block,
+                file_summary=file_summary,
             )
+            if settings.enable_session_memory and getattr(
+                settings,
+                "enable_phase3_memory",
+                True,
+            ):
+                from lean_ai.llm.planner_helpers import retrieve_design_memories
 
-        verification_targets = _build_verification_targets(
-            file_summary_obj,
-            design_and_risks_obj,
-        )
-        security_concerns = _build_security_concerns(design_and_risks_obj)
-        testing_inventory = _format_testing_inventory(file_summary_obj)
-        core_functionality = _format_core_functionality(design_and_risks_obj)
+                design_memories = await retrieve_design_memories(repo_root, task)
+                if design_memories:
+                    phase3_user_content += design_memories
+            phase3_messages = [
+                {"role": "system", "content": PLAN_DESIGN_SYSTEM_PROMPT},
+                {"role": "user", "content": phase3_user_content},
+            ]
 
-        plan = await _chat_structured_with_repair(
-            messages=[
-                {"role": "system", "content": PLAN_ASSEMBLY_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": registry.format(
-                        "planning.assembly_user",
-                        task=task,
-                        design_and_risks=design_and_risks,
-                        file_summary=file_summary,
-                        project_context=(
-                            f"PROJECT CONTEXT:\n{phase4_project_context}\n\n"
-                            if phase4_project_context
-                            else ""
-                        ),
-                        scope=phase4_scope,
-                        missing_files=(
-                            "REQUIRED MISSING FILES — these were identified "
-                            "during risk assessment as files that MUST exist "
-                            "for the app to work. Each one MUST have a "
-                            "corresponding create_file or edit_file step in "
-                            f"the plan:\n{missing_files}\n\n"
-                            if missing_files
-                            else ""
-                        ),
-                        test_command=test_command or "(none configured yet)",
-                        testing_inventory=testing_inventory,
-                        verification_targets=verification_targets or "(derive from affected behavioral files)",
-                        security_concerns=security_concerns or "(none identified by Phase 3)",
-                        core_functionality=core_functionality,
+            async def _search_only_executor(name: str, arguments: dict) -> str:
+                """Execute search tools for Phase 3 design verification."""
+                if name == "search_internet":
+                    from lean_ai.tools.internet import search_internet
+
+                    result = await search_internet(
+                        query=arguments.get("query", ""),
+                        llm_client=planner_client,
+                    )
+                    return result.output if result.success else result.error or "Error"
+                if name == "fetch_url":
+                    from lean_ai.tools.internet import fetch_url
+
+                    result = await fetch_url(
+                        url=arguments.get("url", ""),
+                        repo_root=repo_root,
+                        llm_client=planner_client,
+                    )
+                    return result.output if result.success else result.error or "Error"
+                if name == "task_complete":
+                    return "Design synthesis marked complete."
+                return f"Unknown tool: {name}"
+
+            _phase3_tool_calls, phase3_exploration_prose = await planner_client.chat_with_tools(
+                messages=phase3_messages,
+                tools=build_design_tools(),
+                tool_executor_fn=_search_only_executor,
+                max_turns=15,
+                max_tokens=planner_max_tokens,
+                text_only_exit_count=1,
+                on_tool_call=on_tool_call,
+                on_tool_result=on_tool_result,
+                on_content=on_content,
+                on_thinking=on_thinking,
+                on_metrics=on_metrics,
+                on_metrics_reset=on_metrics_reset,
+                dispatcher=dispatcher,
+                telemetry_context={
+                    "repo_root": repo_root,
+                    "session_id": session_id,
+                    "phase": "planning.phase3",
+                    "role": (
+                        "expert"
+                        if has_distinct_expert and planner_client is expert_llm_client
+                        else "primary"
                     ),
                 },
-            ],
-            schema=ExecutionPlan,
-            expert=expert,
-            max_tokens=plan_assembly_max_tokens,
-            artifact_label="structured plan",
-            ws=ws,
-            phase=4,
-            on_thinking=on_thinking,
-            on_metrics=on_metrics,
-            on_metrics_reset=on_metrics_reset,
-        )
-
-        phase_timings["phase_4_plan_assembly"] = time.monotonic() - t0
-
-        if settings.enable_core_functionality_tagging:
-            plan.core_functionality = list(design_and_risks_obj.core_functionality)
-
-        impl_steps = [s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS]
-        stripped_count = len(plan.steps) - len(impl_steps)
-        if stripped_count:
-            stripped_tools = [s.tool for s in plan.steps if s.tool not in IMPLEMENTATION_STEP_TOOLS]
-            logger.warning(
-                "Stripped %d non-implementation steps from Phase 4 plan: %s",
-                stripped_count,
-                stripped_tools,
             )
-            for i, step in enumerate(impl_steps, 1):
-                step.step_number = i
-            plan.steps = impl_steps
-        if not plan.steps and stripped_count:
-            logger.error(
-                "Phase 4 produced zero implementation steps — all %d steps "
-                "were exploration/verification tools. file_summary may be "
-                "insufficient.",
-                stripped_count,
-            )
+            if on_content:
+                await _send_content_done(ws, phase3_exploration_prose)
 
-        has_implementation = any(s.tool in ("create_file", "edit_file") for s in plan.steps)
-        if plan.steps and not has_implementation:
-            logger.warning(
-                "Phase 4 plan has %d steps but none are create_file or "
-                "edit_file — plan may be exploration-only. Tools: %s",
-                len(plan.steps),
-                [s.tool for s in plan.steps],
-            )
-
-        _sync_affected_files_from_steps(plan)
-
-        plan_warnings = _run_plan_validations(
-            plan,
-            file_summary_obj,
-            design_and_risks_obj,
-        )
-
-        blocking_uncovered = [
-            mf for mf in _uncovered_missing_files(plan, design_and_risks_obj) if mf.blocking
-        ]
-        if blocking_uncovered:
-            logger.warning(
-                "Phase 4 plan validation — %d BLOCKING uncovered missing "
-                "file(s); triggering auto-revision",
-                len(blocking_uncovered),
-            )
-            feedback = (
-                "Phase 3 identified BLOCKING missing files that the plan "
-                "does not cover. Add a create_file or edit_file step for "
-                "each:\n" + "\n".join(f"- {mf.file_path}: {mf.purpose}" for mf in blocking_uncovered)
-            )
-            plan = await _revise_plan(
+            phase3_design_and_risks_obj = await _synthesize_design_and_risks(
                 task=task,
-                revision_context=(
-                    f"PREVIOUS PLAN (JSON):\n"
-                    f"{plan.model_dump_json(indent=2)}\n\n"
-                    f"USER FEEDBACK:\n{feedback}"
-                ),
-                llm_client=llm_client,
-                context=context,
-                ws=ws,
-                expert_llm_client=expert_llm_client,
-                previous_plan=plan,
+                scope=scope,
+                project_context_block=phase3_project_context_block,
+                file_summary=file_summary,
+                exploration_prose=phase3_exploration_prose,
+                expert=planner_client,
+                expert_max_tokens=planner_max_tokens,
                 on_thinking=on_thinking,
                 on_metrics=on_metrics,
                 on_metrics_reset=on_metrics_reset,
             )
-            plan.steps = [s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS]
-            for i, step in enumerate(plan.steps, 1):
-                step.step_number = i
+            phase3_design_and_risks = _format_design_and_risks(phase3_design_and_risks_obj)
+            phase3_missing_files = _format_missing_files(phase3_design_and_risks_obj.missing_files)
+
+            phase_timings["phase_3_design_and_risks"] = time.monotonic() - t0
+            _save_debug_phase(
+                repo_root,
+                session_id,
+                "phase_3_design_and_risks",
+                phase3_design_and_risks,
+                phase_timings["phase_3_design_and_risks"],
+            )
+            logger.info(
+                "Phase 3 synthesis: naming=%d designs=%d missing=%d deps=%d "
+                "risks=%d citations=%d in %.1fs",
+                len(phase3_design_and_risks_obj.naming_conventions),
+                len(phase3_design_and_risks_obj.change_designs),
+                len(phase3_design_and_risks_obj.missing_files),
+                len(phase3_design_and_risks_obj.dependency_order),
+                len(phase3_design_and_risks_obj.critical_risks),
+                len(phase3_design_and_risks_obj.citations),
+                phase_timings["phase_3_design_and_risks"],
+            )
+            await _send_stage_done(
+                ws,
+                "Design and risk synthesis complete",
+                model=planner_client.model_name,
+                phase=3,
+            )
+            return phase3_design_and_risks_obj, phase3_design_and_risks, phase3_missing_files
+
+        async def _run_phase4(
+            planner_client: "LLMClient",
+            *,
+            phase3_design_and_risks_obj: DesignAndRisks,
+            phase3_design_and_risks: str,
+            phase3_missing_files: str,
+        ) -> ExecutionPlan:
+            _planner_max_tokens, planner_ctx, planner_plan_max_tokens = _planning_limits(
+                planner_client
+            )
+            await _send_stage(
+                ws,
+                "Phase 4: Assembling structured plan...",
+                model=planner_client.model_name,
+                phase=4,
+            )
+            logger.info("Planning Phase 4: Structured plan assembly")
+            t0 = time.monotonic()
+
+            phase4_scope = scope
+            phase4_project_context = project_context
+            if planner_ctx <= 32768:
+                phase4_scope = ""
+                phase4_project_context = ""
+                logger.info(
+                    "Phase 4: small context window (%d) — dropping scope and "
+                    "project_context re-injection (already in design_and_risks)",
+                    planner_ctx,
+                )
+
+            verification_targets = _build_verification_targets(
+                file_summary_obj,
+                phase3_design_and_risks_obj,
+            )
+            security_concerns = _build_security_concerns(phase3_design_and_risks_obj)
+            testing_inventory = _format_testing_inventory(file_summary_obj)
+            core_functionality = _format_core_functionality(phase3_design_and_risks_obj)
+
+            plan = await _chat_structured_with_repair(
+                messages=[
+                    {"role": "system", "content": PLAN_ASSEMBLY_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": registry.format(
+                            "planning.assembly_user",
+                            task=task,
+                            design_and_risks=phase3_design_and_risks,
+                            file_summary=file_summary,
+                            project_context=(
+                                f"PROJECT CONTEXT:\n{phase4_project_context}\n\n"
+                                if phase4_project_context
+                                else ""
+                            ),
+                            scope=phase4_scope,
+                            missing_files=(
+                                "REQUIRED MISSING FILES — these were identified "
+                                "during risk assessment as files that MUST exist "
+                                "for the app to work. Each one MUST have a "
+                                "corresponding create_file or edit_file step in "
+                                f"the plan:\n{phase3_missing_files}\n\n"
+                                if phase3_missing_files
+                                else ""
+                            ),
+                            test_command=test_command or "(none configured yet)",
+                            testing_inventory=testing_inventory,
+                            verification_targets=verification_targets
+                            or "(derive from affected behavioral files)",
+                            security_concerns=security_concerns
+                            or "(none identified by Phase 3)",
+                            core_functionality=core_functionality,
+                        ),
+                    },
+                ],
+                schema=ExecutionPlan,
+                expert=planner_client,
+                max_tokens=planner_plan_max_tokens,
+                artifact_label="structured plan",
+                ws=ws,
+                phase=4,
+                on_thinking=on_thinking,
+                on_metrics=on_metrics,
+                on_metrics_reset=on_metrics_reset,
+            )
+
+            phase_timings["phase_4_plan_assembly"] = time.monotonic() - t0
+
+            if settings.enable_core_functionality_tagging:
+                plan.core_functionality = list(phase3_design_and_risks_obj.core_functionality)
+
+            impl_steps = [s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS]
+            stripped_count = len(plan.steps) - len(impl_steps)
+            if stripped_count:
+                stripped_tools = [
+                    s.tool for s in plan.steps if s.tool not in IMPLEMENTATION_STEP_TOOLS
+                ]
+                logger.warning(
+                    "Stripped %d non-implementation steps from Phase 4 plan: %s",
+                    stripped_count,
+                    stripped_tools,
+                )
+                for i, step in enumerate(impl_steps, 1):
+                    step.step_number = i
+                plan.steps = impl_steps
+            if not plan.steps and stripped_count:
+                logger.error(
+                    "Phase 4 produced zero implementation steps — all %d steps "
+                    "were exploration/verification tools. file_summary may be "
+                    "insufficient.",
+                    stripped_count,
+                )
+
+            has_implementation = any(s.tool in ("create_file", "edit_file") for s in plan.steps)
+            if plan.steps and not has_implementation:
+                logger.warning(
+                    "Phase 4 plan has %d steps but none are create_file or "
+                    "edit_file — plan may be exploration-only. Tools: %s",
+                    len(plan.steps),
+                    [s.tool for s in plan.steps],
+                )
+
             _sync_affected_files_from_steps(plan)
+
             plan_warnings = _run_plan_validations(
                 plan,
                 file_summary_obj,
-                design_and_risks_obj,
+                phase3_design_and_risks_obj,
             )
 
-        plan.plan_validation_warnings = plan_warnings
+            blocking_uncovered = [
+                mf
+                for mf in _uncovered_missing_files(plan, phase3_design_and_risks_obj)
+                if mf.blocking
+            ]
+            if blocking_uncovered:
+                logger.warning(
+                    "Phase 4 plan validation — %d BLOCKING uncovered missing "
+                    "file(s); triggering auto-revision",
+                    len(blocking_uncovered),
+                )
+                feedback = (
+                    "Phase 3 identified BLOCKING missing files that the plan "
+                    "does not cover. Add a create_file or edit_file step for "
+                    "each:\n"
+                    + "\n".join(f"- {mf.file_path}: {mf.purpose}" for mf in blocking_uncovered)
+                )
+                revision_expert = (
+                    planner_client
+                    if has_distinct_expert and planner_client is expert_llm_client
+                    else None
+                )
+                plan = await _revise_plan(
+                    task=task,
+                    revision_context=(
+                        f"PREVIOUS PLAN (JSON):\n"
+                        f"{plan.model_dump_json(indent=2)}\n\n"
+                        f"USER FEEDBACK:\n{feedback}"
+                    ),
+                    llm_client=llm_client,
+                    context=context,
+                    ws=ws,
+                    expert_llm_client=revision_expert,
+                    previous_plan=plan,
+                    on_thinking=on_thinking,
+                    on_metrics=on_metrics,
+                    on_metrics_reset=on_metrics_reset,
+                )
+                plan.steps = [s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS]
+                for i, step in enumerate(plan.steps, 1):
+                    step.step_number = i
+                _sync_affected_files_from_steps(plan)
+                plan_warnings = _run_plan_validations(
+                    plan,
+                    file_summary_obj,
+                    phase3_design_and_risks_obj,
+                )
 
-        _save_debug_phase(
-            repo_root,
-            session_id,
-            "phase_4_plan",
-            plan.model_dump_json(indent=2),
-            phase_timings["phase_4_plan_assembly"],
-        )
-        _save_debug_phase(
-            repo_root,
-            session_id,
-            "phase_4_plan_markdown",
-            plan_to_markdown(plan),
-            phase_timings["phase_4_plan_assembly"],
-        )
+            plan.plan_validation_warnings = plan_warnings
 
-        await _send_stage_done(
-            ws,
-            f"Plan assembled — {len(plan.steps)} steps across {len(plan.affected_files)} file(s)",
-            model=expert.model_name,
-            phase=4,
-        )
+            _save_debug_phase(
+                repo_root,
+                session_id,
+                "phase_4_plan",
+                plan.model_dump_json(indent=2),
+                phase_timings["phase_4_plan_assembly"],
+            )
+            _save_debug_phase(
+                repo_root,
+                session_id,
+                "phase_4_plan_markdown",
+                plan_to_markdown(plan),
+                phase_timings["phase_4_plan_assembly"],
+            )
+
+            stage_summary = (
+                f"Plan assembled — {len(plan.steps)} steps across "
+                f"{len(plan.affected_files)} file(s)"
+            )
+            await _send_stage_done(
+                ws,
+                stage_summary,
+                model=planner_client.model_name,
+                phase=4,
+            )
+            return plan
+
+        phase3_client = expert
+        try:
+            (
+                design_and_risks_obj,
+                design_and_risks,
+                missing_files,
+            ) = await _run_phase3(
+                phase3_client,
+                announce_switch=has_distinct_expert and phase3_client is expert_llm_client,
+            )
+        except Exception as exc:
+            if not (
+                has_distinct_expert
+                and phase3_client is expert_llm_client
+                and _is_recoverable_planning_model_failure(exc)
+            ):
+                raise
+            logger.warning(
+                "Expert model failed during Phase 3; retrying on primary model: %s",
+                exc,
+                exc_info=True,
+            )
+            fallback_summary = (
+                "Expert model unavailable during Phase 3 design synthesis. "
+                "Retrying on the primary model..."
+            )
+            await _send_stage(
+                ws,
+                fallback_summary,
+                model=explorer.model_name,
+                phase=3,
+            )
+            phase3_client = explorer
+            (
+                design_and_risks_obj,
+                design_and_risks,
+                missing_files,
+            ) = await _run_phase3(
+                phase3_client,
+                announce_switch=False,
+            )
+
+        try:
+            plan = await _run_phase4(
+                phase3_client,
+                phase3_design_and_risks_obj=design_and_risks_obj,
+                phase3_design_and_risks=design_and_risks,
+                phase3_missing_files=missing_files,
+            )
+        except Exception as exc:
+            if not (
+                has_distinct_expert
+                and phase3_client is expert_llm_client
+                and _is_recoverable_planning_model_failure(exc)
+            ):
+                raise
+            logger.warning(
+                "Expert model failed during Phase 4; retrying on primary model: %s",
+                exc,
+                exc_info=True,
+            )
+            fallback_summary = (
+                "Expert model unavailable during Phase 4 plan assembly. "
+                "Retrying on the primary model..."
+            )
+            await _send_stage(
+                ws,
+                fallback_summary,
+                model=explorer.model_name,
+                phase=4,
+            )
+            plan = await _run_phase4(
+                explorer,
+                phase3_design_and_risks_obj=design_and_risks_obj,
+                phase3_design_and_risks=design_and_risks,
+                phase3_missing_files=missing_files,
+            )
 
         phase_timings["total"] = time.monotonic() - plan_start
 
@@ -725,7 +892,10 @@ async def create_plan(
             )
         await _send_stage_done(
             ws,
-            f"Fallback plan assembled — {len(plan.steps)} steps across {len(plan.affected_files)} file(s)",
+            (
+                f"Fallback plan assembled — {len(plan.steps)} steps across "
+                f"{len(plan.affected_files)} file(s)"
+            ),
             model=expert.model_name,
             phase=4,
         )
@@ -1298,7 +1468,10 @@ def _check_core_functionality_success_checked(plan: ExecutionPlan) -> list[str]:
         for step in plan.steps:
             haystack = _step_contract_haystack(step).lower()
             if (
-                ((entity and entity.lower() in haystack) or (file_path and file_path.lower() in haystack))
+                (
+                    (entity and entity.lower() in haystack)
+                    or (file_path and file_path.lower() in haystack)
+                )
                 and "regression" in haystack
                 and step.success_checks
             ):
