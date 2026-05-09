@@ -14,7 +14,13 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel
 
 from lean_ai.config import settings
-from lean_ai.llm.base import LLMMetrics, LLMProvider, ToolCall, ToolCallInfo
+from lean_ai.llm.base import (
+    LLMMetrics,
+    LLMProvider,
+    StructuredOutputError,
+    ToolCall,
+    ToolCallInfo,
+)
 
 if TYPE_CHECKING:
     from lean_ai.workflow.ws_dispatcher import WSMessageDispatcher
@@ -45,6 +51,19 @@ class TurnAction:
     log_level: int = logging.INFO
 
 
+@dataclass(frozen=True)
+class ResponseAssessment:
+    """Harness-side classification of a completed provider response."""
+
+    usable_output: bool
+    reason: str
+    content_chars: int = 0
+    thinking_chars: int = 0
+    tool_calls_count: int = 0
+    eval_count: int | None = None
+    eval_duration: int | None = None
+
+
 @dataclass
 class _TurnState:
     """Mutable counters tracked across turns in chat_with_tools."""
@@ -63,6 +82,8 @@ class _TurnState:
     # whatever content has accumulated.
     consecutive_budget_interrupts: int = 0
     max_budget_interrupts: int = 2
+    consecutive_no_response: int = 0
+    max_no_response_retries: int = 1
     pre_refresh_nudge_sent: bool = False
 
 
@@ -169,6 +190,86 @@ def _log_harness_message(
         suffix,
         _preview_log_text(content or ""),
     )
+
+
+def _classify_response(
+    *,
+    content: str = "",
+    thinking: str | None = None,
+    tool_calls: list[ToolCallInfo] | None = None,
+    metrics: LLMMetrics | None = None,
+    structured_output: BaseModel | None = None,
+) -> ResponseAssessment:
+    """Classify whether a provider response produced usable output."""
+    content_chars = len(content or "")
+    thinking_text = thinking or ""
+    thinking_chars = len(thinking_text)
+    tool_calls_count = len(tool_calls or [])
+    eval_count = metrics.completion_tokens if metrics is not None else None
+    eval_duration = metrics.eval_duration if metrics is not None else None
+
+    if structured_output is not None:
+        return ResponseAssessment(
+            usable_output=True,
+            reason="structured_output",
+            content_chars=content_chars,
+            thinking_chars=thinking_chars,
+            tool_calls_count=tool_calls_count,
+            eval_count=eval_count,
+            eval_duration=eval_duration,
+        )
+
+    if (content or "").strip():
+        return ResponseAssessment(
+            usable_output=True,
+            reason="assistant_content",
+            content_chars=content_chars,
+            thinking_chars=thinking_chars,
+            tool_calls_count=tool_calls_count,
+            eval_count=eval_count,
+            eval_duration=eval_duration,
+        )
+
+    if tool_calls_count > 0:
+        return ResponseAssessment(
+            usable_output=True,
+            reason="tool_calls",
+            content_chars=content_chars,
+            thinking_chars=thinking_chars,
+            tool_calls_count=tool_calls_count,
+            eval_count=eval_count,
+            eval_duration=eval_duration,
+        )
+
+    if thinking_text.strip():
+        reason = "thinking_only"
+    elif metrics is not None and metrics.completion_tokens == 0:
+        reason = "zero_tokens"
+    else:
+        reason = "empty"
+
+    return ResponseAssessment(
+        usable_output=False,
+        reason=reason,
+        content_chars=content_chars,
+        thinking_chars=thinking_chars,
+        tool_calls_count=tool_calls_count,
+        eval_count=eval_count,
+        eval_duration=eval_duration,
+    )
+
+
+def _build_no_response_nudge(*, structured: bool = False) -> tuple[str, str]:
+    """Return the prompt-registry key and text for a no-response retry."""
+    from lean_ai.llm.prompt_registry import registry
+
+    key = "nudge.no_response_structured" if structured else "nudge.no_response"
+    return key, registry.get(key)
+
+
+def _structured_output_error_is_blank(exc: StructuredOutputError) -> bool:
+    """Return True when structured parsing failed because the model emitted nothing."""
+    return not (exc.raw_output or "").strip() and not (exc.cleaned_output or "").strip()
 
 
 async def _call_noncritical_callback(
@@ -292,21 +393,57 @@ class LLMClient:
         if thinking_callback is not None:
             kwargs["thinking_callback"] = thinking_callback
 
-        if self._semaphore is not None:
-            async with self._semaphore:
-                text, metrics = await self._provider.chat_raw(
-                    messages,
-                    temperature,
-                    max_tokens,
-                    **kwargs,
-                )
-        else:
-            text, metrics = await self._provider.chat_raw(
-                messages,
+        async def _invoke(call_messages: list[dict]) -> tuple[str, LLMMetrics]:
+            if self._semaphore is not None:
+                async with self._semaphore:
+                    return await self._provider.chat_raw(
+                        call_messages,
+                        temperature,
+                        max_tokens,
+                        **kwargs,
+                    )
+            return await self._provider.chat_raw(
+                call_messages,
                 temperature,
                 max_tokens,
                 **kwargs,
             )
+
+        call_messages = [dict(m) for m in messages]
+        text = ""
+        metrics = LLMMetrics()
+        for attempt in range(2):
+            text, metrics = await _invoke(call_messages)
+            assessment = _classify_response(
+                content=text,
+                thinking=metrics.thinking,
+                metrics=metrics,
+            )
+            if assessment.usable_output or attempt == 1:
+                if not assessment.usable_output:
+                    logger.warning(
+                        "chat_raw: response had no usable output after retry "
+                        "(reason=%s eval_count=%s thinking_chars=%d)",
+                        assessment.reason,
+                        assessment.eval_count,
+                        assessment.thinking_chars,
+                    )
+                break
+
+            nudge_key, nudge = _build_no_response_nudge()
+            _log_harness_message(
+                kind="nudge",
+                key=nudge_key,
+                content=nudge,
+                level=logging.WARNING,
+                reason=assessment.reason,
+                eval_count=assessment.eval_count,
+                thinking_chars=assessment.thinking_chars,
+            )
+            if text.strip():
+                call_messages.append({"role": "assistant", "content": text})
+            call_messages.append({"role": "user", "content": nudge})
+
         self.last_chat_metrics = _metrics_to_dict(metrics)
         return text
 
@@ -330,13 +467,32 @@ class LLMClient:
         if on_metrics_reset:
             await _call_noncritical_callback("on_metrics_reset", on_metrics_reset)
 
-        result, metrics = await self._provider.chat_structured(
-            messages,
-            schema,
-            temperature,
-            max_tokens,
-            **kwargs,
-        )
+        call_messages = [dict(m) for m in messages]
+        structured_retry_used = False
+        while True:
+            try:
+                result, metrics = await self._provider.chat_structured(
+                    call_messages,
+                    schema,
+                    temperature,
+                    max_tokens,
+                    **kwargs,
+                )
+                break
+            except StructuredOutputError as exc:
+                if structured_retry_used or not _structured_output_error_is_blank(exc):
+                    raise
+                structured_retry_used = True
+                nudge_key, nudge = _build_no_response_nudge(structured=True)
+                _log_harness_message(
+                    kind="nudge",
+                    key=nudge_key,
+                    content=nudge,
+                    level=logging.WARNING,
+                    reason="blank_structured_output",
+                )
+                call_messages.append({"role": "user", "content": nudge})
+
         self.last_chat_metrics = _metrics_to_dict(metrics)
         if on_metrics and metrics.prompt_tokens:
             await _call_noncritical_callback(
@@ -603,6 +759,7 @@ class LLMClient:
                 stream_callback=_stream_wrapper if _stream_cb else None,
                 thinking_callback=_thinking_wrapper if _think_cb else None,
             )
+            self.last_chat_metrics = _metrics_to_dict(metrics)
 
             # Fire per-turn training capture (fire-and-forget). Must
             # happen BEFORE any mutation of messages (tool results)
@@ -628,6 +785,12 @@ class LLMClient:
                 )
 
             last_prompt_tokens = metrics.prompt_tokens
+            response_assessment = _classify_response(
+                content=content,
+                thinking=metrics.thinking,
+                tool_calls=tool_calls,
+                metrics=metrics,
+            )
 
             if on_metrics and last_prompt_tokens:
                 await _call_noncritical_callback(
@@ -919,6 +1082,42 @@ class LLMClient:
                     explanation_parts.append(summary)
                 logger.info("chat_with_tools: task_complete called — exiting loop")
                 break
+
+            if (
+                not response_assessment.usable_output
+                and not getattr(metrics, "thinking_budget_exceeded", False)
+            ):
+                state.consecutive_no_response += 1
+                state.consecutive_text_only = 0
+                state.consecutive_truncated = 0
+                if state.consecutive_no_response > state.max_no_response_retries:
+                    logger.warning(
+                        "chat_with_tools: exiting — repeated no-response turns "
+                        "(reason=%s eval_count=%s thinking_chars=%d)",
+                        response_assessment.reason,
+                        response_assessment.eval_count,
+                        response_assessment.thinking_chars,
+                    )
+                    break
+                nudge_key, no_response_nudge = _build_no_response_nudge()
+                _log_harness_message(
+                    kind="nudge",
+                    key=nudge_key,
+                    content=no_response_nudge,
+                    level=logging.WARNING,
+                    turn=turn,
+                    reason=response_assessment.reason,
+                    eval_count=response_assessment.eval_count,
+                    thinking_chars=response_assessment.thinking_chars,
+                )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": no_response_nudge,
+                    }
+                )
+                continue
+            state.consecutive_no_response = 0
 
             # ── Reasoning-budget interrupt ────────────────────────
             # When the provider's streaming helper aborted because
@@ -1299,8 +1498,11 @@ def _metrics_to_dict(metrics: LLMMetrics) -> dict:
     return {
         "tokens_per_second": metrics.tokens_per_second,
         "eval_count": metrics.completion_tokens,
+        "eval_duration": metrics.eval_duration,
         "prompt_tokens": metrics.prompt_tokens,
+        "prompt_eval_duration": metrics.prompt_eval_duration,
         "stop_reason": metrics.stop_reason,
+        "done_reason": metrics.stop_reason,
     }
 
 

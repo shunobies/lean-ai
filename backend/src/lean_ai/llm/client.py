@@ -294,6 +294,8 @@ class OllamaProvider(LLMProvider):
                 eval_count,
                 stop_reason=response.get("done_reason"),
                 tps=tps,
+                prompt_eval_duration=response.get("prompt_eval_duration"),
+                eval_duration=eval_duration,
             )
         except Exception:
             return LLMMetrics()

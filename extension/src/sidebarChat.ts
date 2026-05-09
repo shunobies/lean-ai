@@ -347,8 +347,10 @@ export async function handleChatMessage(
     let tokenCount = 0;
     ctx.sessionTreeProvider?.pauseRefresh();
     let receivedDone = false;
+    let doneReason: string | undefined;
+    let evalCount: number | undefined;
     try {
-        ({ receivedDone } = await ctx.client.chatStream(chatText, historyForApi, workspace, (token) => {
+        ({ receivedDone, doneReason, evalCount } = await ctx.client.chatStream(chatText, historyForApi, workspace, (token) => {
             if (streamStartTime === null) { streamStartTime = Date.now(); }
             tokenCount++;
             fullReply += token;
@@ -394,8 +396,14 @@ export async function handleChatMessage(
     }
 
     // Send full text so the webview can apply markdown formatting, plus tok/s metrics
-    const truncated = !receivedDone && tokenCount > 0;
-    ctx.postMessage({ type: "chatDone", fullText: fullReply, tps, evalCount: tokenCount, truncated });
+    const truncated = (!receivedDone && tokenCount > 0) || doneReason === "length" || doneReason === "max_tokens";
+    ctx.postMessage({
+        type: "chatDone",
+        fullText: fullReply,
+        tps,
+        evalCount: evalCount ?? tokenCount,
+        truncated,
+    });
 
     // Persist conversation after each exchange
     await ctx.conversations.persistCurrentConversation(ctx.chatHistory);

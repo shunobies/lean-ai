@@ -2971,6 +2971,42 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
 
     reg.register(
         PromptEntry(
+            key="nudge.no_response",
+            category="Advanced",
+            name="No Response Nudge",
+            description=(
+                "Injected when the model finishes a turn with no usable"
+                " output: no assistant content, no tool calls, or only"
+                " hidden thinking."
+            ),
+            default_text=(
+                "Your previous attempt did not include any usable output. "
+                "Respond now with a real answer or the next tool call. "
+                "Do not output thinking only, and do not leave the response blank."
+            ),
+        )
+    )
+
+    reg.register(
+        PromptEntry(
+            key="nudge.no_response_structured",
+            category="Advanced",
+            name="No Structured Response Nudge",
+            description=(
+                "Injected when a structured-output call returns blank output"
+                " instead of usable JSON."
+            ),
+            default_text=(
+                "Your previous attempt did not include any usable structured output. "
+                "Respond again now with only the required JSON/object matching the "
+                "requested schema. Do not output thinking only, and do not leave the "
+                "response blank."
+            ),
+        )
+    )
+
+    reg.register(
+        PromptEntry(
             key="nudge.loop_detected",
             category="Advanced",
             name="Loop Detection Message",

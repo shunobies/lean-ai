@@ -405,6 +405,7 @@ _SSE_HEADERS = {
     "Cache-Control": "no-cache",
     "X-Accel-Buffering": "no",
 }
+_SSE_HEARTBEAT_SECONDS = 15.0
 
 
 def _sse_event(data: dict) -> str:
@@ -501,7 +502,16 @@ def _sse_generation_response(
         task = asyncio.create_task(_run())
         try:
             while True:
-                event = await queue.get()
+                try:
+                    event = await asyncio.wait_for(
+                        queue.get(),
+                        timeout=_SSE_HEARTBEAT_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    if task.done():
+                        continue
+                    yield _sse_event({"type": "heartbeat"})
+                    continue
                 if event is None:
                     break
                 yield _sse_event(event)

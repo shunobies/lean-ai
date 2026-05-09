@@ -593,6 +593,43 @@ export async function chat(
     return data;
 }
 
+type ChatStreamFinalState = {
+    requestStartedAt: number;
+    lastChunkAt: number;
+    chunkCount: number;
+    thinkingChars: number;
+    contentChars: number;
+    toolCallsCount: number;
+    done: boolean;
+    doneReason?: string;
+    evalCount?: number;
+    evalDuration?: number;
+};
+
+type ChatStreamResult = {
+    receivedDone: boolean;
+    doneReason?: string;
+    evalCount?: number;
+    evalDuration?: number;
+    classification: string;
+};
+
+function classifyChatStreamState(state: ChatStreamFinalState): string {
+    if (!state.done) {
+        return state.chunkCount > 0 ? "stream_ended_without_done" : "no_chunks_received";
+    }
+    if (state.contentChars > 0 || state.toolCallsCount > 0) {
+        return "completed_ok";
+    }
+    if (state.thinkingChars > 0) {
+        return "completed_thinking_only";
+    }
+    if (state.evalCount === 0) {
+        return "completed_zero_tokens";
+    }
+    return "completed_empty";
+}
+
 /**
  * Stream chat tokens from the backend via Server-Sent Events.
  *
@@ -601,7 +638,7 @@ export async function chat(
  *
  * @param onToken  Called for each token as it arrives. `isFirst` is true
  *                 only for the very first token in the response.
- * @returns        Promise that resolves with `{ receivedDone }` when the stream ends.
+ * @returns        Promise that resolves with final stream metadata when the stream ends.
  */
 export function chatStream(
     baseUrl: string,
@@ -624,7 +661,7 @@ export function chatStream(
     onToolResult?: (name: string, success: boolean) => void,
     extendedTurns?: number,
     chatMode?: "architecture_review",
-): Promise<{ receivedDone: boolean }> {
+): Promise<ChatStreamResult> {
     return new Promise((resolve, reject) => {
         const fullUrl = new URL(`${baseUrl}/api/chat/stream`);
         const isHttps = fullUrl.protocol === "https:";
@@ -656,6 +693,15 @@ export function chatStream(
         let sseBuffer = "";
         let isFirst = true;
         let resolved = false;
+        const state: ChatStreamFinalState = {
+            requestStartedAt: Date.now(),
+            lastChunkAt: Date.now(),
+            chunkCount: 0,
+            thinkingChars: 0,
+            contentChars: 0,
+            toolCallsCount: 0,
+            done: false,
+        };
 
         const req = transport.request(options, (res) => {
             if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
@@ -672,20 +718,49 @@ export function chatStream(
                     if (!line.startsWith("data: ")) { continue; }
                     try {
                         const data = JSON.parse(line.slice(6)) as Record<string, unknown>;
+                        state.lastChunkAt = Date.now();
+                        state.chunkCount += 1;
                         if (data["type"] === "token" && data["content"]) {
-                            onToken(data["content"] as string, isFirst);
+                            const token = data["content"] as string;
+                            state.contentChars += token.length;
+                            onToken(token, isFirst);
                             isFirst = false;
                         } else if (data["type"] === "thinking" && data["content"] && onThinking) {
-                            onThinking(data["content"] as string);
+                            const token = data["content"] as string;
+                            state.thinkingChars += token.length;
+                            onThinking(token);
+                        } else if (data["type"] === "thinking" && data["content"]) {
+                            state.thinkingChars += (data["content"] as string).length;
                         } else if (data["type"] === "vision_description" && data["descriptions"] && onVisionDescription) {
                             onVisionDescription(data["descriptions"] as string);
                         } else if (data["type"] === "tool_call" && data["name"] && onToolCall) {
+                            state.toolCallsCount += 1;
                             onToolCall(data["name"] as string, (data["description"] as string) || "");
+                        } else if (data["type"] === "tool_call" && data["name"]) {
+                            state.toolCallsCount += 1;
                         } else if (data["type"] === "tool_result" && data["name"] && onToolResult) {
                             onToolResult(data["name"] as string, data["success"] as boolean);
+                        } else if (data["type"] === "heartbeat") {
+                            continue;
                         } else if (data["type"] === "done") {
+                            state.done = true;
+                            state.doneReason = typeof data["done_reason"] === "string"
+                                ? data["done_reason"] as string
+                                : undefined;
+                            state.evalCount = typeof data["eval_count"] === "number"
+                                ? data["eval_count"] as number
+                                : undefined;
+                            state.evalDuration = typeof data["eval_duration"] === "number"
+                                ? data["eval_duration"] as number
+                                : undefined;
                             resolved = true;
-                            resolve({ receivedDone: true });
+                            resolve({
+                                receivedDone: true,
+                                doneReason: state.doneReason,
+                                evalCount: state.evalCount,
+                                evalDuration: state.evalDuration,
+                                classification: classifyChatStreamState(state),
+                            });
                         } else if (data["type"] === "error") {
                             reject(new Error((data["message"] as string) || "Stream error"));
                         }
@@ -697,8 +772,17 @@ export function chatStream(
 
             res.on("end", () => {
                 if (!resolved) {
-                    console.warn("[Lean AI] Chat stream ended without 'done' event — response may be truncated");
-                    resolve({ receivedDone: false });
+                    const classification = classifyChatStreamState(state);
+                    console.warn(
+                        `[Lean AI] Chat stream ended without 'done' event (${classification}) — response may be truncated`,
+                    );
+                    resolve({
+                        receivedDone: false,
+                        doneReason: state.doneReason,
+                        evalCount: state.evalCount,
+                        evalDuration: state.evalDuration,
+                        classification,
+                    });
                 }
             });
 

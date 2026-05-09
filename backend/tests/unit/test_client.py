@@ -5,7 +5,7 @@ import logging
 import pytest
 from pydantic import BaseModel
 
-from lean_ai.llm.base import LLMMetrics, LLMProvider, ToolCallInfo
+from lean_ai.llm.base import LLMMetrics, LLMProvider, StructuredOutputError, ToolCallInfo
 from lean_ai.llm.client import _sanitize_messages
 from lean_ai.llm.facade import LLMClient
 
@@ -84,6 +84,50 @@ class StructuredFakeProvider(FakeProvider):
         self.messages_at_each_call.append(list(messages))
         self.structured_retry_flags.append(retry_on_validation_error)
         return StructuredResult(value="ok"), LLMMetrics(prompt_tokens=123)
+
+
+class RawFakeProvider(FakeProvider):
+    def __init__(self, raw_responses: list[tuple[str, LLMMetrics]]):
+        super().__init__(responses=[])
+        self.raw_responses = list(raw_responses)
+
+    async def chat_raw(self, messages, temperature=None, max_tokens=None, **kwargs):
+        self.messages_at_each_call.append(list(messages))
+        if self.call_count < len(self.raw_responses):
+            resp = self.raw_responses[self.call_count]
+        else:
+            resp = ("", LLMMetrics())
+        self.call_count += 1
+        return resp
+
+
+class BlankStructuredFakeProvider(StructuredFakeProvider):
+    def __init__(self):
+        super().__init__(responses=[])
+        self.call_count = 0
+
+    async def chat_structured(
+        self,
+        messages,
+        schema,
+        temperature=None,
+        max_tokens=None,
+        *,
+        retry_on_validation_error=True,
+        **kwargs,
+    ):
+        self.messages_at_each_call.append(list(messages))
+        self.structured_retry_flags.append(retry_on_validation_error)
+        self.call_count += 1
+        if self.call_count == 1:
+            raise StructuredOutputError(
+                schema_name=schema.__name__,
+                raw_output="",
+                cleaned_output="",
+                validation_errors=[],
+                summary="blank output",
+            )
+        return StructuredResult(value="ok"), LLMMetrics(prompt_tokens=77)
 
 
 def _make_tool_call_response(
@@ -207,6 +251,64 @@ async def test_chat_structured_forwards_retry_override():
 
 
 @pytest.mark.asyncio
+async def test_chat_raw_retries_once_when_first_attempt_has_no_usable_output():
+    provider = RawFakeProvider(
+        [
+            (
+                "",
+                LLMMetrics(
+                    completion_tokens=0,
+                    thinking="silent chain of thought",
+                ),
+            ),
+            (
+                "Real answer.",
+                LLMMetrics(completion_tokens=12),
+            ),
+        ]
+    )
+    client = LLMClient(provider=provider)
+
+    result = await client.chat_raw(
+        messages=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "task"},
+        ]
+    )
+
+    assert result == "Real answer."
+    assert provider.call_count == 2
+    retry_messages = provider.messages_at_each_call[1]
+    assert any(
+        msg.get("role") == "user" and "did not include any usable output" in msg.get("content", "")
+        for msg in retry_messages
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_structured_retries_blank_output_once():
+    provider = BlankStructuredFakeProvider()
+    client = LLMClient(provider=provider)
+
+    result = await client.chat_structured(
+        messages=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "task"},
+        ],
+        schema=StructuredResult,
+    )
+
+    assert result.value == "ok"
+    assert provider.call_count == 2
+    retry_messages = provider.messages_at_each_call[1]
+    assert any(
+        msg.get("role") == "user"
+        and "usable structured output" in msg.get("content", "")
+        for msg in retry_messages
+    )
+
+
+@pytest.mark.asyncio
 async def test_chat_with_tools_ignores_tool_call_callback_exception(caplog):
     responses = [
         _make_tool_call_response("read_file", {"path": "f.py"}),
@@ -309,7 +411,7 @@ async def test_chat_with_tools_emits_metrics_reset_at_start_and_refresh():
         on_context_refresh=on_refresh,
     )
 
-    assert resets == ["reset", "reset"]
+    assert resets == ["reset", "reset", "reset"]
 
 
 @pytest.mark.asyncio
@@ -759,6 +861,72 @@ async def test_text_only_continues_loop():
     assert "Let me think about this..." in explanation
     assert "I'll make the change now." in explanation
     assert "Done thinking and working." in explanation
+
+
+@pytest.mark.asyncio
+async def test_thinking_only_turn_gets_no_response_retry():
+    responses = [
+        _make_tool_call_response("read_file", {"path": "f.py"}),
+        ("", [], LLMMetrics(thinking="worked it out", completion_tokens=0)),
+        _make_task_complete_response("Done after retry."),
+    ]
+
+    client, fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    executed, explanation = await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=10,
+    )
+
+    assert fake.call_count == 3
+    assert len(executed) == 1
+    assert executed[0].tool_name == "read_file"
+    assert "Done after retry." in explanation
+    assert any(
+        m["role"] == "user" and "did not include any usable output" in m.get("content", "")
+        for m in messages
+    )
+
+
+@pytest.mark.asyncio
+async def test_text_after_thinking_is_treated_as_normal_completion():
+    responses = [
+        (
+            "Here is the answer.",
+            [],
+            LLMMetrics(
+                thinking="reasoned first",
+                completion_tokens=21,
+            ),
+        ),
+    ]
+
+    client, fake = _build_client(responses)
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do stuff"},
+    ]
+
+    _executed, explanation = await client.chat_with_tools(
+        messages=messages,
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=10,
+        text_only_exit_count=1,
+    )
+
+    assert fake.call_count == 1
+    assert explanation == "Here is the answer."
+    assert not any(
+        m["role"] == "user" and "did not include any usable output" in m.get("content", "")
+        for m in messages
+    )
 
 
 @pytest.mark.asyncio

@@ -166,6 +166,8 @@ class LLMMetrics:
     completion_tokens: int = 0
     tokens_per_second: float | None = None
     stop_reason: str | None = None
+    prompt_eval_duration: int | None = None
+    eval_duration: int | None = None
     thinking: str | None = None
     # Populated only when the Ollama stream was aborted because thinking
     # tokens exceeded the configured reasoning_effort soft limit OR the
@@ -185,6 +187,8 @@ class LLMMetrics:
         *,
         stop_reason: str | None = None,
         tps: float | None = None,
+        prompt_eval_duration: int | None = None,
+        eval_duration: int | None = None,
     ) -> "LLMMetrics":
         """Construct from provider-extracted token counts."""
         return cls(
@@ -192,6 +196,8 @@ class LLMMetrics:
             completion_tokens=completion or 0,
             tokens_per_second=tps,
             stop_reason=stop_reason,
+            prompt_eval_duration=prompt_eval_duration,
+            eval_duration=eval_duration,
         )
 
 

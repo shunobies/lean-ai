@@ -43,6 +43,7 @@ _CHAT_MAX_TURNS = 20
 # Hard cap when ChatRequest.extended_turns is supplied (used by the
 # /mock-interview extension command for multi-round scored Q&A).
 _CHAT_EXTENDED_TURNS_MAX = 40
+_STREAM_HEARTBEAT_SECONDS = 15.0
 _MAX_DIRECTORY_ENTRIES = 500
 _MAX_DIRECTORY_DEPTH = 25
 
@@ -829,8 +830,9 @@ async def _stream_chat_with_tools(
         tools = [t for t in tools if t["function"]["name"] in ("search_internet", "fetch_url")]
 
     async def _run():
+        chat_client = _get_chat_client()
         try:
-            await _get_chat_client().chat_with_tools(
+            await chat_client.chat_with_tools(
                 messages=messages,
                 tools=tools,
                 tool_executor_fn=executor,
@@ -844,6 +846,17 @@ async def _stream_chat_with_tools(
                 on_tool_result=_on_tool_result,
                 telemetry_context=_chat_telemetry_context(repo_root),
             )
+            metrics = chat_client.last_chat_metrics or {}
+            await queue.put(
+                {
+                    "type": "done",
+                    "done_reason": metrics.get("done_reason") or metrics.get("stop_reason"),
+                    "eval_count": metrics.get("eval_count"),
+                    "eval_duration": metrics.get("eval_duration"),
+                    "prompt_tokens": metrics.get("prompt_tokens"),
+                    "prompt_eval_duration": metrics.get("prompt_eval_duration"),
+                }
+            )
         except Exception as e:
             await queue.put({"type": "error", "message": str(e)})
         finally:
@@ -853,15 +866,22 @@ async def _stream_chat_with_tools(
 
     try:
         while True:
-            event = await queue.get()
+            try:
+                event = await asyncio.wait_for(
+                    queue.get(),
+                    timeout=_STREAM_HEARTBEAT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                if task.done():
+                    continue
+                yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+                continue
             if event is None:
                 break
             yield f"data: {json.dumps(event)}\n\n"
     except asyncio.CancelledError:
         task.cancel()
         raise
-
-    yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
 
 # ── Streaming chat endpoint ─────────────────────────────────────────
@@ -881,8 +901,9 @@ async def chat_stream_endpoint(request: ChatRequest):
         data: {"type": "thinking", "content": "..."}\n\n
         data: {"type": "tool_call", "name": "...", "description": "..."}\n\n
         data: {"type": "tool_result", "name": "...", "success": true}\n\n
+        data: {"type": "heartbeat"}\n\n
         data: {"type": "vision_description", "descriptions": "..."}\n\n
-        data: {"type": "done"}\n\n
+        data: {"type": "done", "done_reason": "...", "eval_count": 123}\n\n
         data: {"type": "error", "message": "..."}\n\n
     """
 
