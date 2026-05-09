@@ -33,6 +33,13 @@ CATEGORY_ORDER = [
 ]
 
 
+class _PassthroughFormatMap(dict):
+    """Mapping that preserves unknown placeholders during validation."""
+
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
+
+
 @dataclass
 class PromptEntry:
     """A single registered prompt with metadata."""
@@ -99,6 +106,13 @@ class PromptRegistry:
         for var in entry.template_vars:
             if f"{{{var}}}" not in text:
                 errors.append(f"Missing required placeholder: {{{var}}}")
+        probe_values = _PassthroughFormatMap(
+            {var: f"<{var}>" for var in entry.template_vars},
+        )
+        try:
+            text.format_map(probe_values)
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError) as exc:
+            errors.append(f"Invalid format syntax: {exc}")
         return errors
 
     def load(self, repo_root: str) -> None:

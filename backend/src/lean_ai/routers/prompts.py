@@ -55,7 +55,10 @@ async def update_prompts(request: UpdatePromptsRequest) -> dict[str, str]:
         raise HTTPException(
             status_code=422,
             detail={
-                "message": "Validation failed — missing required template variables",
+                "message": (
+                    "Validation failed — prompt contains missing placeholders "
+                    "or invalid format syntax"
+                ),
                 "errors": all_errors,
             },
         )
