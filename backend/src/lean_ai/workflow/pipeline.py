@@ -366,6 +366,7 @@ async def _wait_for_approval(
                 llm_client=llm_client,
                 context=context,
                 revision_context=revision_context,
+                previous_plan=plan,
                 ws=ws,
                 dispatcher=dispatcher,
                 refiner=refiner,

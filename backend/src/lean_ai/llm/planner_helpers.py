@@ -17,8 +17,11 @@ from pydantic import BaseModel
 from lean_ai.config import settings
 from lean_ai.llm.base import StructuredOutputError, format_validation_path
 from lean_ai.llm.plan_schema import (
+    DesignAndRisks,
+    FileSummary,
     IMPLEMENTATION_STEP_TOOLS,
     ExecutionPlan,
+    PlanStep,
     ScopeAssumption,
     ScopeDocument,
 )
@@ -378,6 +381,118 @@ def _structured_failure_message(
     )
 
 
+def _build_fallback_execution_plan(
+    *,
+    task: str,
+    scope: str = "",
+    file_summary_obj: FileSummary | None = None,
+    design_and_risks_obj: DesignAndRisks | None = None,
+    test_command: str = "",
+    failure_summary: str,
+    previous_plan: ExecutionPlan | None = None,
+) -> ExecutionPlan:
+    """Build a best-effort plan instead of aborting the workflow.
+
+    When partial planner state exists, infer likely create/edit targets from
+    it so the user still gets something reviewable on the approval screen.
+    When revising an existing plan, prefer returning that prior plan with a
+    warning rather than dropping the session on the floor.
+    """
+    warning = f"planning fallback: {failure_summary}"
+    if previous_plan is not None:
+        plan = previous_plan.model_copy(deep=True)
+        plan.user_summary = (
+            "Automatic plan revision failed, so the previous plan was preserved "
+            "to keep the workflow moving. Review the warnings and user feedback "
+            "carefully before approval."
+        )
+        plan.plan_validation_warnings = list(plan.plan_validation_warnings) + [
+            warning,
+            "automatic plan revision failed; the prior plan is being reused unchanged",
+        ]
+        return plan
+
+    candidates: list[tuple[str, str, str]] = []
+    seen_paths: set[str] = set()
+
+    def _add_candidate(tool: str, file_path: str, reason: str) -> None:
+        path = (file_path or "").strip()
+        if not path or path in seen_paths:
+            return
+        seen_paths.add(path)
+        normalized_reason = " ".join((reason or "").split()) or (
+            "This file was identified as relevant during partial planning."
+        )
+        candidates.append((tool, path, normalized_reason))
+
+    if design_and_risks_obj is not None:
+        for missing in sorted(
+            design_and_risks_obj.missing_files,
+            key=lambda item: (not item.blocking, item.file_path),
+        ):
+            _add_candidate("create_file", missing.file_path, missing.purpose)
+        for change in design_and_risks_obj.change_designs:
+            _add_candidate("edit_file", change.file_path, change.decisions)
+
+    if file_summary_obj is not None:
+        for item in file_summary_obj.files_to_create:
+            _add_candidate("create_file", item.file_path, item.reason)
+        for item in file_summary_obj.files_to_modify:
+            _add_candidate("edit_file", item.file_path, item.reason)
+
+    steps: list[PlanStep] = []
+    scope_or_task = (scope or task).strip() or "(task text unavailable)"
+    for step_number, (tool, path, reason) in enumerate(candidates[:8], 1):
+        if tool == "create_file":
+            instruction = (
+                f"Create `{path}` for this task using existing project conventions "
+                "and the scoped behavior below."
+            )
+        else:
+            instruction = (
+                f"Update `{path}` to satisfy the task while preserving unrelated behavior "
+                "and existing conventions."
+            )
+        steps.append(
+            PlanStep(
+                step_number=step_number,
+                tool=tool,
+                file_path=path,
+                job=instruction,
+                instruction=instruction,
+                reason=reason,
+                context=scope_or_task[:1200],
+                output_shape=(
+                    "Leave the target file in a concrete, reviewable state that advances "
+                    "the task and avoids placeholder-only edits."
+                ),
+            )
+        )
+
+    warnings = [warning]
+    if not steps:
+        warnings.append(
+            "fallback planner could not infer concrete file targets from the partial phase outputs"
+        )
+
+    return ExecutionPlan(
+        scope=scope_or_task[:4000],
+        user_summary=(
+            "The normal planning pipeline hit an internal failure, so this is a "
+            "best-effort fallback plan assembled from whatever earlier phase data "
+            "was available. Review the warnings carefully before approval."
+        ),
+        steps=steps,
+        affected_files=[step.file_path for step in steps if step.file_path],
+        test_strategy=(
+            f"After implementation, run `{test_command}` and review the changed files."
+            if test_command
+            else "Review the changed files carefully and run the project's test command once it is confirmed."
+        ),
+        plan_validation_warnings=warnings,
+    )
+
+
 async def _chat_structured_with_repair(
     *,
     messages: list[dict],
@@ -699,6 +814,7 @@ async def _revise_plan(
     context: str = "",
     ws: WebSocket | None = None,
     expert_llm_client: "LLMClient | None" = None,
+    previous_plan: ExecutionPlan | None = None,
     on_thinking: "Callable | None" = None,
     on_metrics: "Callable | None" = None,
     on_metrics_reset: "Callable | None" = None,
@@ -735,34 +851,47 @@ async def _revise_plan(
         model=expert.model_name,
     )
     logger.info("Plan revision")
-    plan = await _chat_structured_with_repair(
-        messages=[
-            {"role": "system", "content": PLAN_ASSEMBLY_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    f"TASK: {task}\n\n"
-                    f"CODEBASE CONTEXT:\n{context}\n\n"
-                    f"REVISION CONTEXT:\n{revision_context}\n\n"
-                    "Revise the plan based on the user's feedback. "
-                    "Make targeted edits — don't rewrite from scratch. "
-                    "Keep the Phase 4 job-contract format: each step needs "
-                    "job, inputs, may_change, must_not_change, allowed_tools, "
-                    "output_shape, success_checks, and blocked_protocol. "
-                    "Legacy tool/file_path/instruction/context may remain as "
-                    "short compatibility hints only."
-                ),
-            },
-        ],
-        schema=ExecutionPlan,
-        expert=expert,
-        max_tokens=plan_max_tokens,
-        artifact_label="revised structured plan",
-        ws=ws,
-        on_thinking=on_thinking,
-        on_metrics=on_metrics,
-        on_metrics_reset=on_metrics_reset,
-    )
+    try:
+        plan = await _chat_structured_with_repair(
+            messages=[
+                {"role": "system", "content": PLAN_ASSEMBLY_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": (
+                        f"TASK: {task}\n\n"
+                        f"CODEBASE CONTEXT:\n{context}\n\n"
+                        f"REVISION CONTEXT:\n{revision_context}\n\n"
+                        "Revise the plan based on the user's feedback. "
+                        "Make targeted edits — don't rewrite from scratch. "
+                        "Keep the Phase 4 job-contract format: each step needs "
+                        "job, inputs, may_change, must_not_change, allowed_tools, "
+                        "output_shape, success_checks, and blocked_protocol. "
+                        "Legacy tool/file_path/instruction/context may remain as "
+                        "short compatibility hints only."
+                    ),
+                },
+            ],
+            schema=ExecutionPlan,
+            expert=expert,
+            max_tokens=plan_max_tokens,
+            artifact_label="revised structured plan",
+            ws=ws,
+            on_thinking=on_thinking,
+            on_metrics=on_metrics,
+            on_metrics_reset=on_metrics_reset,
+        )
+    except Exception as exc:
+        logger.exception("Plan revision failed — returning fallback plan")
+        return _build_fallback_execution_plan(
+            task=task,
+            scope=context,
+            test_command="",
+            failure_summary=(
+                "plan revision failed after user feedback: "
+                f"{type(exc).__name__}: {exc}"
+            ),
+            previous_plan=previous_plan,
+        )
     # Safety: strip non-implementation steps (same as Phase 4)
     impl_steps = [s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS]
     if len(impl_steps) < len(plan.steps):

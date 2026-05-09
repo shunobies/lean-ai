@@ -64,6 +64,7 @@ class _TurnState:
     consecutive_budget_interrupts: int = 0
     max_budget_interrupts: int = 2
     pre_refresh_nudge_sent: bool = False
+    refresh_cooldown_turns: int = 0
 
 
 # ── Claim verification ────────────────────────────────────────────
@@ -992,6 +993,10 @@ class LLMClient:
                     on_context_refresh=on_context_refresh,
                 )
                 if refreshed:
+                    # Give the rebuilt prompt one full turn to make progress
+                    # before re-evaluating refresh pressure, otherwise large
+                    # prompt-token reports can cause back-to-back refreshes.
+                    state.refresh_cooldown_turns = 1
                     _fire_in_loop_event(
                         telemetry_context,
                         event_type="context_refresh",
@@ -1195,6 +1200,9 @@ class LLMClient:
 
         # ── Context refresh (event-driven by token threshold) ─────
         if on_context_refresh and prompt_tokens is not None:
+            if state.refresh_cooldown_turns > 0:
+                state.refresh_cooldown_turns -= 1
+                return TurnAction(verdict=TurnVerdict.CONTINUE)
             limit = int(settings.refresh_threshold * self._provider.context_window)
             # Pre-refresh warning should be tied to the existing configurable
             # refresh threshold (default 0.7), not a separate hardcoded ratio.

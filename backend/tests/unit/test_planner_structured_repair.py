@@ -6,8 +6,17 @@ import pytest
 
 from lean_ai.config import settings
 from lean_ai.llm.base import StructuredOutputError, validate_structured_output
-from lean_ai.llm.plan_schema import DesignAndRisks, ExecutionPlan, FileSummary, PlanStep, VerificationPlan
-from lean_ai.llm.planner import _run_phase5_verification
+from lean_ai.llm.plan_schema import (
+    ChangeDesign,
+    DesignAndRisks,
+    ExecutionPlan,
+    FileObservation,
+    FileSummary,
+    PlanStep,
+    ScopeDocument,
+    VerificationPlan,
+)
+from lean_ai.llm.planner import _run_phase5_verification, create_plan
 from lean_ai.llm.planner_helpers import _chat_structured_with_repair, _revise_plan
 
 
@@ -47,6 +56,15 @@ class FakeExpert:
         if isinstance(response, Exception):
             raise response
         return response
+
+
+class FakePlannerClient:
+    def __init__(self, outputs: list[tuple[list, str]]) -> None:
+        self.outputs = list(outputs)
+        self.model_name = "planner-test-model"
+
+    async def chat_with_tools(self, *args, **kwargs):
+        return self.outputs.pop(0)
 
 
 def _make_structured_error(schema, raw_json: str) -> StructuredOutputError:
@@ -209,3 +227,99 @@ async def test_structured_repair_failure_raises_user_safe_error():
 
     assert "malformed ExecutionPlan JSON twice" in str(excinfo.value)
     assert "validation error for ExecutionPlan" not in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_revise_plan_falls_back_to_previous_plan_when_repair_crashes(monkeypatch):
+    async def _boom(**kwargs):
+        raise RuntimeError("repair loop crashed")
+
+    monkeypatch.setattr("lean_ai.llm.planner_helpers._chat_structured_with_repair", _boom)
+
+    previous = _execution_plan()
+    result = await _revise_plan(
+        task="Fix the handler",
+        revision_context="PREVIOUS PLAN: {}",
+        llm_client=FakeExpert([]),
+        context="repo context",
+        previous_plan=previous,
+    )
+
+    assert result.steps == previous.steps
+    assert result.affected_files == previous.affected_files
+    assert any("automatic plan revision failed" in warning for warning in result.plan_validation_warnings)
+
+
+@pytest.mark.asyncio
+async def test_create_plan_returns_fallback_plan_when_phase4_aborts(monkeypatch):
+    async def _fake_scope(**kwargs):
+        scope = ScopeDocument(
+            problem="Update the handler.",
+            deliverables=["Handler change"],
+            in_scope=["Handler logic"],
+            out_of_scope=[],
+            downstream_consumers=[],
+            assumptions=[],
+            success_criteria=[],
+            risks=[],
+        )
+        return scope, "PROBLEM / PURPOSE:\nUpdate the handler.\n", True
+
+    async def _fake_phase2(**kwargs):
+        return (
+            FileSummary(
+                files_to_modify=[
+                    FileObservation(
+                        file_path="src/app.py",
+                        role="modify",
+                        reason="Handler implementation lives here.",
+                        relevant_sections="10-40",
+                        key_snippets=["def handler():\n    pass"],
+                    )
+                ]
+            ),
+            "FILES TO MODIFY:\n1. src/app.py — Handler implementation lives here.\n",
+            0.01,
+        )
+
+    async def _fake_design(**kwargs):
+        return DesignAndRisks(
+            change_designs=[
+                ChangeDesign(
+                    file_path="src/app.py",
+                    decisions="Update the handler logic without changing the public API.",
+                )
+            ]
+        )
+
+    async def _boom(**kwargs):
+        raise RuntimeError("phase 4 assembly exploded")
+
+    async def _no_memory(*args, **kwargs):
+        return ""
+
+    monkeypatch.setattr("lean_ai.llm.planner._retrieve_session_memories", _no_memory)
+    monkeypatch.setattr("lean_ai.llm.planner._synthesize_scope", _fake_scope)
+    monkeypatch.setattr("lean_ai.llm.planner.run_phase2_exploration", _fake_phase2)
+    monkeypatch.setattr("lean_ai.llm.planner._synthesize_design_and_risks", _fake_design)
+    monkeypatch.setattr("lean_ai.llm.planner._chat_structured_with_repair", _boom)
+
+    client = FakePlannerClient(
+        outputs=[
+            ([], "phase 1 prose"),
+            ([], "phase 3 prose"),
+        ]
+    )
+
+    plan = await create_plan(
+        task="Fix the handler",
+        repo_root=".",
+        llm_client=client,
+        context="repo context",
+        ws=None,
+    )
+
+    assert isinstance(plan, ExecutionPlan)
+    assert any("planning fallback:" in warning for warning in plan.plan_validation_warnings)
+    assert "src/app.py" in plan.affected_files
+    assert any(step.file_path == "src/app.py" for step in plan.steps)
