@@ -58,6 +58,21 @@ def test_step_scope_rejects_direct_file_write_in_non_write_step():
     assert "run_tests" in error
 
 
+def test_step_scope_allows_default_read_only_helper_when_not_listed_explicitly():
+    step = PlanStep(
+        step_number=1,
+        job="Update src/app.py only.",
+        may_change=[{"path": "src/app.py", "change": "Small behavior edit."}],
+        allowed_tools=["edit_file", "run_tests"],
+        output_shape="src/app.py contains the updated behavior.",
+        blocked_protocol="Report blocker.",
+    )
+
+    error = _step_scope_error(step, "grep_files", {"pattern": "app"})
+
+    assert error is None
+
+
 def test_step_completion_requires_task_complete():
     step = _step("edit_file", file_path="src/app.py")
     calls = [ToolCall(tool_name="edit_file", parameters={"path": "src/app.py"})]

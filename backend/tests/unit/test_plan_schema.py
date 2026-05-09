@@ -5,7 +5,10 @@ import logging
 import pytest
 from pydantic import ValidationError
 
-from lean_ai.llm.plan_schema import PlanStep
+from lean_ai.llm.plan_schema import (
+    DEFAULT_ALLOWED_READ_ONLY_STEP_TOOLS,
+    PlanStep,
+)
 
 
 def _step(**overrides) -> PlanStep:
@@ -54,3 +57,12 @@ class TestFilePathWarning:
         with caplog.at_level(logging.WARNING):
             _step(tool="edit_file", file_path="src/main.py")
         assert "should have a file_path" not in caplog.text
+
+
+def test_plan_step_adds_default_read_only_helpers_to_explicit_allowed_tools():
+    step = _step(allowed_tools=["edit_file", "run_tests"])
+
+    assert step.allowed_tools[:2] == ["edit_file", "run_tests"]
+    assert step.allowed_tools[-1] == "task_complete"
+    for tool_name in DEFAULT_ALLOWED_READ_ONLY_STEP_TOOLS:
+        assert tool_name in step.allowed_tools

@@ -679,9 +679,13 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
                 "the intended kind of change. Keep this tight.\n"
                 "- `must_not_change`: list protected files, public contracts, "
                 "regression tests, or adjacent areas that are tempting but out of scope.\n"
-                "- `allowed_tools`: include every tool the executor may need for "
-                "this job, including read/search/test tools. Always include "
-                "`task_complete`.\n"
+                "- `allowed_tools`: include the mutating and verification tools "
+                "the executor may need for this job. Standard non-mutating "
+                "helpers (`read_file`, `list_directory`, `directory_tree`, "
+                "`grep_files`, `query_project_context`, `search_reference`, "
+                "`search_internet`, `fetch_url`) plus `task_complete` are added "
+                "to every step automatically, but may still be listed "
+                "explicitly.\n"
                 "- `output_shape`: describe the required final artifact shape: "
                 "files changed, public signatures, test coverage expectations, "
                 "and integration points. This should be precise, but it should "
@@ -1596,7 +1600,9 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
                 "- Use `may_change` to distinguish new files from existing "
                 "files. Include `create_file` in `allowed_tools` for new files, "
                 "`edit_file` for existing files, and `run_command` for build "
-                "commands, migrations, or code generators.\n"
+                "commands, migrations, or code generators. Standard read/search "
+                "helpers plus `task_complete` are available automatically even "
+                "if omitted.\n"
                 "- Do NOT create standalone `run_tests` or `run_lint` steps. "
                 "Put verification commands in `success_checks`; the executor "
                 "may run those tools while completing the bounded job.\n"
@@ -1642,7 +1648,7 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
                 '    {"path": "tests/test_handlers.ext", "change": "Add or update coverage proving the handler is discoverable."}\n'
                 '  ],\n'
                 '  "must_not_change": ["Existing handler names, route paths, or unrelated registry entries"],\n'
-                '  "allowed_tools": ["read_file", "grep_files", "edit_file", "run_tests", "task_complete"],\n'
+                '  "allowed_tools": ["edit_file", "run_tests"],\n'
                 '  "output_shape": "The registry imports ReviewHandler and includes exactly one registration entry using the existing style. Test coverage proves the new handler is discoverable without changing existing handler behavior.",\n'
                 '  "success_checks": [\n'
                 '    {"description": "Registry contains one ReviewHandler import and registration entry.", "tool": "read_file", "expected": "ReviewHandler appears once in imports and registry."},\n'

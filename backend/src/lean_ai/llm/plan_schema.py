@@ -386,10 +386,9 @@ class NameRegistryEntry(BaseModel):
     """Test file path, if applicable."""
 
 
-# Tools valid in implementation plan steps (Phase 4 output).
-# Includes read_file (executor reads before editing), run_tests, run_lint,
-# format_code — only truly non-plan tools (list_directory, directory_tree,
-# grep_files, search_internet, etc.) are filtered out.
+# Canonical primary tools for implementation plan steps (Phase 4 output).
+# Read/search helpers may still appear in ``allowed_tools``; this set is used
+# only for the legacy ``tool`` field and for filtering out pure non-step noise.
 IMPLEMENTATION_STEP_TOOLS = {
     "create_file",
     "edit_file",
@@ -402,6 +401,34 @@ IMPLEMENTATION_STEP_TOOLS = {
 
 # Alias — all tools that may appear in any PlanStep.
 ALL_VALID_STEP_TOOLS = IMPLEMENTATION_STEP_TOOLS
+
+# Safe non-mutating helpers every implementation step may use even when the
+# planner does not spell them out explicitly. This keeps step execution
+# flexible without widening the mutation boundary.
+DEFAULT_ALLOWED_READ_ONLY_STEP_TOOLS = (
+    "read_file",
+    "list_directory",
+    "directory_tree",
+    "grep_files",
+    "query_project_context",
+    "search_reference",
+    "search_internet",
+    "fetch_url",
+)
+
+
+def _dedupe_tool_names(*groups: list[str] | tuple[str, ...]) -> list[str]:
+    """Merge tool names while preserving their first-seen order."""
+
+    merged: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for name in group:
+            if not name or name in seen:
+                continue
+            merged.append(name)
+            seen.add(name)
+    return merged
 
 
 class StepInput(BaseModel):
@@ -531,15 +558,19 @@ class PlanStep(BaseModel):
         if not self.file_path.strip() and self.may_change:
             self.file_path = self.may_change[0].path
 
-        if not self.allowed_tools:
+        allowed_tools = [name for name in self.allowed_tools if name]
+        if not allowed_tools:
             if self.tool:
-                self.allowed_tools = [self.tool]
+                allowed_tools = [self.tool]
             else:
-                self.allowed_tools = ["read_file", "grep_files", "edit_file", "create_file"]
-        if "task_complete" not in self.allowed_tools:
-            self.allowed_tools.append("task_complete")
-        if self.tool and self.tool not in self.allowed_tools:
-            self.allowed_tools.insert(0, self.tool)
+                allowed_tools = ["edit_file", "create_file"]
+        if self.tool:
+            allowed_tools = _dedupe_tool_names([self.tool], allowed_tools)
+        self.allowed_tools = _dedupe_tool_names(
+            allowed_tools,
+            DEFAULT_ALLOWED_READ_ONLY_STEP_TOOLS,
+            ("task_complete",),
+        )
         if not self.tool:
             for candidate in (
                 "edit_file",
