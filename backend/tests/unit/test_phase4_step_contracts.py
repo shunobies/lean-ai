@@ -46,6 +46,11 @@ def test_plan_step_accepts_job_contract_without_legacy_instruction():
 
 
 def test_step_scope_rejects_tool_outside_allowed_contract():
+    """Tool-name blocking is removed; allowed_tools is advisory metadata during execution.
+
+    Using a tool not listed in allowed_tools should not produce a scope error,
+    as long as it is not a file-write tool targeting a path outside may_change.
+    """
     step = PlanStep(
         step_number=1,
         job="Update src/app.py only.",
@@ -57,9 +62,7 @@ def test_step_scope_rejects_tool_outside_allowed_contract():
 
     error = _step_scope_error(step, "run_command", {"command": "touch src/other.py"})
 
-    assert error is not None
-    assert "may use only these tools" in error
-    assert "run_command" in error
+    assert error is None
 
 
 def test_success_check_coverage_uses_phase4_contracts():

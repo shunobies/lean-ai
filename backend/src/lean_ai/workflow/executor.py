@@ -161,19 +161,13 @@ def _step_scope_error(
 ) -> str | None:
     """Return an executor-side scope violation for the current step, if any.
 
-    Keep the tool catalog stable for the LLM, but reject actions outside the
-    current job contract. Read-only helpers are allowed only when the contract
-    includes them (or when an older plan omitted ``allowed_tools`` entirely).
+    The ``allowed_tools`` list in the plan is advisory metadata during execution
+    and does not block tool usage.  Path-based ``may_change`` boundaries are still
+    enforced for ``create_file`` and ``edit_file`` to keep mutations within the
+    planned scope.
     """
     if tool_name == "request_test_change":
         return None
-
-    allowed_tools = _step_allowed_tool_names(step)
-    if tool_name not in allowed_tools:
-        return (
-            f"ERROR: This step may use only these tools: {', '.join(sorted(allowed_tools))}. "
-            f"You tried to use `{tool_name}`. Stay inside the current job contract."
-        )
 
     if tool_name in _FILE_WRITE_TOOLS:
         target_path = _normalize_path(arguments.get("path", ""))

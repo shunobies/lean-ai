@@ -46,7 +46,15 @@ def test_step_scope_rejects_wrong_file_write_path():
 
 
 def test_step_scope_rejects_direct_file_write_in_non_write_step():
-    step = _step("run_tests")
+    """Tool-name blocking is removed; create_file on a may_change path is allowed even in a non-write step."""
+    step = PlanStep(
+        step_number=1,
+        job="Run tests for the module.",
+        may_change=[{"path": "tests/test_new.py", "change": "Create test file."}],
+        allowed_tools=["run_tests"],
+        output_shape="Tests pass.",
+        blocked_protocol="Report blocker.",
+    )
 
     error = _step_scope_error(
         step,
@@ -54,8 +62,46 @@ def test_step_scope_rejects_direct_file_write_in_non_write_step():
         {"path": "tests/test_new.py", "content": "pass"},
     )
 
+    assert error is None
+
+
+def test_step_scope_enforces_may_change_path_boundary():
+    """Path-based may_change boundaries still block writes outside the declared scope."""
+    step = PlanStep(
+        step_number=1,
+        job="Update src/app.py only.",
+        may_change=[{"path": "src/app.py", "change": "Small behavior edit."}],
+        allowed_tools=["edit_file"],
+        output_shape="src/app.py contains the updated behavior.",
+        blocked_protocol="Report blocker.",
+    )
+
+    # Writing to a path NOT in may_change should still error
+    error = _step_scope_error(
+        step,
+        "edit_file",
+        {"path": "src/other.py", "search": "x", "replace": "y"},
+    )
     assert error is not None
-    assert "run_tests" in error
+    assert "src/app.py" in error
+    assert "src/other.py" in error
+
+    # Writing to a path that IS in may_change should be allowed
+    error_ok = _step_scope_error(
+        step,
+        "edit_file",
+        {"path": "src/app.py", "search": "x", "replace": "y"},
+    )
+    assert error_ok is None
+
+    # create_file to an out-of-scope path should also error
+    error_create = _step_scope_error(
+        step,
+        "create_file",
+        {"path": "src/new_module.py", "content": "pass"},
+    )
+    assert error_create is not None
+    assert "src/app.py" in error_create
 
 
 def test_step_scope_allows_default_read_only_helper_when_not_listed_explicitly():

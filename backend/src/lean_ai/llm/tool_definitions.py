@@ -117,7 +117,21 @@ IMPLEMENTATION_TOOLS: list[dict] = [
         "type": "function",
         "function": {
             "name": "run_tests",
-            "description": "Run a test command to verify changes work correctly.",
+            "description": (
+                "Run a test command to verify changes work correctly. "
+                "Use this after making code changes to confirm they don't "
+                "break existing behavior, or before declaring a task complete "
+                "to ensure all tests pass.\n\n"
+                "Best practices:\n"
+                "- Run the full test suite (e.g. 'pytest tests/ -v') to catch "
+                "regressions, not just tests for the file you changed.\n"
+                "- If the full suite is too slow, target the affected module "
+                "(e.g. 'pytest tests/test_module.py -v').\n"
+                "- Check output for failures, errors, and unexpected skips. "
+                "Fix any failures before proceeding.\n"
+                "- If tests fail due to your changes, fix the code — not the "
+                "tests — unless the test itself is genuinely flawed."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -134,7 +148,21 @@ IMPLEMENTATION_TOOLS: list[dict] = [
         "type": "function",
         "function": {
             "name": "run_lint",
-            "description": "Run a linting command to check code quality.",
+            "description": (
+                "Run a linting command to check code quality and catch style "
+                "issues, unused imports, or potential bugs before they reach "
+                "review.\n\n"
+                "Best practices:\n"
+                "- Run lint on the specific files you changed first "
+                "(e.g. 'ruff check src/module/').\n"
+                "- If lint passes on changed files, also run on the full "
+                "source tree to ensure no regressions.\n"
+                "- Fix all reported issues before declaring a task complete. "
+                "Do not ignore lint warnings — they often indicate real bugs.\n"
+                "- If a lint rule seems wrong for the project, check the "
+                "project's lint configuration (pyproject.toml, .ruff.toml, "
+                "etc.) before deciding to suppress it."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -151,7 +179,19 @@ IMPLEMENTATION_TOOLS: list[dict] = [
         "type": "function",
         "function": {
             "name": "format_code",
-            "description": "Run a code formatter.",
+            "description": (
+                "Run a code formatter to automatically fix style and "
+                "indentation issues. Use this after making manual edits to "
+                "ensure the code matches the project's formatting standards.\n\n"
+                "Best practices:\n"
+                "- Run the formatter on the files you changed "
+                "(e.g. 'ruff format src/module/').\n"
+                "- Run formatting BEFORE linting, as formatters handle "
+                "style issues that lint would otherwise report.\n"
+                "- If the formatter makes changes, review the diff to ensure "
+                "no unintended modifications occurred.\n"
+                "- Always run formatting before declaring a task complete."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -798,10 +838,27 @@ QUERY_CONTEXT_TOOL: dict = {
     "function": {
         "name": "query_project_context",
         "description": (
-            "Query the project context database for information about "
-            "specific files, sections, or keywords. Use this to look up "
-            "what a file does, find all entries in a section (e.g. "
-            "'API Surface'), or search for a keyword across all context."
+            "Query the project context database for pre-indexed information "
+            "about the codebase. Use this BEFORE reading files when you need "
+            "to understand architecture, module relationships, or conventions.\n\n"
+            "When to use:\n"
+            "- At the start of a task to understand which files are relevant "
+            "and how they fit together.\n"
+            "- When you need to know the purpose of a file without reading "
+            "it (use file_path filter).\n"
+            "- To look up conventions, API surface details, or data flow "
+            "descriptions (use section filter).\n"
+            "- To find all references to a concept across the codebase "
+            "(use keyword filter).\n\n"
+            "How to use:\n"
+            "- file_path: Look up info about a specific file (partial match "
+            "is fine, e.g. 'routers/chat.py').\n"
+            "- section: Browse a specific section like 'Architecture Overview', "
+            "'Module Map', 'Key Abstractions', 'API Surface', "
+            "'Integration Points', 'Data Flow', or 'Conventions'.\n"
+            "- keyword: Search for a term across all context entries.\n"
+            "- Combine filters for precise lookups, or omit all for a broad "
+            "overview."
         ),
         "parameters": {
             "type": "object",
