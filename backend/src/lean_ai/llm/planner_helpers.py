@@ -17,10 +17,10 @@ from pydantic import BaseModel
 from lean_ai.config import settings
 from lean_ai.llm.base import StructuredOutputError, format_validation_path
 from lean_ai.llm.plan_schema import (
-    DesignAndRisks,
-    FileSummary,
     IMPLEMENTATION_STEP_TOOLS,
+    DesignAndRisks,
     ExecutionPlan,
+    FileSummary,
     PlanStep,
     ScopeAssumption,
     ScopeDocument,
@@ -406,7 +406,8 @@ def _build_fallback_execution_plan(
             "to keep the workflow moving. Review the warnings and user feedback "
             "carefully before approval."
         )
-        plan.plan_validation_warnings = list(plan.plan_validation_warnings) + [
+        plan.plan_validation_warnings = [
+            *plan.plan_validation_warnings,
             warning,
             "automatic plan revision failed; the prior plan is being reused unchanged",
         ]
@@ -487,7 +488,10 @@ def _build_fallback_execution_plan(
         test_strategy=(
             f"After implementation, run `{test_command}` and review the changed files."
             if test_command
-            else "Review the changed files carefully and run the project's test command once it is confirmed."
+            else (
+                "Review the changed files carefully and run the project's "
+                "test command once it is confirmed."
+            )
         ),
         plan_validation_warnings=warnings,
     )

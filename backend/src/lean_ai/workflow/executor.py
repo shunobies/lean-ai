@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from fastapi import WebSocket
 
 from lean_ai.config import settings
+from lean_ai.context.metadata import invalidate_metadata_cache_for_paths
 from lean_ai.indexer.tree import list_repo_tree
 from lean_ai.llm.base import ToolCall
 from lean_ai.llm.plan_schema import (
@@ -939,6 +940,10 @@ async def execute_plan(
     journal_content = read_journal(repo_root, session_id)
     if journal_content:
         summary += f"\n\nSession Journal:\n{journal_content}"
+
+    # ── Invalidate metadata cache for modified files ──
+    if files_modified:
+        invalidate_metadata_cache_for_paths(repo_root, files_modified)
 
     # ── Incremental project_context.md update ──
     if files_modified and settings.enable_project_context:

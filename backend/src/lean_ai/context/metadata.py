@@ -326,37 +326,79 @@ def _get_file_mtimes(repo_root: str, entries) -> dict[str, float]:
     return mtimes
 
 
+def _build_scandir_manifest(repo_root: str) -> dict[str, float]:
+    """Lightweight manifest of source file paths and mtimes via os.scandir.
+
+    Walks the repository tree without reading file contents, collecting
+    relative paths and modification times for source files only.
+    Used for early-exit cache comparison before a full tree walk.
+    """
+    from lean_ai.indexer.tree import BINARY_EXTENSIONS, SKIP_DIRS, SKIP_FILES
+
+    root = Path(repo_root)
+    source_exts = _get_source_exts()
+    manifest: dict[str, float] = {}
+
+    for dirpath, dirnames, filenames in os.walk(root):
+        # Prune excluded directories in-place
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+
+        for fname in filenames:
+            if fname in SKIP_FILES:
+                continue
+            full = Path(dirpath) / fname
+            rel = full.relative_to(root)
+            rel_str = str(rel).replace("\\", "/")
+
+            ext = full.suffix.lower()
+            if ext in BINARY_EXTENSIONS:
+                continue
+            if ext not in source_exts:
+                continue
+            if _is_test_file(rel_str):
+                continue
+
+            try:
+                mtime = full.stat().st_mtime
+            except OSError:
+                continue
+            manifest[rel_str] = mtime
+
+    return manifest
+
+
 def extract_metadata_cached(repo_root: str, entries=None) -> _RepoMetadata:
     """Extract repository metadata with disk-level caching.
 
     On first run, performs a full single-pass extraction and caches the
     result.  On subsequent runs, only re-extracts metadata for files
     whose mtime has changed since the last cache write.
+
+    Uses a lightweight os.scandir manifest comparison before any tree
+    walk to detect full cache hits and early-exit.  On partial hits,
+    extracts parent directories of changed files and restricts the
+    tree walk to those directories.
     """
-    if entries is None:
-        try:
-            from lean_ai.indexer.tree import list_repo_tree
-
-            entries = list_repo_tree(repo_root)
-        except Exception:
-            return _RepoMetadata()
-
-    current_mtimes = _get_file_mtimes(repo_root, entries)
+    # Load cache before tree walk for early-exit optimization
     cache = _load_metadata_cache(repo_root)
 
     if cache and cache.get("version") == 2:
         cached_manifest = cache.get("manifest", {})
         cached_files = cache.get("files", {})
 
+        # Lightweight manifest comparison using os.scandir (no FileEntry objects)
+        current_manifest = _build_scandir_manifest(repo_root)
+
         changed_files: set[str] = set()
-        for fpath, mtime in current_mtimes.items():
+        for fpath, mtime in current_manifest.items():
             if fpath not in cached_manifest or cached_manifest[fpath] != mtime:
                 changed_files.add(fpath)
 
-        deleted_files = set(cached_manifest) - set(current_mtimes)
+        deleted_files = set(cached_manifest) - set(current_manifest)
 
         if not changed_files and not deleted_files:
-            logger.info("Metadata cache HIT: all %d files unchanged", len(cached_files))
+            # FULL HIT — return cached metadata immediately, no tree walk needed
+            logger.info("Metadata cache FULL HIT: all %d files unchanged", len(cached_files))
             metadata = _RepoMetadata()
             for fpath, fdata in cached_files.items():
                 metadata.files[fpath] = _FileMetadata(
@@ -368,6 +410,7 @@ def extract_metadata_cached(repo_root: str, entries=None) -> _RepoMetadata:
             metadata.fan_in = cache.get("fan_in", {})
             return metadata
 
+        # PARTIAL HIT — restrict work to directories containing changed files
         logger.info(
             "Metadata cache PARTIAL: %d changed, %d deleted, %d cached",
             len(changed_files),
@@ -375,14 +418,20 @@ def extract_metadata_cached(repo_root: str, entries=None) -> _RepoMetadata:
             len(cached_files) - len(deleted_files),
         )
 
+        # Extract parent directories of changed files to restrict walk scope
+        changed_dirs: set[str] = set()
+        for fpath in changed_files:
+            parent = str(Path(fpath).parent)
+            changed_dirs.add(parent)
+
+        # Build file paths from current manifest (avoids full tree walk)
+        file_paths = set(current_manifest.keys())
         root = Path(repo_root)
-        file_paths = {e.path.replace("\\", "/") for e in entries}
         metadata = _RepoMetadata()
 
+        # Restore unchanged cached files
         for fpath, fdata in cached_files.items():
-            if fpath in deleted_files:
-                continue
-            if fpath in changed_files:
+            if fpath in deleted_files or fpath in changed_files:
                 continue
             metadata.files[fpath] = _FileMetadata(
                 class_function_defs=fdata.get("class_function_defs", []),
@@ -391,6 +440,7 @@ def extract_metadata_cached(repo_root: str, entries=None) -> _RepoMetadata:
                 imported_modules=fdata.get("imported_modules", []),
             )
 
+        # Re-extract only changed files (restricted to their parent directories)
         for fpath in changed_files:
             ext = Path(fpath).suffix.lower()
             try:
@@ -402,10 +452,65 @@ def extract_metadata_cached(repo_root: str, entries=None) -> _RepoMetadata:
         source_prefixes = _discover_source_prefixes(file_paths)
         metadata.fan_in = _resolve_fan_in(metadata, file_paths, source_prefixes)
 
-        _save_metadata_cache(repo_root, metadata, current_mtimes)
+        _save_metadata_cache(repo_root, metadata, current_manifest)
         return metadata
 
+    # Cache MISS — full extraction
+    if entries is None:
+        try:
+            from lean_ai.indexer.tree import list_repo_tree
+
+            entries = list_repo_tree(repo_root)
+        except Exception:
+            return _RepoMetadata()
+
+    current_mtimes = _get_file_mtimes(repo_root, entries)
     logger.info("Metadata cache MISS: full extraction for %d files", len(current_mtimes))
     metadata = _extract_all_metadata(repo_root, entries=entries)
     _save_metadata_cache(repo_root, metadata, current_mtimes)
     return metadata
+
+
+def invalidate_metadata_cache_for_paths(repo_root: str, paths: list[str]) -> None:
+    """Remove modified or deleted paths from the metadata cache.
+
+    Invoked after file operations (write, delete, rename) to clear stale
+    manifest entries and cached file metadata so the next extraction
+    re-reads those files from disk.
+
+    Parameters
+    ----------
+    repo_root:
+        Path to the repository root.
+    paths:
+        Relative file paths to invalidate from the cache.
+    """
+    cache = _load_metadata_cache(repo_root)
+    if cache is None:
+        return
+
+    paths_to_remove = set(paths)
+    removed = 0
+
+    # Remove from manifest
+    manifest = cache.get("manifest", {})
+    for p in list(manifest):
+        if p in paths_to_remove:
+            del manifest[p]
+            removed += 1
+
+    # Remove from files dict
+    files = cache.get("files", {})
+    for p in list(files):
+        if p in paths_to_remove:
+            del files[p]
+
+    if removed:
+        # Write the modified cache directly to preserve remaining entries
+        cache_dir = Path(repo_root) / ".lean_ai"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / _METADATA_CACHE_FILE).write_text(
+            _json.dumps(cache, indent=1),
+            encoding="utf-8",
+        )
+        logger.debug("Invalidated %d paths from metadata cache", removed)
