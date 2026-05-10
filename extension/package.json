@@ -1,7 +1,7 @@
 {
   "name": "lean-ai",
   "displayName": "Lean AI",
-  "description": "Single-Model Deterministic Agentic Architecture - Chat Agent & Inline Predictions",
+  "description": "Multi-provider LLM agentic coding assistant with phase-based planning, chat & inline predictions",
   "version": "0.19.9",
   "publisher": "lean-ai",
   "icon": "icon.png",
@@ -663,7 +663,7 @@
         "lean-ai.supportsAudioExpert": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "**Per-Model Capability** — Declare that the **expert** model accepts audio. Consulted only if primary/request/worker are unflagged."
+          "markdownDescription": "**Per-Model Capability** — Declare that the **expert** model accepts audio. Fourth in the audio priority chain."
         },
         "lean-ai.supportsAudioRequest": {
           "type": "boolean",

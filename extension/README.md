@@ -4,7 +4,7 @@
 
 Lean AI is an agentic coding assistant that reads your project, plans changes, and executes them — all inside your editor. Give it a task in plain English, review the plan, and watch it work.
 
-Run it fully local with [Ollama](https://ollama.com), or connect to OpenAI and Anthropic when you need heavier reasoning. No cloud account required to get started.
+Run it fully local with [Ollama](https://ollama.com), or connect to OpenAI, Anthropic, Gemini, or Lean AI Serve when you need heavier reasoning. No cloud account required to get started.
 
 ## Features
 
@@ -12,8 +12,8 @@ Run it fully local with [Ollama](https://ollama.com), or connect to OpenAI and A
 - **Plan first, then execute** — a 6-phase planning pipeline reads your codebase, traces data flow, and produces a structured plan. You approve before anything changes. Thinking and content tokens stream live during each phase so you can watch the agent reason in real-time.
 - **Three workflow modes** — `/agent` for full planning, `/fix` for quick bug fixes, `/request` for open-ended research and documentation tasks.
 - **Architecture review mode** — `/improve-codebase-architecture` reviews the current repo using code, project context, session history, memories, and recorded decisions to suggest high-leverage deepening opportunities.
-- **Multi-provider** — Ollama (free, local), OpenAI, and Anthropic. Switch from the settings panel without restarting.
-- **Dual-model pipeline** — use a fast local model for exploration and implementation, hand off to a cloud model for reasoning-heavy planning phases.
+- **Multi-provider** — Ollama (free, local), OpenAI, Anthropic, Gemini, and Lean AI Serve. Switch from the settings panel without restarting.
+- **Multi-model roles** — assign independent models to primary, expert, request, worker, and inline prediction roles. Mix local and cloud providers per role — e.g., a fast Ollama model for coding and a cloud model for planning.
 - **Built-in code quality** — auto-runs your linter and tests after every change, with LLM self-correction on failure.
 - **Reference library** — drop internal docs (PDF, EPUB, Word, Markdown) into `.lean_ai/reference/` for context-aware plans.
 - **MediaWiki integration** — connect to an internal wiki so the agent can search and read company documentation while working on tasks. Supports authenticated and public wikis.
@@ -157,8 +157,8 @@ All voice processing runs on CPU only — GPU is reserved for the LLM.
 
 Open the settings panel (gear icon in the chat header) to configure:
 
-- **LLM Provider** — Ollama, OpenAI, or Anthropic
-- **Model selection** — primary, expert, and request models with independent sampling parameters (temperature, top-p, top-k, repeat penalty, context window, max tokens) and thinking mode per model
+- **LLM Provider** — Ollama, OpenAI, Anthropic, Gemini, or Lean AI Serve
+- **Model selection** — primary, expert, request, worker, and inline models with independent sampling parameters (temperature, top-p, top-k, repeat penalty, context window, max tokens) and thinking mode per model
 - **Post-validation** — lint, test, and format commands
 - **Search provider** — DuckDuckGo, SearXNG, Google, or Bing
 - **MediaWiki** — connect to an internal wiki instance (URL, API path, optional authentication)

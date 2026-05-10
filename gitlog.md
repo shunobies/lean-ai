@@ -1,3 +1,8 @@
+6257198 Non-mutating tools allowed in all implementation steps.
+c51af13 Added implicit tool non mutating list to all implementation steps.
+8907540 Added a heartbeat to the system to prevent hung LLMs where they think and dont respond.clear
+3d549eb Fixed Failure states from fail hard to fail safe also discovered a bug that could cause double context refresh causing a failure state.
+d2c6db2 Fixed planning feedback
 e14ba2b Fixed llm inheritance settings bug. Fixed tool call failed bug that halted process. Fixed init bug that wouldn't refresh project_context.md
 30d96c3 Fixed error in tool calling on failed tool call as well as project context not refreshing logic bug.
 8cdc634 No longer inherit from primary model settings and allow for defaults from ollama by leaving settings blank.

@@ -2,6 +2,341 @@
 
 All notable changes to the Lean AI extension will be documented in this file.
 
+## [0.19.9] - 2026-05-01
+
+### Added
+- **Non-mutating tools in all implementation steps** — added implicit non-mutating tool list to all implementation steps, allowing read-only tools to be used safely throughout plan execution without explicit declaration.
+
+## [0.19.8] - 2026-05-01
+
+### Added
+- **LLM heartbeat** — added a heartbeat mechanism to detect and recover from hung LLMs that think indefinitely without responding, preventing the agent from getting stuck in silent thinking loops.
+
+## [0.19.7] - 2026-05-01
+
+### Fixed
+- **Failure state recovery** — changed failure handling from fail-hard to fail-safe behavior so the agent recovers gracefully from errors instead of halting. Fixed a double context refresh bug that could cause failure states.
+
+## [0.19.6] - 2026-05-01
+
+### Fixed
+- **Planning feedback** — fixed planning feedback loop so the agent properly incorporates user corrections during the planning phase.
+
+## [0.19.5] - 2026-04-30
+
+### Fixed
+- **GitHub co-author default name** — updated the default GitHub co-author name from "LeanAI" to "LeanAI-bot" for clearer attribution on Lean AI-generated commits.
+
+## [0.19.4] - 2026-04-30
+
+### Fixed
+- **Edge case hardening** — consolidated remaining edge cases found during hardening toward version 1.0, including file size handling and chunk breakdown improvements for large files.
+- **Feedback loop responsiveness** — reduced delay between user steering input and LLM acknowledgment so the agent responds quicker when course correction is needed.
+- **Interview-prep and mock-interview** — fixed pause-between-questions behavior so questions are asked in order with proper pauses for user responses.
+
+## [0.19.3] - 2026-04-29
+
+### Fixed
+- **Context calculation in UI** — fixed miscalculations in context window display and context clearing logic that should have been implemented earlier.
+- **Dependency vulnerabilities** — fixed 6 code vulnerabilities related to dependency versions, including Pillow CVE patch.
+
+## [0.19.2] - 2026-04-29
+
+### Changed
+- **Planning phase 4 flexibility** — updated how planning works in phase 4 to allow more flexibility for the implementation model (primary).
+- **Planning steps** — adjusted planning step structure for better determinism.
+
+### Fixed
+- **Tool call failure handling** — fixed error in tool calling on failed tool call that halted the process. Fixed project context not refreshing logic bug.
+
+## [0.19.1] - 2026-04-28
+
+### Added
+- **Content hashing** — implemented content hashing in the project context generation pipeline to determine if a file needs to be reviewed for project context update, reducing rebuild time on larger projects.
+
+### Fixed
+- **LLM inheritance settings** — fixed settings inheritance bug where model parameters incorrectly inherited from primary model. No longer inherit from primary model settings and allow for defaults from Ollama by leaving settings blank.
+- **Init refresh** — fixed `/init` bug that wouldn't refresh `project_context.md`.
+
+## [0.19.0] - 2026-04-28
+
+### Added
+- **GitHub Lean-AI Co-author** — configurable `Co-authored-by` trailer on Lean AI-generated commits, enabled via `lean-ai.githubCoauthorEnabled` with customizable name and email.
+- **Implementation phase hardening** — consolidated hardening improvements for the implementation phase including improved error recovery and state management.
+- **Phase 2 planning handoff** — hardened Phase 2 planning handoff with improved observation capture and synthesis.
+
+### Changed
+- **Improved Phase 2 process** — enhanced Phase 2 file identification and exploration with better observation recording and context passing.
+
+## [0.18.4] - 2026-04-27
+
+### Fixed
+- **JetBrains build** — fixed JetBrains plugin build configuration in GitHub Actions, added IntelliJ plugin verifier dependency and verification settings.
+
+## [0.18.3] - 2026-04-27
+
+### Added
+- **Process ledger** — added ledger for better process flow and context tracking during agent workflows.
+- **Resume logic** — added Phase 1 resume and discrepancy recovery logic for reliable session continuation.
+- **UI verification hardening** — hardened UI verification web capture with browser fallback when Playwright installation fails.
+
+### Changed
+- **Find_Car skill** — improved `/skill` command reliability with unique ledger anchors for safe targeted edits and clarification pause/resume flow.
+
+## [0.18.2] - 2026-04-26
+
+### Added
+- **Skills command** — `/skill <name> <task>` slash command loads `.lean_ai/skills/<name>/instructions.md` (plus referenced files) and applies the skill to a task. Full documentation in docs/skills.md.
+- **Grillme protocol** — added grillme protocol to primary chat for enhanced LLM understanding of changes and project context.
+- **Context refresh with journaling** — tied pre-refresh nudge to configured refresh threshold with journal-based state preservation.
+
+### Fixed
+- **Search URL reliability** — fixed Google search parser URL extraction. Fixed Phase 2 exploration loop where the LLM re-explores already-visited files.
+- **Chat nudging** — fixed text-only response nudging and `chat_with_tools` prompt issues.
+
+## [0.18.1] - 2026-04-26
+
+### Added
+- **`/improve-codebase-architecture` command** — slash command to review the codebase for deepening opportunities using code, context, session history, memories, and recorded decisions.
+- **`/memories` command** — manually trigger memory extraction from the last completed workflow session.
+
+### Fixed
+- **Slash command schema** — fixed `/interview-prep` hyphen handling in the slash command regex schema. Updated all documentation to match actual registered slash commands.
+
+## [0.18.0] - 2026-04-25
+
+### Added
+- **Job search assistant** — comprehensive suite of slash commands for high-volume job application workflows:
+  - `/interview-prep` — convert a `.docx` resume and tailor it for a specific role with 20+ questions and per-application folders
+  - `/ats-check` — keyword gap report comparing resume to job description
+  - `/batch-prep` — tailor resumes and cover letters for many roles in one run
+  - `/thank-you` — draft a post-interview thank-you note
+  - `/recruiter-reply` — draft a reply to a recruiter's cold outreach
+  - `/negotiate` — research market comp and build a negotiation brief
+  - `/analyse-rejection` — post-mortem a rejection with concrete takeaways
+  - `/log-applied` — append a tracker row and commit the application folder to git
+  - `/mock-interview` — interactive Q&A practice with 5-dimension rubric scoring
+- **`.docx` support** — deterministic Word document parsing via `convert-docx` endpoint for resume processing.
+- **Job-search scaffold** — bootstrap a new job application workspace with organized folders, tracker template, and git initialization.
+
+## [0.17.0] - 2026-04-24
+
+### Added
+- **Training archive Tier S+A** — per-turn capture with 5 new tables for turn-level, plan-decision-level, and validation-attempt-level traces. Ingestion guide for DPO and SFT training data extraction.
+- **TDD Phase C dispute policy** — wired `request_test_change` into Phase C with Test Modification Policy, allowing the primary model to dispute tests with expert evaluation in a tight review session.
+
+## [0.16.0] - 2026-04-23
+
+### Added
+- **Per-role reasoning effort** — configurable reasoning effort per model role (primary, expert, request, worker). Ollama supports budget-interrupt via `max_thinking_tokens` safety rail; cloud providers use native reasoning parameters.
+- **Reasoning effort UI** — dropdown in settings panel per role with budget-interrupt indicator during WebSocket streaming.
+
+## [0.15.2] - 2026-04-22
+
+### Added
+- **`preserve_thinking` via client-side fold** — renderer-agnostic fold of thinking tokens into content on Ollama, preserving chain-of-thought context across tool loops without relying on server-side support.
+
+## [0.15.1] - 2026-04-22
+
+### Added
+- **Per-role `min_p` / `presence_penalty`** — independent minimum probability cutoff and presence penalty settings for each model role (primary, expert, request, worker). Configurable from settings UI.
+- **`preserve_thinking` per role** — toggle to keep thinking traces across turns for models that support it.
+
+## [0.15.0] - 2026-04-21
+
+### Added
+- **Per-LLM image/audio capability flags** — active-role routing for image and audio support. Each model role (primary, expert, request, worker, inline) can independently declare image and audio support. Audio priority chain: primary → request → worker → expert → inline.
+- **Media messages module** — per-LLM image/audio scaffolding with `resolve_image_handler` and `resolve_audio_handler` helpers.
+- **STT LLM handoff** — wire speech-to-text through the LLM pipeline when the active role supports audio.
+
+## [0.14.3] - 2026-04-20
+
+### Added
+- **System Chromium fallback** — fall back to system-installed Chromium/Chrome when Playwright can't install a browser on the current OS, improving UI verification reliability on restricted environments.
+
+### Changed
+- **Dependency bump** — bumped `@vscode/vsce` and pinned `uuid ≥14.0.0` to close Dependabot alert.
+
+## [0.14.2] - 2026-04-20
+
+### Changed
+- **Inline JSON schema in Ollama structured calls** — Ollama structured output calls now inline the JSON schema so the LLM sees the expected shape, improving compliance with structured responses.
+
+## [0.14.1] - 2026-04-19
+
+### Added
+- **UI verification in Settings panel** — surfaced UI verification controls (install Chromium, test pipeline) in the custom settings panel for easier access.
+
+## [0.14.0] - 2026-04-19
+
+### Added
+- **`verify_web_ui` tool** — headless Chromium web capture with multi-pass vision analysis. Screenshot a URL, analyze layout, component inventory, text transcription, and color palette. Supports `file://`, `http://`, `https://`, and `data:` URLs.
+- **`verify_desktop_ui` tool** — launch a desktop app, capture its main window, and run multi-pass vision analysis. Supports any GUI framework (Tkinter, Qt, Swing, JavaFX, Electron, native). Platform support: Windows, macOS, Linux X11, Linux Wayland.
+- **UI verification pipeline** — multi-pass analysis with focused question answering, region inventory, text transcription, and pixel-sampled color palette extraction.
+- **Extension commands** — `Lean AI: Install UI Verification (Chromium)` and `Lean AI: Test UI Verification Pipeline` for setup and testing.
+- **UI verification config** — `ui-verification` extras group, config schema, and structured vision helper in the backend.
+
+## [0.13.3] - 2026-04-18
+
+### Changed
+- **TDD prompt hardening** — hardened TDD prompts for TDD-naive and Mixture-of-Experts models. Taught TDD from first principles in Phase A and B prompts with explicit test-writing instructions.
+
+## [0.13.2] - 2026-04-18
+
+### Changed
+- **Planner phases 1-2 routing** — route planner phases 1-2 through the primary model instead of the request model. Exploration benefits from a coder-tuned model that reads files precisely.
+
+## [0.13.1] - 2026-04-18
+
+### Fixed
+- **lxml CVE-2026-41066** — bumped lxml from 6.0.3 to 6.1.0 to fix XXE vulnerability.
+
+## [0.13.0] - 2026-04-17
+
+### Added
+- **Phase 5 testing strengthening** — comprehensive improvements to the validation testing pipeline:
+  - **Strict test contract** — prompts enforce that tests must be runnable and meaningful.
+  - **Regression protection** — core-functionality detection mandates regression tests for changed areas.
+  - **Core-functionality tagging** — automatic detection of core modules that always need test coverage.
+  - **Testing inventory** — maintain a testing inventory with coverage validation.
+  - **Fix-loop banner** — visible banner during validation fix loop with training column for diagnosis.
+  - **Testing-environment awareness** — detect and adapt to the project's testing setup.
+  - **Inverted post-command priority** — test before lint for faster feedback.
+
+### Changed
+- **Execution progress card** — clear the Execution Progress card on workflow terminal events.
+
+## [0.12.0] - 2026-04-16
+
+### Added
+- **Self-improvement data pipeline** — Layer 2 curated memory system with training archive:
+  - **Curated memory** — auto-extracted memories with confidence scoring, user confirmation workflow, and auto-promotion when the system confirms lessons.
+  - **Training archive** — per-turn, plan-decision, and validation-attempt level trace capture with 5 new SQLite tables.
+  - **Export API** — REST endpoints for exporting DPO pairs, SFT data, tool execution logs, tool compressions, and clarification Q/A pairs.
+  - **Ingestion guide** — documentation for fine-tuning smaller models on captured data.
+
+## [0.11.3] - 2026-04-15
+
+### Added
+- **Phase 1 split** — split Phase 1 into clarification (Phase 1) and scope synthesis (Phase 1a). Added opt-in `request_clarification` tool for the agent to ask clarifying questions during scope analysis.
+
+## [0.11.2] - 2026-04-15
+
+### Changed
+- **Phase 1 prompts** — reframed Phase 1 prompts as pure task rewrite with no question priming. The agent focuses on rewriting the task description rather than asking questions.
+
+## [0.11.1] - 2026-04-15
+
+### Changed
+- **Chat Round 1/2 exclusion** — enforced strict exclusion between Round 1 (chat) and Round 2 (agent prompt) in the two-round chat protocol.
+- **Phase 1 scope enforcement** — structured-enforced Phase 1 scope output via `ScopeDocument` schema to guarantee consistent 8-section scope documents.
+
+## [0.11.0] - 2026-04-15
+
+### Changed
+- **Knowledge base renamed to reference library** — renamed "knowledge base" to "reference library" across the entire stack (breaking change). All tools, settings, and documentation updated.
+- **KB document listing** — appended knowledge base document listing to unfiltered `search_knowledge` responses for better discoverability.
+
+## [0.10.3] - 2026-04-14
+
+### Fixed
+- **`/init` embedding waste** — fixed `/init` loading the embedding model when there's nothing to embed. Skips embedding model load for already-indexed workspaces.
+- **Documentation alignment** — aligned CLAUDE.md, SPECIFICATION.md, and /docs with v0.10.x planner changes.
+
+## [0.10.2] - 2026-04-14
+
+### Fixed
+- **Health monitor restart behavior** — health monitor never auto-restarts on timeouts, only on ECONNREFUSED. Prevents unnecessary backend restarts during long operations.
+- **Ollama warmup busy tag** — added `ollama.warmup` busy tag for `/api/health` visibility during cold model loads.
+
+## [0.10.1] - 2026-04-14
+
+### Fixed
+- **`/init` backend restart loop** — fixed backend restart loop during `/init` embedding generation. Added health probe timeout, consecutive-failure threshold, ECONNREFUSED fast-path, busy signal, and batch-size cap to prevent the health monitor from restarting the backend during long embedding operations.
+
+## [0.10.0] - 2026-04-14
+
+### Added
+- **Structured schemas across planning Phases 1-5** — all planning phases now use structured JSON schemas and validators:
+  - Phase 1: tool-enabled scope analysis with 8-section structured output
+  - Phase 2: deterministic observation capture and structured synthesis
+  - Phase 3: structured `DesignAndRisks` output, dropped scratchpad/journal bridge
+  - Phase 4: structured naming via name registry and plan validation
+  - Phase 5: registry-backed prompts with structured targets and path check
+- **Always-explore chat flow** — chat now defaults to always-explore mode with strict two-round agent prompt protocol. Round 1 produces a Suggested Agent Prompt; Round 2 sends it to the agent.
+
+### Changed
+- **Phase 1 scope guarantee** — guaranteed Phase 1 always emits an 8-section scope document, never raw prose.
+
+## [0.9.13] - 2026-04-14
+
+### Added
+- **`list_knowledge_documents` tool** — lists all documents in the reference library index with title, path, format, and chunk count.
+- **Scoped `search_knowledge`** — new `document` filter parameter on `search_knowledge` to restrict results to a single document.
+
+## [0.9.12] - 2026-04-14
+
+### Changed
+- **TDD prompt overhaul** — major improvements to Test-Driven Development prompts:
+  - Phase 5 now designs tests from the plan rather than from scratch
+  - Phase A receives the implementation plan for context
+  - Phase B/C tool fixes for reliable test execution
+- **Execution progress card accent** — added accent styling to the execution progress card for better visibility.
+
+## [0.9.11] - 2026-04-14
+
+### Added
+- **Pinned execution progress card** — execution progress card is now pinned above the chat area for persistent visibility during workflow execution.
+
+## [0.9.10] - 2026-04-14
+
+### Added
+- **Manual embedding-model context window override** — new `LEAN_AI_EMBEDDING_CONTEXT_WINDOW` setting allows manual override of the embedding model's context window. Exposed in the extension Advanced settings panel.
+
+## [0.9.9] - 2026-04-14
+
+### Fixed
+- **pypdf security patches** — bumped pypdf to >=6.10.2 to patch 4 moderate Dependabot advisories (FlateDecode RAM exhaustion and xref long-runtime CVEs).
+
+## [0.9.8] - 2026-04-14
+
+### Changed
+- **Knowledge-base chunk expansion** — enlarged knowledge base chunks and added small-to-big neighbor expansion for better long-form prose Q&A retrieval.
+
+## [0.9.7] - 2026-04-14
+
+### Added
+- **`search_knowledge` tool** — new tool for searching the reference library with improved chunk retrieval.
+- **Refiner chunks setting** — exposed refiner chunks configuration in settings.
+
+### Fixed
+- **KB chunk truncation** — fixed knowledge base chunk truncation issue.
+
+## [0.9.6] - 2026-04-14
+
+### Changed
+- **Condensation target scaling** — condensation target now scales with the actual context window size for better context management.
+
+## [0.9.5] - 2026-04-14
+
+### Fixed
+- **`/init` crash** — fixed crash during `/init` and deduplicated context MD writes to prevent duplicate entries.
+
+## [0.9.4] - 2026-04-14
+
+### Added
+- **SQLite-backed file-by-file context generation** — replaced batch context generation with SQLite-backed pipeline for incremental, queryable file-by-file context extraction with a dedicated query tool.
+
+## [0.9.3] - 2026-04-14
+
+### Changed
+- **3-step context generation pipeline** — replaced file-by-file context generation with a 3-step pipeline for better reliability and incremental updates.
+
+## [0.9.2] - 2026-04-14
+
+### Changed
+- **Ruff lint strengthening** — strengthened ruff lint rules and Phase 5 verification prompts for better code quality enforcement.
+
 ## [0.9.1] - 2026-04-14
 
 ### Fixed
