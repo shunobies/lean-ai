@@ -822,8 +822,15 @@ async def _revise_plan(
     on_thinking: "Callable | None" = None,
     on_metrics: "Callable | None" = None,
     on_metrics_reset: "Callable | None" = None,
+    file_summary: str = "",
+    design_and_risks: str = "",
+    scope: str = "",
 ) -> ExecutionPlan:
     """Revise an existing plan based on user feedback.
+
+    Rebuilds the revision prompt to mirror the Phase 4 assembly prompt
+    structure so that file_summary, design_and_risks, and scope are
+    reinjected as full context sections — not lost at phase boundaries.
 
     Args:
         task: The original task.
@@ -832,6 +839,9 @@ async def _revise_plan(
         context: Project context.
         ws: Optional WebSocket for progress.
         expert_llm_client: Optional expert LLM client for reasoning-heavy work.
+        file_summary: Formatted file summary from Phase 2 exploration.
+        design_and_risks: Formatted design and risk synthesis from Phase 3.
+        scope: Formatted scope document from Phase 1.
 
     Returns:
         Revised ExecutionPlan.
@@ -855,24 +865,48 @@ async def _revise_plan(
         model=expert.model_name,
     )
     logger.info("Plan revision")
+
+    # Build the revision prompt using the same Phase 4 assembly template
+    # so that file_summary, design_and_risks, and scope are reinjected
+    # as full structured context — not lost at phase boundaries.
+    project_context_block = (
+        f"PROJECT CONTEXT:\n{context}\n\n" if context else ""
+    )
+    assembly_prompt = registry.format(
+        "planning.assembly_user",
+        task=task,
+        design_and_risks=design_and_risks,
+        file_summary=file_summary,
+        project_context=project_context_block,
+        scope=scope,
+        missing_files="",
+        test_command="(none configured yet)",
+        testing_inventory="(none available during revision)",
+        verification_targets="(derive from affected behavioral files)",
+        security_concerns="(none identified during revision)",
+        core_functionality="(none identified during revision)",
+        dependency_order="",
+        naming_conventions="",
+        risk_assessment="",
+    )
+    revision_user_content = (
+        f"{assembly_prompt}\n\n"
+        f"REVISION CONTEXT:\n{revision_context}\n\n"
+        "Revise the plan based on the user's feedback. "
+        "Make targeted edits — don't rewrite from scratch. "
+        "Keep the Phase 4 job-contract format: each step needs "
+        "job, inputs, may_change, must_not_change, allowed_tools, "
+        "output_shape, success_checks, and blocked_protocol. "
+        "Legacy tool/file_path/instruction/context may remain as "
+        "short compatibility hints only."
+    )
     try:
         plan = await _chat_structured_with_repair(
             messages=[
                 {"role": "system", "content": PLAN_ASSEMBLY_SYSTEM_PROMPT},
                 {
                     "role": "user",
-                    "content": (
-                        f"TASK: {task}\n\n"
-                        f"CODEBASE CONTEXT:\n{context}\n\n"
-                        f"REVISION CONTEXT:\n{revision_context}\n\n"
-                        "Revise the plan based on the user's feedback. "
-                        "Make targeted edits — don't rewrite from scratch. "
-                        "Keep the Phase 4 job-contract format: each step needs "
-                        "job, inputs, may_change, must_not_change, allowed_tools, "
-                        "output_shape, success_checks, and blocked_protocol. "
-                        "Legacy tool/file_path/instruction/context may remain as "
-                        "short compatibility hints only."
-                    ),
+                    "content": revision_user_content,
                 },
             ],
             schema=ExecutionPlan,

@@ -1094,7 +1094,7 @@ async def _run_tdd_execution(
     )
     test_system_prompt = build_tdd_test_writing_prompt(
         load_execution_context(repo_root),
-        implementation_plan_md=plan_to_markdown(plan, include_context=False),
+        implementation_plan_md=plan_to_markdown(plan),
         naming_conventions=format_naming_conventions_for_prompt(
             getattr(plan, "naming_conventions", []) or [],
         ),

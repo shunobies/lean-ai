@@ -512,14 +512,6 @@ async def create_plan(
 
         phase4_scope = scope
         phase4_project_context = project_context
-        if expert_ctx <= 32768:
-            phase4_scope = ""
-            phase4_project_context = ""
-            logger.info(
-                "Phase 4: small context window (%d) — dropping scope and "
-                "project_context re-injection (already in design_and_risks)",
-                expert_ctx,
-            )
 
         verification_targets = _build_verification_targets(
             file_summary_obj,
@@ -528,6 +520,9 @@ async def create_plan(
         security_concerns = _build_security_concerns(design_and_risks_obj)
         testing_inventory = _format_testing_inventory(file_summary_obj)
         core_functionality = _format_core_functionality(design_and_risks_obj)
+        dependency_order_block = _format_dependency_order(design_and_risks_obj)
+        naming_conventions_block = _format_naming_conventions_section(design_and_risks_obj)
+        risk_assessment_block = _format_risk_assessment_section(design_and_risks_obj)
 
         plan = await _chat_structured_with_repair(
             messages=[
@@ -559,6 +554,9 @@ async def create_plan(
                         verification_targets=verification_targets or "(derive from affected behavioral files)",
                         security_concerns=security_concerns or "(none identified by Phase 3)",
                         core_functionality=core_functionality,
+                        dependency_order=dependency_order_block,
+                        naming_conventions=naming_conventions_block,
+                        risk_assessment=risk_assessment_block,
                     ),
                 },
             ],
@@ -609,25 +607,38 @@ async def create_plan(
 
         _sync_affected_files_from_steps(plan)
 
-        plan_warnings = _run_plan_validations(
+        plan_warnings, is_blocking = _run_plan_validations(
             plan,
             file_summary_obj,
             design_and_risks_obj,
         )
 
-        blocking_uncovered = [
-            mf for mf in _uncovered_missing_files(plan, design_and_risks_obj) if mf.blocking
-        ]
-        if blocking_uncovered:
+        # Revision loop with hard cap of 2 iterations for blocking warnings.
+        # Each iteration asks the LLM to revise the plan to address the
+        # blocking validation failures, then re-validates.
+        max_revisions = 2
+        revision_count = 0
+        while is_blocking and revision_count < max_revisions:
+            revision_count += 1
             logger.warning(
-                "Phase 4 plan validation — %d BLOCKING uncovered missing "
-                "file(s); triggering auto-revision",
-                len(blocking_uncovered),
+                "Phase 4 plan validation — blocking warnings detected "
+                "(revision %d/%d); triggering auto-revision",
+                revision_count,
+                max_revisions,
             )
+            # Build feedback from blocking warnings.
+            blocking_warnings = [
+                w for w in plan_warnings
+                if "[BLOCKING]" in w
+                or "invented path:" in w
+                or "write target not found" in w
+            ]
+            if not blocking_warnings:
+                blocking_warnings = plan_warnings
             feedback = (
-                "Phase 3 identified BLOCKING missing files that the plan "
-                "does not cover. Add a create_file or edit_file step for "
-                "each:\n" + "\n".join(f"- {mf.file_path}: {mf.purpose}" for mf in blocking_uncovered)
+                "Phase 4 plan validation produced BLOCKING warnings. "
+                "Revise the plan to address each one:\n"
+                + "\n".join(f"- {w}" for w in blocking_warnings)
             )
             plan = await _revise_plan(
                 task=task,
@@ -649,10 +660,18 @@ async def create_plan(
             for i, step in enumerate(plan.steps, 1):
                 step.step_number = i
             _sync_affected_files_from_steps(plan)
-            plan_warnings = _run_plan_validations(
+            plan_warnings, is_blocking = _run_plan_validations(
                 plan,
                 file_summary_obj,
                 design_and_risks_obj,
+            )
+
+        if revision_count >= max_revisions and is_blocking:
+            logger.warning(
+                "Phase 4 revision cap reached (%d iterations) — "
+                "plan ships with %d blocking warning(s)",
+                max_revisions,
+                len([w for w in plan_warnings if "[BLOCKING]" in w]),
             )
 
         plan.plan_validation_warnings = plan_warnings
@@ -793,6 +812,11 @@ async def _run_phase5_verification(
     # an explicit empty-marker.
     core_functionality = _format_core_functionality(plan)
 
+    # Structured sections from Phase 3 — always included in Phase 5 prompts.
+    dependency_order_block = _format_dependency_order(design_and_risks_obj)
+    naming_conventions_block = _format_naming_conventions_section(design_and_risks_obj)
+    risk_assessment_block = _format_risk_assessment_section(design_and_risks_obj)
+
     # Layer 4 graceful-degradation scaffolding: when ``test_command`` is
     # empty, omit the "end with run_tests" rule so the LLM doesn't
     # invent a phantom test command. The Layer 4 PR removes the
@@ -816,6 +840,9 @@ async def _run_phase5_verification(
             security_concerns=security_concerns,
             core_functionality=core_functionality,
             next_step=str(next_step),
+            dependency_order=dependency_order_block,
+            naming_conventions=naming_conventions_block,
+            risk_assessment=risk_assessment_block,
         )
     else:
         user_content = registry.format(
@@ -830,6 +857,9 @@ async def _run_phase5_verification(
             core_functionality=core_functionality,
             next_step=str(next_step),
             run_tests_rule=run_tests_rule,
+            dependency_order=dependency_order_block,
+            naming_conventions=naming_conventions_block,
+            risk_assessment=risk_assessment_block,
         )
 
     verification = await _chat_structured_with_repair(
@@ -1120,6 +1150,47 @@ def _format_missing_files(missing: list[MissingFile]) -> str:
     return "\n".join(rows)
 
 
+def _format_dependency_order(dar: DesignAndRisks) -> str:
+    """Render dependency_order as a structured block for Phase 4 prompts.
+
+    Returns empty string when no dependency entries exist.
+    """
+    if not dar.dependency_order:
+        return ""
+    lines: list[str] = []
+    for d in dar.dependency_order:
+        lines.append(f"- {d.file_path} depends on {d.depends_on} — {d.reason}")
+    return "DEPENDENCY ORDER:\n" + "\n".join(lines) + "\n\n"
+
+
+def _format_naming_conventions_section(dar: DesignAndRisks) -> str:
+    """Render naming_conventions as a structured block for Phase 4 prompts.
+
+    Returns empty string when no naming conventions exist.
+    """
+    if not dar.naming_conventions:
+        return ""
+    lines: list[str] = []
+    lines.append("| category | pattern | source_file |")
+    lines.append("|---|---|---|")
+    for nc in dar.naming_conventions:
+        lines.append(f"| {nc.category} | {nc.pattern} | {nc.source_file} |")
+    return "NAMING CONVENTIONS:\n" + "\n".join(lines) + "\n\n"
+
+
+def _format_risk_assessment_section(dar: DesignAndRisks) -> str:
+    """Render critical_risks as a structured block for Phase 4/5 prompts.
+
+    Returns empty string when no risks exist.
+    """
+    if not dar.critical_risks:
+        return ""
+    lines: list[str] = []
+    for r in dar.critical_risks:
+        lines.append(f"- **[{r.severity}]** {r.risk} — {r.mitigation}")
+    return "RISK ASSESSMENT:\n" + "\n".join(lines) + "\n\n"
+
+
 # ── Phase 4 plan validation helpers ─────────────────────────────────────────
 #
 # All checks are set-membership against structured inputs from Phases 2 and
@@ -1157,10 +1228,14 @@ def _collect_known_paths(
 def _check_hallucinated_paths(
     plan: ExecutionPlan,
     known_paths: set[str],
-) -> list[str]:
-    """Flag any step.file_path that is not in the prior-phase path universe."""
+) -> tuple[list[str], bool]:
+    """Flag any step.file_path that is not in the prior-phase path universe.
+
+    Returns ``(warnings, is_blocking)``. Invented paths are blocking —
+    the plan references files the prior phases never identified.
+    """
     if not known_paths:
-        return []
+        return [], False
     plan_paths: set[str] = set()
     for step in plan.steps:
         if step.file_path:
@@ -1168,7 +1243,8 @@ def _check_hallucinated_paths(
         for target in step.may_change:
             if target.path:
                 plan_paths.add(target.path)
-    return [f"invented path: {p}" for p in sorted(plan_paths - known_paths)]
+    warnings = [f"invented path: {p}" for p in sorted(plan_paths - known_paths)]
+    return warnings, bool(warnings)
 
 
 def _uncovered_missing_files(
@@ -1190,10 +1266,15 @@ def _check_edit_create_consistency(
     plan: ExecutionPlan,
     file_summary: FileSummary | None,
     dar: DesignAndRisks,
-) -> list[str]:
-    """Flag edit_file on unknown paths and create_file on existing paths."""
+) -> tuple[list[str], bool]:
+    """Flag edit_file on unknown paths and create_file on existing paths.
+
+    Returns ``(warnings, is_blocking)``. Tool/path mismatches are blocking
+    because the executor will fail if asked to edit a file it cannot find
+    or create a file that already exists.
+    """
     if file_summary is None:
-        return []
+        return [], False
     to_modify: set[str] = {o.file_path for o in file_summary.files_to_modify}
     to_modify |= {o.file_path for o in file_summary.files_read_for_context}
     to_create: set[str] = {o.file_path for o in file_summary.files_to_create}
@@ -1208,7 +1289,7 @@ def _check_edit_create_consistency(
                 continue
             if "edit_file" in s.allowed_tools or "create_file" in s.allowed_tools:
                 warnings.append(f"write target not found in prior-phase paths: {path}")
-    return warnings
+    return warnings, bool(warnings)
 
 
 def _sync_affected_files_from_steps(plan: ExecutionPlan) -> None:
@@ -1245,8 +1326,13 @@ def _step_contract_haystack(step: PlanStep) -> str:
 def _check_success_checks_cover_affected_files(
     plan: ExecutionPlan,
     file_summary: FileSummary | None,
-) -> list[str]:
-    """Warn when executable affected files have no test/success-check contract."""
+) -> tuple[list[str], bool]:
+    """Warn when executable affected files have no test/success-check contract.
+
+    Returns ``(warnings, is_blocking)``. Missing success checks are
+    non-blocking — the plan can still execute, but the user should be
+    aware of the gap.
+    """
     code_paths: set[str] = set()
     if file_summary is not None:
         for obs in file_summary.files_to_create:
@@ -1261,7 +1347,7 @@ def _check_success_checks_cover_affected_files(
                 code_paths.add(path)
 
     if not code_paths:
-        return []
+        return [], False
 
     warnings: list[str] = []
     for code_path in sorted(code_paths):
@@ -1274,14 +1360,21 @@ def _check_success_checks_cover_affected_files(
                 break
         if not covered:
             warnings.append(f"affected file has no success-check coverage: {code_path}")
-    return warnings
+    return warnings, False
 
 
-def _check_core_functionality_success_checked(plan: ExecutionPlan) -> list[str]:
-    """Warn when core-functionality tags lack regression-oriented checks."""
+def _check_core_functionality_success_checked(
+    plan: ExecutionPlan,
+) -> tuple[list[str], bool]:
+    """Warn when core-functionality tags lack regression-oriented checks.
+
+    Returns ``(warnings, is_blocking)``. Missing regression checks on
+    core functionality are non-blocking — the plan still executes but
+    the user is warned.
+    """
     tags = getattr(plan, "core_functionality", None) or []
     if not tags:
-        return []
+        return [], False
 
     confidence_rank = {"low": 0, "medium": 1, "high": 2}
     try:
@@ -1310,31 +1403,50 @@ def _check_core_functionality_success_checked(plan: ExecutionPlan) -> list[str]:
                 f"'{entity}' in {file_path} "
                 f"[{tag.source_signal}, confidence={tag.confidence}]"
             )
-    return warnings
+    return warnings, False
 
 
 def _run_plan_validations(
     plan: ExecutionPlan,
     file_summary: FileSummary | None,
     dar: DesignAndRisks,
-) -> list[str]:
-    """Run every validator, log each warning, and return the full list.
+) -> tuple[list[str], bool]:
+    """Run every validator, log each warning, and return ``(warnings, is_blocking)``.
 
     Shared between the pre- and post-revision passes so the logic stays
-    in one place.
+    in one place. The ``is_blocking`` flag is True when any blocking
+    validator produced warnings, indicating the plan should be revised.
     """
     warnings: list[str] = []
+    is_blocking = False
     known = _collect_known_paths(file_summary, dar)
-    warnings.extend(_check_hallucinated_paths(plan, known))
-    warnings.extend(_check_edit_create_consistency(plan, file_summary, dar))
-    warnings.extend(_check_success_checks_cover_affected_files(plan, file_summary))
-    warnings.extend(_check_core_functionality_success_checked(plan))
-    for mf in _uncovered_missing_files(plan, dar):
+
+    w, b = _check_hallucinated_paths(plan, known)
+    warnings.extend(w)
+    is_blocking = is_blocking or b
+
+    w, b = _check_edit_create_consistency(plan, file_summary, dar)
+    warnings.extend(w)
+    is_blocking = is_blocking or b
+
+    w, b = _check_success_checks_cover_affected_files(plan, file_summary)
+    warnings.extend(w)
+    # Non-blocking — do not flip is_blocking
+
+    w, b = _check_core_functionality_success_checked(plan)
+    warnings.extend(w)
+    # Non-blocking — do not flip is_blocking
+
+    uncovered = _uncovered_missing_files(plan, dar)
+    for mf in uncovered:
         tag = " [BLOCKING]" if mf.blocking else ""
         warnings.append(f"uncovered missing file: {mf.file_path} — {mf.purpose}{tag}")
+        if mf.blocking:
+            is_blocking = True
+
     for w in warnings:
         logger.warning("Phase 4 plan validation — %s", w)
-    return warnings
+    return warnings, is_blocking
 
 
 # ── Phase 5 helpers ─────────────────────────────────────────────────────────

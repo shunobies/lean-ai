@@ -851,6 +851,9 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
                 "core_functionality",
                 "next_step",
                 "run_tests_rule",
+                "dependency_order",
+                "naming_conventions",
+                "risk_assessment",
             ],
             warning=(
                 "Kept in parity with planning.verification_user_tdd — most "
@@ -879,6 +882,22 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
                 "coverage):\n{security_concerns}\n"
                 "(If this list is empty, apply general SECURITY-category "
                 "judgment to the files under test.)\n\n"
+                "DEPENDENCY ORDER (execution sequence constraints):\n"
+                "{dependency_order}\n"
+                "(Use this to determine which test files can be created "
+                "independently and which must wait for implementation "
+                "steps. Tests for dependent files should be ordered "
+                "after their dependencies.)\n\n"
+                "NAMING CONVENTIONS (from Phase 3/4):\n"
+                "{naming_conventions}\n"
+                "(Use these naming patterns for all test file names, "
+                "test class names, and test function names. Do NOT "
+                "invent alternate naming schemes.)\n\n"
+                "RISK ASSESSMENT (from Phase 3 design):\n"
+                "{risk_assessment}\n"
+                "(Prioritise test coverage for high-risk areas. If a "
+                "risk involves external I/O, ensure the test uses the "
+                "appropriate seam or mock.)\n\n"
                 "Produce ONLY the verification steps that should run "
                 "AFTER implementation.\n\n"
                 "REQUIRED OUTPUT SHAPE:\n"
@@ -998,6 +1017,9 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
                 "security_concerns",
                 "core_functionality",
                 "next_step",
+                "dependency_order",
+                "naming_conventions",
+                "risk_assessment",
             ],
             warning=(
                 "Kept in parity with planning.verification_user_normal — most "
@@ -1029,6 +1051,22 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
                 "coverage):\n{security_concerns}\n"
                 "(If this list is empty, apply general SECURITY-category "
                 "judgment to the files under test.)\n\n"
+                "DEPENDENCY ORDER (execution sequence constraints):\n"
+                "{dependency_order}\n"
+                "(Use this to determine which test files can be created "
+                "independently and which must wait for implementation "
+                "steps. Tests for dependent files should be ordered "
+                "after their dependencies.)\n\n"
+                "NAMING CONVENTIONS (from Phase 3/4):\n"
+                "{naming_conventions}\n"
+                "(Use these naming patterns for all test file names, "
+                "test class names, and test function names. Do NOT "
+                "invent alternate naming schemes.)\n\n"
+                "RISK ASSESSMENT (from Phase 3 design):\n"
+                "{risk_assessment}\n"
+                "(Prioritise test coverage for high-risk areas. If a "
+                "risk involves external I/O, ensure the test uses the "
+                "appropriate seam or mock.)\n\n"
                 "BEHAVIOR TO TEST (derived from the IMPLEMENTATION PLAN "
                 "above):\n"
                 "Design tests that pin down the *intended* behavior of "
@@ -1668,19 +1706,19 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
                 '  "step_number": 5,\n'
                 '  "job": "Wire ReviewHandler into the request handler registry.",\n'
                 '  "inputs": [\n'
-                '    {"source": "src/config/handlers.ext", "details": "Existing registry around line 34 and import block around line 8."},\n'
-                '    {"source": "Phase 3 dependency order", "details": "ReviewHandler must be registered after its module exists."}\n'
+                '    {{"source": "src/config/handlers.ext", "details": "Existing registry around line 34 and import block around line 8."}},\n'
+                '    {{"source": "Phase 3 dependency order", "details": "ReviewHandler must be registered after its module exists."}}\n'
                 '  ],\n'
                 '  "may_change": [\n'
-                '    {"path": "src/config/handlers.ext", "change": "Add import and one registry entry for ReviewHandler."},\n'
-                '    {"path": "tests/test_handlers.ext", "change": "Add or update coverage proving the handler is discoverable."}\n'
+                '    {{"path": "src/config/handlers.ext", "change": "Add import and one registry entry for ReviewHandler."}},\n'
+                '    {{"path": "tests/test_handlers.ext", "change": "Add or update coverage proving the handler is discoverable."}}\n'
                 '  ],\n'
                 '  "must_not_change": ["Existing handler names, route paths, or unrelated registry entries"],\n'
                 '  "allowed_tools": ["edit_file", "run_tests"],\n'
                 '  "output_shape": "The registry imports ReviewHandler and includes exactly one registration entry using the existing style. Test coverage proves the new handler is discoverable without changing existing handler behavior.",\n'
                 '  "success_checks": [\n'
-                '    {"description": "Registry contains one ReviewHandler import and registration entry.", "tool": "read_file", "expected": "ReviewHandler appears once in imports and registry."},\n'
-                '    {"description": "Relevant handler tests pass.", "tool": "run_tests", "command": "{test_command}", "expected": "Command exits successfully."}\n'
+                '    {{"description": "Registry contains one ReviewHandler import and registration entry.", "tool": "read_file", "expected": "ReviewHandler appears once in imports and registry."}},\n'
+                '    {{"description": "Relevant handler tests pass.", "tool": "run_tests", "command": "{test_command}", "expected": "Command exits successfully."}}\n'
                 '  ],\n'
                 '  "blocked_protocol": "If the registry shape differs from the input, read the file and adapt to the local pattern. If ReviewHandler is absent, stop and report the missing dependency.",\n'
                 '  "tool": "edit_file",\n'

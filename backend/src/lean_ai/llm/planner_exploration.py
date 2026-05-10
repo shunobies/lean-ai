@@ -397,10 +397,10 @@ async def run_phase2_exploration(
     """Run Phase 2: File identification + content reading.
 
     Returns ``(FileSummary | None, file_identification_markdown, elapsed)``.
-    The structured ``FileSummary`` is non-None only on the serial path
-    (``num_parallel=1``) where the synthesis pass succeeded. Parallel
-    mode returns ``None`` for the structured object since Phase 2a/2b
-    produce free-form text. Phase 4 validators skip cleanly when the
+    The structured ``FileSummary`` is non-None when the synthesis pass
+    succeeded (both serial and parallel paths now run synthesis). On
+    synthesis failure the object is ``None`` and the raw prose is used
+    as the markdown handoff. Phase 4 validators skip cleanly when the
     object is ``None``.
     """
     t0 = time.monotonic()
@@ -431,10 +431,7 @@ async def run_phase2_exploration(
     file_summary_obj: FileSummary | None = None
 
     if settings.num_parallel >= 2:
-        # TODO(parallel-phase2): parallel exploration still returns a prose
-        # handoff and skips the observation-backed FileSummary contract. Keep
-        # this deferred while the single-model Phase 2 path is hardened first.
-        file_identification = await _run_parallel_exploration(
+        file_identification, file_summary_obj = await _run_parallel_exploration(
             task=task,
             scope=scope,
             context=context,
@@ -554,7 +551,7 @@ async def _run_parallel_exploration(
     on_metrics: Callable | None,
     on_metrics_reset: Callable | None,
     t0: float,
-) -> str:
+) -> tuple[str, FileSummary | None]:
     """Parallel Phase 2: fan-out scan then merge deep-dive reads."""
     # Phase 2a: broad scan — identify files without reading contents
     scan_tools = [
@@ -617,7 +614,7 @@ async def _run_parallel_exploration(
     logger.info("Phase 2a scan identified %d file paths", len(file_paths))
 
     if not file_paths:
-        return scan_output
+        return scan_output, None
 
     # Phase 2b: parallel deep-dive — read identified files
     n_workers = min(len(file_paths), settings.num_parallel)
@@ -625,6 +622,8 @@ async def _run_parallel_exploration(
 
     async def _deep_dive(file_subset: list[str]) -> str:
         """Read a subset of files and produce a summary."""
+        from lean_ai.llm.tool_definitions import RECORD_FILE_OBSERVATION_TOOL
+
         file_list = "\n".join(f"- {f}" for f in file_subset)
         dive_messages = [
             {"role": "system", "content": PLAN_EXPLORATION_SYSTEM_PROMPT},
@@ -636,7 +635,8 @@ async def _run_parallel_exploration(
                     f"classes/functions with signatures, and what needs to "
                     f"change for the task.\n\nTask: {task}\n\n"
                     f"Files to read:\n{file_list}\n\n"
-                    f"Call task_complete when done."
+                    f"Call record_file_observation for every relevant file "
+                    f"you read, then call task_complete when done."
                 ),
             },
         ]
@@ -650,6 +650,7 @@ async def _run_parallel_exploration(
                 "task_complete",
             )
         ]
+        read_tools.append(RECORD_FILE_OBSERVATION_TOOL)
         max_turns = max(10, 30 // n_workers)
         _, dive_output = await explorer.chat_with_tools(
             messages=dive_messages,
@@ -687,9 +688,26 @@ async def _run_parallel_exploration(
             good_results.append(result)
 
     if not good_results:
-        return scan_output
+        return scan_output, None
 
-    return scan_output + "\n\n" + "\n\n".join(good_results)
+    merged_prose = scan_output + "\n\n" + "\n\n".join(good_results)
+
+    # Synthesis pass: coerce observations recorded by deep-dive workers
+    # into a validated FileSummary so downstream phases get structured data.
+    file_summary_obj, file_identification = await _synthesize_file_summary(
+        task=task,
+        scope=scope,
+        exploration_output=merged_prose,
+        repo_root=repo_root,
+        session_id=session_id,
+        explorer=explorer,
+        phase_max_tokens=phase_max_tokens,
+        on_thinking=on_thinking,
+        on_metrics=on_metrics,
+        on_metrics_reset=on_metrics_reset,
+    )
+
+    return file_identification, file_summary_obj
 
 
 async def _run_serial_exploration(

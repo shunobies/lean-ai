@@ -34,14 +34,13 @@ def _verif(steps: list[PlanStep]) -> VerificationPlan:
     return VerificationPlan(steps=steps)
 
 
-def _test_step(*, file_path: str, instruction: str = "", context: str = "") -> PlanStep:
+def _test_step(*, file_path: str, instruction: str = "") -> PlanStep:
     return PlanStep(
         step_number=1,
         tool="create_file",
         file_path=file_path,
         instruction=instruction or "create test",
         reason="reason",
-        context=context,
     )
 
 
@@ -168,7 +167,6 @@ def test_run_tests_step_does_not_count_as_coverage() -> None:
                 file_path="",
                 instruction="pytest tests/ -q",
                 reason="execute test suite",
-                context="",
             )
         ]
     )

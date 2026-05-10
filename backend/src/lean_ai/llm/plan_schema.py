@@ -117,6 +117,19 @@ class VerifiedReference(BaseModel):
     confirmed_patterns: str = ""
 
 
+class WebReference(BaseModel):
+    """External dependency verified via web search during exploration.
+
+    Mirrors VerifiedReference so Phase 2 web-research findings can be
+    captured through a distinct type while sharing the same shape.
+    """
+
+    dependency: str
+    docs_url: str
+    version: str = ""
+    confirmed_patterns: str = ""
+
+
 class AssumptionStatus(BaseModel):
     """Outcome of processing one ASSUMPTION from the Phase 1 scope checklist."""
 
@@ -533,9 +546,6 @@ class PlanStep(BaseModel):
     reason: str = ""
     """Why this job is needed."""
 
-    context: str = ""
-    """Legacy context hint. Prefer structured ``inputs`` in new plans."""
-
     _FILE_TOOLS = frozenset({"create_file", "edit_file", "read_file"})
     _MUTATING_TOOLS = frozenset({"create_file", "edit_file", "run_command", "format_code"})
 
@@ -727,7 +737,7 @@ def format_name_registry_for_prompt(
     return "\n\n".join(blocks)
 
 
-def _render_step(parts: list[str], step: PlanStep, include_context: bool) -> None:
+def _render_step(parts: list[str], step: PlanStep) -> None:
     """Render a single plan step as markdown lines."""
     tool_label = ", ".join(step.allowed_tools) if step.allowed_tools else step.tool
     target_label = ""
@@ -764,20 +774,10 @@ def _render_step(parts: list[str], step: PlanStep, include_context: bool) -> Non
         parts.append(f"   **Success checks:** {checks}")
     if step.blocked_protocol:
         parts.append(f"   **If blocked:** {step.blocked_protocol}")
-    if include_context and step.context:
-        parts.append(f"   ```\n{step.context}\n   ```")
 
 
-def plan_to_markdown(plan: ExecutionPlan, *, include_context: bool = False) -> str:
-    """Render an ExecutionPlan as human-readable markdown.
-
-    Args:
-        plan: The execution plan to render.
-        include_context: If True, append each step's context field as a
-            fenced code block.  Used by Phase 6 so the verification model
-            can see design details.  The approval UI passes False (default)
-            to keep the output concise.
-    """
+def plan_to_markdown(plan: ExecutionPlan) -> str:
+    """Render an ExecutionPlan as human-readable markdown."""
     parts: list[str] = []
 
     parts.append(f"## Scope\n\n{plan.scope}\n")
@@ -793,14 +793,14 @@ def plan_to_markdown(plan: ExecutionPlan, *, include_context: bool = False) -> s
     if plan.tdd_test_steps:
         parts.append("## TEST PHASE (Expert Model)\n")
         for step in plan.tdd_test_steps:
-            _render_step(parts, step, include_context)
+            _render_step(parts, step)
         parts.append("")
         parts.append("## IMPLEMENTATION PHASE (Primary Model)\n")
     else:
         parts.append("## Steps\n")
 
     for step in plan.steps:
-        _render_step(parts, step, include_context)
+        _render_step(parts, step)
     parts.append("")
 
     parts.append("## Affected Files\n")

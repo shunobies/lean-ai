@@ -994,6 +994,60 @@ RECORD_FILE_OBSERVATION_TOOL: dict = {
 }
 
 
+RECORD_WEB_REFERENCE_TOOL: dict = {
+    "type": "function",
+    "function": {
+        "name": "record_web_reference",
+        "description": (
+            "Record a structured finding from a web search during Phase 2 "
+            "exploration. Call this after using search_internet or fetch_url "
+            "to verify an external dependency, API, or library. Web references "
+            "are the authoritative way web-research findings reach downstream "
+            "phases — free-form prose is for narrating reasoning, not for "
+            "transcribing documentation. If called twice for the same "
+            "dependency, the second call replaces the first (latest "
+            "understanding wins)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "dependency": {
+                    "type": "string",
+                    "description": (
+                        "Name of the external dependency, API, or library "
+                        "(e.g. 'ruff', 'pydantic v2', 'ollama tools parameter')."
+                    ),
+                },
+                "docs_url": {
+                    "type": "string",
+                    "description": (
+                        "URL to the official documentation page consulted "
+                        "(e.g. 'https://docs.astral.sh/ruff/')."
+                    ),
+                },
+                "version": {
+                    "type": "string",
+                    "description": (
+                        "Confirmed version or version range (e.g. '>=2.0', "
+                        "'0.4.5'). Leave empty if version was not specified."
+                    ),
+                },
+                "confirmed_patterns": {
+                    "type": "string",
+                    "description": (
+                        "Key API signatures, configuration patterns, or "
+                        "usage examples confirmed by the documentation. "
+                        "Include concrete details the planner must keep in "
+                        "hand for design and implementation."
+                    ),
+                },
+            },
+            "required": ["dependency", "docs_url"],
+        },
+    },
+}
+
+
 # Read-only tools for planning phases
 PLANNING_TOOLS: list[dict] = [
     tool
@@ -1021,6 +1075,7 @@ def build_planning_tools() -> list[dict]:
         + search_tools
         + [QUERY_CONTEXT_TOOL]
         + REFERENCE_TOOLS
+        + [RECORD_WEB_REFERENCE_TOOL]
         + _maybe_wiki_tools()
         + _maybe_ui_verification_tools()
     )
@@ -1046,7 +1101,13 @@ DESIGN_TOOLS: list[dict] = [
 
 def build_design_tools() -> list[dict]:
     """Search + task_complete + reference + wiki + UI verification tools for Phase 3."""
-    return DESIGN_TOOLS + REFERENCE_TOOLS + _maybe_wiki_tools() + _maybe_ui_verification_tools()
+    return (
+        DESIGN_TOOLS
+        + REFERENCE_TOOLS
+        + [RECORD_WEB_REFERENCE_TOOL]
+        + _maybe_wiki_tools()
+        + _maybe_ui_verification_tools()
+    )
 
 
 # Read-only tools for chat exploration (no task_complete — text exit)
