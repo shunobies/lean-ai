@@ -82,7 +82,6 @@ def _implementation_step() -> PlanStep:
         file_path="src/app.py",
         instruction="Update the handler implementation.",
         reason="Implement the requested behavior.",
-        context="",
     )
 
 
@@ -104,7 +103,6 @@ def _verification_plan() -> VerificationPlan:
                 file_path="tests/test_app.py",
                 instruction="Add a regression test for the updated handler.",
                 reason="Verify the new behavior.",
-                context="",
             ),
             PlanStep(
                 step_number=2,
@@ -112,7 +110,6 @@ def _verification_plan() -> VerificationPlan:
                 file_path="",
                 instruction="Run pytest -q",
                 reason="Confirm the suite passes.",
-                context="",
             ),
         ]
     )

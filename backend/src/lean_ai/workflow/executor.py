@@ -359,7 +359,7 @@ def _build_step_groups(
 
     Rules:
     - Same ``file_path`` → sequential (same group boundary).
-    - Step B's instruction/context mentions step A's ``file_path``
+    - Step B's structured job contract mentions step A's ``file_path``
       → cross-file dependency (boundary-aware matching).
     - Barrier tools (run_tests, run_lint, etc.) depend on ALL prior steps.
     - Steps with no dependency on each other land in the same parallel group.
@@ -402,18 +402,27 @@ def _build_step_groups(
                 dep_step = file_owners[step_path]
                 max_dep_group = max(max_dep_group, group_idx[dep_step])
 
-        # Cross-file reference: check if instruction/context mentions
-        # any previously-touched file (boundary-aware)
+        # Cross-file reference: check if the structured job contract mentions
+        # any previously-touched file (boundary-aware).
         searchable = " ".join(
             part
             for part in (
                 step.job or "",
                 step.instruction or "",
                 step.reason or "",
-                step.context or "",
                 step.output_shape or "",
                 _step_success_check_text(step),
                 step.file_path or "",
+                " ".join(
+                    f"{inp.source} {inp.details}".strip()
+                    for inp in step.inputs
+                    if inp.source or inp.details
+                ),
+                " ".join(
+                    f"{target.path} {target.change}".strip()
+                    for target in step.may_change
+                    if target.path or target.change
+                ),
             )
             if part
         )

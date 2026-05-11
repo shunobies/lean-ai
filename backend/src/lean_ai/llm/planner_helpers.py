@@ -462,7 +462,12 @@ def _build_fallback_execution_plan(
                 job=instruction,
                 instruction=instruction,
                 reason=reason,
-                context=scope_or_task[:1200],
+                inputs=[
+                    {
+                        "source": "Task scope",
+                        "details": scope_or_task[:1200],
+                    }
+                ],
                 output_shape=(
                     "Leave the target file in a concrete, reviewable state that advances "
                     "the task and avoids placeholder-only edits."
@@ -897,7 +902,7 @@ async def _revise_plan(
         "Keep the Phase 4 job-contract format: each step needs "
         "job, inputs, may_change, must_not_change, allowed_tools, "
         "output_shape, success_checks, and blocked_protocol. "
-        "Legacy tool/file_path/instruction/context may remain as "
+        "Legacy tool/file_path/instruction may remain as "
         "short compatibility hints only."
     )
     try:

@@ -97,7 +97,7 @@ def test_success_check_coverage_uses_phase4_contracts():
         ]
     )
 
-    assert _check_success_checks_cover_affected_files(plan, summary) == []
+    assert _check_success_checks_cover_affected_files(plan, summary) == ([], False)
 
 
 def test_core_functionality_requires_regression_success_check():
@@ -139,4 +139,4 @@ def test_core_functionality_requires_regression_success_check():
         ],
     )
 
-    assert _check_core_functionality_success_checked(plan) == []
+    assert _check_core_functionality_success_checked(plan) == ([], False)

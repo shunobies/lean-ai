@@ -1727,8 +1727,7 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
                 '  "reason": "The new ReviewHandler must be registered '
                 "in the handler config so the framework discovers it at "
                 "boot. Without this, requests to /reviews will return "
-                '404.",\n'
-                '  "context": ""\n'
+                '404."\n'
                 "}}\n\n"
                 "{missing_files}"
                 "FINAL CHECKLIST — verify before producing the plan:\n"

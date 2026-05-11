@@ -455,22 +455,20 @@ def build_step_user_message(
     if step.reason:
         parts.append("")
 
-    if step.context:
-        ctx_text = step.context
-        # At small context windows, truncate and instruct to read_file instead
-        if settings._active_context_window <= 32768 and len(ctx_text) > 1000:
-            ctx_text = ctx_text[:1000] + "\n... (truncated — call read_file before editing)"
-        parts.append(f"\nContext (file content from planner investigation):\n```\n{ctx_text}\n```")
-
     # Include relevant artifacts from previous steps
     if step_artifacts:
         relevant: dict[str, str] = {}
+        inputs_text = " ".join(
+            f"{inp.source} {inp.details}".strip()
+            for inp in step.inputs
+            if inp.source or inp.details
+        )
         searchable = (
             (step.job or "")
             + " "
             + (step.instruction or "")
             + " "
-            + (step.context or "")
+            + inputs_text
             + " "
             + (step.output_shape or "")
             + " "

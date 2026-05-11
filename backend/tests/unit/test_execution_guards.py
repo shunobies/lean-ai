@@ -27,7 +27,6 @@ def _step(
         file_path=file_path,
         instruction=instruction,
         reason="",
-        context="",
     )
 
 

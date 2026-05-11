@@ -489,10 +489,9 @@ class PlanStep(BaseModel):
 
     The canonical fields describe a small implementation job, its inputs,
     mutation boundary, available tools, required output shape, success checks,
-    and blocked protocol. Legacy ``tool`` / ``file_path`` / ``instruction`` /
-    ``context`` fields remain as compatibility hints for older plans and UI
-    surfaces, but new plans should not rely on the one-step/one-tool recipe
-    model.
+    and blocked protocol. Legacy ``tool`` / ``file_path`` / ``instruction``
+    fields remain as compatibility hints for older plans and UI surfaces, but
+    new plans should not rely on the one-step/one-tool recipe model.
     """
 
     step_number: int

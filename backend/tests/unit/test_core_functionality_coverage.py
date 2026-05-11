@@ -37,7 +37,7 @@ def _step(
     *,
     file_path: str,
     instruction: str = "",
-    context: str = "",
+    output_shape: str = "",
     reason: str = "",
 ) -> PlanStep:
     return PlanStep(
@@ -45,8 +45,8 @@ def _step(
         tool="create_file",
         file_path=file_path,
         instruction=instruction or "create test",
+        output_shape=output_shape,
         reason=reason,
-        context=context,
     )
 
 
@@ -152,7 +152,7 @@ def test_silent_when_entity_has_matching_regression_step_by_path() -> None:
         steps=[
             _step(
                 file_path="tests/regression/regression_thing_test.py",
-                context="covers contract of src/services/thing.py",
+                output_shape="Regression test covers the contract of src/services/thing.py.",
             )
         ]
     )

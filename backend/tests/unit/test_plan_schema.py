@@ -17,7 +17,6 @@ def _step(**overrides) -> PlanStep:
         "tool": "edit_file",
         "file_path": "src/main.py",
         "instruction": "Update the main function",
-        "context": "",
     }
     defaults.update(overrides)
     return PlanStep(**defaults)

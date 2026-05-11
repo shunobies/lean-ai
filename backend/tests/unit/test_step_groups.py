@@ -12,7 +12,6 @@ def _step(
         tool=tool,
         file_path=file_path,
         instruction=instruction,
-        context="",
     )
 
 
@@ -80,8 +79,8 @@ class TestBuildStepGroups:
         groups = _build_step_groups(steps)
         assert len(groups) == 2
 
-    def test_context_reference_creates_dependency(self):
-        """Planner-supplied context mentioning another file must serialize the steps."""
+    def test_inputs_reference_creates_dependency(self):
+        """Planner-supplied inputs mentioning another file must serialize the steps."""
         steps = [
             PlanStep(
                 step_number=1,
@@ -89,7 +88,6 @@ class TestBuildStepGroups:
                 file_path="src/models.py",
                 instruction="add model",
                 reason="",
-                context="",
             ),
             PlanStep(
                 step_number=2,
@@ -97,7 +95,12 @@ class TestBuildStepGroups:
                 file_path="src/views.py",
                 instruction="wire view",
                 reason="",
-                context="Follow the serializer pattern from src/models.py",
+                inputs=[
+                    {
+                        "source": "src/models.py",
+                        "details": "Follow the serializer pattern from this file.",
+                    }
+                ],
             ),
         ]
         groups = _build_step_groups(steps)

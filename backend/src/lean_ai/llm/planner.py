@@ -795,7 +795,7 @@ async def _run_phase5_verification(
     )
     t0 = time.monotonic()
 
-    impl_plan_md = plan_to_markdown(plan, include_context=False)
+    impl_plan_md = plan_to_markdown(plan)
     next_step = len(plan.steps) + 1
 
     verification_targets = _build_verification_targets(
@@ -923,7 +923,6 @@ async def _run_phase5_verification(
                     reason=(
                         "Verify the existing test suite still passes after the plan's changes."
                     ),
-                    context="",
                 )
             )
             # Keep the injected step in the debug payload too so the
@@ -1312,7 +1311,6 @@ def _step_contract_haystack(step: PlanStep) -> str:
         step.instruction or "",
         step.reason or "",
         step.output_shape or "",
-        step.context or "",
         step.file_path or "",
     ]
     parts.extend(f"{inp.source} {inp.details}" for inp in step.inputs)
@@ -1704,14 +1702,7 @@ def _check_core_functionality_covered(
             continue
         if not is_regression_test_path(step.file_path):
             continue
-        haystack = "\n".join(
-            [
-                step.file_path or "",
-                step.instruction or "",
-                step.context or "",
-                step.reason or "",
-            ]
-        )
+        haystack = _step_contract_haystack(step)
         haystacks.append((step.file_path, haystack))
 
     warnings: list[str] = []
@@ -1743,9 +1734,9 @@ def _check_affected_files_covered(
     For every file in ``plan.affected_files`` that has an executable
     extension AND corresponds to a ``FileSummary.files_to_create`` or
     ``files_to_modify`` observation, verify at least one ``create_file``
-    step in ``verification.steps`` references that path in
-    ``file_path``, ``instruction``, or ``context``. Uncovered paths
-    append a warning to ``plan.plan_validation_warnings``.
+    step in ``verification.steps`` references that path anywhere in its
+    structured job contract. Uncovered paths append a warning to
+    ``plan.plan_validation_warnings``.
 
     This is intentionally a *warning*, not a blocker — the plan still
     proceeds and the user sees the warning on the approval screen, so
@@ -1772,15 +1763,13 @@ def _check_affected_files_covered(
         return []
 
     # Build a haystack of everything Phase 5's create_file test steps
-    # reference. Any code path that appears anywhere in this haystack
-    # is considered covered.
+    # reference. Any code path that appears anywhere in this structured
+    # contract text is considered covered.
     haystacks: list[str] = []
     for step in verification.steps:
         if step.tool != "create_file":
             continue
-        haystacks.append(step.file_path or "")
-        haystacks.append(step.instruction or "")
-        haystacks.append(step.context or "")
+        haystacks.append(_step_contract_haystack(step))
     combined = "\n".join(haystacks)
 
     warnings: list[str] = []
