@@ -484,7 +484,7 @@ export function getNotesPanelHtml(): string {
             html += '<div class="note-card" id="note-' + note.id + '">';
 
             // Header (clickable to expand)
-            html += '<div class="note-header" onclick="toggleNote(\\''+note.id+'\\')">';
+            html += '<div class="note-header" role="button" tabindex="0" aria-expanded="false" aria-controls="body-'+note.id+'" onclick="toggleNote(\\''+note.id+'\\')" onkeydown="if(event.key===\\'Enter\\'||event.key===\\' \\'){event.preventDefault();toggleNote(\\''+note.id+'\\')}">';
             html += '<span class="note-expand-icon" id="icon-'+note.id+'">&#9654;</span>';
             if (note.project) {
                 html += '<span class="note-project-badge">'+escapeHtml(note.project)+'</span>';
@@ -518,7 +518,7 @@ export function getNotesPanelHtml(): string {
                     html += '<div class="'+cls+'">';
                     html += '<input type="checkbox" '+checked+' onchange="toggleTodo('+todo.id+', this.checked)" />';
                     html += '<span class="todo-text">'+escapeHtml(todo.description)+'</span>';
-                    html += '<button class="todo-delete-btn" onclick="deleteTodo('+todo.id+')" title="Delete">x</button>';
+                    html += '<button class="todo-delete-btn" onclick="deleteTodo('+todo.id+')" title="Delete TODO" aria-label="Delete TODO">x</button>';
                     html += '</div>';
                 });
                 // Add todo input
@@ -533,7 +533,7 @@ export function getNotesPanelHtml(): string {
             // Actions
             html += '<div class="note-actions">';
             html += '<button class="btn btn-secondary" onclick="editNote(\\''+note.id+'\\')">Edit</button>';
-            html += '<button class="btn btn-danger" onclick="deleteNote(\\''+note.id+'\\')">Delete</button>';
+            html += '<button class="btn btn-danger" onclick="deleteNote(\\''+note.id+'\\')" aria-label="Delete note">Delete</button>';
             html += '</div>';
 
             html += '</div>'; // note-body
@@ -551,9 +551,11 @@ export function getNotesPanelHtml(): string {
         if (body.classList.contains("expanded")) {
             body.classList.remove("expanded");
             icon.innerHTML = "&#9654;";
+            body.previousElementSibling?.setAttribute("aria-expanded", "false");
         } else {
             body.classList.add("expanded");
             icon.innerHTML = "&#9660;";
+            body.previousElementSibling?.setAttribute("aria-expanded", "true");
         }
     }
 

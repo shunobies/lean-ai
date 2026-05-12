@@ -515,7 +515,7 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
             ctx.postMessage({
                 type: "tool_approval_required",
                 token: raw.token as string,
-                tool_name: raw.tool_name as string,
+                tool_name: (raw.tool_name || raw.tool) as string,
                 command: raw.command as string,
                 reason: raw.reason as string,
             });

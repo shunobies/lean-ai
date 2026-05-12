@@ -501,7 +501,7 @@ export function getSettingsPanelHtml(): string {
                 <label>Model <span class="hint">e.g. qwen3-coder:30b</span></label>
                 <div class="model-combobox" id="ollamaModelCombobox">
                     <input type="text" id="ollamaModel" placeholder="qwen3-coder:30b">
-                    <button type="button" class="model-combobox-btn" tabindex="-1">&#9660;</button>
+                    <button type="button" class="model-combobox-btn" aria-label="Show available Ollama models">&#9660;</button>
                     <div class="model-combobox-options"></div>
                 </div>
             </div>
@@ -738,7 +738,7 @@ export function getSettingsPanelHtml(): string {
                         <label>Expert Ollama Model <span class="hint">e.g. qwen3:72b</span></label>
                         <div class="model-combobox" id="ollamaModelExpertCombobox">
                             <input type="text" id="ollamaModelExpert" placeholder="qwen3:72b">
-                            <button type="button" class="model-combobox-btn" tabindex="-1">&#9660;</button>
+                            <button type="button" class="model-combobox-btn" aria-label="Show available Ollama models">&#9660;</button>
                             <div class="model-combobox-options"></div>
                         </div>
                     </div>
@@ -905,7 +905,7 @@ export function getSettingsPanelHtml(): string {
                         <label>Request Ollama Model <span class="hint">e.g. qwen3.5:27b</span></label>
                         <div class="model-combobox" id="ollamaModelRequestCombobox">
                             <input type="text" id="ollamaModelRequest" placeholder="qwen3.5:27b">
-                            <button type="button" class="model-combobox-btn" tabindex="-1">&#9660;</button>
+                            <button type="button" class="model-combobox-btn" aria-label="Show available Ollama models">&#9660;</button>
                             <div class="model-combobox-options"></div>
                         </div>
                     </div>
@@ -1072,7 +1072,7 @@ export function getSettingsPanelHtml(): string {
                         <label>Worker Ollama Model <span class="hint">e.g. qwen3.5:2b-q8_0</span></label>
                         <div class="model-combobox" id="ollamaModelWorkerCombobox">
                             <input type="text" id="ollamaModelWorker" placeholder="qwen3.5:2b-q8_0">
-                            <button type="button" class="model-combobox-btn" tabindex="-1">&#9660;</button>
+                            <button type="button" class="model-combobox-btn" aria-label="Show available Ollama models">&#9660;</button>
                             <div class="model-combobox-options"></div>
                         </div>
                     </div>
@@ -1339,7 +1339,7 @@ export function getSettingsPanelHtml(): string {
             <label>Inline predictions model <span class="hint">leave empty to share primary model</span></label>
             <div class="model-combobox" id="inlineModelCombobox">
                 <input type="text" id="inlineModel" placeholder="qwen2.5-coder:7b">
-                <button type="button" class="model-combobox-btn" tabindex="-1">&#9660;</button>
+                <button type="button" class="model-combobox-btn" aria-label="Show available Ollama models">&#9660;</button>
                 <div class="model-combobox-options"></div>
             </div>
         </div>
@@ -1371,7 +1371,7 @@ export function getSettingsPanelHtml(): string {
             <label>Embedding model</label>
             <div class="model-combobox" id="embeddingModelCombobox">
                 <input type="text" id="embeddingModel" placeholder="qwen3-embedding:0.6b">
-                <button type="button" class="model-combobox-btn" tabindex="-1">&#9660;</button>
+                <button type="button" class="model-combobox-btn" aria-label="Show available Ollama models">&#9660;</button>
                 <div class="model-combobox-options"></div>
             </div>
         </div>
@@ -1385,7 +1385,7 @@ export function getSettingsPanelHtml(): string {
             <label>Vision model <span class="hint">leave empty to disable image support</span></label>
             <div class="model-combobox" id="visionModelCombobox">
                 <input type="text" id="visionModel" placeholder="qwen3-vl:8b">
-                <button type="button" class="model-combobox-btn" tabindex="-1">&#9660;</button>
+                <button type="button" class="model-combobox-btn" aria-label="Show available Ollama models">&#9660;</button>
                 <div class="model-combobox-options"></div>
             </div>
         </div>
@@ -1399,12 +1399,12 @@ export function getSettingsPanelHtml(): string {
             <label>Search provider</label>
             <input type="hidden" id="searchProvider" value="duckduckgo">
             <div class="custom-select" id="searchProviderDropdown">
-                <div class="custom-select-trigger" id="searchProviderTrigger">DuckDuckGo (default, no setup)</div>
-                <div class="custom-select-options" id="searchProviderOptions">
-                    <div class="custom-select-option selected" data-value="duckduckgo">DuckDuckGo (default, no setup)</div>
-                    <div class="custom-select-option" data-value="searxng">SearXNG (self-hosted)</div>
-                    <div class="custom-select-option" data-value="google">Google (requires Chrome)</div>
-                    <div class="custom-select-option" data-value="bing">Bing (requires Chrome)</div>
+                <div class="custom-select-trigger" id="searchProviderTrigger" role="button" tabindex="0" aria-haspopup="listbox" aria-expanded="false">DuckDuckGo (default, no setup)</div>
+                <div class="custom-select-options" id="searchProviderOptions" role="listbox" aria-label="Search provider">
+                    <div class="custom-select-option selected" data-value="duckduckgo" role="option" aria-selected="true">DuckDuckGo (default, no setup)</div>
+                    <div class="custom-select-option" data-value="searxng" role="option" aria-selected="false">SearXNG (self-hosted)</div>
+                    <div class="custom-select-option" data-value="google" role="option" aria-selected="false">Google (requires Chrome)</div>
+                    <div class="custom-select-option" data-value="bing" role="option" aria-selected="false">Bing (requires Chrome)</div>
                 </div>
             </div>
         </div>
@@ -1988,7 +1988,9 @@ export function getSettingsPanelHtml(): string {
         document.getElementById('searchProvider').value = opt.value;
         document.getElementById('searchProviderTrigger').textContent = opt.label;
         document.querySelectorAll('#searchProviderOptions .custom-select-option').forEach(el => {
-            el.classList.toggle('selected', el.dataset.value === opt.value);
+            const selected = el.dataset.value === opt.value;
+            el.classList.toggle('selected', selected);
+            el.setAttribute('aria-selected', String(selected));
         });
         document.getElementById('searxngUrlField').style.display =
             opt.value === 'searxng' ? '' : 'none';
@@ -1996,18 +1998,41 @@ export function getSettingsPanelHtml(): string {
 
     document.getElementById('searchProviderTrigger').addEventListener('click', (e) => {
         e.stopPropagation();
-        document.getElementById('searchProviderDropdown').classList.toggle('open');
+        const dropdown = document.getElementById('searchProviderDropdown');
+        dropdown.classList.toggle('open');
+        document.getElementById('searchProviderTrigger').setAttribute(
+            'aria-expanded',
+            String(dropdown.classList.contains('open')),
+        );
+    });
+
+    document.getElementById('searchProviderTrigger').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            e.stopPropagation();
+            const dropdown = document.getElementById('searchProviderDropdown');
+            dropdown.classList.toggle('open');
+            document.getElementById('searchProviderTrigger').setAttribute(
+                'aria-expanded',
+                String(dropdown.classList.contains('open')),
+            );
+        } else if (e.key === 'Escape') {
+            document.getElementById('searchProviderDropdown').classList.remove('open');
+            document.getElementById('searchProviderTrigger').setAttribute('aria-expanded', 'false');
+        }
     });
 
     document.querySelectorAll('#searchProviderOptions .custom-select-option').forEach(el => {
         el.addEventListener('click', () => {
             setSearchProvider(el.dataset.value);
             document.getElementById('searchProviderDropdown').classList.remove('open');
+            document.getElementById('searchProviderTrigger').setAttribute('aria-expanded', 'false');
         });
     });
 
     document.addEventListener('click', (e) => {
         document.getElementById('searchProviderDropdown').classList.remove('open');
+        document.getElementById('searchProviderTrigger').setAttribute('aria-expanded', 'false');
         if (!e.target.closest('.model-combobox')) {
             document.querySelectorAll('.model-combobox').forEach(b => b.classList.remove('open'));
         }

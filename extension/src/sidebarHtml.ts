@@ -315,6 +315,16 @@ export function getWebviewHtml(chatFontSize: number): string {
         opacity: 1;
         background: var(--vscode-toolbar-hoverBackground);
     }
+    .header-icon-btn:focus-visible,
+    .new-chat-btn:focus-visible,
+    .context-pill:focus-visible,
+    .mic-btn:focus-visible,
+    .attachment-thumb .remove-btn:focus-visible,
+    .tool-approval-card button:focus-visible,
+    .memory-suggestion button:focus-visible {
+        outline: 1px solid var(--vscode-focusBorder);
+        outline-offset: 2px;
+    }
 
     .search-bar {
         padding: 6px 12px;
@@ -693,24 +703,51 @@ export function getWebviewHtml(chatFontSize: number): string {
         background: var(--vscode-editor-background);
         flex-shrink: 0;
         gap: 8px;
-        align-items: center;
-        justify-content: center;
+        flex-direction: column;
+        align-items: stretch;
     }
     .approval-bar.visible {
         display: flex;
     }
-    .approval-bar .approve-btn {
-        padding: 6px 18px;
-        background: var(--vscode-testing-iconPassed, #28a745);
-        color: #fff;
-        border: none;
+    .approval-bar .approval-copy {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .approval-bar .approval-actions,
+    .approval-bar .approval-feedback-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+    }
+    .approval-bar button {
+        padding: 6px 12px;
+        border: 1px solid var(--vscode-button-border, transparent);
         border-radius: 4px;
         cursor: pointer;
         font-family: inherit;
         font-size: 13px;
         font-weight: 600;
     }
-    .approval-bar .approve-btn:hover { opacity: 0.9; }
+    .approval-bar .approve-btn {
+        background: var(--vscode-testing-iconPassed, #28a745);
+        color: #fff;
+    }
+    .approval-bar .request-changes-btn,
+    .approval-bar .cancel-feedback-btn {
+        background: var(--vscode-button-secondaryBackground);
+        color: var(--vscode-button-secondaryForeground);
+    }
+    .approval-bar .send-feedback-btn {
+        background: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+    }
+    .approval-bar button:hover { opacity: 0.9; }
+    .approval-bar button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
     .approval-bar .approval-hint {
         font-size: 11px;
         opacity: 0.6;
@@ -720,6 +757,32 @@ export function getWebviewHtml(chatFontSize: number): string {
         font-size: 12px;
         opacity: 0.8;
         margin-right: 4px;
+    }
+    .approval-bar .approval-feedback {
+        display: none;
+        flex-direction: column;
+        gap: 6px;
+    }
+    .approval-bar .approval-feedback.visible {
+        display: flex;
+    }
+    .approval-bar .approval-feedback textarea {
+        width: 100%;
+        min-height: 54px;
+        resize: vertical;
+        border: 1px solid var(--vscode-input-border);
+        background: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        border-radius: 4px;
+        padding: 6px 8px;
+        font-family: inherit;
+        font-size: inherit;
+        outline: none;
+    }
+    .approval-bar .approval-feedback textarea:focus,
+    .approval-bar button:focus-visible {
+        outline: 1px solid var(--vscode-focusBorder);
+        outline-offset: 2px;
     }
 
     .tab-bar {
@@ -1104,25 +1167,25 @@ export function getWebviewHtml(chatFontSize: number): string {
     <div class="header-left">
         <span class="header-title">Lean AI</span>
         <span class="stage-badge" id="stageBadge"></span>
-        <span class="metrics-badge" id="ctxBadge" title="Context window usage"></span>
-        <span class="metrics-badge" id="timeBadge" title="Elapsed time"></span>
+        <span class="metrics-badge" id="ctxBadge" title="Context window usage" aria-live="polite"></span>
+        <span class="metrics-badge" id="timeBadge" title="Elapsed time" aria-live="polite"></span>
     </div>
     <div class="header-right">
-        <button class="header-icon-btn" id="backBtn" title="Back to current chat" style="display:none;"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M7 1L1 8L7 15V10H15V6H7V1Z"/></svg></button>
-        <button class="header-icon-btn" id="notesBtn" title="Notes & TODOs"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M3 1h10a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zm1 3v1h8V4H4zm0 3v1h8V7H4zm0 3v1h5v-1H4z"/></svg></button>
-        <button class="header-icon-btn" id="editPromptsBtn" title="Edit Prompts"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M13.23 1h-1.46L3.52 9.25l-.16.22L1 13.59 2.41 15l4.12-2.36.22-.16L15 4.23V2.77L13.23 1zM2.41 13.59l1.51-2.53.49.49.49.49-2.49 1.55zm3.45-2.15L4.56 10.1 11 3.66l1.34 1.34-6.48 6.44z"/></svg></button>
-        <button class="header-icon-btn" id="settingsBtn" title="Lean AI Settings"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M9.1 4.4L8.6 2H7.4L6.9 4.4L6.2 4.7L4.2 3.4L3.4 4.2L4.7 6.2L4.4 6.9L2 7.4V8.6L4.4 9.1L4.7 9.8L3.4 11.8L4.2 12.6L6.2 11.3L6.9 11.6L7.4 14H8.6L9.1 11.6L9.8 11.3L11.8 12.6L12.6 11.8L11.3 9.8L11.6 9.1L14 8.6V7.4L11.6 6.9L11.3 6.2L12.6 4.2L11.8 3.4L9.8 4.7L9.1 4.4ZM8 10C6.9 10 6 9.1 6 8C6 6.9 6.9 6 8 6C9.1 6 10 6.9 10 8C10 9.1 9.1 10 8 10Z"/></svg></button>
-        <button class="header-icon-btn" id="searchBtn" title="Search conversations"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M11.7 10.3C12.5 9.3 13 8 13 6.5C13 2.9 10.1 0 6.5 0C2.9 0 0 2.9 0 6.5C0 10.1 2.9 13 6.5 13C8 13 9.3 12.5 10.3 11.7L14.3 15.7L15.7 14.3L11.7 10.3ZM6.5 11C4 11 2 9 2 6.5C2 4 4 2 6.5 2C9 2 11 4 11 6.5C11 9 9 11 6.5 11Z"/></svg></button>
-        <button class="header-icon-btn" id="popOutBtn" title="Open chat in new window"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 1C.67 1 0 1.67 0 2.5v11c0 .83.67 1.5 1.5 1.5h11c.83 0 1.5-.67 1.5-1.5V10h-1v3.5a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H5V1H1.5zM9 1v1h3.29L7.15 7.15l.7.7L13 2.71V6h1V1H9z"/></svg></button>
-        <button class="new-chat-btn" id="newChatBtn" title="New Chat">+</button>
+        <button class="header-icon-btn" id="backBtn" title="Back to current chat" aria-label="Back to current chat" style="display:none;"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M7 1L1 8L7 15V10H15V6H7V1Z"/></svg></button>
+        <button class="header-icon-btn" id="notesBtn" title="Notes & TODOs" aria-label="Open Notes and TODOs"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3 1h10a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zm1 3v1h8V4H4zm0 3v1h8V7H4zm0 3v1h5v-1H4z"/></svg></button>
+        <button class="header-icon-btn" id="editPromptsBtn" title="Edit Prompts" aria-label="Edit prompts"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.23 1h-1.46L3.52 9.25l-.16.22L1 13.59 2.41 15l4.12-2.36.22-.16L15 4.23V2.77L13.23 1zM2.41 13.59l1.51-2.53.49.49.49.49-2.49 1.55zm3.45-2.15L4.56 10.1 11 3.66l1.34 1.34-6.48 6.44z"/></svg></button>
+        <button class="header-icon-btn" id="settingsBtn" title="Lean AI Settings" aria-label="Open Lean AI settings"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M9.1 4.4L8.6 2H7.4L6.9 4.4L6.2 4.7L4.2 3.4L3.4 4.2L4.7 6.2L4.4 6.9L2 7.4V8.6L4.4 9.1L4.7 9.8L3.4 11.8L4.2 12.6L6.2 11.3L6.9 11.6L7.4 14H8.6L9.1 11.6L9.8 11.3L11.8 12.6L12.6 11.8L11.3 9.8L11.6 9.1L14 8.6V7.4L11.6 6.9L11.3 6.2L12.6 4.2L11.8 3.4L9.8 4.7L9.1 4.4ZM8 10C6.9 10 6 9.1 6 8C6 6.9 6.9 6 8 6C9.1 6 10 6.9 10 8C10 9.1 9.1 10 8 10Z"/></svg></button>
+        <button class="header-icon-btn" id="searchBtn" title="Search conversations" aria-label="Search conversations" aria-expanded="false"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M11.7 10.3C12.5 9.3 13 8 13 6.5C13 2.9 10.1 0 6.5 0C2.9 0 0 2.9 0 6.5C0 10.1 2.9 13 6.5 13C8 13 9.3 12.5 10.3 11.7L14.3 15.7L15.7 14.3L11.7 10.3ZM6.5 11C4 11 2 9 2 6.5C2 4 4 2 6.5 2C9 2 11 4 11 6.5C11 9 9 11 6.5 11Z"/></svg></button>
+        <button class="header-icon-btn" id="popOutBtn" title="Open chat in new window" aria-label="Open chat in new window"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.5 1C.67 1 0 1.67 0 2.5v11c0 .83.67 1.5 1.5 1.5h11c.83 0 1.5-.67 1.5-1.5V10h-1v3.5a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H5V1H1.5zM9 1v1h3.29L7.15 7.15l.7.7L13 2.71V6h1V1H9z"/></svg></button>
+        <button class="new-chat-btn" id="newChatBtn" title="New Chat" aria-label="Start a new chat">+</button>
     </div>
 </div>
 
 <div class="tab-bar" id="tabBar"></div>
 
 <div class="search-bar" id="searchBar" style="display:none;">
-    <input type="text" id="searchInput" placeholder="Search past conversations..." />
-    <button class="search-clear-btn" id="searchClearBtn" title="Close search">&times;</button>
+    <input type="text" id="searchInput" placeholder="Search past conversations..." aria-label="Search past conversations" />
+    <button class="search-clear-btn" id="searchClearBtn" title="Close search" aria-label="Close conversation search">&times;</button>
 </div>
 
 <div class="execution-progress-card" id="executionProgressCard" style="display:none;">
@@ -1134,44 +1197,57 @@ export function getWebviewHtml(chatFontSize: number): string {
 </div>
 
 <div class="messages-wrapper">
-<div class="messages" id="messages">
+<div class="messages" id="messages" role="log" aria-live="polite" aria-relevant="additions text">
     <div class="msg msg-system">Describe what you'd like to build or change. I'll help you refine it into a clear task for the agent.</div>
 </div>
-<button class="jump-to-bottom" id="jumpToBottom" title="Jump to latest">&#8595; New messages</button>
+<button class="jump-to-bottom" id="jumpToBottom" title="Jump to latest" aria-label="Jump to latest messages">&#8595; New messages</button>
 </div>
-<div class="thinking" id="thinking">Processing...</div>
+<div class="thinking" id="thinking" role="status" aria-live="polite">Processing...</div>
 
-<div class="approval-bar" id="approvalBar">
-    <button class="approve-btn" id="approveBtn">Approve Plan</button>
-    <span class="approval-hint">or type feedback below to revise</span>
+<div class="approval-bar" id="approvalBar" role="region" aria-label="Plan approval controls">
+    <div class="approval-copy">
+        <span class="approval-label">Plan ready for review</span>
+        <span class="approval-hint">Approve to implement, or request changes before any files are modified.</span>
+    </div>
+    <div class="approval-actions">
+        <button class="request-changes-btn" id="requestChangesBtn" type="button">Request Changes</button>
+        <button class="approve-btn" id="approveBtn" type="button">Approve Plan</button>
+    </div>
+    <div class="approval-feedback" id="approvalFeedback">
+        <textarea id="approvalFeedbackInput" rows="2" placeholder="What should change before implementation?" aria-label="Plan change feedback"></textarea>
+        <div class="approval-feedback-actions">
+            <button class="cancel-feedback-btn" id="cancelFeedbackBtn" type="button">Cancel</button>
+            <button class="send-feedback-btn" id="sendFeedbackBtn" type="button">Send Feedback</button>
+        </div>
+    </div>
 </div>
 
 <div class="context-pills" id="contextPills">
-    <button class="context-pill" id="problemsPill" title="Include Problems tab (errors &amp; warnings) as context for the agent">&#9888; Problems (<span id="problemsCount">0</span>)</button>
-    <button class="context-pill" id="debugPill" title="Include active debug session state (call stack, variables) as context" style="display:none;">&#9679; Debug State</button>
+    <button class="context-pill" id="problemsPill" title="Include Problems tab (errors &amp; warnings) as context for the agent" aria-pressed="false">&#9888; Problems (<span id="problemsCount">0</span>)</button>
+    <button class="context-pill" id="debugPill" title="Include active debug session state (call stack, variables) as context" aria-pressed="false" style="display:none;">&#9679; Debug State</button>
 </div>
 
 <div class="voice-controls" id="voiceControls" style="display:none;">
     <label class="voice-toggle"><input type="checkbox" id="sttToggle"> STT</label>
     <label class="voice-toggle"><input type="checkbox" id="ttsToggle"> TTS</label>
     <label class="voice-toggle"><input type="checkbox" id="wakeWordToggle"> Wake</label>
-    <select id="voiceSelect" class="voice-select" title="TTS Voice" style="display:none;"></select>
-    <input type="range" id="speedSlider" class="voice-speed" min="0.5" max="2.0" step="0.1" value="1.0" title="TTS Speed" style="display:none;">
+    <select id="voiceSelect" class="voice-select" title="TTS Voice" aria-label="TTS voice" style="display:none;"></select>
+    <input type="range" id="speedSlider" class="voice-speed" min="0.5" max="2.0" step="0.1" value="1.0" title="TTS Speed" aria-label="TTS speed" style="display:none;">
     <span id="speedLabel" class="voice-speed-label" style="display:none;">1.0x</span>
-    <button class="voice-stop-tts" id="stopTtsBtn" style="display:none;" title="Stop speaking">&#9724;</button>
-    <button class="voice-replay-tts" id="replayTtsBtn" style="display:none;" title="Replay last response">&#9654;</button>
+    <button class="voice-stop-tts" id="stopTtsBtn" style="display:none;" title="Stop speaking" aria-label="Stop speaking">&#9724;</button>
+    <button class="voice-replay-tts" id="replayTtsBtn" style="display:none;" title="Replay last response" aria-label="Replay last response">&#9654;</button>
     <span id="voiceSetupHint" class="voice-setup-hint" style="display:none;">&#9888; Deps missing &mdash; <a href="#" id="voiceSetupLink">setup steps</a></span>
 </div>
 
 <div class="attachment-strip" id="attachmentStrip"></div>
 
 <div class="input-area">
-    <textarea id="input" rows="2" placeholder="Ask a question or describe a task..." autofocus></textarea>
-    <button id="micBtn" class="mic-btn" title="Record voice (STT)" style="display:none;">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 10a2 2 0 0 0 2-2V4a2 2 0 1 0-4 0v4a2 2 0 0 0 2 2z"/><path d="M12 8a1 1 0 0 0-2 0 2 2 0 1 1-4 0 1 1 0 0 0-2 0 4 4 0 0 0 3 3.87V13H5.5a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1H9v-1.13A4 4 0 0 0 12 8z"/></svg>
+    <textarea id="input" rows="2" placeholder="Ask a question or describe a task..." aria-label="Chat message" autofocus></textarea>
+    <button id="micBtn" class="mic-btn" title="Record voice (STT)" aria-label="Record voice" aria-pressed="false" style="display:none;">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 10a2 2 0 0 0 2-2V4a2 2 0 1 0-4 0v4a2 2 0 0 0 2 2z"/><path d="M12 8a1 1 0 0 0-2 0 2 2 0 1 1-4 0 1 1 0 0 0-2 0 4 4 0 0 0 3 3.87V13H5.5a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1H9v-1.13A4 4 0 0 0 12 8z"/></svg>
     </button>
-    <button id="stopBtn" class="stop-btn" title="Stop the running workflow">Stop</button>
-    <button id="sendBtn">Send</button>
+    <button id="stopBtn" class="stop-btn" title="Stop the running workflow" aria-label="Stop the running workflow">Stop</button>
+    <button id="sendBtn" aria-label="Send message">Send</button>
 </div>
 
 <script>
@@ -1189,6 +1265,11 @@ export function getWebviewHtml(chatFontSize: number): string {
     const newChatBtn = document.getElementById('newChatBtn');
     const approvalBar = document.getElementById('approvalBar');
     const approveBtn = document.getElementById('approveBtn');
+    const requestChangesBtn = document.getElementById('requestChangesBtn');
+    const approvalFeedback = document.getElementById('approvalFeedback');
+    const approvalFeedbackInput = document.getElementById('approvalFeedbackInput');
+    const cancelFeedbackBtn = document.getElementById('cancelFeedbackBtn');
+    const sendFeedbackBtn = document.getElementById('sendFeedbackBtn');
     const stageBadge = document.getElementById('stageBadge');
     const searchBtn = document.getElementById('searchBtn');
     const editPromptsBtn = document.getElementById('editPromptsBtn');
@@ -1291,6 +1372,7 @@ export function getWebviewHtml(chatFontSize: number): string {
             btn.className = 'remove-btn';
             btn.textContent = '\\u00d7';
             btn.title = 'Remove image';
+            btn.setAttribute('aria-label', 'Remove image attachment ' + att.filename);
             btn.addEventListener('click', () => {
                 pendingAttachments.splice(idx, 1);
                 renderAttachments();
@@ -1605,8 +1687,8 @@ export function getWebviewHtml(chatFontSize: number): string {
 
     function approveToolCmd(btn, approved) {
         const card = btn.closest('.tool-approval-card');
-        const token = card ? card.dataset.token : null;
-        if (!token) return;
+        if (!card) return;
+        const token = card && card.dataset.token ? card.dataset.token : undefined;
         // Disable both buttons to prevent double-click
         card.querySelectorAll('button').forEach(b => b.disabled = true);
         // Replace actions with outcome label
@@ -1836,12 +1918,14 @@ export function getWebviewHtml(chatFontSize: number): string {
     problemsPill.addEventListener('click', () => {
         problemsActive = !problemsActive;
         problemsPill.classList.toggle('active', problemsActive);
+        problemsPill.setAttribute('aria-pressed', String(problemsActive));
         vscode.postMessage({ type: 'toggleProblems', enabled: problemsActive });
     });
 
     debugPill.addEventListener('click', () => {
         debugActive = !debugActive;
         debugPill.classList.toggle('active', debugActive);
+        debugPill.setAttribute('aria-pressed', String(debugActive));
         vscode.postMessage({ type: 'toggleDebug', enabled: debugActive });
     });
 
@@ -1871,10 +1955,14 @@ export function getWebviewHtml(chatFontSize: number): string {
         if (isRecording) {
             vscode.postMessage({ type: 'sttStop' });
             micBtn.classList.remove('recording');
+            micBtn.setAttribute('aria-pressed', 'false');
+            micBtn.setAttribute('aria-label', 'Record voice');
             isRecording = false;
         } else {
             vscode.postMessage({ type: 'sttStart', autoStop: false });
             micBtn.classList.add('recording');
+            micBtn.setAttribute('aria-pressed', 'true');
+            micBtn.setAttribute('aria-label', 'Stop voice recording');
             isRecording = true;
         }
     });
@@ -2116,7 +2204,29 @@ export function getWebviewHtml(chatFontSize: number): string {
     });
 
     approveBtn.addEventListener('click', () => {
+        approvalFeedback.classList.remove('visible');
         vscode.postMessage({ type: 'approve' });
+    });
+
+    requestChangesBtn.addEventListener('click', () => {
+        approvalFeedback.classList.add('visible');
+        approvalFeedbackInput.focus();
+    });
+
+    cancelFeedbackBtn.addEventListener('click', () => {
+        approvalFeedback.classList.remove('visible');
+        approvalFeedbackInput.value = '';
+        requestChangesBtn.focus();
+    });
+
+    sendFeedbackBtn.addEventListener('click', () => {
+        const feedback = approvalFeedbackInput.value.trim();
+        if (!feedback) {
+            approvalFeedbackInput.focus();
+            return;
+        }
+        sendFeedbackBtn.disabled = true;
+        vscode.postMessage({ type: 'requestChanges', feedback });
     });
 
     // ── Search UI ──
@@ -2126,6 +2236,7 @@ export function getWebviewHtml(chatFontSize: number): string {
         savedMessagesHtml = messagesEl.innerHTML;
         resetAssistantStreamState();
         searchBar.style.display = 'flex';
+        searchBtn.setAttribute('aria-expanded', 'true');
         messagesEl.innerHTML = '<div class="msg msg-system">Search your past conversations...</div>';
         searchInput.focus();
         backBtn.style.display = 'inline-block';
@@ -2135,6 +2246,7 @@ export function getWebviewHtml(chatFontSize: number): string {
         searchMode = false;
         searchBar.style.display = 'none';
         searchInput.value = '';
+        searchBtn.setAttribute('aria-expanded', 'false');
         backBtn.style.display = 'none';
         if (savedMessagesHtml !== null) {
             resetAssistantStreamState();
@@ -2297,9 +2409,11 @@ export function getWebviewHtml(chatFontSize: number): string {
                 viewMode = msg.mode;
                 if (msg.mode === 'popout') {
                     popOutBtn.title = 'Return to sidebar';
+                    popOutBtn.setAttribute('aria-label', 'Return chat to sidebar');
                     popOutBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M0 2.5A1.5 1.5 0 0 1 1.5 1H5v1H1.5a.5.5 0 0 0-.5.5v11a.5.5 0 0 0 .5.5H5v1H1.5A1.5 1.5 0 0 1 0 13.5v-11zM6 1h8.5A1.5 1.5 0 0 1 16 2.5v11a1.5 1.5 0 0 1-1.5 1.5H6V1z"/></svg>';
                 } else {
                     popOutBtn.title = 'Open chat in new window';
+                    popOutBtn.setAttribute('aria-label', 'Open chat in new window');
                     popOutBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 1C.67 1 0 1.67 0 2.5v11c0 .83.67 1.5 1.5 1.5h11c.83 0 1.5-.67 1.5-1.5V10h-1v3.5a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H5V1H1.5zM9 1v1h3.29L7.15 7.15l.7.7L13 2.71V6h1V1H9z"/></svg>';
                 }
                 break;
@@ -2517,10 +2631,14 @@ export function getWebviewHtml(chatFontSize: number): string {
 
             case 'showApproval':
                 approvalBar.classList.add('visible');
+                sendFeedbackBtn.disabled = false;
                 break;
 
             case 'hideApproval':
                 approvalBar.classList.remove('visible');
+                approvalFeedback.classList.remove('visible');
+                approvalFeedbackInput.value = '';
+                sendFeedbackBtn.disabled = false;
                 break;
 
             case 'sendEnabled':
@@ -2791,10 +2909,11 @@ export function getWebviewHtml(chatFontSize: number): string {
 
                 const card = document.createElement('div');
                 card.className = 'msg tool-approval-card';
-                card.dataset.token = token;
+                if (token) { card.dataset.token = token; }
                 card.innerHTML =
                     '<div class="tool-approval-title">&#9888; Command approval required</div>' +
                     '<div class="tool-approval-reason">Tool: <b>' + escapeHtml(toolName) + '</b> — ' + escapeHtml(reason) + '</div>' +
+                    '<div class="tool-approval-reason">Review this command before allowing it to run.</div>' +
                     '<div class="tool-approval-cmd">' + escapeHtml(cmd) + '</div>' +
                     '<div class="tool-approval-actions">' +
                     '<button class="btn-approve" onclick="approveToolCmd(this, true)">Allow</button>' +
@@ -2840,6 +2959,7 @@ export function getWebviewHtml(chatFontSize: number): string {
                 const total = (msg.errorCount || 0) + (msg.warningCount || 0);
                 problemsCount.textContent = String(total);
                 problemsPill.classList.toggle('has-errors', (msg.errorCount || 0) > 0);
+                problemsPill.setAttribute('aria-label', total + ' Problems entries available as context');
                 break;
             }
 
@@ -2848,10 +2968,12 @@ export function getWebviewHtml(chatFontSize: number): string {
                 debugPill.style.display = isActive ? 'inline-block' : 'none';
                 if (msg.name) {
                     debugPill.title = 'Include debug state from "' + msg.name + '" as context';
+                    debugPill.setAttribute('aria-label', 'Include debug state from ' + msg.name + ' as context');
                 }
                 if (!isActive && debugActive) {
                     debugActive = false;
                     debugPill.classList.remove('active');
+                    debugPill.setAttribute('aria-pressed', 'false');
                 }
                 break;
             }

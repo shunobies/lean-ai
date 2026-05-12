@@ -465,6 +465,29 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
             case "approve":
                 handleApprove(this.chatCtx());
                 break;
+            case "requestChanges": {
+                const feedback = String(msg.feedback ?? "").trim();
+                if (!feedback) {
+                    this.postMessage({ type: "sendEnabled" });
+                    break;
+                }
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.postMessage({ type: "hideApproval" });
+                    this.postMessage({ type: "thinking", show: true, text: "Sending plan feedback..." });
+                    this.ws.send(JSON.stringify({
+                        type: "user_message",
+                        content: feedback,
+                        repo_root: this.getRepoRoot(),
+                    }));
+                } else {
+                    this.postMessage({
+                        type: "error",
+                        text: "No active workflow is waiting for plan feedback.",
+                    });
+                    this.postMessage({ type: "sendEnabled" });
+                }
+                break;
+            }
             case "searchConversations":
                 this.conversations.handleSearchConversations(msg.query as string);
                 break;

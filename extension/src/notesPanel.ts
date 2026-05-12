@@ -99,6 +99,14 @@ export class NotesPanel {
             case "deleteNote": {
                 const noteId = msg.noteId as string;
                 try {
+                    const confirmed = await vscode.window.showWarningMessage(
+                        "Delete this note? This cannot be undone.",
+                        { modal: true },
+                        "Delete Note",
+                    );
+                    if (confirmed !== "Delete Note") {
+                        return;
+                    }
                     await client.deleteNote(noteId);
                     await this._loadNotes();
                 } catch (err) {
@@ -134,6 +142,14 @@ export class NotesPanel {
             case "deleteTodo": {
                 const todoId = msg.todoId as number;
                 try {
+                    const confirmed = await vscode.window.showWarningMessage(
+                        "Delete this TODO? This cannot be undone.",
+                        { modal: true },
+                        "Delete TODO",
+                    );
+                    if (confirmed !== "Delete TODO") {
+                        return;
+                    }
                     await client.deleteTodo(todoId);
                     await this._loadNotes();
                 } catch (err) {

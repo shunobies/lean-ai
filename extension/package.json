@@ -167,7 +167,7 @@
     },
     "configuration": {
       "title": "Lean AI",
-      "markdownDescription": "Configure Lean AI — a local agentic coding assistant. For a guided setup with mutual exclusion between providers, use the **⚙ button** in the Lean AI sidebar. [View documentation on GitHub](https://github.com/shunobies/lean-ai/)\n\nChanges here are written to `backend/.env` and require a backend restart.",
+      "markdownDescription": "Configure Lean AI — a local agentic coding assistant. For a guided setup with mutual exclusion between providers, use the **⚙ button** in the Lean AI sidebar. [View documentation on GitHub](https://github.com/shunobies/lean-ai/)\n\nChanges here are synced to `backend/config.yaml` and require a backend restart.",
       "properties": {
         "lean-ai.backendUrl": {
           "type": "string",

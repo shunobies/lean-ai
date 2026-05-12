@@ -287,7 +287,7 @@ When the backend subprocess starts, the extension injects API keys from the OS k
 
 ### VSCode Native Settings
 
-All settings are also available via VSCode's native settings UI (**Settings** > search "Lean AI"). Changes made there are synced to `backend/.env` automatically, and the extension will prompt to restart the backend.
+All settings are also available via VSCode's native settings UI (**Settings** > search "Lean AI"). Changes made there are synced to `backend/config.yaml` automatically, and the extension will prompt to restart the backend. Existing values in `backend/.env` still work as a fallback.
 
 #### Extension settings
 
@@ -300,7 +300,7 @@ All settings are also available via VSCode's native settings UI (**Settings** > 
 | `lean-ai.backendDir` | *(auto-detect)* | Path to the `backend/` directory containing `pyproject.toml` |
 | `lean-ai.chatFontSize` | `13` | Font size (px) for chat messages (10–20, adjusts live) |
 
-#### Backend settings (synced to `backend/.env`)
+#### Backend settings (synced to `backend/config.yaml`)
 
 | Setting | Default | Description |
 |---|---|---|
