@@ -2,7 +2,7 @@
   "name": "lean-ai",
   "displayName": "Lean AI",
   "description": "Multi-provider LLM agentic coding assistant with phase-based planning, chat & inline predictions",
-  "version": "0.20.3",
+  "version": "0.20.4",
   "publisher": "lean-ai",
   "icon": "icon.png",
   "repository": {
