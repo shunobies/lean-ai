@@ -1,3 +1,9 @@
+import {
+    NO_FOLLOW_UP_ASSISTANT_NOTE,
+    createInitialAssistantStreamSegmentationState,
+    reduceAssistantStreamSegmentationState,
+} from "./assistantStreamSegmentation";
+
 /**
  * Webview HTML template for the Lean AI sidebar chat panel.
  * Extracted from sidebarProvider.ts for maintainability.
@@ -182,6 +188,19 @@ export function getWebviewHtml(chatFontSize: number): string {
         align-self: flex-start;
         background: var(--vscode-editor-background);
         border: 1px solid var(--vscode-panel-border);
+    }
+    .msg-ai.interrupted-draft {
+        border-style: dashed;
+        border-color: var(--vscode-descriptionForeground);
+    }
+    .msg-ai .stream-status-label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 10px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--vscode-descriptionForeground);
+        opacity: 0.85;
     }
     .msg-error {
         align-self: flex-start;
@@ -1157,6 +1176,11 @@ export function getWebviewHtml(chatFontSize: number): string {
 
 <script>
     const vscode = acquireVsCodeApi();
+    const createInitialAssistantStreamSegmentationState =
+        ${createInitialAssistantStreamSegmentationState.toString()};
+    const reduceAssistantStreamSegmentationState =
+        ${reduceAssistantStreamSegmentationState.toString()};
+    const NO_FOLLOW_UP_ASSISTANT_NOTE = ${JSON.stringify(NO_FOLLOW_UP_ASSISTANT_NOTE)};
     const messagesEl = document.getElementById('messages');
     const inputEl = document.getElementById('input');
     const sendBtn = document.getElementById('sendBtn');
@@ -1190,8 +1214,9 @@ export function getWebviewHtml(chatFontSize: number): string {
     let viewMode = 'sidebar';
     let savedMessagesHtml = null;
     let searchDebounceTimer = null;
-    let currentStreamDiv = null; // AI bubble being filled during chat streaming
-    let currentPlanningDiv = null; // AI bubble being filled during planning streaming
+    let assistantStreamSegmentationState = createInitialAssistantStreamSegmentationState();
+    let activeAssistantStreamDiv = null;
+    let activeAssistantStreamBuffer = '';
     let problemsActive = false;
     let debugActive = false;
     let visionAvailable = false; // Set by health check response
@@ -1372,6 +1397,7 @@ export function getWebviewHtml(chatFontSize: number): string {
         if (currentTab) {
             currentTab.messagesHtml = messagesEl.innerHTML;
         }
+        resetAssistantStreamState();
 
         activeTabId = tabId;
         const targetTab = tabs.get(tabId);
@@ -1404,6 +1430,7 @@ export function getWebviewHtml(chatFontSize: number): string {
         if (currentTab) {
             currentTab.messagesHtml = messagesEl.innerHTML;
         }
+        resetAssistantStreamState();
 
         // Create new read-only tab
         const shortTitle = title.length > 20 ? title.slice(0, 20) + '...' : title;
@@ -1623,6 +1650,87 @@ export function getWebviewHtml(chatFontSize: number): string {
         messagesEl.appendChild(div);
         scrollToBottom();
         return div;
+    }
+
+    function createAssistantStreamBubble() {
+        const div = document.createElement('div');
+        div.className = 'msg msg-ai';
+        messagesEl.appendChild(div);
+        return div;
+    }
+
+    function finalizeActiveAssistantStream(markInterrupted) {
+        if (!activeAssistantStreamDiv) { return; }
+
+        const finalHtml = formatMarkdown(activeAssistantStreamBuffer);
+        activeAssistantStreamDiv.innerHTML = markInterrupted
+            ? '<div class="stream-status-label">Draft before tool activity</div>' + finalHtml
+            : finalHtml;
+        activeAssistantStreamDiv.classList.toggle('interrupted-draft', !!markInterrupted);
+        addCodeBlockButtons(activeAssistantStreamDiv);
+        activeAssistantStreamDiv = null;
+        activeAssistantStreamBuffer = '';
+    }
+
+    function applyAssistantStreamEvent(event, options) {
+        const result = reduceAssistantStreamSegmentationState(
+            assistantStreamSegmentationState,
+            event,
+        );
+
+        if (result.actions.finalizeSegment) {
+            finalizeActiveAssistantStream(result.actions.markInterrupted);
+        }
+
+        if (result.actions.startSegment) {
+            activeAssistantStreamDiv = createAssistantStreamBubble();
+            activeAssistantStreamBuffer = '';
+        }
+
+        assistantStreamSegmentationState = result.state;
+
+        if (result.actions.showNoFollowUpNote) {
+            addMessage(escapeHtml(NO_FOLLOW_UP_ASSISTANT_NOTE), 'msg-system');
+        }
+
+        if (!options || options.scroll !== false) {
+            scrollToBottom();
+        }
+    }
+
+    function appendAssistantStreamContent(channel, text, opts) {
+        const options = opts || {};
+        applyAssistantStreamEvent({ type: 'assistant_chunk', channel }, { scroll: false });
+        if (!activeAssistantStreamDiv) { return; }
+        if (options.replaceBuffer) {
+            activeAssistantStreamBuffer = text || '';
+        } else {
+            activeAssistantStreamBuffer += text || '';
+        }
+        activeAssistantStreamDiv.textContent = activeAssistantStreamBuffer;
+        scrollToBottom();
+    }
+
+    function interruptAssistantStream() {
+        applyAssistantStreamEvent({ type: 'interrupt' });
+    }
+
+    function finalizeAssistantStream(channel, opts) {
+        const options = opts || {};
+        applyAssistantStreamEvent(
+            {
+                type: options.turnDone ? 'turn_done' : 'finalize',
+                channel,
+                showNoFollowUpNote: !!options.showNoFollowUpNote,
+            },
+            { scroll: false },
+        );
+    }
+
+    function resetAssistantStreamState() {
+        assistantStreamSegmentationState = createInitialAssistantStreamSegmentationState();
+        activeAssistantStreamDiv = null;
+        activeAssistantStreamBuffer = '';
     }
 
     function setStage(stage) {
@@ -2000,6 +2108,7 @@ export function getWebviewHtml(chatFontSize: number): string {
         if (currentTab) {
             currentTab.messagesHtml = messagesEl.innerHTML;
         }
+        resetAssistantStreamState();
 
         // Tell the backend to persist + archive the current conversation
         // (it will reply with 'chatArchived' containing the tab info)
@@ -2015,6 +2124,7 @@ export function getWebviewHtml(chatFontSize: number): string {
     function openSearch() {
         searchMode = true;
         savedMessagesHtml = messagesEl.innerHTML;
+        resetAssistantStreamState();
         searchBar.style.display = 'flex';
         messagesEl.innerHTML = '<div class="msg msg-system">Search your past conversations...</div>';
         searchInput.focus();
@@ -2027,6 +2137,7 @@ export function getWebviewHtml(chatFontSize: number): string {
         searchInput.value = '';
         backBtn.style.display = 'none';
         if (savedMessagesHtml !== null) {
+            resetAssistantStreamState();
             messagesEl.innerHTML = savedMessagesHtml;
             savedMessagesHtml = null;
         }
@@ -2195,22 +2306,29 @@ export function getWebviewHtml(chatFontSize: number): string {
 
             case 'reply':
                 if (msg.streaming) {
-                    // Streaming token — append to current planning bubble
-                    if (!currentPlanningDiv) {
-                        currentPlanningDiv = document.createElement('div');
-                        currentPlanningDiv.className = 'msg msg-ai';
-                        messagesEl.appendChild(currentPlanningDiv);
+                    appendAssistantStreamContent('workflow', msg.text || '');
+                    if (msg.done) {
+                        finalizeAssistantStream('workflow');
                     }
-                    currentPlanningDiv.textContent += msg.text;
-                    scrollToBottom();
-                } else if (msg.done && currentPlanningDiv) {
-                    // Streaming complete — apply markdown formatting
-                    currentPlanningDiv.innerHTML = formatMarkdown(msg.text);
-                    addCodeBlockButtons(currentPlanningDiv);
-                    currentPlanningDiv = null;
-                    scrollToBottom();
+                } else if (msg.done) {
+                    if (msg.text && activeAssistantStreamDiv &&
+                        assistantStreamSegmentationState.activeChannel === 'workflow') {
+                        appendAssistantStreamContent('workflow', msg.text, { replaceBuffer: true });
+                        finalizeAssistantStream('workflow');
+                    } else if (activeAssistantStreamDiv &&
+                        assistantStreamSegmentationState.activeChannel === 'workflow') {
+                        finalizeAssistantStream('workflow');
+                    } else if (msg.text) {
+                        sending = false;
+                        sendBtn.disabled = false;
+                        if (sendTimeout) { clearTimeout(sendTimeout); sendTimeout = null; }
+                        addMessage(formatMarkdown(msg.text), msg.cls || 'msg-ai');
+                    }
                 } else {
                     // Non-streaming reply (existing behavior)
+                    if (activeAssistantStreamDiv) {
+                        interruptAssistantStream();
+                    }
                     sending = false;
                     sendBtn.disabled = false;
                     if (sendTimeout) { clearTimeout(sendTimeout); sendTimeout = null; }
@@ -2219,6 +2337,9 @@ export function getWebviewHtml(chatFontSize: number): string {
                 break;
 
             case 'filesModifiedLinks': {
+                if (activeAssistantStreamDiv) {
+                    interruptAssistantStream();
+                }
                 var files = msg.files || [];
                 var baseBranch = msg.baseBranch || '';
                 var links = files.map(function(f) {
@@ -2283,6 +2404,9 @@ export function getWebviewHtml(chatFontSize: number): string {
 
             case 'chatToolActivity': {
                 // Show tool exploration status (e.g. "Reading src/config.py")
+                if (activeAssistantStreamDiv) {
+                    interruptAssistantStream();
+                }
                 const actDiv = document.createElement('div');
                 actDiv.className = 'msg msg-tool-activity';
                 actDiv.innerHTML = '<em>' + escapeHtml(msg.description) + '</em>';
@@ -2302,30 +2426,20 @@ export function getWebviewHtml(chatFontSize: number): string {
             }
 
             case 'chatToken': {
-                // First token: hide "Thinking...", create an empty AI bubble
+                // First token: hide "Thinking..." and stamp the first assistant segment
                 if (msg.isFirst) {
                     thinkingEl.classList.remove('visible');
                     addTimestampDivider(new Date());
-                    currentStreamDiv = document.createElement('div');
-                    currentStreamDiv.className = 'msg msg-ai';
-                    messagesEl.appendChild(currentStreamDiv);
                 }
-                // Append raw text (markdown applied on chatDone)
-                if (currentStreamDiv) {
-                    currentStreamDiv.textContent += msg.content;
-                    scrollToBottom();
-                }
+                appendAssistantStreamContent('chat', msg.content || '');
                 break;
             }
 
             case 'chatDone': {
-                // Re-render the streamed bubble with full markdown formatting
-                if (currentStreamDiv && msg.fullText) {
-                    currentStreamDiv.innerHTML = formatMarkdown(msg.fullText);
-                    addCodeBlockButtons(currentStreamDiv);
-                    scrollToBottom();
-                }
-                currentStreamDiv = null;
+                finalizeAssistantStream('chat', {
+                    turnDone: true,
+                    showNoFollowUpNote: true,
+                });
                 // tok/s footer (client-side computation — mirrors old blocking chat mode)
                 if (msg.tps != null) {
                     const countStr = msg.evalCount != null ? ' · ' + msg.evalCount.toLocaleString() + ' tokens' : '';
@@ -2340,7 +2454,7 @@ export function getWebviewHtml(chatFontSize: number): string {
 
             case 'streamingCleanup':
                 // Finalize any open planning streaming bubble (e.g. on stage done or error)
-                currentPlanningDiv = null;
+                finalizeAssistantStream('workflow');
                 break;
 
             case 'error':
@@ -2348,8 +2462,8 @@ export function getWebviewHtml(chatFontSize: number): string {
                 sendBtn.disabled = false;
                 stopBtn.style.display = 'none';
                 if (sendTimeout) { clearTimeout(sendTimeout); sendTimeout = null; }
-                currentStreamDiv = null; // clean up any partial streaming bubble
-                currentPlanningDiv = null; // clean up any partial planning bubble
+                finalizeActiveAssistantStream(false);
+                resetAssistantStreamState();
                 addMessage(escapeHtml(msg.text), 'msg-error');
                 break;
 
@@ -2392,8 +2506,8 @@ export function getWebviewHtml(chatFontSize: number): string {
                 sendBtn.disabled = false;
                 stopBtn.style.display = 'none';
                 if (sendTimeout) { clearTimeout(sendTimeout); sendTimeout = null; }
-                currentStreamDiv = null;
-                currentPlanningDiv = null;
+                finalizeActiveAssistantStream(false);
+                resetAssistantStreamState();
                 setStage(null);
                 resetMetrics();
                 thinkingEl.classList.remove('visible');
@@ -2529,6 +2643,7 @@ export function getWebviewHtml(chatFontSize: number): string {
 
             case 'chatReset':
                 lastTimestamp = null;
+                resetAssistantStreamState();
                 break;
 
             case 'chatArchived': {
@@ -2548,6 +2663,7 @@ export function getWebviewHtml(chatFontSize: number): string {
                 activeTabId = 'current';
                 const curTab = tabs.get('current');
                 if (curTab) { curTab.messagesHtml = null; }
+                resetAssistantStreamState();
                 messagesEl.innerHTML = '<div class="msg msg-system">Describe what you&#39;d like to build or change. I&#39;ll help you refine it into a clear task for the agent.</div>';
                 setStage(null);
                 resetMetrics();
@@ -2568,6 +2684,7 @@ export function getWebviewHtml(chatFontSize: number): string {
                 break;
 
             case 'searchResults': {
+                resetAssistantStreamState();
                 const results = msg.results || [];
                 if (results.length === 0) {
                     messagesEl.innerHTML = '<div class="msg msg-system">No matching conversations found.</div>';
@@ -2611,6 +2728,7 @@ export function getWebviewHtml(chatFontSize: number): string {
                     searchMode = false;
                     searchInput.value = '';
                 }
+                resetAssistantStreamState();
                 backBtn.style.display = 'inline-block';
                 messagesEl.innerHTML = '';
                 lastTimestamp = null;
@@ -2663,6 +2781,9 @@ export function getWebviewHtml(chatFontSize: number): string {
 
             case 'tool_approval_required': {
                 // Destructive shell command detected — show inline approval card.
+                if (activeAssistantStreamDiv) {
+                    interruptAssistantStream();
+                }
                 const token = msg.token;
                 const toolName = msg.tool_name || 'run_tests';
                 const cmd = msg.command || '';
@@ -2687,6 +2808,9 @@ export function getWebviewHtml(chatFontSize: number): string {
             case 'memory_suggested': {
                 // Auto-extracted memory — inline chip so the user can confirm
                 // without leaving the workflow.
+                if (activeAssistantStreamDiv) {
+                    interruptAssistantStream();
+                }
                 const memoryId = msg.memory_id;
                 if (!memoryId) { break; }
                 const category = msg.category || 'general';
@@ -2733,6 +2857,7 @@ export function getWebviewHtml(chatFontSize: number): string {
             }
 
             case 'restoreCurrentChat': {
+                resetAssistantStreamState();
                 backBtn.style.display = 'none';
                 savedMessagesHtml = null;
                 messagesEl.innerHTML = '<div class="msg msg-system">Describe what you&#39;d like to build or change. I&#39;ll help you refine it into a clear task for the agent.</div>';
