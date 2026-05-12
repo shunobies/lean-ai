@@ -121,3 +121,6 @@ ignore = [
     "SIM108",   # Ternary operator — often less readable
     "RUF006",   # Store asyncio.create_task reference — intentional fire-and-forget
 ]
+
+[tool.uv]
+override-dependencies = ["urllib3>=2.7.0"]
