@@ -168,9 +168,7 @@ async def test_revise_plan_uses_execution_plan_repair_flow():
 
 @pytest.mark.asyncio
 async def test_phase5_verification_plan_repair_appends_steps(tmp_path):
-    saved_tdd = settings.enable_tdd
-    settings.enable_tdd = False
-    try:
+        pass  # removed try/finally that toggled enable_tdd
         error = _make_structured_error(VerificationPlan, '{"steps": }')
         expert = FakeExpert([error, _verification_plan()])
         ws = FakeWebSocket()
@@ -200,9 +198,6 @@ async def test_phase5_verification_plan_repair_appends_steps(tmp_path):
         assert "tests/test_app.py" in plan.affected_files
         assert any(step.file_path == "tests/test_app.py" for step in plan.steps)
         assert ws.messages[-2]["summary"] == "Repairing malformed VerificationPlan JSON..."
-    finally:
-        settings.enable_tdd = saved_tdd
-
 
 @pytest.mark.asyncio
 async def test_structured_repair_failure_raises_user_safe_error():

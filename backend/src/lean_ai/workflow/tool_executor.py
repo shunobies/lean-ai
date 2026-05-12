@@ -453,7 +453,6 @@ def make_tool_executor(
     worker_client: "LLMClient | None" = None,
     dispatcher: "WSMessageDispatcher | None" = None,
     tdd_protect_tests: bool = False,
-    on_test_dispute: "Callable | None" = None,
     allowed_files: "list[str] | None" = None,
     session_created_regression_files: "set[str] | None" = None,
     telemetry_context: dict | None = None,
@@ -465,11 +464,7 @@ def make_tool_executor(
             When provided and output exceeds 5% of the context window, the
             worker model summarizes it before returning to the primary model.
         tdd_protect_tests: When True, block ``create_file``/``edit_file``
-            calls targeting test files.  The LLM should use
-            ``request_test_change`` instead.
-        on_test_dispute: Async callback invoked when ``request_test_change``
-            is called.  Receives the tool arguments dict and returns a
-            string result for the primary model.
+            calls targeting test files during the implementation phase.
         allowed_files: When set, restrict ``edit_file`` to only these paths.
             ``create_file`` is allowed for genuinely new files but blocked
             if it would overwrite an existing file not on the list.
@@ -561,9 +556,7 @@ def make_tool_executor(
             if is_test_file_path(target_path):
                 return (
                     "ERROR: TDD mode — you cannot modify test files during "
-                    "the implementation phase. If you believe a test is "
-                    "flawed, use the request_test_change tool to dispute it "
-                    "with a specific programmatic reason."
+                    "the implementation phase."
                 )
 
         # Regression guard: regression tests are immutable once
@@ -582,12 +575,6 @@ def make_tool_executor(
                 and target_path not in session_created_regression_files
             ):
                 return REGRESSION_GUARD_ERROR.format(path=target_path)
-
-        # Handle test dispute tool
-        if name == "request_test_change":
-            if on_test_dispute is not None:
-                return await on_test_dispute(arguments)
-            return "ERROR: request_test_change is not available in this context."
 
         if name == "create_file":
             target_path = arguments["path"]

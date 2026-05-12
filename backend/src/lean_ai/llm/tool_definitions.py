@@ -618,53 +618,9 @@ def build_request_tools() -> list[dict]:
     return [*build_implementation_tools(), REQUEST_CLARIFICATION_TOOL]
 
 
-# ── TDD-specific tool ────────────────────────────────────────────────────────
-
-REQUEST_TEST_CHANGE_TOOL: dict = {
-    "type": "function",
-    "function": {
-        "name": "request_test_change",
-        "description": (
-            "Dispute a test that you believe is flawed. Provide the test file "
-            "path and a specific, programmatic reason why the test is incorrect "
-            "(e.g., wrong assertion, tests an implementation detail rather than "
-            "behavior, impossible precondition, tests something out of scope). "
-            "The expert model will evaluate your dispute and either fix the test "
-            "or reject the dispute with an explanation. "
-            "Do NOT use this tool simply because a test is hard to pass — only "
-            "when the test itself has a genuine defect."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "test_file": {
-                    "type": "string",
-                    "description": "Path to the test file containing the flawed test",
-                },
-                "test_function": {
-                    "type": "string",
-                    "description": "Name of the specific test function being disputed",
-                },
-                "reason": {
-                    "type": "string",
-                    "description": (
-                        "Specific, programmatic reason the test is flawed. "
-                        "Must reference concrete code behavior. Examples: "
-                        "'asserts return type is list but the API returns a generator', "
-                        "'tests a private method that was renamed in the plan', "
-                        "'import path does not match the module structure'"
-                    ),
-                },
-            },
-            "required": ["test_file", "test_function", "reason"],
-        },
-    },
-}
-
-
 def build_tdd_implementation_tools() -> list[dict]:
-    """IMPLEMENTATION_TOOLS + request_test_change + wiki tools for TDD mode."""
-    return [*build_implementation_tools(), REQUEST_TEST_CHANGE_TOOL]
+    """Return implementation tools."""
+    return build_implementation_tools()
 
 
 def _maybe_wiki_tools() -> list[dict]:

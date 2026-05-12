@@ -354,7 +354,7 @@ async def on_workflow_event(
     """Persist a workflow event to the training archive.
 
     Covers: ``loop_detected``, ``context_refresh``, ``reminder_injected``,
-    ``claim_unverified``, ``cancellation``, ``tdd_dispute``,
+    ``claim_unverified``, ``cancellation``,
     ``execution_complete``, ``session_start``.
     """
     try:

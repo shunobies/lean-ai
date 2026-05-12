@@ -54,7 +54,6 @@ def humanize_tool_call(name: str, args: dict) -> str:
         return "Recording journal entry"
     if name == "task_complete":
         return "Task complete"
-    if name == "request_test_change":
         return f"Requesting test change: {_string_arg(args, 'test_file', '...')}"
     if name == "save_note":
         return "Saving note"

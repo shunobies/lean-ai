@@ -1687,6 +1687,23 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
                 "test command when configured. If no runner is configured, "
                 "success checks should say what test file/behavior should exist "
                 "for later execution.\n"
+                "- SUCCESS CHECK QUALITY: Every success check must specify a "
+                "concrete `tool`, a `command` (when applicable), and the "
+                "expected outcome. Vague checks without tool/command will "
+                "cause executor confusion and plan revision.\n"
+                "  NEGATIVE EXAMPLES (do NOT write checks like these):\n"
+                "  - {{\"description\": \"Verify the new function works correctly.\", \"tool\": \"read_file\"}}\n"
+                "    (Too vague — no command, no expected outcome)\n"
+                "  - {{\"description\": \"Tests should pass.\", \"tool\": \"run_tests\"}}\n"
+                "    (No command specified, no expected fields)\n"
+                "  POSITIVE EXAMPLES (write checks like these):\n"
+                "  - {{\"description\": \"New function is importable and returns expected type.\", \"tool\": \"run_tests\", \"command\": \"{test_command} tests/test_new_module.py\", \"expected\": \"Command exits with code 0 and all assertions pass.\"}}\n"
+                "  - {{\"description\": \"Lint passes on modified files.\", \"tool\": \"run_lint\", \"command\": \"ruff check src/module/\", \"expected\": \"No lint violations reported.\"}}\n"
+                "  VALIDATION RULES FOR SUCCESS CHECKS:\n"
+                "  - Each check must name a specific tool from allowed_tools.\n"
+                "  - Each check must include a command string that can be run directly.\n"
+                "  - Each check must describe the expected outcome (exit code, output pattern, file content).\n"
+                "  - If the check targets file content, use tool=read_file with the exact path.\n"
                 "- SECURITY and REGRESSION requirements belong in "
                 "`success_checks`; do not leave them for a later phase.\n"
                 "- REASON FIELD: Every step must include a 'reason' field "
@@ -2598,36 +2615,6 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
 
     reg.register(
         PromptEntry(
-            key="memory.extract_tdd_dispute",
-            category="Memory",
-            name="TDD Dispute Memory Extraction",
-            description=(
-                "Extracts a memory from a TDD test dispute decision."
-                " Category is `gotcha` (rejected) or `fix_pattern` (accepted)."
-            ),
-            template_vars=["session_summary"],
-            default_text=(
-                "During TDD execution, the primary model disputed a test the "
-                "expert model had written. The expert evaluated and made a "
-                "decision. Extract 0-1 memories capturing the lesson.\n\n"
-                "If the dispute was ACCEPTED (test was flawed, got rewritten):\n"
-                '- category="gotcha"\n'
-                "- content: what pattern in the test was wrong, so future test "
-                "  writing avoids it\n\n"
-                "If the dispute was REJECTED (test was correct, primary adapted):\n"
-                '- category="fix_pattern"\n'
-                "- content: what implementation approach matched the test's "
-                "  expectations, for future similar tests\n\n"
-                "Add 2-4 tags. DO NOT extract if the dispute was about a trivial "
-                "typo or a task-specific detail that won't generalize.\n\n"
-                "SESSION DATA:\n"
-                "{session_summary}"
-            ),
-        )
-    )
-
-    reg.register(
-        PromptEntry(
             key="memory.session_summary",
             category="Memory",
             name="Session Conversation Summary",
@@ -2940,36 +2927,6 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
     )
 
     # ── TDD & Vision ──────────────────────────────────────────────────
-
-    reg.register(
-        PromptEntry(
-            key="tdd.dispute_evaluation",
-            category="TDD & Vision",
-            name="TDD Dispute Evaluation",
-            description=("System prompt for expert model evaluating test disputes in TDD mode."),
-            default_text=(
-                "Evaluate a test dispute from the implementation model.  The implementor "
-                "claims a test is flawed and cannot be satisfied by a correct implementation.\n\n"
-                "RULES:\n"
-                "1. Read the test file to see the current test code.\n"
-                "2. Evaluate the implementor's reason carefully and objectively.\n"
-                "3. If the dispute is VALID (the test has a genuine flaw — wrong assertion, "
-                "tests an implementation detail, impossible precondition, wrong import path, "
-                "tests out-of-scope behavior):\n"
-                "   - Fix the test using edit_file.  Preserve the test's documentation "
-                "(docstrings, comments) and update them to reflect the fix.\n"
-                '   - Call task_complete with a summary starting with "ACCEPTED: " followed '
-                "by what you changed and why.\n"
-                "4. If the dispute is INVALID (the test is correct and the implementor "
-                "needs to find a different approach):\n"
-                '   - Call task_complete with a summary starting with "REJECTED: " followed '
-                "by: why the test is correct, what behaviour the test is validating, and "
-                "what implementation approach would satisfy it.\n"
-                "5. Do NOT add new tests or remove existing ones — only fix the disputed "
-                "test function if the dispute is valid."
-            ),
-        )
-    )
 
     reg.register(
         PromptEntry(

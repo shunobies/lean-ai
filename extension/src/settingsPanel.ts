@@ -310,7 +310,6 @@ export class SettingsPanel {
             wikiUrl:                  "lean-ai.wikiUrl",
             wikiApiPath:              "lean-ai.wikiApiPath",
             wikiUsername:             "lean-ai.wikiUsername",
-            enableTdd:                "lean-ai.enableTdd",
             enablePostValidation:     "lean-ai.enablePostValidation",
             postFormatCommand:        "lean-ai.postFormatCommand",
             postLintFixCommand:       "lean-ai.postLintFixCommand",
@@ -413,7 +412,7 @@ export class SettingsPanel {
         const booleanFields = new Set([
             "enableEmbeddings", "enableIntegrations", "integrationAutoPush",
             "githubCoauthorEnabled",
-            "enableTdd", "enablePostValidation",
+            "enablePostValidation",
             "enableRequiredCitations", "debugPlanning", "enableThinking",
             "enableThinkingExpert", "enableThinkingRequest", "enableThinkingWorker",
             "enableStt", "enableTts", "enableWakeWord",
@@ -671,7 +670,6 @@ export class SettingsPanel {
             wikiUsername:              config.get("lean-ai.wikiUsername", ""),
 
             // TDD mode
-            enableTdd:                 config.get("lean-ai.enableTdd", false),
 
             // Post-validation
             enablePostValidation:      config.get("lean-ai.enablePostValidation", true),

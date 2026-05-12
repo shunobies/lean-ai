@@ -272,7 +272,6 @@ def build_tdd_step_system_prompt(
     tests rather than the reverse. Disputes are available as a narrow
     escape hatch (for tests that are logically impossible to satisfy or
     that encode a wrong contract) — they route through the expert via
-    ``request_test_change`` and never edit tests directly.
     """
     prompt = build_step_system_prompt(context, naming_conventions, name_registry)
     prompt += (
@@ -290,7 +289,6 @@ def build_tdd_step_system_prompt(
         "is usually a signal your implementation is wrong, not the "
         "test.\n"
         "- Legitimate dispute reasons (the only ones that should reach "
-        "request_test_change):\n"
         "  1. The test is logically impossible to satisfy with any "
         "correct implementation (e.g. contradicts another test, "
         "references a function that cannot exist, asserts behaviour "
@@ -302,7 +300,6 @@ def build_tdd_step_system_prompt(
         "contract does not require (e.g. asserts exact log wording, "
         "pins a private method signature). Propose a narrower "
         "assertion.\n"
-        "- How to dispute: call request_test_change(test_file, "
         "test_function, reason). Your reason must be one short "
         "paragraph with the specific technical justification — "
         '"this test is wrong" will be rejected. The expert evaluates '
@@ -352,7 +349,6 @@ def build_tdd_review_prompt(
         "- Does NOT assert on private helpers, internal data "
         "structures, step ordering inside a function, or exact log "
         "wording (unless the plan explicitly calls that out).\n\n"
-        "WHEN TO DISPUTE (call request_test_change):\n"
         "- The test asserts on an implementation detail instead of a "
         "contract — e.g. `assert obj._internal_cache == ...` or "
         "`assert helper_spy.call_count == 3`.\n"
@@ -376,7 +372,6 @@ def build_tdd_review_prompt(
         "- The test seems overly strict — if it matches the plan's "
         "contract, it is correct.\n\n"
         "ADDITIONAL TOOL AVAILABLE IN THIS PHASE:\n"
-        "  request_test_change(test_file, test_function, reason)\n"
         "    test_file:     path to the test file containing the flawed test\n"
         "    test_function: name of the specific test function being disputed\n"
         "    reason:        specific, programmatic reason — the failing assertion, "

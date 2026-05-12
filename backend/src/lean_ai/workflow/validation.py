@@ -270,6 +270,18 @@ async def _run_validation_fix_loop(
     for attempt in range(max_retries):
         # Check which validations failed
         failures = {k: v for k, v in validation_results.items() if not v["success"]}
+
+        # Handle incomplete steps gracefully — log a warning but don't block
+        incomplete_steps = [
+            k for k, v in validation_results.items()
+            if v.get("success") is None or (not v.get("output") and not v.get("full_output"))
+        ]
+        if incomplete_steps:
+            logger.warning(
+                "Incomplete validation steps detected (skipped, not blocking): %s",
+                ", ".join(incomplete_steps),
+            )
+
         if not failures:
             break  # All fixed
 
@@ -415,23 +427,7 @@ async def _run_validation_fix_loop(
                 )
 
         # Run LLM with a tight turn budget
-        # In TDD mode, protect test files and allow disputes
-        tdd_fix_protect = settings.enable_tdd and expert_llm_client is not None
-        tdd_fix_dispute = None
-        if tdd_fix_protect:
-            from lean_ai.workflow.tdd import evaluate_test_dispute as _eval_dispute
-
-            async def tdd_fix_dispute(arguments: dict) -> str:
-                return await _eval_dispute(
-                    test_file=arguments["test_file"],
-                    test_function=arguments["test_function"],
-                    reason=arguments["reason"],
-                    repo_root=repo_root,
-                    expert_client=expert_llm_client,
-                    ws=ws,
-                    session_id=session_id,
-                    dispatcher=dispatcher,
-                )
+        tdd_fix_protect = expert_llm_client is not None
 
         # Context refresh: rebuild messages from fresh disk state
         def _build_fix_refresh(current_messages: list[dict]) -> list[dict]:
@@ -491,7 +487,6 @@ async def _run_validation_fix_loop(
             llm_client=active_client,
             dispatcher=dispatcher,
             tdd_protect_tests=tdd_fix_protect,
-            on_test_dispute=tdd_fix_dispute,
             allowed_files=allowed_files,
             telemetry_context=validation_telemetry,
         )

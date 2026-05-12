@@ -105,14 +105,14 @@ async def run_workflow(
                     "_active_context_window",
                     None,
                 ),
-                "tdd_enabled": bool(getattr(settings, "enable_tdd", False)),
+                "tdd_enabled": expert_llm_client is not None,
             },
         )
     except Exception:
         logger.debug("session_start event failed (non-fatal)", exc_info=True)
 
     # Validate TDD requirements: expert model + sufficient context window
-    if settings.enable_tdd and expert_llm_client is None:
+    if expert_llm_client is None:
         logger.warning(
             "TDD mode enabled but no expert model configured — falling back to normal mode",
         )
@@ -126,7 +126,7 @@ async def run_workflow(
             },
         )
 
-    if settings.enable_tdd and settings._active_context_window <= 32768:
+    if expert_llm_client is not None and settings._active_context_window <= 32768:
         logger.warning(
             "TDD mode disabled — context window too small (%d). "
             "TDD requires cross-phase context that exceeds 32k budget.",

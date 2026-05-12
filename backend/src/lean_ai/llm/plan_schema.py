@@ -484,6 +484,23 @@ class StepSuccessCheck(BaseModel):
     """Expected result or observable signal."""
 
 
+class StepResult(BaseModel):
+    """Result of executing a single plan step, including incomplete tracking.
+
+    Used by the TDD retry mechanism to record why a step was marked
+    incomplete after exhausting retries, allowing execution to continue.
+    """
+
+    step_number: int
+    """The step this result corresponds to."""
+
+    success: bool = True
+    """Whether the step completed successfully."""
+
+    incomplete_reason: str | None = None
+    """Explanation when the step was marked incomplete after retries."""
+
+
 class PlanStep(BaseModel):
     """One bounded job contract in the execution plan.
 

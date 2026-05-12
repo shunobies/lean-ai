@@ -11,7 +11,6 @@ Phase-specific extraction entry points capture failure/success signals
 that would otherwise be thrown away:
 - :func:`extract_from_plan_rejection` — after a user rejects a plan
 - :func:`extract_from_fix_success` — after a validation fix-loop succeeds
-- :func:`extract_from_tdd_dispute` — after a TDD dispute is decided
 """
 
 import asyncio
@@ -311,22 +310,6 @@ def build_fix_success_summary(
     return "\n".join(parts)
 
 
-def build_tdd_dispute_summary(
-    task: str,
-    test_file: str,
-    reason: str,
-    decision: str,
-    explanation: str,
-) -> str:
-    """Compact summary for extract_from_tdd_dispute."""
-    parts = [f"TASK: {task}"]
-    parts.append(f"\nTEST FILE: {test_file}")
-    parts.append(f"\nDISPUTE REASON:\n{_truncate(reason, 1000)}")
-    parts.append(f"\nEXPERT DECISION: {decision}")
-    parts.append(f"\nEXPLANATION:\n{_truncate(explanation, 1500)}")
-    return "\n".join(parts)
-
-
 # ── Public API ──
 
 
@@ -418,43 +401,6 @@ def schedule_fix_success_extraction(
             source_task=task,
             prompt_key="memory.extract_fix_pattern",
             source_phase="fix_loop",
-            on_memory_created=on_memory_created,
-            max_items=2,
-        ),
-    )
-
-
-def schedule_tdd_dispute_extraction(
-    llm: LLMClient,
-    repo_root: str,
-    session_id: str,
-    *,
-    task: str,
-    test_file: str,
-    reason: str,
-    decision: str,
-    explanation: str,
-    on_memory_created: OnMemoryCreated | None = None,
-) -> None:
-    """Queue extraction of a memory from a TDD dispute decision."""
-    _ensure_worker()
-    assert _queue is not None
-    summary = build_tdd_dispute_summary(
-        task,
-        test_file,
-        reason,
-        decision,
-        explanation,
-    )
-    _queue.put_nowait(
-        _ExtractionItem(
-            llm=llm,
-            repo_root=repo_root,
-            session_id=session_id,
-            session_summary=summary,
-            source_task=task,
-            prompt_key="memory.extract_tdd_dispute",
-            source_phase="tdd_dispute",
             on_memory_created=on_memory_created,
             max_items=2,
         ),

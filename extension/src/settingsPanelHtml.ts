@@ -1198,18 +1198,6 @@ export function getSettingsPanelHtml(): string {
     </div>
 </div>
 
-<!-- ── TDD Mode ── -->
-<div class="section">
-    <h2>TDD Mode</h2>
-    <div class="field-check">
-        <input type="checkbox" id="enableTdd">
-        <div>
-            <label for="enableTdd">TDD Mode — expert writes tests first, primary implements</label>
-            <span class="hint">Requires an expert model. Primary cannot edit tests but can dispute flawed tests.</span>
-        </div>
-    </div>
-</div>
-
 <!-- ── Post-Validation ── -->
 <div class="section">
     <h2>Post-Validation</h2>
@@ -2222,9 +2210,6 @@ export function getSettingsPanelHtml(): string {
             wikiApiPath:           val('wikiApiPath'),
             wikiUsername:          val('wikiUsername'),
 
-            // TDD mode
-            enableTdd:             val('enableTdd'),
-
             // Post-validation
             enablePostValidation:  val('enablePostValidation'),
             postFormatCommand:     val('postFormatCommand'),
@@ -2518,9 +2503,6 @@ export function getSettingsPanelHtml(): string {
         if (v.wikiKeySet) {
             document.getElementById('wiki-key-widget')._renderSet();
         }
-
-        // TDD mode
-        setVal('enableTdd',                v.enableTdd);
 
         // Post-validation
         setVal('enablePostValidation',     v.enablePostValidation);

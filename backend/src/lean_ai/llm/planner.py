@@ -501,6 +501,50 @@ async def create_plan(
             phase=3,
         )
 
+        # ── Phase 4a: Deterministic test discovery ──
+        await _send_stage(
+            ws,
+            "Phase 4a: Discovering test files...",
+            model=expert.model_name,
+            phase=4,
+        )
+        logger.info("Planning Phase 4a: Deterministic test discovery")
+        t0_4a = time.monotonic()
+
+        # Collect affected file paths from design_and_risks_obj
+        phase4a_affected: list[str] = []
+        for cd in design_and_risks_obj.change_designs:
+            if cd.file_path and cd.file_path not in phase4a_affected:
+                phase4a_affected.append(cd.file_path)
+        if file_summary_obj is not None:
+            for obs in file_summary_obj.files_to_create:
+                if obs.file_path and obs.file_path not in phase4a_affected:
+                    phase4a_affected.append(obs.file_path)
+            for obs in file_summary_obj.files_to_modify:
+                if obs.file_path and obs.file_path not in phase4a_affected:
+                    phase4a_affected.append(obs.file_path)
+
+        test_discovery = await _run_phase_4a(repo_root, phase4a_affected)
+
+        phase_timings["phase_4a_test_discovery"] = time.monotonic() - t0_4a
+        _save_debug_phase(
+            repo_root,
+            session_id,
+            "phase_4a_test_discovery",
+            test_discovery,
+            phase_timings["phase_4a_test_discovery"],
+        )
+        logger.info(
+            "Phase 4a test discovery completed in %.1fs",
+            phase_timings["phase_4a_test_discovery"],
+        )
+        await _send_stage_done(
+            ws,
+            "Test discovery complete",
+            model=expert.model_name,
+            phase=4,
+        )
+
         await _send_stage(
             ws,
             "Phase 4: Assembling structured plan...",
@@ -518,7 +562,11 @@ async def create_plan(
             design_and_risks_obj,
         )
         security_concerns = _build_security_concerns(design_and_risks_obj)
-        testing_inventory = _format_testing_inventory(file_summary_obj)
+        testing_inventory_raw = _format_testing_inventory(file_summary_obj)
+        testing_inventory = _format_test_inventory_for_phase4(
+            test_discovery,
+            testing_inventory_raw,
+        )
         core_functionality = _format_core_functionality(design_and_risks_obj)
         dependency_order_block = _format_dependency_order(design_and_risks_obj)
         naming_conventions_block = _format_naming_conventions_section(design_and_risks_obj)
@@ -782,7 +830,7 @@ async def _run_phase5_verification(
 
     Returns elapsed time in seconds.
     """
-    tdd_mode = settings.enable_tdd
+    tdd_mode = False
     phase_label = (
         "Phase 5: Designing TDD test steps..."
         if tdd_mode
@@ -1325,11 +1373,11 @@ def _check_success_checks_cover_affected_files(
     plan: ExecutionPlan,
     file_summary: FileSummary | None,
 ) -> tuple[list[str], bool]:
-    """Warn when executable affected files have no test/success-check contract.
+    """Block when executable affected files have no test/success-check contract.
 
-    Returns ``(warnings, is_blocking)``. Missing success checks are
-    non-blocking — the plan can still execute, but the user should be
-    aware of the gap.
+    Returns ``(errors, is_blocking)``. Missing success checks are
+    blocking — the plan must be revised to include concrete success
+    checks for every affected executable file.
     """
     code_paths: set[str] = set()
     if file_summary is not None:
@@ -1358,7 +1406,47 @@ def _check_success_checks_cover_affected_files(
                 break
         if not covered:
             warnings.append(f"affected file has no success-check coverage: {code_path}")
-    return warnings, False
+    return warnings, bool(warnings)
+
+
+def _check_success_checks_are_specific(
+    plan: ExecutionPlan,
+) -> tuple[list[str], bool]:
+    """Reject vague success checks that lack concrete tool/command references.
+
+    Scans every success check's description for vague patterns like
+    'verify', 'test that', 'check that', 'ensure' that are not followed
+    by a concrete tool or command reference. A check is considered
+    specific if its combined text (description + tool + command + expected)
+    mentions a concrete tool name or shell command.
+
+    Returns ``(errors, is_blocking)``. Vague success checks are blocking
+    because they cannot be mechanically verified by the executor.
+    """
+    vague_prefixes = ("verify", "test that", "check that", "ensure")
+    concrete_signals = (
+        "pytest", "npm test", "vitest", "jest", "mocha", "unittest",
+        "python -m", "node", "cargo test", "go test", "make test",
+        "grep", "cat", "read_file", "list_directory", "directory_tree",
+        "python ", "node ", "npm ", "yarn ", "pnpm ", "bun ",
+        "./", "bash", "sh -c", "curl", "http", "diff",
+    )
+    errors: list[str] = []
+    for step in plan.steps:
+        for check in step.success_checks:
+            text = f"{check.description} {check.tool} {check.command} {check.expected}".lower()
+            # Check if description starts with a vague pattern
+            desc_lower = check.description.lower()
+            if not any(desc_lower.startswith(p) for p in vague_prefixes):
+                continue
+            # Check if there's a concrete signal anywhere in the check
+            if any(signal in text for signal in concrete_signals):
+                continue
+            errors.append(
+                f"vague success check in step {step.step_number}: "
+                f"'{check.description}' lacks concrete tool/command reference"
+            )
+    return errors, bool(errors)
 
 
 def _check_core_functionality_success_checked(
@@ -1429,7 +1517,11 @@ def _run_plan_validations(
 
     w, b = _check_success_checks_cover_affected_files(plan, file_summary)
     warnings.extend(w)
-    # Non-blocking — do not flip is_blocking
+    is_blocking = is_blocking or b
+
+    w, b = _check_success_checks_are_specific(plan)
+    warnings.extend(w)
+    is_blocking = is_blocking or b
 
     w, b = _check_core_functionality_success_checked(plan)
     warnings.extend(w)
@@ -1445,6 +1537,86 @@ def _run_plan_validations(
     for w in warnings:
         logger.warning("Phase 4 plan validation — %s", w)
     return warnings, is_blocking
+
+
+# ── Phase 4a helpers ───────────
+#
+# Phase 4a performs deterministic grep-based test discovery before Phase 4
+# plan assembly. This gives the LLM concrete test file paths and patterns
+# to reference when writing success checks, avoiding hallucinated test paths.
+
+
+async def _run_phase_4a(
+    repo_root: str,
+    affected_files: list[str],
+) -> str:
+    """Perform deterministic grep-based test discovery for affected files.
+
+    Searches the repository for test files related to each affected file
+    using pattern-based grep. Returns a formatted string summarizing
+    discovered test files and patterns, or a sentinel if no tests found.
+    This output is injected into the Phase 4 prompt so the LLM can write
+    concrete success checks referencing real test infrastructure.
+
+    Args:
+        repo_root: Path to the repository root.
+        affected_files: List of file paths affected by the plan.
+
+    Returns:
+        Formatted test inventory string for Phase 4 prompt injection.
+    """
+    import subprocess
+
+    results: list[str] = []
+    for filepath in affected_files:
+        basename = filepath.rsplit("/", 1)[-1].rsplit(".", 1)[0] if "." in filepath else filepath.rsplit("/", 1)[-1]
+        # Search for test files referencing this source file
+        try:
+            proc = subprocess.run(
+                ["grep", "-rl", "--include=*.py", "--include=*.ts", "--include=*.js", "--include=*.test.*", "--include=*.spec.*", "--include=*_test.*", "--include=*test_*", basename, str(Path(repo_root))],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                test_files = [f.strip() for f in proc.stdout.strip().split("\n") if f.strip()]
+                results.append(f"- {filepath} → tests: {', '.join(test_files[:5])}")
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            # grep not available or timed out — skip this file
+            pass
+
+    if not results:
+        return "(no existing test files discovered via grep — use test_command for verification)"
+    return "\n".join(results)
+
+
+def _format_test_inventory_for_phase4(
+    test_discovery: str,
+    testing_inventory: str,
+) -> str:
+    """Combine Phase 4a test discovery with Phase 2 testing inventory.
+
+    Merges the deterministic grep results from Phase 4a with the
+    structured testing inventory from Phase 2 to produce a single
+    test inventory block for the Phase 4 assembly prompt.
+
+    Args:
+        test_discovery: Output from _run_phase_4a grep-based discovery.
+        testing_inventory: Output from _format_testing_inventory.
+
+    Returns:
+        Combined test inventory string for Phase 4 prompt.
+    """
+    parts: list[str] = []
+    if test_discovery and test_discovery != "(no existing test files discovered via grep — use test_command for verification)":
+        parts.append("## Discovered Test Files (Phase 4a grep-based discovery)")
+        parts.append(test_discovery)
+    if testing_inventory:
+        parts.append("## Testing Inventory (Phase 2)")
+        parts.append(testing_inventory)
+    if not parts:
+        return "(no test infrastructure detected)"
+    return "\n\n".join(parts)
 
 
 # ── Phase 5 helpers ─────────────────────────────────────────────────────────

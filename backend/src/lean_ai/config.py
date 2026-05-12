@@ -457,10 +457,6 @@ class Settings(BaseSettings):
     # ── Claim verification ──
     enable_claim_verification: bool = True  # Nudge LLM to verify external claims via web search
 
-    # ── TDD mode ──
-    enable_tdd: bool = False  # Expert writes tests first, primary implements
-    tdd_max_disputes_per_step: int = 3  # Max test disputes per implementation step
-
     # ── Phase 5 strict-test contract (programmatic-only, hooks required) ──
     enable_strict_test_contract: bool = True
     # Opt-in tool-backed exploration turn inside Phase 5 when Phase 2's
@@ -699,11 +695,11 @@ class Settings(BaseSettings):
 
     @property
     def effective_expert_min_p(self) -> float | None:
-        return self._ollama_role_param("expert", "min_p")
+        return self.ollama_expert_min_p if self.ollama_expert_min_p is not None else self.ollama_min_p
 
     @property
     def effective_expert_presence_penalty(self) -> float | None:
-        return self._ollama_role_param("expert", "presence_penalty")
+        return self.ollama_expert_presence_penalty if self.ollama_expert_presence_penalty is not None else self.ollama_presence_penalty
 
     @property
     def effective_expert_context_window(self) -> int:

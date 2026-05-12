@@ -40,7 +40,6 @@ from lean_ai.workflow.hooks import (
 from lean_ai.workflow.prompts import (
     build_step_system_prompt,
     build_step_user_message,
-    build_tdd_review_prompt,
     build_tdd_step_system_prompt,
     build_tdd_test_writing_prompt,
 )
@@ -87,6 +86,40 @@ _READ_ONLY_TOOLS = frozenset(
 )
 _COMPLETION_TOOL = "task_complete"
 _INCOMPLETE_REL_PATH = ".lean_ai/incomplete.md"
+_TDD_MAX_RETRIES = 2
+
+
+def _collect_step_test_commands(step: PlanStep) -> list[str]:
+    """Return test commands from a step's success_checks.
+
+    Inspects ``success_checks`` for entries whose tool is ``run_tests``
+    and returns the associated command strings.  Empty when the step
+    declares no test-based success checks.
+    """
+    commands: list[str] = []
+    for check in getattr(step, "success_checks", None) or []:
+        if check.tool == "run_tests" and check.command:
+            commands.append(check.command)
+    return commands
+
+
+async def _run_step_tests(
+    repo_root: str,
+    test_commands: list[str],
+) -> tuple[bool, str]:
+    """Run one or more test commands and return (all_passed, combined_output).
+
+    Returns ``True`` only when every command exits successfully.
+    """
+    from lean_ai.tools.shell import run_tests as shell_run_tests
+
+    outputs: list[str] = []
+    for cmd in test_commands:
+        result = await shell_run_tests(cmd, repo_root)
+        outputs.append(str(result))
+        if not result.success:
+            return False, "\n".join(outputs)
+    return True, "\n".join(outputs)
 
 
 def _normalize_path(p: str) -> str:
@@ -167,9 +200,6 @@ def _step_scope_error(
     enforced for ``create_file`` and ``edit_file`` to keep mutations within the
     planned scope.
     """
-    if tool_name == "request_test_change":
-        return None
-
     if tool_name in _FILE_WRITE_TOOLS:
         target_path = _normalize_path(arguments.get("path", ""))
         allowed_paths = _step_may_change_paths(step)
@@ -810,7 +840,7 @@ async def execute_plan(
 
     # ── TDD three-phase execution ─────────────────────────────────
     tdd_active = (
-        settings.enable_tdd
+        False
         and plan.tdd_test_steps
         and expert_llm_client is not None
         and settings._active_context_window > 32768
@@ -1051,31 +1081,7 @@ async def _run_tdd_execution(
     step_artifacts: dict[str, str],
     run_step: Callable,
 ) -> bool:
-    """TDD three-phase execution: expert tests → review → implement."""
-    from lean_ai.workflow.tdd import evaluate_test_dispute
-
-    # Shared dispute evaluator used by both Phase B (review) and Phase C
-    # (implementation). Tests remain write-protected in both phases;
-    # when the primary genuinely finds a flawed test, it calls
-    # request_test_change and the expert decides whether to edit the
-    # test or reject the dispute. Matches the existing "Test
-    # Modification Policy" (see CLAUDE.md) — tests are not changed
-    # directly, only via an explained, expert-evaluated dispute.
-    plan_context_md = plan_to_markdown(plan)
-
-    async def _tdd_dispute(arguments: dict) -> str:
-        return await evaluate_test_dispute(
-            test_file=arguments["test_file"],
-            test_function=arguments["test_function"],
-            reason=arguments["reason"],
-            repo_root=repo_root,
-            expert_client=expert_llm_client,
-            ws=ws,
-            session_id=session_id,
-            dispatcher=dispatcher,
-            plan_context=plan_context_md,
-            step_artifacts=step_artifacts,
-        )
+    """TDD two-phase execution: expert writes tests → primary implements."""
 
     # ── Phase A: Expert writes tests ──────────────────────────
     await ws_send(
@@ -1149,121 +1155,6 @@ async def _run_tdd_execution(
         },
     )
 
-    # Identify all test files changed during the writing phase, including
-    # edited shared fixtures or conftest files.
-    tdd_test_files = _collect_tdd_review_files(plan.tdd_test_steps)
-
-    # ── Phase B: Primary reviews tests (read-only) ───────────
-    if tdd_test_files:
-        await ws_send(
-            ws,
-            "stage_status",
-            {
-                "stage": "tdd_test_review",
-                "status": "running",
-                "summary": (f"TDD: Primary reviewing {len(tdd_test_files)} test file(s)..."),
-            },
-        )
-
-        review_prompt = build_tdd_review_prompt(
-            load_execution_context(repo_root),
-            tdd_test_files,
-        )
-
-        # Build review message — include test file contents
-        review_parts = [
-            "Review the following test files. Use "
-            "request_test_change for any flawed tests, or call "
-            "task_complete if all tests look correct.\n"
-        ]
-        for tf in tdd_test_files:
-            full_path = os.path.join(repo_root, tf)
-            try:
-                with open(full_path, encoding="utf-8") as f:
-                    review_parts.append(f"\n--- {tf} ---\n```\n{f.read()}\n```")
-            except Exception:
-                review_parts.append(f"\n--- {tf} --- (could not read)")
-
-        review_telemetry = {
-            "repo_root": repo_root,
-            "session_id": session_id,
-            "phase": "tdd.review",
-            "role": "primary",
-        }
-        review_executor = make_tool_executor(
-            repo_root,
-            ws,
-            session_id,
-            llm_client=llm_client,
-            dispatcher=dispatcher,
-            tdd_protect_tests=True,
-            on_test_dispute=_tdd_dispute,
-            telemetry_context=review_telemetry,
-        )
-
-        review_messages = [
-            {"role": "system", "content": review_prompt},
-            {"role": "user", "content": "\n".join(review_parts)},
-        ]
-        review_complete_seen = False
-
-        def _validate_review_completion() -> None:
-            nonlocal review_complete_seen
-            review_complete_seen = True
-            return None
-
-        await llm_client.chat_with_tools(
-            messages=review_messages,
-            tools=build_tdd_implementation_tools(),
-            tool_executor_fn=review_executor,
-            max_turns=settings.implementation_max_turns,
-            max_tokens=settings.implementation_max_tokens,
-            text_only_nudge=(
-                "This is the TDD review phase. Read the changed test files, use "
-                "request_test_change for any flawed test, and call task_complete "
-                "when review is complete."
-            ),
-            on_tool_call=cb.on_tool_call,
-            on_tool_result=cb.on_tool_result,
-            on_content=cb.on_content,
-            on_thinking=cb.on_thinking,
-            on_metrics=cb.on_metrics,
-            on_metrics_reset=cb.on_metrics_reset,
-            dispatcher=dispatcher,
-            telemetry_context=review_telemetry,
-            task_complete_validator=_validate_review_completion,
-        )
-        if not review_complete_seen:
-            await asyncio.to_thread(
-                _append_incomplete_entry,
-                repo_root,
-                step_label="[TDD Review]",
-                detail=(
-                    "TDD review ended without task_complete, so the changed test files were "
-                    "not positively accepted or disputed."
-                ),
-            )
-            await ws_send(
-                ws,
-                "stage_status",
-                {
-                    "stage": "tdd_test_review",
-                    "status": "done",
-                    "summary": "TDD: Test review halted because the review did not complete cleanly.",
-                },
-            )
-            return False
-
-        await ws_send(
-            ws,
-            "stage_status",
-            {
-                "stage": "tdd_test_review",
-                "status": "done",
-                "summary": "TDD: Test review complete.",
-            },
-        )
-
     # ── Phase C: Primary implements code ──────────────────────
     await ws_send(
         ws,
@@ -1284,6 +1175,7 @@ async def _run_tdd_execution(
             getattr(plan, "name_registry", []) or [],
         ),
     )
+    incomplete_results: list[dict] = []
     for step in plan.steps:
         impl_executor = make_tool_executor(
             repo_root,
@@ -1292,7 +1184,6 @@ async def _run_tdd_execution(
             llm_client=llm_client,
             dispatcher=dispatcher,
             tdd_protect_tests=True,
-            on_test_dispute=_tdd_dispute,
             telemetry_context={
                 "repo_root": repo_root,
                 "session_id": session_id,
@@ -1315,17 +1206,128 @@ async def _run_tdd_execution(
                 "role": "primary",
             },
         )
-        if not step_ok:
-            await ws_send(
-                ws,
-                "stage_status",
+
+        # Gather step-specific test commands for retry loop
+        test_commands = _collect_step_test_commands(step)
+
+        if not step_ok and not test_commands:
+            # Step failed and has no test-based checks — record incomplete
+            incomplete_results.append(
                 {
-                    "stage": "tdd_implementation",
-                    "status": "done",
-                    "summary": "TDD: Implementation halted because a step did not complete cleanly.",
-                },
+                    "step_number": step.step_number,
+                    "reason": f"Step did not complete cleanly: {_step_primary_label(step)}.",
+                }
             )
-            return False
+            _append_incomplete_entry(
+                repo_root,
+                step_label=f"[TDD Impl] Step {step.step_number}",
+                detail=f"Step did not complete cleanly: {_step_primary_label(step)}.",
+            )
+            continue
+
+        if not step_ok and test_commands:
+            # Step failed but has test commands — retry with test feedback
+            attempts = 0
+            last_test_output = ""
+            while attempts < _TDD_MAX_RETRIES:
+                attempts += 1
+                logger.info(
+                    "TDD retry %d/%d for step %d after test failure",
+                    attempts,
+                    _TDD_MAX_RETRIES,
+                    step.step_number,
+                )
+                step_ok = await run_step(
+                    step,
+                    llm_client,
+                    build_tdd_implementation_tools(),
+                    impl_executor,
+                    tdd_impl_prompt,
+                    label_prefix=f"[TDD Impl Retry {attempts}] ",
+                    telemetry={
+                        "repo_root": repo_root,
+                        "session_id": session_id,
+                        "phase": "tdd.implement",
+                        "role": "primary",
+                    },
+                )
+                if step_ok:
+                    break
+                # Run tests to get failure output for next retry
+                _, last_test_output = await _run_step_tests(repo_root, test_commands)
+
+            if not step_ok:
+                incomplete_results.append(
+                    {
+                        "step_number": step.step_number,
+                        "reason": (
+                            f"Step failed after {_TDD_MAX_RETRIES} retries. "
+                            f"Last test output: {last_test_output[:500]}"
+                        ),
+                    }
+                )
+                _append_incomplete_entry(
+                    repo_root,
+                    step_label=f"[TDD Impl] Step {step.step_number}",
+                    detail=(
+                        f"Step failed after {_TDD_MAX_RETRIES} retries. "
+                        f"Last test output: {last_test_output[:500]}"
+                    ),
+                )
+                continue
+
+        # Step succeeded — run tests and retry if they fail
+        if test_commands:
+            tests_pass, test_output = await _run_step_tests(repo_root, test_commands)
+            if not tests_pass:
+                attempts = 0
+                while attempts < _TDD_MAX_RETRIES:
+                    attempts += 1
+                    logger.info(
+                        "TDD retry %d/%d for step %d after test failure",
+                        attempts,
+                        _TDD_MAX_RETRIES,
+                        step.step_number,
+                    )
+                    step_ok = await run_step(
+                        step,
+                        llm_client,
+                        build_tdd_implementation_tools(),
+                        impl_executor,
+                        tdd_impl_prompt,
+                        label_prefix=f"[TDD Impl Retry {attempts}] ",
+                        telemetry={
+                            "repo_root": repo_root,
+                            "session_id": session_id,
+                            "phase": "tdd.implement",
+                            "role": "primary",
+                        },
+                    )
+                    if not step_ok:
+                        break
+                    tests_pass, test_output = await _run_step_tests(repo_root, test_commands)
+                    if tests_pass:
+                        break
+
+                if not tests_pass:
+                    incomplete_results.append(
+                        {
+                            "step_number": step.step_number,
+                            "reason": (
+                                f"Tests still failing after {_TDD_MAX_RETRIES} retries. "
+                                f"Last test output: {test_output[:500]}"
+                            ),
+                        }
+                    )
+                    _append_incomplete_entry(
+                        repo_root,
+                        step_label=f"[TDD Impl] Step {step.step_number}",
+                        detail=(
+                            f"Tests still failing after {_TDD_MAX_RETRIES} retries. "
+                            f"Last test output: {test_output[:500]}"
+                        ),
+                    )
+                    continue
 
     await ws_send(
         ws,
