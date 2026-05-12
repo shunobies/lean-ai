@@ -23,7 +23,6 @@ class LeanAiConfigurable : Configurable {
     private var backendHost = settings.state.backendHost
     private var enableInlinePredictions = settings.state.enableInlinePredictions
     private var enablePostValidation = settings.state.enablePostValidation
-    private var enableTdd = settings.state.enableTdd
     private var enableThinking = settings.state.enableThinking
 
     override fun getDisplayName(): String = "Lean AI"
@@ -77,11 +76,6 @@ class LeanAiConfigurable : Configurable {
                         .bindSelected(::enablePostValidation)
                 }
                 row {
-                    checkBox("Enable TDD mode")
-                        .bindSelected(::enableTdd)
-                        .comment("Expert writes tests first, primary implements")
-                }
-                row {
                     checkBox("Enable thinking mode")
                         .bindSelected(::enableThinking)
                         .comment("Pass think=True to Ollama for reasoning models")
@@ -104,7 +98,6 @@ class LeanAiConfigurable : Configurable {
                 backendHost != s.backendHost ||
                 enableInlinePredictions != s.enableInlinePredictions ||
                 enablePostValidation != s.enablePostValidation ||
-                enableTdd != s.enableTdd ||
                 enableThinking != s.enableThinking
     }
 
@@ -117,7 +110,6 @@ class LeanAiConfigurable : Configurable {
         s.backendHost = backendHost
         s.enableInlinePredictions = enableInlinePredictions
         s.enablePostValidation = enablePostValidation
-        s.enableTdd = enableTdd
         s.enableThinking = enableThinking
     }
 
@@ -130,7 +122,6 @@ class LeanAiConfigurable : Configurable {
         backendHost = s.backendHost
         enableInlinePredictions = s.enableInlinePredictions
         enablePostValidation = s.enablePostValidation
-        enableTdd = s.enableTdd
         enableThinking = s.enableThinking
     }
 }

@@ -138,6 +138,12 @@ class _DecryptingYamlSource(PydanticBaseSettingsSource):
             "export_api_key",
         }
     )
+    _DEPRECATED_FIELDS = frozenset(
+        {
+            "enable_tdd",
+            "tdd_max_disputes_per_step",
+        }
+    )
 
     def __init__(self, settings_cls: type[BaseSettings], yaml_file: str = "config.yaml") -> None:
         super().__init__(settings_cls)
@@ -150,6 +156,11 @@ class _DecryptingYamlSource(PydanticBaseSettingsSource):
 
     def __call__(self) -> dict[str, Any]:
         data = self._yaml_source()
+        # Backward compatibility: older config.yaml files may still contain
+        # removed TDD fields. Ignore those specific keys so startup doesn't
+        # hard-fail on upgrade, while keeping strict validation for typos.
+        for field_name in self._DEPRECATED_FIELDS:
+            data.pop(field_name, None)
         keyfile = _default_keyfile_path()
         for field_name in self._SECRET_FIELDS:
             if field_name in data and isinstance(data[field_name], str):

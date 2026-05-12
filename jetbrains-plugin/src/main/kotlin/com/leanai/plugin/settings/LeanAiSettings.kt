@@ -106,9 +106,6 @@ class LeanAiSettings : PersistentStateComponent<LeanAiSettings.State> {
         var searchApiUrl: String = "",
         var searchDelay: Double = 2.0,
 
-        // ── TDD ──────────────────────────────────────────────────────────
-        var enableTdd: Boolean = false,
-
         // ── Post-Validation ──────────────────────────────────────────────
         var enablePostValidation: Boolean = true,
         var postFormatCommand: String = "",

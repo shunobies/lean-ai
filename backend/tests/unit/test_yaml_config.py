@@ -84,3 +84,17 @@ def test_plain_api_key_in_yaml(tmp_path, monkeypatch):
 
     s = Settings()
     assert s.openai_api_key == "sk-plain-key"
+
+
+def test_yaml_ignores_removed_tdd_fields(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "config.yaml").write_text(
+        'enable_tdd: "true"\n'
+        "tdd_max_disputes_per_step: 7\n"
+        "ollama_model: yaml-model\n"
+    )
+    from lean_ai.config import Settings
+
+    s = Settings()
+    assert s.ollama_model == "yaml-model"
+    assert not hasattr(s, "enable_tdd")

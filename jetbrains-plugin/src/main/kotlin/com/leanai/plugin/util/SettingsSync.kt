@@ -141,9 +141,6 @@ object SettingsSync {
         putIfSet("LEAN_AI_SEARCH_API_URL", s.searchApiUrl)
         if (s.searchDelay != 2.0) env["LEAN_AI_SEARCH_DELAY"] = s.searchDelay.toString()
 
-        // TDD
-        putBool("LEAN_AI_ENABLE_TDD", s.enableTdd)
-
         // Post-validation
         putBool("LEAN_AI_ENABLE_POST_VALIDATION", s.enablePostValidation)
         putIfSet("LEAN_AI_POST_FORMAT_COMMAND", s.postFormatCommand)
