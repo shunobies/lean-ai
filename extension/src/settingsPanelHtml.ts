@@ -14,7 +14,8 @@ export function getSettingsPanelHtml(): string {
     :root {
         --gap: 12px;
         --section-gap: 24px;
-        --radius: 6px;
+        --radius: 8px;
+        --sidebar-width: 248px;
     }
     * { box-sizing: border-box; }
     body {
@@ -23,8 +24,25 @@ export function getSettingsPanelHtml(): string {
         color: var(--vscode-foreground);
         background: var(--vscode-editor-background);
         margin: 0;
-        padding: 20px 24px 100px;
-        max-width: 720px;
+        padding: 0;
+        max-width: none;
+        min-height: 100vh;
+    }
+    button:focus-visible,
+    a:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    [tabindex]:focus-visible {
+        outline: 1px solid var(--vscode-focusBorder);
+        outline-offset: 2px;
+    }
+    .settings-shell {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 24px 28px 120px;
+    }
+    .settings-header {
+        margin-bottom: 18px;
     }
     h1 {
         font-size: 1.3em;
@@ -36,7 +54,7 @@ export function getSettingsPanelHtml(): string {
     }
     .subtitle {
         color: var(--vscode-descriptionForeground);
-        margin: 0 0 var(--section-gap);
+        margin: 0;
         font-size: 0.9em;
     }
     .subtitle a {
@@ -44,7 +62,176 @@ export function getSettingsPanelHtml(): string {
         text-decoration: none;
     }
     .subtitle a:hover { text-decoration: underline; }
-
+    .settings-layout {
+        display: grid;
+        grid-template-columns: minmax(220px, var(--sidebar-width)) minmax(0, 1fr);
+        gap: 24px;
+        align-items: start;
+    }
+    .settings-sidebar {
+        position: sticky;
+        top: 16px;
+        align-self: start;
+        max-height: calc(100vh - 112px);
+        overflow: auto;
+        padding: 14px;
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 12px;
+        background: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-sideBar-background, transparent));
+    }
+    .settings-search-label {
+        display: block;
+        margin-bottom: 6px;
+        color: var(--vscode-descriptionForeground);
+        font-size: 0.82em;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+    }
+    .settings-search-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 6px;
+        margin-bottom: 12px;
+    }
+    #settingsSearch {
+        min-width: 0;
+        width: 100%;
+        padding: 7px 8px;
+        background: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        border: 1px solid var(--vscode-input-border);
+        border-radius: 4px;
+        font-family: inherit;
+        font-size: inherit;
+        outline: none;
+    }
+    #settingsSearch:focus { border-color: var(--vscode-focusBorder); }
+    .clear-search {
+        padding: 0 9px;
+        min-width: 32px;
+        border: 1px solid var(--vscode-input-border);
+        background: var(--vscode-button-secondaryBackground);
+        color: var(--vscode-button-secondaryForeground);
+    }
+    .settings-nav {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+    .nav-button {
+        width: 100%;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 8px;
+        padding: 9px 10px;
+        border: 1px solid transparent;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--vscode-foreground);
+        text-align: left;
+        white-space: normal;
+    }
+    .nav-button:hover {
+        background: var(--vscode-toolbar-hoverBackground);
+    }
+    .nav-button[aria-current="page"] {
+        background: color-mix(in srgb, var(--vscode-button-background) 18%, transparent);
+        border-color: color-mix(in srgb, var(--vscode-focusBorder) 60%, transparent);
+    }
+    .nav-title {
+        font-weight: 600;
+    }
+    .nav-desc {
+        display: block;
+        margin-top: 2px;
+        color: var(--vscode-descriptionForeground);
+        font-size: 0.82em;
+    }
+    .nav-badge,
+    .section-badge,
+    .status-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 20px;
+        padding: 2px 7px;
+        border-radius: 999px;
+        border: 1px solid var(--vscode-input-border);
+        color: var(--vscode-descriptionForeground);
+        font-size: 0.78em;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+    .badge-ok {
+        color: var(--vscode-testing-iconPassed);
+        border-color: color-mix(in srgb, var(--vscode-testing-iconPassed) 40%, transparent);
+        background: color-mix(in srgb, var(--vscode-testing-iconPassed) 12%, transparent);
+    }
+    .badge-warn {
+        color: var(--vscode-editorWarning-foreground, #c08a00);
+        border-color: color-mix(in srgb, var(--vscode-editorWarning-foreground, #c08a00) 40%, transparent);
+        background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #c08a00) 12%, transparent);
+    }
+    .badge-info {
+        color: var(--vscode-textLink-foreground);
+        border-color: color-mix(in srgb, var(--vscode-textLink-foreground) 36%, transparent);
+        background: color-mix(in srgb, var(--vscode-textLink-foreground) 10%, transparent);
+    }
+    .settings-content {
+        min-width: 0;
+    }
+    .setup-status {
+        margin-bottom: 16px;
+        padding: 16px;
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 12px;
+        background:
+            linear-gradient(135deg, color-mix(in srgb, var(--vscode-button-background) 11%, transparent), transparent 45%),
+            var(--vscode-editor-background);
+    }
+    .setup-status h2 {
+        margin-bottom: 4px;
+        border: 0;
+        padding: 0;
+    }
+    .setup-status p {
+        margin: 0 0 12px;
+        color: var(--vscode-descriptionForeground);
+        font-size: 0.9em;
+    }
+    .status-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+    }
+    .status-card {
+        min-width: 0;
+        padding: 10px;
+        border: 1px solid var(--vscode-input-border);
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-editor-foreground, transparent));
+    }
+    .status-label {
+        color: var(--vscode-descriptionForeground);
+        font-size: 0.78em;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.02em;
+    }
+    .status-value {
+        margin-top: 5px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 600;
+    }
+    .status-meta {
+        margin-top: 4px;
+        color: var(--vscode-descriptionForeground);
+        font-size: 0.82em;
+    }
     h2 {
         font-size: 1em;
         font-weight: 600;
@@ -55,6 +242,86 @@ export function getSettingsPanelHtml(): string {
     }
     .section {
         margin-bottom: var(--section-gap);
+    }
+    .settings-page-section {
+        margin-bottom: 16px;
+        padding: 18px;
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 12px;
+        background: color-mix(in srgb, var(--vscode-editor-background) 96%, var(--vscode-sideBar-background, transparent));
+    }
+    .settings-page-section:not(.is-active) {
+        display: none;
+    }
+    .settings-content.search-mode .settings-page-section {
+        display: block;
+    }
+    .settings-page-section.search-hidden {
+        display: none !important;
+    }
+    .settings-page-section.search-match {
+        border-color: color-mix(in srgb, var(--vscode-focusBorder) 65%, var(--vscode-panel-border));
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--vscode-focusBorder) 20%, transparent);
+    }
+    .section-heading {
+        margin-bottom: 16px;
+    }
+    .section-kicker {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--vscode-descriptionForeground);
+        font-size: 0.78em;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+    .section-title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        border-bottom: 1px solid var(--vscode-panel-border);
+        padding-bottom: 6px;
+    }
+    .section-title-row h2 {
+        margin: 0;
+        padding: 0;
+        border: 0;
+    }
+    .section-description {
+        margin: 8px 0 0;
+        color: var(--vscode-descriptionForeground);
+        font-size: 0.9em;
+    }
+    .settings-subsection {
+        margin-bottom: var(--section-gap);
+        padding-bottom: 4px;
+    }
+    .settings-subsection:last-child {
+        margin-bottom: 0;
+    }
+    .no-search-results {
+        display: none;
+        margin-bottom: 16px;
+        padding: 14px;
+        border: 1px dashed var(--vscode-input-border);
+        border-radius: 10px;
+        color: var(--vscode-descriptionForeground);
+        text-align: center;
+    }
+    .no-search-results.visible {
+        display: block;
+    }
+    .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
     }
 
     /* Radio group for provider selection */
@@ -412,6 +679,13 @@ export function getSettingsPanelHtml(): string {
         z-index: 100;
     }
     .footer-left { display: flex; align-items: center; gap: 10px; }
+    .dirty-indicator {
+        color: var(--vscode-descriptionForeground);
+        font-size: 0.85em;
+    }
+    .dirty-indicator.unsaved {
+        color: var(--vscode-editorWarning-foreground, #c08a00);
+    }
     .footer a {
         color: var(--vscode-textLink-foreground);
         text-decoration: none;
@@ -429,6 +703,10 @@ export function getSettingsPanelHtml(): string {
         font-family: inherit;
     }
     .save-btn:hover { background: var(--vscode-button-hoverBackground); }
+    .save-btn:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+    }
     .save-feedback {
         font-size: 0.85em;
         color: var(--vscode-testing-iconPassed);
@@ -438,20 +716,130 @@ export function getSettingsPanelHtml(): string {
     .save-feedback.visible { opacity: 1; }
 
     .indent { margin-left: 16px; }
+    @media (max-width: 860px) {
+        .settings-shell {
+            padding: 18px 16px 120px;
+        }
+        .settings-layout {
+            grid-template-columns: 1fr;
+            gap: 14px;
+        }
+        .settings-sidebar {
+            position: sticky;
+            top: 0;
+            z-index: 80;
+            max-height: none;
+        }
+        .settings-nav {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .status-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+    @media (max-width: 560px) {
+        .settings-nav,
+        .status-grid {
+            grid-template-columns: 1fr;
+        }
+        .settings-page-section {
+            padding: 14px;
+        }
+        .footer {
+            align-items: flex-start;
+            flex-direction: column;
+        }
+    }
 </style>
 </head>
 <body>
-<h1>&#9881; Lean AI Settings</h1>
-<p class="subtitle">
-    Changes are saved to <code>backend/config.yaml</code> and take effect after a backend restart. &nbsp;
-    <a href="#" class="github-link">View documentation on GitHub ↗</a>
-    &nbsp;·&nbsp;
-    <a href="#" id="openVscodeSettingsLink">Python path &amp; backend directory ↗ VSCode Settings</a>
-</p>
+<div class="settings-shell">
+    <header class="settings-header">
+        <h1>&#9881; Lean AI Settings</h1>
+        <p class="subtitle">
+            Changes are saved to <code>backend/config.yaml</code> and take effect after a backend restart. &nbsp;
+            <a href="#" class="github-link">View documentation on GitHub ↗</a>
+            &nbsp;·&nbsp;
+            <a href="#" id="openVscodeSettingsLink">Python path &amp; backend directory ↗ VSCode Settings</a>
+        </p>
+    </header>
+
+    <div class="settings-layout">
+        <aside class="settings-sidebar" aria-label="Settings navigation">
+            <label class="settings-search-label" for="settingsSearch">Find a setting</label>
+            <div class="settings-search-row">
+                <input type="search" id="settingsSearch" placeholder="Search settings..." autocomplete="off" aria-describedby="settingsSearchHelp">
+                <button type="button" class="clear-search" id="clearSettingsSearch" aria-label="Clear settings search">×</button>
+            </div>
+            <div class="visually-hidden" id="settingsSearchHelp">Search by section, setting label, description, or setting id.</div>
+            <nav class="settings-nav" id="settingsNav" aria-label="Settings sections">
+                <button type="button" class="nav-button" data-target="getting-started" aria-current="page">
+                    <span><span class="nav-title">Getting Started</span><span class="nav-desc">Provider, API key, primary model</span></span>
+                    <span class="nav-badge" id="navBadgeGettingStarted">Required</span>
+                </button>
+                <button type="button" class="nav-button" data-target="models">
+                    <span><span class="nav-title">Models</span><span class="nav-desc">Expert, request, worker roles</span></span>
+                    <span class="nav-badge" id="navBadgeModels">Optional</span>
+                </button>
+                <button type="button" class="nav-button" data-target="validation">
+                    <span><span class="nav-title">Validation</span><span class="nav-desc">Format, lint, and test checks</span></span>
+                    <span class="nav-badge" id="navBadgeValidation">Optional</span>
+                </button>
+                <button type="button" class="nav-button" data-target="voice-media">
+                    <span><span class="nav-title">Voice &amp; Media</span><span class="nav-desc">Speech, audio, screenshots</span></span>
+                    <span class="nav-badge" id="navBadgeVoiceMedia">Optional</span>
+                </button>
+                <button type="button" class="nav-button" data-target="integrations">
+                    <span><span class="nav-title">Integrations</span><span class="nav-desc">GitHub, Jira, ServiceNow, Wiki</span></span>
+                    <span class="nav-badge" id="navBadgeIntegrations">Optional</span>
+                </button>
+                <button type="button" class="nav-button" data-target="advanced">
+                    <span><span class="nav-title">Advanced</span><span class="nav-desc">Embeddings, search, runtime knobs</span></span>
+                    <span class="nav-badge badge-info" id="navBadgeAdvanced">Advanced</span>
+                </button>
+            </nav>
+        </aside>
+
+        <main class="settings-content" id="settingsContent">
+            <section class="setup-status" aria-live="polite">
+                <h2>Setup status</h2>
+                <p>Quick scan of what is configured now. Use the sections on the left to jump directly to the work area.</p>
+                <div class="status-grid">
+                    <div class="status-card">
+                        <div class="status-label">Provider</div>
+                        <div class="status-value" id="statusProvider">Ollama</div>
+                        <div class="status-meta" id="statusProviderMeta">Local models</div>
+                    </div>
+                    <div class="status-card">
+                        <div class="status-label">Primary model</div>
+                        <div class="status-value" id="statusModel">Not set</div>
+                        <div class="status-meta" id="statusModelMeta">Choose a model</div>
+                    </div>
+                    <div class="status-card">
+                        <div class="status-label">API key</div>
+                        <div class="status-value" id="statusKey">Not required</div>
+                        <div class="status-meta" id="statusKeyMeta">Ollama uses local auth</div>
+                    </div>
+                    <div class="status-card">
+                        <div class="status-label">Extras</div>
+                        <div class="status-value" id="statusExtras">None enabled</div>
+                        <div class="status-meta" id="statusExtrasMeta">Validation, voice, integrations</div>
+                    </div>
+                </div>
+            </section>
+            <div class="no-search-results" id="settingsSearchEmpty">No matching settings found. Try a provider, model role, integration name, or setting id.</div>
 
 <!-- ── Primary LLM Provider ── -->
-<div class="section">
-    <h2>LLM Provider</h2>
+<section class="settings-page-section section is-active" id="section-getting-started" data-section="getting-started" data-search="getting started provider llm api key primary model ollama openai anthropic gemini serve">
+    <div class="section-heading">
+        <span class="section-kicker">Getting started</span>
+        <div class="section-title-row">
+            <h2>LLM Provider</h2>
+            <span class="section-badge" id="badgeGettingStarted">Required</span>
+        </div>
+        <p class="section-description">Pick the default provider and model Lean AI should use for most work. API keys stay in SecretStorage, not config files.</p>
+    </div>
     <div class="radio-group" id="providerGroup">
         <label class="radio-option" id="opt-ollama">
             <input type="radio" name="provider" value="ollama">
@@ -695,10 +1083,19 @@ export function getSettingsPanelHtml(): string {
             </select>
         </div>
     </div>
-</div>
+</section>
 
 <!-- ── Expert Model ── -->
-<div class="section">
+<section class="settings-page-section" id="section-models" data-section="models" data-search="models expert request worker planning chat request mode summarization compression ollama openai anthropic gemini serve capability image audio thinking reasoning">
+    <div class="section-heading">
+        <span class="section-kicker">Models</span>
+        <div class="section-title-row">
+            <h2>Role-specific models</h2>
+            <span class="section-badge" id="badgeModels">Optional</span>
+        </div>
+        <p class="section-description">Keep the primary model simple, or assign specialized models for planning, chat requests, and background summarization.</p>
+    </div>
+<div class="settings-subsection">
     <h2>Expert Model <span style="font-weight:normal;font-size:0.85em;color:var(--vscode-descriptionForeground)">— optional, for reasoning-heavy planning phases</span></h2>
     <div class="field-check">
         <input type="checkbox" id="useExpertModel">
@@ -865,7 +1262,7 @@ export function getSettingsPanelHtml(): string {
 </div>
 
 <!-- ── Request Model ── -->
-<div class="section">
+<div class="settings-subsection">
     <h2>Request Model <span style="font-weight:normal;font-size:0.85em;color:var(--vscode-descriptionForeground)">— optional, for chat and /request mode</span></h2>
     <div class="field-check">
         <input type="checkbox" id="useRequestModel">
@@ -1032,7 +1429,7 @@ export function getSettingsPanelHtml(): string {
 </div>
 
 <!-- ── Worker Model ── -->
-<div class="section">
+<div class="settings-subsection">
     <h2>Worker Model <span style="font-weight:normal;font-size:0.85em;color:var(--vscode-descriptionForeground)">— optional, small fast model for auxiliary tasks</span></h2>
     <div class="field-check">
         <input type="checkbox" id="useWorkerModel">
@@ -1197,9 +1594,19 @@ export function getSettingsPanelHtml(): string {
         </div>
     </div>
 </div>
+</section>
 
 <!-- ── Post-Validation ── -->
-<div class="section">
+<section class="settings-page-section" id="section-validation" data-section="validation" data-search="validation post-validation format lint test retries fix loop checks">
+    <div class="section-heading">
+        <span class="section-kicker">Validation</span>
+        <div class="section-title-row">
+            <h2>Post-Validation Checks</h2>
+            <span class="section-badge" id="badgeValidation">Optional</span>
+        </div>
+        <p class="section-description">Configure post-change format, lint, and test checks that can trigger an automatic fix loop.</p>
+    </div>
+<div class="settings-subsection">
     <h2>Post-Validation</h2>
     <div class="field-check">
         <input type="checkbox" id="enablePostValidation">
@@ -1235,9 +1642,19 @@ export function getSettingsPanelHtml(): string {
         </div>
     </div>
 </div>
+</section>
 
 <!-- ── Voice ── -->
-<div class="section">
+<section class="settings-page-section" id="section-voice-media" data-section="voice-media" data-search="voice media speech stt tts wake word audio screenshot ui verification vision chromium viewport capture browser">
+    <div class="section-heading">
+        <span class="section-kicker">Voice &amp; Media</span>
+        <div class="section-title-row">
+            <h2>Voice &amp; Media Tools</h2>
+            <span class="section-badge" id="badgeVoiceMedia">Optional</span>
+        </div>
+        <p class="section-description">Enable speech features and screenshot-backed UI verification tools.</p>
+    </div>
+<div class="settings-subsection">
     <h2>Voice</h2>
     <div class="field-check">
         <input type="checkbox" id="enableStt">
@@ -1296,7 +1713,7 @@ export function getSettingsPanelHtml(): string {
 </div>
 
 <!-- ── UI Verification ── -->
-<div class="section">
+<div class="settings-subsection">
     <h2>UI Verification</h2>
     <div class="field-check">
         <input type="checkbox" id="enableUiVerification">
@@ -1330,10 +1747,18 @@ export function getSettingsPanelHtml(): string {
         <button type="button" id="uiVerificationTestBtn" class="btn-secondary">Run Test Capture</button>
     </div>
 </div>
+</section>
 
 <!-- ── Advanced (collapsible) ── -->
-<details>
-    <summary>Advanced</summary>
+<section class="settings-page-section" id="section-advanced" data-section="advanced" data-search="advanced inline predictions embeddings vision search searxng duckduckgo google bing context refresh threshold parallel thinking citations debug reference chunks runtime">
+    <div class="section-heading">
+        <span class="section-kicker">Advanced</span>
+        <div class="section-title-row">
+            <h2>Advanced Runtime</h2>
+            <span class="section-badge badge-info" id="badgeAdvanced">Advanced</span>
+        </div>
+        <p class="section-description">Tune optional model routing, search, embeddings, citations, context refresh, and debug behavior.</p>
+    </div>
     <div class="field-row">
         <div class="field">
             <label>Inline predictions model <span class="hint">leave empty to share primary model</span></label>
@@ -1486,8 +1911,18 @@ export function getSettingsPanelHtml(): string {
         </div>
     </div>
 
-    <hr style="border:none;border-top:1px solid var(--vscode-panel-border);margin:16px 0;">
-    <h3 style="margin-top:0;margin-bottom:8px;opacity:0.9;">Integrations</h3>
+    </section>
+
+<!-- ── Integrations ── -->
+<section class="settings-page-section" id="section-integrations" data-section="integrations" data-search="integrations github jira servicenow mediawiki wiki token repository coauthor issue task sync external services">
+    <div class="section-heading">
+        <span class="section-kicker">Integrations</span>
+        <div class="section-title-row">
+            <h2>External Services</h2>
+            <span class="section-badge" id="badgeIntegrations">Optional</span>
+        </div>
+        <p class="section-description">Connect Lean AI to external task systems and documentation sources.</p>
+    </div>
     <div class="field-check">
         <input type="checkbox" id="enableIntegrations">
         <div>
@@ -1577,12 +2012,17 @@ export function getSettingsPanelHtml(): string {
         <label>Wiki Password</label>
         <div id="wiki-key-widget"></div>
     </div>
-</details>
+</section>
+
+        </main>
+    </div>
+</div>
 
 <!-- ── Fixed Footer ── -->
 <div class="footer">
     <div class="footer-left">
         <button class="save-btn" id="saveBtn">Save &amp; Restart Backend</button>
+        <span class="dirty-indicator" id="dirtyIndicator">No unsaved changes</span>
         <span class="save-feedback" id="saveFeedback">&#10003; Saved</span>
     </div>
     <a href="#" class="github-link">View documentation on GitHub ↗</a>
@@ -1590,6 +2030,281 @@ export function getSettingsPanelHtml(): string {
 
 <script>
     const vscode = acquireVsCodeApi();
+    const storedUiState = (typeof vscode.getState === 'function' && vscode.getState()) || {};
+    const settingsContent = document.getElementById('settingsContent');
+    const settingsSearchInput = document.getElementById('settingsSearch');
+    const clearSettingsSearchButton = document.getElementById('clearSettingsSearch');
+    const settingsSearchEmpty = document.getElementById('settingsSearchEmpty');
+    const settingsSections = Array.from(document.querySelectorAll('.settings-page-section'));
+    const navButtons = Array.from(document.querySelectorAll('.nav-button'));
+    const saveButton = document.getElementById('saveBtn');
+    const dirtyIndicator = document.getElementById('dirtyIndicator');
+    const sectionIds = settingsSections.map(section => section.dataset.section);
+    let activeSection = normalizeSectionId(storedUiState.activeSection || window.location.hash.replace('#section-', '').replace('#', '') || 'getting-started');
+    let previousSectionBeforeSearch = activeSection;
+    let isHydrating = true;
+    let hasUnsavedChanges = false;
+
+    function normalizeSectionId(sectionId) {
+        return sectionIds.includes(sectionId) ? sectionId : 'getting-started';
+    }
+
+    function persistUiState() {
+        if (typeof vscode.setState !== 'function') { return; }
+        vscode.setState(Object.assign({}, storedUiState, {
+            activeSection,
+            settingsSearch: settingsSearchInput ? settingsSearchInput.value : '',
+        }));
+    }
+
+    function activateSection(sectionId, focusHeading) {
+        activeSection = normalizeSectionId(sectionId);
+        settingsSections.forEach(section => {
+            section.classList.toggle('is-active', section.dataset.section === activeSection);
+        });
+        navButtons.forEach(button => {
+            const isCurrent = button.dataset.target === activeSection;
+            if (isCurrent) {
+                button.setAttribute('aria-current', 'page');
+            } else {
+                button.removeAttribute('aria-current');
+            }
+        });
+        try {
+            history.replaceState(null, '', '#section-' + activeSection);
+        } catch (_err) {
+            window.location.hash = 'section-' + activeSection;
+        }
+        persistUiState();
+        if (focusHeading) {
+            const active = document.querySelector('.settings-page-section.is-active h2');
+            if (active) {
+                active.setAttribute('tabindex', '-1');
+                active.focus({ preventScroll: true });
+            }
+        }
+    }
+
+    function getSectionSearchText(section) {
+        if (!section._searchText) {
+            const ids = Array.from(section.querySelectorAll('[id]')).map(el => el.id).join(' ');
+            section._searchText = ((section.dataset.search || '') + ' ' + section.textContent + ' ' + ids).toLowerCase();
+        }
+        return section._searchText;
+    }
+
+    function applySettingsSearch() {
+        const query = settingsSearchInput ? settingsSearchInput.value.trim().toLowerCase() : '';
+        if (!query) {
+            settingsContent.classList.remove('search-mode');
+            settingsSections.forEach(section => {
+                section.classList.remove('search-hidden', 'search-match');
+            });
+            navButtons.forEach(button => {
+                button.style.display = '';
+            });
+            settingsSearchEmpty.classList.remove('visible');
+            activateSection(previousSectionBeforeSearch || activeSection);
+            persistUiState();
+            return;
+        }
+
+        previousSectionBeforeSearch = activeSection;
+        settingsContent.classList.add('search-mode');
+        let matches = 0;
+        settingsSections.forEach(section => {
+            const matched = getSectionSearchText(section).includes(query);
+            section.classList.toggle('search-hidden', !matched);
+            section.classList.toggle('search-match', matched);
+            if (matched) { matches += 1; }
+        });
+        navButtons.forEach(button => {
+            const section = document.getElementById('section-' + button.dataset.target);
+            const visible = section && !section.classList.contains('search-hidden');
+            button.style.display = visible ? '' : 'none';
+            button.removeAttribute('aria-current');
+        });
+        settingsSearchEmpty.classList.toggle('visible', matches === 0);
+        persistUiState();
+    }
+
+    function setDirty(nextDirty) {
+        hasUnsavedChanges = !!nextDirty;
+        if (saveButton) { saveButton.disabled = !hasUnsavedChanges; }
+        if (dirtyIndicator) {
+            dirtyIndicator.textContent = hasUnsavedChanges ? 'Unsaved changes' : 'No unsaved changes';
+            dirtyIndicator.classList.toggle('unsaved', hasUnsavedChanges);
+        }
+    }
+
+    function markDirty() {
+        if (!isHydrating) {
+            setDirty(true);
+        }
+    }
+
+    function isSettingsFormControl(el) {
+        if (!el || !el.matches || !el.matches('input, select, textarea')) { return false; }
+        if (el.id === 'settingsSearch') { return false; }
+        if (el.id && el.id.indexOf('key-input-') === 0) { return false; }
+        return !!el.closest('#settingsContent');
+    }
+
+    function setStatusText(id, text) {
+        const el = document.getElementById(id);
+        if (el) { el.textContent = text; }
+    }
+
+    function setBadge(id, text, state) {
+        const el = document.getElementById(id);
+        if (!el) { return; }
+        el.textContent = text;
+        el.classList.remove('badge-ok', 'badge-warn', 'badge-info');
+        if (state) { el.classList.add('badge-' + state); }
+    }
+
+    function setSectionBadge(sectionId, text, state) {
+        const names = {
+            'getting-started': ['badgeGettingStarted', 'navBadgeGettingStarted'],
+            models: ['badgeModels', 'navBadgeModels'],
+            validation: ['badgeValidation', 'navBadgeValidation'],
+            'voice-media': ['badgeVoiceMedia', 'navBadgeVoiceMedia'],
+            integrations: ['badgeIntegrations', 'navBadgeIntegrations'],
+            advanced: ['badgeAdvanced', 'navBadgeAdvanced'],
+        };
+        (names[sectionId] || []).forEach(id => setBadge(id, text, state));
+    }
+
+    function getControlValue(id) {
+        const el = document.getElementById(id);
+        if (!el) { return ''; }
+        if (el.type === 'checkbox') { return el.checked; }
+        return (el.value || '').trim();
+    }
+
+    function keyIsSet(provider) {
+        const container = document.getElementById(provider + '-key-widget');
+        return !!(container && container._keySet);
+    }
+
+    function updateSetupStatus() {
+        const providerLabels = {
+            ollama: 'Ollama',
+            openai: 'OpenAI',
+            anthropic: 'Anthropic',
+            gemini: 'Gemini',
+            serve: 'Lean AI Serve',
+        };
+        const providerMeta = {
+            ollama: 'Local models, no key',
+            openai: 'OpenAI-compatible API',
+            anthropic: 'Claude API',
+            gemini: 'Google Gemini API',
+            serve: 'Lean AI Serve API',
+        };
+        const provider = getPrimaryProvider();
+        const model = getPrimaryModel();
+        const requiresKey = provider !== 'ollama';
+        const hasKey = !requiresKey || keyIsSet(provider);
+        const modelReady = !!model;
+        const ready = modelReady && hasKey;
+
+        setStatusText('statusProvider', providerLabels[provider] || provider || 'Provider');
+        setStatusText('statusProviderMeta', providerMeta[provider] || 'Custom provider');
+        setStatusText('statusModel', modelReady ? model : 'Not set');
+        setStatusText('statusModelMeta', modelReady ? 'Primary model configured' : 'Choose a primary model');
+        setStatusText('statusKey', requiresKey ? (hasKey ? 'Configured' : 'Missing') : 'Not required');
+        setStatusText('statusKeyMeta', requiresKey ? 'Stored in OS keychain' : 'Local provider');
+        setSectionBadge('getting-started', ready ? 'Configured' : (hasKey ? 'Needs model' : 'Needs key'), ready ? 'ok' : 'warn');
+
+        const modelRoles = [
+            getControlValue('useExpertModel'),
+            getControlValue('useRequestModel'),
+            getControlValue('useWorkerModel'),
+        ].filter(Boolean).length;
+        setSectionBadge('models', modelRoles ? modelRoles + ' role' + (modelRoles === 1 ? '' : 's') : 'Optional', modelRoles ? 'ok' : '');
+
+        const validationCount = getControlValue('enablePostValidation') ? 1 : 0;
+        setSectionBadge('validation', validationCount ? 'Enabled' : 'Optional', validationCount ? 'ok' : '');
+
+        const mediaCount = [
+            getControlValue('enableStt'),
+            getControlValue('enableTts'),
+            getControlValue('enableWakeWord'),
+            getControlValue('enableUiVerification'),
+        ].filter(Boolean).length;
+        setSectionBadge('voice-media', mediaCount ? mediaCount + ' enabled' : 'Optional', mediaCount ? 'ok' : '');
+
+        const integrationSignals = [
+            getControlValue('enableIntegrations'),
+            getControlValue('githubRepo'),
+            getControlValue('jiraUrl'),
+            getControlValue('servicenowUrl'),
+            getControlValue('wikiUrl'),
+            keyIsSet('github'),
+            keyIsSet('jira'),
+            keyIsSet('servicenow'),
+            keyIsSet('wiki'),
+        ].filter(Boolean).length;
+        setSectionBadge('integrations', integrationSignals ? 'Configured' : 'Optional', integrationSignals ? 'ok' : '');
+
+        const advancedSignals = [
+            getControlValue('inlineModel'),
+            getControlValue('embeddingModel'),
+            getControlValue('enableEmbeddings'),
+            getControlValue('visionModel'),
+            getControlValue('searchProvider') && getControlValue('searchProvider') !== 'duckduckgo',
+            getControlValue('enableRequiredCitations'),
+            getControlValue('enableThinking'),
+            getControlValue('debugPlanning'),
+        ].filter(Boolean).length;
+        setSectionBadge('advanced', advancedSignals ? advancedSignals + ' tuned' : 'Advanced', advancedSignals ? 'info' : 'info');
+
+        const extras = validationCount + mediaCount + (integrationSignals ? 1 : 0);
+        setStatusText('statusExtras', extras ? extras + ' enabled' : 'None enabled');
+        setStatusText('statusExtrasMeta', extras ? 'Optional features configured' : 'Validation, voice, integrations');
+    }
+
+    navButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            if (settingsSearchInput && settingsSearchInput.value) {
+                settingsSearchInput.value = '';
+                applySettingsSearch();
+            }
+            activateSection(button.dataset.target, true);
+        });
+    });
+
+    if (settingsSearchInput) {
+        settingsSearchInput.value = storedUiState.settingsSearch || '';
+        settingsSearchInput.addEventListener('input', applySettingsSearch);
+    }
+    if (clearSettingsSearchButton) {
+        clearSettingsSearchButton.addEventListener('click', () => {
+            if (settingsSearchInput) {
+                settingsSearchInput.value = '';
+                settingsSearchInput.focus();
+            }
+            applySettingsSearch();
+        });
+    }
+
+    document.addEventListener('input', event => {
+        if (isSettingsFormControl(event.target)) {
+            markDirty();
+            updateSetupStatus();
+        }
+    }, true);
+    document.addEventListener('change', event => {
+        if (isSettingsFormControl(event.target)) {
+            markDirty();
+            updateSetupStatus();
+        }
+    }, true);
+
+    activateSection(activeSection);
+    applySettingsSearch();
+    setDirty(false);
 
     // ── Per-model capability heuristics ─────────────────────────────────────
     //
@@ -1759,6 +2474,7 @@ export function getSettingsPanelHtml(): string {
                 '<button class="btn-secondary" onclick="startEdit(\\''+containerId+'\\', \\''+provider+'\\')">Update</button>' +
                 '<button class="btn-danger" onclick="clearKey(\\''+containerId+'\\', \\''+provider+'\\')">Clear</button>' +
                 '</div>';
+            updateSetupStatus();
         }
 
         function renderUnset() {
@@ -1770,6 +2486,7 @@ export function getSettingsPanelHtml(): string {
                 '<input type="password" id="key-input-'+provider+'" placeholder="Paste your API key here...">' +
                 '<button class="btn-primary" onclick="saveKey(\\''+containerId+'\\', \\''+provider+'\\')">Save Key</button>' +
                 '</div>';
+            updateSetupStatus();
         }
 
         function renderEditing() {
@@ -1783,6 +2500,7 @@ export function getSettingsPanelHtml(): string {
                 '<button class="btn-primary" onclick="saveKey(\\''+containerId+'\\', \\''+provider+'\\')">Save Key</button>' +
                 '<button class="btn-secondary" onclick="cancelEdit(\\''+containerId+'\\', \\''+provider+'\\')">Cancel</button>' +
                 '</div>';
+            updateSetupStatus();
         }
 
         container._renderSet = renderSet;
@@ -1856,6 +2574,7 @@ export function getSettingsPanelHtml(): string {
             if (radio) {
                 radio.checked = true;
                 updateProvider();
+                markDirty();
             }
         });
     });
@@ -1874,6 +2593,8 @@ export function getSettingsPanelHtml(): string {
             const sec = document.getElementById(val + '-fields');
             if (sec) sec.classList.add('active');
         }
+        refreshAllCapabilityWarnings();
+        updateSetupStatus();
     }
     document.querySelectorAll('input[name="provider"]').forEach(r => r.addEventListener('change', updateProvider));
 
@@ -1881,7 +2602,7 @@ export function getSettingsPanelHtml(): string {
     document.querySelectorAll('#expertProviderGroup .radio-option').forEach(opt => {
         opt.addEventListener('click', function() {
             const radio = this.querySelector('input[type="radio"]');
-            if (radio) { radio.checked = true; updateExpertProvider(); }
+            if (radio) { radio.checked = true; updateExpertProvider(); markDirty(); }
         });
     });
 
@@ -1896,6 +2617,8 @@ export function getSettingsPanelHtml(): string {
             const sec = document.getElementById('expert-' + val + '-fields');
             if (sec) sec.classList.add('active');
         }
+        refreshAllCapabilityWarnings();
+        updateSetupStatus();
     }
     document.querySelectorAll('input[name="expertProvider"]').forEach(r => r.addEventListener('change', updateExpertProvider));
 
@@ -1908,7 +2631,7 @@ export function getSettingsPanelHtml(): string {
     document.querySelectorAll('#requestProviderGroup .radio-option').forEach(opt => {
         opt.addEventListener('click', () => {
             const radio = opt.querySelector('input[type="radio"]');
-            if (radio) { radio.checked = true; updateRequestProvider(); }
+            if (radio) { radio.checked = true; updateRequestProvider(); markDirty(); }
         });
     });
 
@@ -1923,6 +2646,8 @@ export function getSettingsPanelHtml(): string {
             const sec = document.getElementById('request-' + val + '-fields');
             if (sec) sec.classList.add('active');
         }
+        refreshAllCapabilityWarnings();
+        updateSetupStatus();
     }
     document.querySelectorAll('input[name="requestProvider"]').forEach(r => r.addEventListener('change', updateRequestProvider));
 
@@ -1935,7 +2660,7 @@ export function getSettingsPanelHtml(): string {
     document.querySelectorAll('#workerProviderGroup .radio-option').forEach(opt => {
         opt.addEventListener('click', () => {
             const radio = opt.querySelector('input[type="radio"]');
-            if (radio) { radio.checked = true; updateWorkerProvider(); }
+            if (radio) { radio.checked = true; updateWorkerProvider(); markDirty(); }
         });
     });
 
@@ -1950,6 +2675,8 @@ export function getSettingsPanelHtml(): string {
             const sec = document.getElementById('worker-' + val + '-fields');
             if (sec) sec.classList.add('active');
         }
+        refreshAllCapabilityWarnings();
+        updateSetupStatus();
     }
     document.querySelectorAll('input[name="workerProvider"]').forEach(r => r.addEventListener('change', updateWorkerProvider));
 
@@ -1994,6 +2721,8 @@ export function getSettingsPanelHtml(): string {
         });
         document.getElementById('searxngUrlField').style.display =
             opt.value === 'searxng' ? '' : 'none';
+        markDirty();
+        updateSetupStatus();
     }
 
     document.getElementById('searchProviderTrigger').addEventListener('click', (e) => {
@@ -2070,6 +2799,9 @@ export function getSettingsPanelHtml(): string {
                     var input = document.getElementById(inputId);
                     if (input) { input.value = el.dataset.value; }
                     document.getElementById(comboboxId).classList.remove('open');
+                    markDirty();
+                    refreshAllCapabilityWarnings();
+                    updateSetupStatus();
                 });
             });
         });
@@ -2297,6 +3029,8 @@ export function getSettingsPanelHtml(): string {
         };
 
         vscode.postMessage({ type: 'saveSettings', values });
+        setDirty(false);
+        updateSetupStatus();
 
         const fb = document.getElementById('saveFeedback');
         fb.classList.add('visible');
@@ -2592,6 +3326,14 @@ export function getSettingsPanelHtml(): string {
 
         // Populate Ollama model dropdowns
         requestOllamaModels();
+        updateSetupStatus();
+        setDirty(false);
+        isHydrating = false;
+        if (settingsSearchInput && settingsSearchInput.value) {
+            applySettingsSearch();
+        } else {
+            activateSection(activeSection);
+        }
     });
 </script>
 </body>
