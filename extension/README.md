@@ -96,12 +96,28 @@ Attach screenshots, UI mockups, error messages, or any image to the chat. A sepa
 
 Optional voice interaction for hands-free coding: speak your requests, hear responses read aloud, and trigger recording with a wake word.
 
+> **Ubuntu 26.04 / Python 3.14 note:** The `voice` extra currently needs Python **3.13 or earlier**. The TTS dependency `kokoro-onnx` does not yet support Python 3.14, so `pip install "lean-ai[voice]"` will fail if your backend is using the distro-default Python 3.14 interpreter. Create the backend virtualenv with `python3.13` (or another Python `<3.14`) and point Lean AI at that venv with `lean-ai.pythonPath` and `lean-ai.backendDir`.
+
 **Setup:**
 
 ```bash
 # Install voice dependencies (requires portaudio system library)
-# Ubuntu/Debian:
+# Ubuntu 26.04 / Debian (recommended: pin the backend venv to Python 3.13)
+sudo apt install portaudio19-dev build-essential
+cd /path/to/lean_ai/backend
+python3.13 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -e ".[voice]"
+
+# Then point the extension at the pinned backend:
+# lean-ai.backendDir = /path/to/lean_ai/backend
+# lean-ai.pythonPath = /path/to/lean_ai/backend/.venv/bin/python
+
+# Other Ubuntu/Debian setups that already use Python 3.13 or earlier:
 sudo apt install portaudio19-dev
+pip install "lean-ai[voice]"
+
 # macOS:
 brew install portaudio
 

@@ -58,6 +58,19 @@ cd backend
 pip install -e ".[dev]"
 ```
 
+For voice features on Ubuntu 26.04 or any environment where `python3` is already 3.14+, create the backend virtualenv with Python 3.13 first. The current `voice` extra depends on `kokoro-onnx`, which does not yet support Python 3.14.
+
+```bash
+sudo apt install portaudio19-dev build-essential
+cd backend
+python3.13 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -e ".[voice]"
+```
+
+If you're running the extension against that source checkout, set `lean-ai.backendDir` to the `backend/` directory and `lean-ai.pythonPath` to `backend/.venv/bin/python`.
+
 Need cloud providers or reference library support? See [optional extras](docs/configuration.md#installation-extras).
 
 Start the server manually:
