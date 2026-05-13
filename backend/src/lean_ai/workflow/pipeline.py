@@ -11,10 +11,6 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from fastapi import WebSocketDisconnect
-
-from lean_ai.workflow.ws_protocol import WorkflowSession
-
 from lean_ai.config import settings
 from lean_ai.llm.plan_schema import ExecutionPlan, plan_to_markdown
 from lean_ai.llm.planner import create_plan
@@ -24,6 +20,7 @@ from lean_ai.workflow.fix_mode import _run_fix
 from lean_ai.workflow.validation import _effective_post_commands
 from lean_ai.workflow.ws_dispatcher import WSMessageDispatcher
 from lean_ai.workflow.ws_handler import ws_send
+from lean_ai.workflow.ws_protocol import WorkflowSession, WorkflowSessionClosedError
 
 if TYPE_CHECKING:
     from lean_ai.llm.facade import LLMClient
@@ -287,7 +284,7 @@ async def _wait_for_approval(
     while True:
         msg = await dispatcher.wait_for_approval() if dispatcher else None
         if msg is None:
-            raise WebSocketDisconnect()
+            raise WorkflowSessionClosedError()
 
         if msg.get("type") == "approve":
             logger.info("Plan approved by user")
@@ -348,7 +345,7 @@ async def _wait_for_approval(
                         "recoverable": False,
                     },
                 )
-                raise WebSocketDisconnect()
+                raise WorkflowSessionClosedError()
 
             await ws_send(
                 ws,

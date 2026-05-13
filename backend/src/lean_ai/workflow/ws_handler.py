@@ -7,8 +7,7 @@ that wraps a raw FastAPI ``WebSocket``.
 
 import asyncio
 import logging
-
-from fastapi import WebSocket
+from typing import Any, Protocol
 
 from lean_ai.workflow.ws_protocol import WorkflowSession
 
@@ -18,10 +17,18 @@ logger = logging.getLogger(__name__)
 # ── FastAPI adapter ──────────────────────────────────────────────
 
 
+class _WebSocketLike(Protocol):
+    """Small structural interface used by the FastAPI adapter."""
+
+    client: Any
+
+    async def send_json(self, data: dict[str, object]) -> None: ...
+
+
 class FastAPIWorkflowSession:
     """Wraps a raw FastAPI ``WebSocket`` to satisfy ``WorkflowSession``."""
 
-    def __init__(self, ws: WebSocket) -> None:
+    def __init__(self, ws: _WebSocketLike) -> None:
         self._ws = ws
 
     async def send(self, data: dict[str, object]) -> None:

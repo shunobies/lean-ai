@@ -418,7 +418,7 @@ def fire_plan_decision_hook(
     plan_after: str | None,
     decision: str,
     revision_count: int = 0,
-    ws: WebSocket | None,
+    ws: WorkflowSession | None,
 ) -> None:
     """Fire-and-forget wrapper for on_plan_decision."""
     from lean_ai.workflow.callbacks import log_task_exception
@@ -454,7 +454,7 @@ def fire_validation_attempt_hook(
     succeeded: bool,
     failures_before: dict | None = None,
     failures_after: dict | None = None,
-    ws: WebSocket | None,
+    ws: WorkflowSession | None,
 ) -> None:
     """Fire-and-forget wrapper for on_validation_attempt_complete."""
     from lean_ai.workflow.callbacks import log_task_exception

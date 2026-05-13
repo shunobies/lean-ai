@@ -9,8 +9,11 @@ from __future__ import annotations
 
 from typing import Literal, Protocol, TypedDict
 
-
 # ── WorkflowSession protocol ──────────────────────────────────────
+
+
+class WorkflowSessionClosedError(Exception):
+    """Raised when the workflow session closes while awaiting user input."""
 
 
 class WorkflowSession(Protocol):

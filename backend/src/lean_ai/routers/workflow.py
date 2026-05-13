@@ -35,6 +35,7 @@ from lean_ai.tools.git_ops import (
 from lean_ai.workflow.pipeline import run_workflow
 from lean_ai.workflow.ws_dispatcher import WorkflowCancelledError, WSMessageDispatcher
 from lean_ai.workflow.ws_handler import FastAPIWorkflowSession
+from lean_ai.workflow.ws_protocol import WorkflowSessionClosedError
 
 logger = logging.getLogger(__name__)
 
@@ -443,7 +444,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
                             )
                     finally:
                         await db.close()
-                except WebSocketDisconnect:
+                except (WebSocketDisconnect, WorkflowSessionClosedError):
                     raise
                 except Exception as e:
                     logger.exception("Workflow error for session %s", session_id)
@@ -590,7 +591,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
                         await update_session(db, session_id, status="completed")
                     finally:
                         await db.close()
-                except WebSocketDisconnect:
+                except (WebSocketDisconnect, WorkflowSessionClosedError):
                     raise
                 except Exception as e:
                     logger.exception("Resume error for session %s", session_id)
@@ -610,7 +611,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
 
             # approve_tool / cancel handled by WSMessageDispatcher during workflow
 
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, WorkflowSessionClosedError):
         logger.info("WebSocket disconnected for session %s", session_id)
     except WorkflowCancelledError:
         logger.info("WebSocket workflow cancelled for session %s", session_id)
