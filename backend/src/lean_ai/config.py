@@ -468,9 +468,9 @@ class Settings(BaseSettings):
     # ── Claim verification ──
     enable_claim_verification: bool = True  # Nudge LLM to verify external claims via web search
 
-    # ── Phase 5 strict-test contract (programmatic-only, hooks required) ──
+    # ── TDD / strict-test contract (programmatic-only, hooks required) ──
     enable_strict_test_contract: bool = True
-    # Opt-in tool-backed exploration turn inside Phase 5 when Phase 2's
+    # Opt-in tool-backed exploration turn inside the legacy Phase 5 helper when Phase 2's
     # testing_inventory is thin. Costs extra turns; disabled by default.
     enable_phase5_investigation: bool = False
     # Regression file convention — path-component regex. Case-insensitive
@@ -480,10 +480,10 @@ class Settings(BaseSettings):
         r"(?i)(?:^|[/\\])regressions?(?:[/\\]|[_-][^/\\]*\.[A-Za-z0-9]+$)"
     )
     # Layer 9 — Core-functionality detection. When enabled, Phase 3 tags
-    # load-bearing entities and Phase 5 MUST produce regression tests for
-    # each tag. Prune via approval UI.
+    # load-bearing entities and active TDD planning must produce regression
+    # tests for each tag. Prune via approval UI.
     enable_core_functionality_tagging: bool = True
-    # Minimum confidence to auto-promote a tag into Phase 5's mandatory
+    # Minimum confidence to auto-promote a tag into the mandatory
     # regression list. "low" lets the user prune aggressively; "high"
     # only enforces high-confidence tags.
     core_functionality_min_confidence: str = "medium"  # "low" | "medium" | "high"

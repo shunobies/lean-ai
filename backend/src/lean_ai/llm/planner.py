@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lean_ai.config import settings
-from lean_ai.workflow.ws_protocol import WorkflowSession
 from lean_ai.llm.plan_schema import (
     IMPLEMENTATION_STEP_TOOLS,
     DesignAndRisks,
@@ -59,6 +58,7 @@ from lean_ai.llm.tool_definitions import (
     build_design_tools,
     build_planning_tools,
 )
+from lean_ai.workflow.ws_protocol import WorkflowSession
 
 if TYPE_CHECKING:
     from lean_ai.llm.facade import LLMClient
@@ -484,7 +484,10 @@ async def create_plan(
             phase_timings["phase_3_design_and_risks"],
         )
         logger.info(
-            "Phase 3 synthesis: naming=%d designs=%d missing=%d deps=%d risks=%d citations=%d in %.1fs",
+            (
+                "Phase 3 synthesis: naming=%d designs=%d missing=%d deps=%d "
+                "risks=%d citations=%d in %.1fs"
+            ),
             len(design_and_risks_obj.naming_conventions),
             len(design_and_risks_obj.change_designs),
             len(design_and_risks_obj.missing_files),
@@ -544,15 +547,6 @@ async def create_plan(
             phase=4,
         )
 
-        await _send_stage(
-            ws,
-            "Phase 4: Assembling structured plan...",
-            model=expert.model_name,
-            phase=4,
-        )
-        logger.info("Planning Phase 4: Structured plan assembly")
-        t0 = time.monotonic()
-
         phase4_scope = scope
         phase4_project_context = project_context
 
@@ -570,89 +564,158 @@ async def create_plan(
         dependency_order_block = _format_dependency_order(design_and_risks_obj)
         naming_conventions_block = _format_naming_conventions_section(design_and_risks_obj)
         risk_assessment_block = _format_risk_assessment_section(design_and_risks_obj)
-
-        plan = await _chat_structured_with_repair(
-            messages=[
-                {"role": "system", "content": PLAN_ASSEMBLY_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": registry.format(
-                        "planning.assembly_user",
-                        task=task,
-                        design_and_risks=design_and_risks,
-                        file_summary=file_summary,
-                        project_context=(
-                            f"PROJECT CONTEXT:\n{phase4_project_context}\n\n"
-                            if phase4_project_context
-                            else ""
-                        ),
-                        scope=phase4_scope,
-                        missing_files=(
-                            "REQUIRED MISSING FILES — these were identified "
-                            "during risk assessment as files that MUST exist "
-                            "for the app to work. Each one MUST have a "
-                            "corresponding create_file or edit_file step in "
-                            f"the plan:\n{missing_files}\n\n"
-                            if missing_files
-                            else ""
-                        ),
-                        test_command=test_command or "(none configured yet)",
-                        testing_inventory=testing_inventory,
-                        verification_targets=verification_targets or "(derive from affected behavioral files)",
-                        security_concerns=security_concerns or "(none identified by Phase 3)",
-                        core_functionality=core_functionality,
-                        dependency_order=dependency_order_block,
-                        naming_conventions=naming_conventions_block,
-                        risk_assessment=risk_assessment_block,
-                    ),
-                },
-            ],
-            schema=ExecutionPlan,
-            expert=expert,
-            max_tokens=plan_assembly_max_tokens,
-            artifact_label="structured plan",
-            ws=ws,
-            phase=4,
-            on_thinking=on_thinking,
-            on_metrics=on_metrics,
-            on_metrics_reset=on_metrics_reset,
+        missing_files_block = (
+            "REQUIRED MISSING FILES — these were identified "
+            "during risk assessment as files that MUST exist "
+            "for the app to work. Each one MUST have a "
+            "corresponding create_file or edit_file step in "
+            f"the plan:\n{missing_files}\n\n"
+            if missing_files
+            else ""
         )
 
-        phase_timings["phase_4_plan_assembly"] = time.monotonic() - t0
+        tdd_verification: VerificationPlan | None = None
+        final_assembly_timing_key = "phase_4_plan_assembly"
+
+        if settings.enable_strict_test_contract:
+            draft_plan, draft_elapsed = await _assemble_phase4_plan(
+                task=task,
+                design_and_risks=design_and_risks,
+                file_summary=file_summary,
+                project_context=phase4_project_context,
+                scope=phase4_scope,
+                missing_files=missing_files_block,
+                test_command=test_command,
+                testing_inventory=testing_inventory,
+                verification_targets=verification_targets,
+                security_concerns=security_concerns,
+                core_functionality=core_functionality,
+                dependency_order=dependency_order_block,
+                naming_conventions=naming_conventions_block,
+                risk_assessment=risk_assessment_block,
+                tdd_guidance="",
+                planned_tdd_tests="",
+                expert=expert,
+                plan_assembly_max_tokens=plan_assembly_max_tokens,
+                ws=ws,
+                on_thinking=on_thinking,
+                on_metrics=on_metrics,
+                on_metrics_reset=on_metrics_reset,
+                stage_summary="Phase 4b: Drafting implementation plan for TDD...",
+                done_prefix="Draft implementation plan assembled",
+                artifact_label="draft structured plan",
+            )
+            phase_timings["phase_4b_draft_plan_assembly"] = draft_elapsed
+            if settings.enable_core_functionality_tagging:
+                draft_plan.core_functionality = list(design_and_risks_obj.core_functionality)
+            _save_debug_phase(
+                repo_root,
+                session_id,
+                "phase_4b_draft_plan",
+                draft_plan.model_dump_json(indent=2),
+                phase_timings["phase_4b_draft_plan_assembly"],
+            )
+
+            tdd_verification, tdd_elapsed = await _run_phase_4b_tdd_test_design(
+                draft_plan=draft_plan,
+                task=task,
+                testing_inventory=testing_inventory,
+                verification_targets=verification_targets,
+                security_concerns=security_concerns,
+                core_functionality=core_functionality,
+                dependency_order=dependency_order_block,
+                naming_conventions=naming_conventions_block,
+                risk_assessment=risk_assessment_block,
+                expert=expert,
+                plan_assembly_max_tokens=plan_assembly_max_tokens,
+                ws=ws,
+                on_thinking=on_thinking,
+                on_metrics=on_metrics,
+                on_metrics_reset=on_metrics_reset,
+            )
+            phase_timings["phase_4b_tdd_test_design"] = tdd_elapsed
+            _save_debug_phase(
+                repo_root,
+                session_id,
+                "phase_4b_tdd_test_design",
+                tdd_verification.model_dump_json(indent=2),
+                phase_timings["phase_4b_tdd_test_design"],
+            )
+
+            tdd_guidance = (
+                "TDD MODE IS ACTIVE.\n"
+                "- A dedicated pre-implementation test phase will run before "
+                "the implementation steps.\n"
+                "- Keep authored test creation in `tdd_test_steps` and keep "
+                "`steps` focused on implementation.\n"
+                "- Implementation `success_checks` must reference the "
+                "planned tests by concrete file path or test command.\n\n"
+            )
+            planned_tdd_tests = _render_tdd_test_plan_for_phase4(tdd_verification)
+            plan, final_elapsed = await _assemble_phase4_plan(
+                task=task,
+                design_and_risks=design_and_risks,
+                file_summary=file_summary,
+                project_context=phase4_project_context,
+                scope=phase4_scope,
+                missing_files=missing_files_block,
+                test_command=test_command,
+                testing_inventory=testing_inventory,
+                verification_targets=verification_targets,
+                security_concerns=security_concerns,
+                core_functionality=core_functionality,
+                dependency_order=dependency_order_block,
+                naming_conventions=naming_conventions_block,
+                risk_assessment=risk_assessment_block,
+                tdd_guidance=tdd_guidance,
+                planned_tdd_tests=planned_tdd_tests,
+                expert=expert,
+                plan_assembly_max_tokens=plan_assembly_max_tokens,
+                ws=ws,
+                on_thinking=on_thinking,
+                on_metrics=on_metrics,
+                on_metrics_reset=on_metrics_reset,
+                stage_summary="Phase 4c: Assembling TDD implementation plan...",
+                done_prefix="TDD implementation plan assembled",
+                artifact_label="structured TDD plan",
+            )
+            final_assembly_timing_key = "phase_4c_plan_assembly"
+            phase_timings[final_assembly_timing_key] = final_elapsed
+            _attach_tdd_contract(plan, tdd_verification.steps)
+        else:
+            plan, final_elapsed = await _assemble_phase4_plan(
+                task=task,
+                design_and_risks=design_and_risks,
+                file_summary=file_summary,
+                project_context=phase4_project_context,
+                scope=phase4_scope,
+                missing_files=missing_files_block,
+                test_command=test_command,
+                testing_inventory=testing_inventory,
+                verification_targets=verification_targets,
+                security_concerns=security_concerns,
+                core_functionality=core_functionality,
+                dependency_order=dependency_order_block,
+                naming_conventions=naming_conventions_block,
+                risk_assessment=risk_assessment_block,
+                tdd_guidance="",
+                planned_tdd_tests="",
+                expert=expert,
+                plan_assembly_max_tokens=plan_assembly_max_tokens,
+                ws=ws,
+                on_thinking=on_thinking,
+                on_metrics=on_metrics,
+                on_metrics_reset=on_metrics_reset,
+                stage_summary="Phase 4: Assembling structured plan...",
+                done_prefix="Plan assembled",
+                artifact_label="structured plan",
+            )
+            phase_timings[final_assembly_timing_key] = final_elapsed
 
         if settings.enable_core_functionality_tagging:
             plan.core_functionality = list(design_and_risks_obj.core_functionality)
-
-        impl_steps = [s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS]
-        stripped_count = len(plan.steps) - len(impl_steps)
-        if stripped_count:
-            stripped_tools = [s.tool for s in plan.steps if s.tool not in IMPLEMENTATION_STEP_TOOLS]
-            logger.warning(
-                "Stripped %d non-implementation steps from Phase 4 plan: %s",
-                stripped_count,
-                stripped_tools,
-            )
-            for i, step in enumerate(impl_steps, 1):
-                step.step_number = i
-            plan.steps = impl_steps
-        if not plan.steps and stripped_count:
-            logger.error(
-                "Phase 4 produced zero implementation steps — all %d steps "
-                "were exploration/verification tools. file_summary may be "
-                "insufficient.",
-                stripped_count,
-            )
-
-        has_implementation = any(s.tool in ("create_file", "edit_file") for s in plan.steps)
-        if plan.steps and not has_implementation:
-            logger.warning(
-                "Phase 4 plan has %d steps but none are create_file or "
-                "edit_file — plan may be exploration-only. Tools: %s",
-                len(plan.steps),
-                [s.tool for s in plan.steps],
-            )
-
-        _sync_affected_files_from_steps(plan)
+        if tdd_verification is None:
+            plan.tdd_mode = False
 
         plan_warnings, is_blocking = _run_plan_validations(
             plan,
@@ -703,10 +766,14 @@ async def create_plan(
                 on_metrics=on_metrics,
                 on_metrics_reset=on_metrics_reset,
             )
-            plan.steps = [s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS]
-            for i, step in enumerate(plan.steps, 1):
-                step.step_number = i
-            _sync_affected_files_from_steps(plan)
+            _strip_non_implementation_steps(plan)
+            if settings.enable_core_functionality_tagging:
+                plan.core_functionality = list(design_and_risks_obj.core_functionality)
+            if tdd_verification is not None:
+                _attach_tdd_contract(plan, tdd_verification.steps)
+            else:
+                plan.tdd_mode = False
+                _sync_affected_files_from_steps(plan)
             plan_warnings, is_blocking = _run_plan_validations(
                 plan,
                 file_summary_obj,
@@ -728,21 +795,14 @@ async def create_plan(
             session_id,
             "phase_4_plan",
             plan.model_dump_json(indent=2),
-            phase_timings["phase_4_plan_assembly"],
+            phase_timings[final_assembly_timing_key],
         )
         _save_debug_phase(
             repo_root,
             session_id,
             "phase_4_plan_markdown",
             plan_to_markdown(plan),
-            phase_timings["phase_4_plan_assembly"],
-        )
-
-        await _send_stage_done(
-            ws,
-            f"Plan assembled — {len(plan.steps)} steps across {len(plan.affected_files)} file(s)",
-            model=expert.model_name,
-            phase=4,
+            phase_timings[final_assembly_timing_key],
         )
 
         phase_timings["total"] = time.monotonic() - plan_start
@@ -791,7 +851,10 @@ async def create_plan(
             )
         await _send_stage_done(
             ws,
-            f"Fallback plan assembled — {len(plan.steps)} steps across {len(plan.affected_files)} file(s)",
+            (
+                "Fallback plan assembled — "
+                f"{len(plan.steps)} steps across {len(plan.affected_files)} file(s)"
+            ),
             model=expert.model_name,
             phase=4,
         )
@@ -815,13 +878,16 @@ async def _run_phase5_verification(
     on_metrics: Callable | None,
     on_metrics_reset: Callable | None,
 ) -> float:
-    """Run Phase 5: Verification step generation.
+    """Run the legacy Phase 5 verification helper.
 
-    Appends test creation + test execution steps to the plan (normal
-    mode) or stores them separately in ``plan.tdd_test_steps`` (TDD
-    mode). Receives the structured Phase 2 ``FileSummary`` and Phase 3
-    ``DesignAndRisks`` so the user prompt can target specific files
-    for coverage and cite critical_risks as security cases.
+    This path is retained for compatibility tests and older debug
+    artifacts. Active TDD planning now happens in Phase 4b/4c. The
+    helper still appends test creation + test execution steps to the
+    plan (normal mode) or stores them separately in
+    ``plan.tdd_test_steps`` (legacy TDD mode). Receives the structured
+    Phase 2 ``FileSummary`` and Phase 3 ``DesignAndRisks`` so the user
+    prompt can target specific files for coverage and cite
+    critical_risks as security cases.
 
     Test-path convention warnings are appended to
     ``plan.plan_validation_warnings`` so the approval UI (the Phase 4
@@ -1341,7 +1407,7 @@ def _check_edit_create_consistency(
 def _sync_affected_files_from_steps(plan: ExecutionPlan) -> None:
     """Ensure affected_files includes every declared mutation target."""
     seen = set(plan.affected_files)
-    for step in plan.steps:
+    for step in list(plan.tdd_test_steps) + list(plan.steps):
         if step.file_path and step.file_path not in seen and step.tool in IMPLEMENTATION_STEP_TOOLS:
             plan.affected_files.append(step.file_path)
             seen.add(step.file_path)
@@ -1368,16 +1434,11 @@ def _step_contract_haystack(step: PlanStep) -> str:
     return "\n".join(part for part in parts if part)
 
 
-def _check_success_checks_cover_affected_files(
+def _collect_executable_code_paths(
     plan: ExecutionPlan,
     file_summary: FileSummary | None,
-) -> tuple[list[str], bool]:
-    """Block when executable affected files have no test/success-check contract.
-
-    Returns ``(errors, is_blocking)``. Missing success checks are
-    blocking — the plan must be revised to include concrete success
-    checks for every affected executable file.
-    """
+) -> set[str]:
+    """Return executable affected-file paths that need verification coverage."""
     code_paths: set[str] = set()
     if file_summary is not None:
         for obs in file_summary.files_to_create:
@@ -1390,21 +1451,73 @@ def _check_success_checks_cover_affected_files(
         for path in plan.affected_files:
             if _has_executable_extension(path):
                 code_paths.add(path)
+    return code_paths
 
+
+def _path_is_covered_in_step(path: str, step: PlanStep) -> bool:
+    """Return True when a plan step clearly references *path*."""
+    haystack = _step_contract_haystack(step)
+    filename = path.rsplit("/", 1)[-1]
+    return path in haystack or filename in haystack
+
+
+def _check_success_checks_cover_affected_files(
+    plan: ExecutionPlan,
+    file_summary: FileSummary | None,
+) -> tuple[list[str], bool]:
+    """Block when executable affected files have no test/success-check contract.
+
+    Returns ``(errors, is_blocking)``. Missing success checks are
+    blocking — the plan must be revised to include concrete success
+    checks for every affected executable file.
+    """
+    code_paths = _collect_executable_code_paths(plan, file_summary)
     if not code_paths:
         return [], False
 
     warnings: list[str] = []
     for code_path in sorted(code_paths):
-        filename = code_path.rsplit("/", 1)[-1]
         covered = False
         for step in plan.steps:
-            haystack = _step_contract_haystack(step)
-            if (code_path in haystack or filename in haystack) and step.success_checks:
+            if _path_is_covered_in_step(code_path, step) and step.success_checks:
                 covered = True
                 break
         if not covered:
             warnings.append(f"affected file has no success-check coverage: {code_path}")
+    return warnings, bool(warnings)
+
+
+def _check_tdd_test_contract_cover_affected_files(
+    plan: ExecutionPlan,
+    file_summary: FileSummary | None,
+) -> tuple[list[str], bool]:
+    """Block when TDD plans omit both authored tests and executable checks.
+
+    In TDD mode, affected executable files need at least one of:
+    1. A Phase 4b-authored test step in ``tdd_test_steps`` that references
+       the file or its primary symbol, or
+    2. An implementation-step success check that references the file.
+    """
+    if not plan.tdd_mode:
+        return [], False
+
+    code_paths = _collect_executable_code_paths(plan, file_summary)
+    if not code_paths:
+        return [], False
+
+    warnings: list[str] = []
+    for code_path in sorted(code_paths):
+        success_checked = any(
+            _path_is_covered_in_step(code_path, step) and step.success_checks
+            for step in plan.steps
+        )
+        tdd_tested = any(
+            _path_is_covered_in_step(code_path, step) for step in plan.tdd_test_steps
+        )
+        if not (success_checked or tdd_tested):
+            warnings.append(
+                f"TDD contract missing authored test or success-check coverage: {code_path}"
+            )
     return warnings, bool(warnings)
 
 
@@ -1473,12 +1586,15 @@ def _check_core_functionality_success_checked(
         entity = tag.entity.strip()
         file_path = tag.file_path.strip()
         covered = False
-        for step in plan.steps:
+        for step in list(plan.tdd_test_steps) + list(plan.steps):
             haystack = _step_contract_haystack(step).lower()
             if (
-                ((entity and entity.lower() in haystack) or (file_path and file_path.lower() in haystack))
+                (
+                    (entity and entity.lower() in haystack)
+                    or (file_path and file_path.lower() in haystack)
+                )
                 and "regression" in haystack
-                and step.success_checks
+                and (step.success_checks or step in plan.tdd_test_steps)
             ):
                 covered = True
                 break
@@ -1515,6 +1631,10 @@ def _run_plan_validations(
     is_blocking = is_blocking or b
 
     w, b = _check_success_checks_cover_affected_files(plan, file_summary)
+    warnings.extend(w)
+    is_blocking = is_blocking or b
+
+    w, b = _check_tdd_test_contract_cover_affected_files(plan, file_summary)
     warnings.extend(w)
     is_blocking = is_blocking or b
 
@@ -1568,11 +1688,27 @@ async def _run_phase_4a(
 
     results: list[str] = []
     for filepath in affected_files:
-        basename = filepath.rsplit("/", 1)[-1].rsplit(".", 1)[0] if "." in filepath else filepath.rsplit("/", 1)[-1]
+        basename = (
+            filepath.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+            if "." in filepath
+            else filepath.rsplit("/", 1)[-1]
+        )
         # Search for test files referencing this source file
         try:
             proc = subprocess.run(
-                ["grep", "-rl", "--include=*.py", "--include=*.ts", "--include=*.js", "--include=*.test.*", "--include=*.spec.*", "--include=*_test.*", "--include=*test_*", basename, str(Path(repo_root))],
+                [
+                    "grep",
+                    "-rl",
+                    "--include=*.py",
+                    "--include=*.ts",
+                    "--include=*.js",
+                    "--include=*.test.*",
+                    "--include=*.spec.*",
+                    "--include=*_test.*",
+                    "--include=*test_*",
+                    basename,
+                    str(Path(repo_root)),
+                ],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -1606,8 +1742,12 @@ def _format_test_inventory_for_phase4(
     Returns:
         Combined test inventory string for Phase 4 prompt.
     """
+    no_tests_found = (
+        "(no existing test files discovered via grep — use test_command "
+        "for verification)"
+    )
     parts: list[str] = []
-    if test_discovery and test_discovery != "(no existing test files discovered via grep — use test_command for verification)":
+    if test_discovery and test_discovery != no_tests_found:
         parts.append("## Discovered Test Files (Phase 4a grep-based discovery)")
         parts.append(test_discovery)
     if testing_inventory:
@@ -1616,6 +1756,232 @@ def _format_test_inventory_for_phase4(
     if not parts:
         return "(no test infrastructure detected)"
     return "\n\n".join(parts)
+
+
+def _render_tdd_test_plan_for_phase4(verification: VerificationPlan) -> str:
+    """Render authored TDD test steps for the final Phase 4 assembly prompt."""
+    if not verification.steps:
+        return ""
+    lines = ["PLANNED TDD TEST STEPS (Phase 4b):"]
+    for step in verification.steps:
+        target = step.file_path or "(no file path provided)"
+        lines.append(f"- Step {step.step_number}: {target}")
+        if step.instruction:
+            lines.append(f"  instruction: {step.instruction}")
+        if step.reason:
+            lines.append(f"  reason: {step.reason}")
+    return "\n".join(lines) + "\n\n"
+
+
+def _attach_tdd_contract(
+    plan: ExecutionPlan,
+    tdd_test_steps: list[PlanStep],
+) -> None:
+    """Attach TDD test steps to a plan and normalize numbering."""
+    normalized_test_steps = list(tdd_test_steps)
+    for i, step in enumerate(normalized_test_steps, 1):
+        step.step_number = i
+    offset = len(normalized_test_steps)
+    for i, step in enumerate(plan.steps, offset + 1):
+        step.step_number = i
+    plan.tdd_mode = bool(normalized_test_steps)
+    plan.tdd_test_steps = normalized_test_steps
+    _sync_affected_files_from_steps(plan)
+
+
+def _strip_non_implementation_steps(plan: ExecutionPlan) -> None:
+    """Keep only implementation-compatible steps in ``plan.steps``."""
+    impl_steps = [s for s in plan.steps if s.tool in IMPLEMENTATION_STEP_TOOLS]
+    stripped_count = len(plan.steps) - len(impl_steps)
+    if stripped_count:
+        stripped_tools = [s.tool for s in plan.steps if s.tool not in IMPLEMENTATION_STEP_TOOLS]
+        logger.warning(
+            "Stripped %d non-implementation steps from Phase 4 plan: %s",
+            stripped_count,
+            stripped_tools,
+        )
+        for i, step in enumerate(impl_steps, 1):
+            step.step_number = i
+        plan.steps = impl_steps
+    if not plan.steps and stripped_count:
+        logger.error(
+            "Phase 4 produced zero implementation steps — all %d steps "
+            "were exploration/verification tools. file_summary may be "
+            "insufficient.",
+            stripped_count,
+        )
+
+    has_implementation = any(s.tool in ("create_file", "edit_file") for s in plan.steps)
+    if plan.steps and not has_implementation:
+        logger.warning(
+            "Phase 4 plan has %d steps but none are create_file or "
+            "edit_file — plan may be exploration-only. Tools: %s",
+            len(plan.steps),
+            [s.tool for s in plan.steps],
+        )
+
+
+async def _assemble_phase4_plan(
+    *,
+    task: str,
+    design_and_risks: str,
+    file_summary: str,
+    project_context: str,
+    scope: str,
+    missing_files: str,
+    test_command: str,
+    testing_inventory: str,
+    verification_targets: str,
+    security_concerns: str,
+    core_functionality: str,
+    dependency_order: str,
+    naming_conventions: str,
+    risk_assessment: str,
+    tdd_guidance: str,
+    planned_tdd_tests: str,
+    expert: "LLMClient",
+    plan_assembly_max_tokens: int,
+    ws: WorkflowSession | None,
+    on_thinking: Callable | None,
+    on_metrics: Callable | None,
+    on_metrics_reset: Callable | None,
+    stage_summary: str,
+    done_prefix: str,
+    artifact_label: str,
+) -> tuple[ExecutionPlan, float]:
+    """Run one Phase 4 assembly pass and strip non-implementation steps."""
+    await _send_stage(
+        ws,
+        stage_summary,
+        model=expert.model_name,
+        phase=4,
+    )
+    logger.info("Planning Phase 4 assembly pass: %s", artifact_label)
+    t0 = time.monotonic()
+
+    plan = await _chat_structured_with_repair(
+        messages=[
+            {"role": "system", "content": PLAN_ASSEMBLY_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": registry.format(
+                    "planning.assembly_user",
+                    task=task,
+                    design_and_risks=design_and_risks,
+                    file_summary=file_summary,
+                    project_context=(
+                        f"PROJECT CONTEXT:\n{project_context}\n\n" if project_context else ""
+                    ),
+                    scope=scope,
+                    missing_files=missing_files,
+                    test_command=test_command or "(none configured yet)",
+                    testing_inventory=testing_inventory,
+                    verification_targets=(
+                        verification_targets
+                        or "(derive from affected behavioral files)"
+                    ),
+                    security_concerns=security_concerns or "(none identified by Phase 3)",
+                    core_functionality=core_functionality,
+                    dependency_order=dependency_order,
+                    naming_conventions=naming_conventions,
+                    risk_assessment=risk_assessment,
+                    tdd_guidance=tdd_guidance,
+                    planned_tdd_tests=planned_tdd_tests,
+                ),
+            },
+        ],
+        schema=ExecutionPlan,
+        expert=expert,
+        max_tokens=plan_assembly_max_tokens,
+        artifact_label=artifact_label,
+        ws=ws,
+        phase=4,
+        on_thinking=on_thinking,
+        on_metrics=on_metrics,
+        on_metrics_reset=on_metrics_reset,
+    )
+
+    elapsed = time.monotonic() - t0
+    _strip_non_implementation_steps(plan)
+    _sync_affected_files_from_steps(plan)
+    await _send_stage_done(
+        ws,
+        f"{done_prefix} — {len(plan.steps)} steps across {len(plan.affected_files)} file(s)",
+        model=expert.model_name,
+        phase=4,
+    )
+    return plan, elapsed
+
+
+async def _run_phase_4b_tdd_test_design(
+    *,
+    draft_plan: ExecutionPlan,
+    task: str,
+    testing_inventory: str,
+    verification_targets: str,
+    security_concerns: str,
+    core_functionality: str,
+    dependency_order: str,
+    naming_conventions: str,
+    risk_assessment: str,
+    expert: "LLMClient",
+    plan_assembly_max_tokens: int,
+    ws: WorkflowSession | None,
+    on_thinking: Callable | None,
+    on_metrics: Callable | None,
+    on_metrics_reset: Callable | None,
+) -> tuple[VerificationPlan, float]:
+    """Run the active Phase 4b TDD test-design pass."""
+    await _send_stage(
+        ws,
+        "Phase 4b: Designing TDD test steps...",
+        model=expert.model_name,
+        phase=4,
+    )
+    logger.info("Planning Phase 4b: TDD test design")
+    t0 = time.monotonic()
+
+    verification = await _chat_structured_with_repair(
+        messages=[
+            {"role": "system", "content": PLAN_VERIFICATION_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": registry.format(
+                    "planning.verification_user_tdd",
+                    task=task,
+                    impl_plan_md=plan_to_markdown(draft_plan),
+                    testing_inventory=testing_inventory,
+                    verification_targets=verification_targets,
+                    security_concerns=security_concerns,
+                    core_functionality=core_functionality,
+                    next_step=str(1),
+                    dependency_order=dependency_order,
+                    naming_conventions=naming_conventions,
+                    risk_assessment=risk_assessment,
+                ),
+            },
+        ],
+        schema=VerificationPlan,
+        expert=expert,
+        max_tokens=plan_assembly_max_tokens,
+        artifact_label="phase 4b TDD test plan",
+        ws=ws,
+        phase=4,
+        on_thinking=on_thinking,
+        on_metrics=on_metrics,
+        on_metrics_reset=on_metrics_reset,
+    )
+
+    for i, step in enumerate(verification.steps, 1):
+        step.step_number = i
+    elapsed = time.monotonic() - t0
+    await _send_stage_done(
+        ws,
+        f"TDD test steps designed — {len(verification.steps)} step(s)",
+        model=expert.model_name,
+        phase=4,
+    )
+    return verification, elapsed
 
 
 # ── Phase 5 helpers ─────────────────────────────────────────────────────────
@@ -1668,15 +2034,14 @@ def _build_security_concerns(dar: DesignAndRisks) -> str:
 
 
 def _format_testing_inventory(file_summary: FileSummary | None) -> str:
-    """Render ``FileSummary.testing_inventory`` (Layer 6) for Phase 5.
+    """Render ``FileSummary.testing_inventory`` (Layer 6) for TDD planning.
 
     Returns a concise markdown block with framework, directory,
     assertion style, existing regression files, and per-affected-file
     coverage. Returns the ``(none)`` sentinel when Phase 2 did not
     populate the field so the prompt reads cleanly.
 
-    Phase 2 population lands in a later PR; this helper keeps the
-    Phase 5 call site stable until then.
+    Phase 4 and the legacy Phase 5 helper both consume this formatter.
     """
     inv = getattr(file_summary, "testing_inventory", None) if file_summary else None
     if inv is None:
@@ -1691,6 +2056,8 @@ def _format_testing_inventory(file_summary: FileSummary | None) -> str:
         lines.append(f"- Directory: {inv.test_directory}")
     if inv.test_file_pattern:
         lines.append(f"- File pattern: {inv.test_file_pattern}")
+    if inv.strategy_summary:
+        lines.append(f"- Strategy summary: {inv.strategy_summary}")
     if inv.assertion_style_excerpt:
         lines.append("- Assertion style excerpt:\n```\n" + inv.assertion_style_excerpt + "\n```")
     if inv.existing_regression_files:

@@ -14,9 +14,17 @@ from lean_ai.llm.plan_schema import (
     FileSummary,
     PlanStep,
     ScopeDocument,
+    StepSuccessCheck,
     VerificationPlan,
 )
-from lean_ai.llm.planner import _run_phase5_verification, create_plan
+from lean_ai.llm.plan_schema import (
+    TestingInventory as InventoryModel,
+)
+from lean_ai.llm.planner import (
+    _assemble_phase4_plan,
+    _run_phase5_verification,
+    create_plan,
+)
 from lean_ai.llm.planner_helpers import _chat_structured_with_repair, _revise_plan
 
 
@@ -24,8 +32,14 @@ class FakeWebSocket:
     def __init__(self) -> None:
         self.messages: list[dict] = []
 
-    async def send_json(self, payload: dict) -> None:
+    async def send(self, payload: dict) -> None:
         self.messages.append(payload)
+
+    def send_nowait(self, payload: dict) -> None:
+        self.messages.append(payload)
+
+    def is_connected(self) -> bool:
+        return True
 
 
 class FakeExpert:
@@ -56,6 +70,9 @@ class FakeExpert:
         if isinstance(response, Exception):
             raise response
         return response
+
+    async def chat_with_tools(self, *args, **kwargs):
+        return [], "phase 3 prose"
 
 
 class FakePlannerClient:
@@ -115,6 +132,20 @@ def _verification_plan() -> VerificationPlan:
     )
 
 
+def _tdd_verification_plan() -> VerificationPlan:
+    return VerificationPlan(
+        steps=[
+            PlanStep(
+                step_number=1,
+                tool="create_file",
+                file_path="tests/test_app.py",
+                instruction="Add tests covering src/app.py handler behavior.",
+                reason="Pin the intended handler contract before implementation.",
+            )
+        ]
+    )
+
+
 @pytest.mark.asyncio
 async def test_phase4_execution_plan_repair_retries_once():
     error = _make_structured_error(ExecutionPlan, '{"scope": }')
@@ -162,42 +193,44 @@ async def test_revise_plan_uses_execution_plan_repair_flow():
 
     assert result == _execution_plan()
     assert len(expert.calls) == 2
-    assert "Revise the plan based on the user's feedback" in expert.calls[0]["messages"][1]["content"]
+    assert (
+        "Revise the plan based on the user's feedback"
+        in expert.calls[0]["messages"][1]["content"]
+    )
     assert "ExecutionPlan" in expert.calls[1]["messages"][-1]["content"]
 
 
 @pytest.mark.asyncio
 async def test_phase5_verification_plan_repair_appends_steps(tmp_path):
-        pass  # removed try/finally that toggled enable_tdd
-        error = _make_structured_error(VerificationPlan, '{"steps": }')
-        expert = FakeExpert([error, _verification_plan()])
-        ws = FakeWebSocket()
-        plan = _execution_plan()
+    error = _make_structured_error(VerificationPlan, '{"steps": }')
+    expert = FakeExpert([error, _verification_plan()])
+    ws = FakeWebSocket()
+    plan = _execution_plan()
 
-        elapsed = await _run_phase5_verification(
-            plan=plan,
-            task="Add tests",
-            file_summary="",
-            file_summary_obj=FileSummary(),
-            design_and_risks_obj=DesignAndRisks(),
-            test_command="pytest -q",
-            expert=expert,
-            plan_assembly_max_tokens=4000,
-            ws=ws,
-            repo_root=str(tmp_path),
-            session_id="s1",
-            on_thinking=None,
-            on_metrics=None,
-            on_metrics_reset=None,
-        )
+    elapsed = await _run_phase5_verification(
+        plan=plan,
+        task="Add tests",
+        file_summary="",
+        file_summary_obj=FileSummary(),
+        design_and_risks_obj=DesignAndRisks(),
+        test_command="pytest -q",
+        expert=expert,
+        plan_assembly_max_tokens=4000,
+        ws=ws,
+        repo_root=str(tmp_path),
+        session_id="s1",
+        on_thinking=None,
+        on_metrics=None,
+        on_metrics_reset=None,
+    )
 
-        assert elapsed >= 0
-        assert len(expert.calls) == 2
-        assert expert.calls[0]["retry_on_validation_error"] is False
-        assert "VerificationPlan" in expert.calls[1]["messages"][-1]["content"]
-        assert "tests/test_app.py" in plan.affected_files
-        assert any(step.file_path == "tests/test_app.py" for step in plan.steps)
-        assert ws.messages[-2]["summary"] == "Repairing malformed VerificationPlan JSON..."
+    assert elapsed >= 0
+    assert len(expert.calls) == 2
+    assert expert.calls[0]["retry_on_validation_error"] is False
+    assert "VerificationPlan" in expert.calls[1]["messages"][-1]["content"]
+    assert "tests/test_app.py" in plan.affected_files
+    assert any(step.file_path == "tests/test_app.py" for step in plan.steps)
+    assert ws.messages[-2]["summary"] == "Repairing malformed VerificationPlan JSON..."
 
 @pytest.mark.asyncio
 async def test_structured_repair_failure_raises_user_safe_error():
@@ -239,7 +272,10 @@ async def test_revise_plan_falls_back_to_previous_plan_when_repair_crashes(monke
 
     assert result.steps == previous.steps
     assert result.affected_files == previous.affected_files
-    assert any("automatic plan revision failed" in warning for warning in result.plan_validation_warnings)
+    assert any(
+        "automatic plan revision failed" in warning
+        for warning in result.plan_validation_warnings
+    )
 
 
 @pytest.mark.asyncio
@@ -315,3 +351,225 @@ async def test_create_plan_returns_fallback_plan_when_phase4_aborts(monkeypatch)
     assert any("planning fallback:" in warning for warning in plan.plan_validation_warnings)
     assert "src/app.py" in plan.affected_files
     assert any(step.file_path == "src/app.py" for step in plan.steps)
+
+
+@pytest.mark.asyncio
+async def test_assemble_phase4_plan_includes_strategy_summary_in_prompt():
+    expert = FakeExpert([_execution_plan()])
+
+    plan, _ = await _assemble_phase4_plan(
+        task="Add tests",
+        design_and_risks="DESIGN",
+        file_summary="FILE SUMMARY",
+        project_context="repo context",
+        scope="scope text",
+        missing_files="",
+        test_command="pytest -q",
+        testing_inventory=(
+            "- Framework: pytest\n"
+            "- Strategy summary: Prefer pytest -q against targeted test files.\n"
+        ),
+        verification_targets="- src/app.py",
+        security_concerns="(none)",
+        core_functionality="(none)",
+        dependency_order="",
+        naming_conventions="",
+        risk_assessment="",
+        tdd_guidance="",
+        planned_tdd_tests="",
+        expert=expert,
+        plan_assembly_max_tokens=4000,
+        ws=None,
+        on_thinking=None,
+        on_metrics=None,
+        on_metrics_reset=None,
+        stage_summary="Phase 4",
+        done_prefix="Done",
+        artifact_label="structured plan",
+    )
+
+    assert isinstance(plan, ExecutionPlan)
+    prompt = expert.calls[0]["messages"][1]["content"]
+    assert "Strategy summary: Prefer pytest -q against targeted test files." in prompt
+
+
+@pytest.mark.asyncio
+async def test_create_plan_strict_mode_builds_tdd_contract(monkeypatch, tmp_path):
+    async def _fake_scope(**kwargs):
+        scope = ScopeDocument(
+            problem="Update the handler.",
+            deliverables=["Handler change"],
+            in_scope=["src/app.py"],
+            out_of_scope=[],
+            downstream_consumers=[],
+            assumptions=[],
+            success_criteria=["Handler behavior is covered by tests."],
+            risks=[],
+        )
+        return scope, "PROBLEM / PURPOSE:\nUpdate the handler.\n", True
+
+    async def _fake_phase2(**kwargs):
+        return (
+            FileSummary(
+                files_to_modify=[
+                    FileObservation(
+                        file_path="src/app.py",
+                        role="modify",
+                        reason="Handler implementation lives here.",
+                        relevant_sections="10-40",
+                        key_snippets=["def handler():\n    pass"],
+                    )
+                ],
+                testing_inventory=InventoryModel(
+                    test_framework="pytest",
+                    test_directory="tests/",
+                    test_file_pattern="test_*.py",
+                    strategy_summary="Prefer targeted pytest invocations.",
+                ),
+            ),
+            "FILES TO MODIFY:\n1. src/app.py — Handler implementation lives here.\n",
+            0.01,
+        )
+
+    async def _fake_design(**kwargs):
+        return DesignAndRisks(
+            change_designs=[
+                ChangeDesign(
+                    file_path="src/app.py",
+                    decisions="Update the handler logic without changing the public API.",
+                )
+            ]
+        )
+
+    async def _no_memory(*args, **kwargs):
+        return ""
+
+    monkeypatch.setattr("lean_ai.llm.planner._retrieve_session_memories", _no_memory)
+    monkeypatch.setattr("lean_ai.llm.planner._synthesize_scope", _fake_scope)
+    monkeypatch.setattr("lean_ai.llm.planner.run_phase2_exploration", _fake_phase2)
+    monkeypatch.setattr("lean_ai.llm.planner._synthesize_design_and_risks", _fake_design)
+    async def _fake_phase4a(*args, **kwargs):
+        return "tests/test_app.py"
+
+    monkeypatch.setattr("lean_ai.llm.planner._run_phase_4a", _fake_phase4a)
+    monkeypatch.setattr(settings, "enable_strict_test_contract", True)
+
+    draft_plan = _execution_plan()
+    final_plan = _execution_plan()
+    final_plan.steps[0].success_checks = [
+        StepSuccessCheck(
+            description="Run the authored handler tests.",
+            tool="run_tests",
+            command="pytest tests/test_app.py -q",
+            expected="Command exits successfully.",
+        )
+    ]
+    expert = FakeExpert([draft_plan, _tdd_verification_plan(), final_plan])
+
+    plan = await create_plan(
+        task="Fix the handler",
+        repo_root=str(tmp_path),
+        llm_client=FakePlannerClient(
+            outputs=[
+                ([], "phase 1 prose"),
+                ([], "phase 3 prose"),
+            ]
+        ),
+        context="repo context",
+        ws=None,
+        expert_llm_client=expert,
+        test_command="pytest -q",
+    )
+
+    assert plan.tdd_mode is True
+    assert len(plan.tdd_test_steps) == 1
+    assert plan.tdd_test_steps[0].file_path == "tests/test_app.py"
+    assert plan.tdd_test_steps[0].step_number == 1
+    assert plan.steps[0].step_number == 2
+    assert any(
+        check.command == "pytest tests/test_app.py -q"
+        for check in plan.steps[0].success_checks
+    )
+    assert len(expert.calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_create_plan_non_tdd_mode_stays_single_pass(monkeypatch, tmp_path):
+    async def _fake_scope(**kwargs):
+        scope = ScopeDocument(
+            problem="Update the handler.",
+            deliverables=["Handler change"],
+            in_scope=["src/app.py"],
+            out_of_scope=[],
+            downstream_consumers=[],
+            assumptions=[],
+            success_criteria=["Handler behavior is covered by tests."],
+            risks=[],
+        )
+        return scope, "PROBLEM / PURPOSE:\nUpdate the handler.\n", True
+
+    async def _fake_phase2(**kwargs):
+        return (
+            FileSummary(
+                files_to_modify=[
+                    FileObservation(
+                        file_path="src/app.py",
+                        role="modify",
+                        reason="Handler implementation lives here.",
+                    )
+                ]
+            ),
+            "FILES TO MODIFY:\n1. src/app.py — Handler implementation lives here.\n",
+            0.01,
+        )
+
+    async def _fake_design(**kwargs):
+        return DesignAndRisks(
+            change_designs=[
+                ChangeDesign(
+                    file_path="src/app.py",
+                    decisions="Update the handler logic without changing the public API.",
+                )
+            ]
+        )
+
+    async def _no_memory(*args, **kwargs):
+        return ""
+
+    monkeypatch.setattr("lean_ai.llm.planner._retrieve_session_memories", _no_memory)
+    monkeypatch.setattr("lean_ai.llm.planner._synthesize_scope", _fake_scope)
+    monkeypatch.setattr("lean_ai.llm.planner.run_phase2_exploration", _fake_phase2)
+    monkeypatch.setattr("lean_ai.llm.planner._synthesize_design_and_risks", _fake_design)
+    async def _fake_phase4a(*args, **kwargs):
+        return ""
+
+    monkeypatch.setattr("lean_ai.llm.planner._run_phase_4a", _fake_phase4a)
+    monkeypatch.setattr(settings, "enable_strict_test_contract", False)
+
+    non_tdd_plan = _execution_plan()
+    non_tdd_plan.steps[0].success_checks = [
+        StepSuccessCheck(
+            description="Run the handler tests.",
+            tool="run_tests",
+            command="pytest tests/test_app.py -q",
+            expected="Command exits successfully.",
+        )
+    ]
+    expert = FakeExpert([non_tdd_plan])
+    plan = await create_plan(
+        task="Fix the handler",
+        repo_root=str(tmp_path),
+        llm_client=FakePlannerClient(
+            outputs=[
+                ([], "phase 1 prose"),
+                ([], "phase 3 prose"),
+            ]
+        ),
+        context="repo context",
+        ws=None,
+        expert_llm_client=expert,
+    )
+
+    assert plan.tdd_mode is False
+    assert plan.tdd_test_steps == []
+    assert len(expert.calls) == 1

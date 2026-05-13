@@ -835,10 +835,10 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
         PromptEntry(
             key="planning.verification_user_normal",
             category="Planning",
-            name="Phase 5: Verification (Normal User Message)",
+            name="Legacy Phase 5: Verification (Normal User Message)",
             description=(
-                "User message for Phase 5 in normal mode — asks for test"
-                " file creation steps plus a final run_tests step."
+                "Legacy verification prompt for compatibility tests and"
+                " dormant Phase 5 flows in normal mode."
             ),
             template_vars=[
                 "task",
@@ -1003,11 +1003,10 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
         PromptEntry(
             key="planning.verification_user_tdd",
             category="Planning",
-            name="Phase 5: Verification (TDD User Message)",
+            name="Phase 4b / Legacy Phase 5: Verification (TDD User Message)",
             description=(
-                "User message for Phase 5 in TDD mode — asks for test"
-                " file creation steps only (no run_tests). Tests are"
-                " written BEFORE implementation by the expert model."
+                "TDD test-design prompt reused by active Phase 4b and"
+                " retained for legacy Phase 5 compatibility."
             ),
             template_vars=[
                 "task",
@@ -1455,6 +1454,11 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
                 "test files that already exercise it (empty list if "
                 "uncovered). Use short coverage_notes when a file is "
                 "partially covered.\n"
+                "   - strategy_summary: 2-5 sentences summarising the "
+                "repo's testing strategy for downstream planning — name "
+                "the primary framework, where tests live, how targeted "
+                "test commands are usually invoked, and any important "
+                "constraints or seams.\n"
                 "   - notes: anything else Phase 5 should know (e.g. "
                 "'integration tests require a running Postgres', "
                 "'tests/e2e/ is headless via xvfb').\n"
@@ -1614,6 +1618,8 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
                 "verification_targets",
                 "security_concerns",
                 "core_functionality",
+                "tdd_guidance",
+                "planned_tdd_tests",
             ],
             warning="Contains JSON format examples and detailed step rules. Edit carefully.",
             default_text=(
@@ -1630,6 +1636,8 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
                 "(If this is empty, derive checks from behavioral affected files.)\n\n"
                 "CORE FUNCTIONALITY REQUIRING REGRESSION COVERAGE:\n{core_functionality}\n\n"
                 "SECURITY CONCERNS THAT NEED VERIFICATION:\n{security_concerns}\n\n"
+                "{tdd_guidance}"
+                "{planned_tdd_tests}"
                 "Assemble the final execution plan as structured JSON. "
                 "Each step must be a bounded job contract with its own "
                 "success checks. Do NOT append a separate verification "
@@ -1672,6 +1680,11 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
                 "- Do NOT create standalone `run_tests` or `run_lint` steps. "
                 "Put verification commands in `success_checks`; the executor "
                 "may run those tools while completing the bounded job.\n"
+                "- When the TDD guidance block is present, treat the listed "
+                "planned test steps as authoritative pre-implementation "
+                "coverage. Keep test creation in `tdd_test_steps`, keep "
+                "implementation work in `steps`, set `tdd_mode` true, and "
+                "tie `success_checks` to those planned tests.\n"
                 "- For edit jobs: `inputs` must name the file sections, "
                 "functions, classes, or line ranges read during exploration. "
                 "`output_shape` must describe the expected public behavior, "
@@ -1687,6 +1700,10 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
                 "test command when configured. If no runner is configured, "
                 "success checks should say what test file/behavior should exist "
                 "for later execution.\n"
+                "- In TDD mode, success checks must reference the already-"
+                "planned tests by concrete file path or command so the "
+                "executor can verify implementation against the authored test "
+                "phase.\n"
                 "- SUCCESS CHECK QUALITY: Every success check must specify a "
                 "concrete `tool`, a `command` (when applicable), and the "
                 "expected outcome. Vague checks without tool/command will "

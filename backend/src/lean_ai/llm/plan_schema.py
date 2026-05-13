@@ -161,10 +161,11 @@ class ExistingCoverage(BaseModel):
 
 
 class TestingInventory(BaseModel):
-    """Phase 2's test-infrastructure inventory, consumed by Phase 5.
+    """Phase 2's test-infrastructure inventory, consumed by TDD planning.
 
-    Gives Phase 5 structured knowledge of the project's test framework
-    and existing coverage without needing its own tool budget.
+    Gives the Phase 4 TDD planner structured knowledge of the project's
+    test framework and existing coverage without needing its own tool
+    budget.
     """
 
     test_framework: str = ""
@@ -188,11 +189,15 @@ class TestingInventory(BaseModel):
     Phase 5 may reference them but never plan edits to them."""
 
     affected_files_existing_coverage: list[ExistingCoverage] = []
-    """Per-affected-file coverage record so Phase 5 can skip already-
+    """Per-affected-file coverage record so Phase 4 TDD planning can skip already-
     covered behavior and focus on uncovered code paths."""
 
+    strategy_summary: str = ""
+    """Compact prose summary of the repo's testing strategy, conventions,
+    and constraints for direct prompt injection into Phase 4."""
+
     notes: str = ""
-    """Anything else Phase 5 should know about the test infrastructure
+    """Anything else Phase 4 TDD planning should know about the test infrastructure
     — e.g. 'integration tests live under tests/integration and require
     a running Postgres'."""
 
@@ -209,8 +214,8 @@ class FileSummary(BaseModel):
     testing_inventory: TestingInventory | None = None
     """Phase 2's test-infrastructure inventory (Layer 6). ``None`` when
     the project has no test footprint or Phase 2 (e.g. parallel path)
-    did not produce one. Phase 5 renders this into its user prompt so
-    the LLM can target existing coverage gaps precisely."""
+    did not produce one. Phase 4 renders this into its TDD-aware prompts
+    so the LLM can target existing coverage gaps precisely."""
 
     notes: str = ""
     """Free-form catch-all for cross-file references, tricky invariants, or
@@ -670,9 +675,20 @@ class ExecutionPlan(BaseModel):
     steps: list[PlanStep]
     """Ordered list of steps to execute.  Each step is one tool call."""
 
+    tdd_mode: bool = False
+    """Whether this plan should execute in TDD mode.
+
+    When true, ``tdd_test_steps`` must run before ``steps`` and the
+    executor applies test-file immutability during implementation.
+    """
+
     tdd_test_steps: list[PlanStep] = []
-    """Legacy TDD test steps. New plans fold verification expectations into
-    per-step ``success_checks`` instead of appending a separate Phase 5 plan."""
+    """Pre-implementation TDD test steps.
+
+    These are designed in Phase 4b and executed before the
+    implementation steps in ``steps``. Implementation verification still
+    belongs in per-step ``success_checks``.
+    """
 
     affected_files: list[str]
     """All file paths that will be created or modified."""

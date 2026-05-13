@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lean_ai.config import settings
-from lean_ai.workflow.ws_protocol import WorkflowSession
 from lean_ai.context.metadata import invalidate_metadata_cache_for_paths
 from lean_ai.indexer.tree import list_repo_tree
 from lean_ai.llm.base import ToolCall
@@ -49,6 +48,7 @@ from lean_ai.workflow.validation import (
 )
 from lean_ai.workflow.ws_dispatcher import WSMessageDispatcher
 from lean_ai.workflow.ws_handler import ws_send, ws_send_nowait
+from lean_ai.workflow.ws_protocol import WorkflowSession
 
 if TYPE_CHECKING:
     from lean_ai.llm.facade import LLMClient
@@ -509,13 +509,21 @@ async def execute_plan(
         dispatcher=dispatcher,
         telemetry_context=exec_telemetry,
     )
-    total_steps = len(plan.steps) + len(getattr(plan, "tdd_test_steps", None) or [])
+    tdd_active = (
+        settings.enable_strict_test_contract
+        and getattr(plan, "tdd_mode", False)
+        and bool(getattr(plan, "tdd_test_steps", None))
+    )
+    total_steps = len(plan.steps) + (
+        len(getattr(plan, "tdd_test_steps", None) or []) if tdd_active else 0
+    )
     all_executed: list[ToolCall] = []
     step_explanations: list[str] = []
     completed_descriptions: list[str] = []
     step_artifacts: dict[str, str] = {}  # {relative_path: file_content}
     implicit_modified_files: set[str] = set()
     _artifacts_lock = asyncio.Lock()
+    tdd_metrics: dict[str, int | bool | str] | None = None
 
     # Send execution checklist to the extension for progress UI
     checklist_steps = []
@@ -528,7 +536,7 @@ async def execute_plan(
                 "file_path": step.file_path or "",
             }
         )
-    if getattr(plan, "tdd_test_steps", None):
+    if tdd_active:
         tdd_steps = [
             {
                 "step_index": s.step_number - 1,
@@ -688,7 +696,8 @@ async def execute_plan(
             return (
                 f"This is still {step_label}. Use tools to do the work before replying with prose. "
                 f"Complete the job contract{target}, satisfy its success checks, then call "
-                "task_complete when the step is truly finished. If blocked, follow the blocked protocol."
+                "task_complete when the step is truly finished. "
+                "If blocked, follow the blocked protocol."
             )
 
         async def _step_executor(name: str, arguments: dict) -> str:
@@ -762,7 +771,9 @@ async def execute_plan(
         allowed_paths = _step_may_change_paths(step)
         if not completion_error and allowed_paths and implicit_changed_paths:
             out_of_scope = [
-                path for path in implicit_changed_paths if _normalize_path(path) not in allowed_paths
+                path
+                for path in implicit_changed_paths
+                if _normalize_path(path) not in allowed_paths
             ]
             if out_of_scope:
                 completion_error = (
@@ -838,17 +849,10 @@ async def execute_plan(
         return True
 
     # ── TDD three-phase execution ─────────────────────────────────
-    tdd_active = (
-        False
-        and plan.tdd_test_steps
-        and expert_llm_client is not None
-        and settings._active_context_window > 32768
-    )
-
     halted_early = False
 
     if tdd_active:
-        halted_early = not await _run_tdd_execution(
+        tdd_completed, tdd_metrics = await _run_tdd_execution(
             plan=plan,
             repo_root=repo_root,
             ws=ws,
@@ -860,6 +864,7 @@ async def execute_plan(
             step_artifacts=step_artifacts,
             run_step=_run_step,
         )
+        halted_early = not tdd_completed
     else:
         # ── Normal (non-TDD) execution ────────────────────────────
         step_groups = _build_step_groups(plan.steps)
@@ -974,6 +979,18 @@ async def execute_plan(
                 summary += f"\n  {name}: {result['output'][:200]}"
         else:
             summary += "\n\n✓ Post-validation passed."
+    if tdd_metrics:
+        summary += (
+            "\n\nTDD Metrics:"
+            f"\n- test writer: {tdd_metrics['test_writer_role']}"
+            f"\n- planned test steps: {tdd_metrics['planned_test_steps']}"
+            f"\n- implementation steps with test checks: "
+            f"{tdd_metrics['implementation_steps_with_test_checks']}/"
+            f"{tdd_metrics['implementation_steps']}"
+            f"\n- red-green retries: {tdd_metrics['red_green_retries']}"
+            f"\n- implementation steps missing test checks: "
+            f"{tdd_metrics['steps_missing_test_checks']}"
+        )
 
     journal_content = read_journal(repo_root, session_id)
     if journal_content:
@@ -1073,14 +1090,24 @@ async def _run_tdd_execution(
     repo_root: str,
     ws: WorkflowSession | None,
     llm_client: "LLMClient",
-    expert_llm_client: "LLMClient",
+    expert_llm_client: "LLMClient | None",
     session_id: str,
     dispatcher: WSMessageDispatcher | None,
     cb,
     step_artifacts: dict[str, str],
     run_step: Callable,
-) -> bool:
+) -> tuple[bool, dict[str, int | bool | str]]:
     """TDD two-phase execution: expert writes tests → primary implements."""
+    test_writer_client = expert_llm_client or llm_client
+    test_writer_role = "expert" if expert_llm_client is not None else "primary_fallback"
+    metrics: dict[str, int | bool | str] = {
+        "planned_test_steps": len(plan.tdd_test_steps),
+        "implementation_steps": len(plan.steps),
+        "implementation_steps_with_test_checks": 0,
+        "steps_missing_test_checks": 0,
+        "red_green_retries": 0,
+        "test_writer_role": test_writer_role,
+    }
 
     # ── Phase A: Expert writes tests ──────────────────────────
     await ws_send(
@@ -1089,7 +1116,10 @@ async def _run_tdd_execution(
         {
             "stage": "tdd_test_writing",
             "status": "running",
-            "summary": (f"TDD: Expert writing {len(plan.tdd_test_steps)} test step(s)..."),
+            "summary": (
+                "TDD: Writing "
+                f"{len(plan.tdd_test_steps)} test step(s) with {test_writer_role}..."
+            ),
         },
     )
 
@@ -1097,13 +1127,13 @@ async def _run_tdd_execution(
         repo_root,
         ws,
         session_id,
-        llm_client=expert_llm_client,
+        llm_client=test_writer_client,
         dispatcher=dispatcher,
         telemetry_context={
             "repo_root": repo_root,
             "session_id": session_id,
             "phase": "tdd.write",
-            "role": "expert",
+            "role": str(test_writer_role),
         },
     )
     test_system_prompt = build_tdd_test_writing_prompt(
@@ -1120,7 +1150,7 @@ async def _run_tdd_execution(
     for step in plan.tdd_test_steps:
         step_ok = await run_step(
             step,
-            expert_llm_client,
+            test_writer_client,
             build_implementation_tools(),
             test_tool_executor,
             test_system_prompt,
@@ -1129,7 +1159,7 @@ async def _run_tdd_execution(
                 "repo_root": repo_root,
                 "session_id": session_id,
                 "phase": "tdd.write",
-                "role": "expert",
+                "role": str(test_writer_role),
             },
         )
         if not step_ok:
@@ -1142,7 +1172,7 @@ async def _run_tdd_execution(
                     "summary": "TDD: Test writing halted because a step did not complete cleanly.",
                 },
             )
-            return False
+            return False, metrics
 
     await ws_send(
         ws,
@@ -1191,6 +1221,12 @@ async def _run_tdd_execution(
             },
         )
 
+        test_commands = _collect_step_test_commands(step)
+        if test_commands:
+            metrics["implementation_steps_with_test_checks"] += 1
+        else:
+            metrics["steps_missing_test_checks"] += 1
+
         step_ok = await run_step(
             step,
             llm_client,
@@ -1205,9 +1241,6 @@ async def _run_tdd_execution(
                 "role": "primary",
             },
         )
-
-        # Gather step-specific test commands for retry loop
-        test_commands = _collect_step_test_commands(step)
 
         if not step_ok and not test_commands:
             # Step failed and has no test-based checks — record incomplete
@@ -1230,6 +1263,7 @@ async def _run_tdd_execution(
             last_test_output = ""
             while attempts < _TDD_MAX_RETRIES:
                 attempts += 1
+                metrics["red_green_retries"] += 1
                 logger.info(
                     "TDD retry %d/%d for step %d after test failure",
                     attempts,
@@ -1282,6 +1316,7 @@ async def _run_tdd_execution(
                 attempts = 0
                 while attempts < _TDD_MAX_RETRIES:
                     attempts += 1
+                    metrics["red_green_retries"] += 1
                     logger.info(
                         "TDD retry %d/%d for step %d after test failure",
                         attempts,
@@ -1334,10 +1369,19 @@ async def _run_tdd_execution(
         {
             "stage": "tdd_implementation",
             "status": "done",
-            "summary": "TDD: Implementation complete.",
+            "summary": (
+                "TDD: Implementation complete. "
+                f"Metrics — planned test steps: {metrics['planned_test_steps']}; "
+                "implementation steps with test checks: "
+                f"{metrics['implementation_steps_with_test_checks']}/"
+                f"{metrics['implementation_steps']}; "
+                f"red-green retries: {metrics['red_green_retries']}; "
+                "steps missing test checks: "
+                f"{metrics['steps_missing_test_checks']}."
+            ),
         },
     )
-    return True
+    return True, metrics
 
 
 async def _update_project_context(

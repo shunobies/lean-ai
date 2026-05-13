@@ -7,7 +7,9 @@ from pydantic import ValidationError
 
 from lean_ai.llm.plan_schema import (
     DEFAULT_ALLOWED_READ_ONLY_STEP_TOOLS,
+    ExecutionPlan,
     PlanStep,
+    plan_to_markdown,
 )
 
 
@@ -65,3 +67,28 @@ def test_plan_step_adds_default_read_only_helpers_to_explicit_allowed_tools():
     assert step.allowed_tools[-1] == "task_complete"
     for tool_name in DEFAULT_ALLOWED_READ_ONLY_STEP_TOOLS:
         assert tool_name in step.allowed_tools
+
+
+def test_plan_to_markdown_renders_separate_tdd_and_implementation_sections():
+    plan = ExecutionPlan(
+        scope="Implement auth callback.",
+        tdd_mode=True,
+        steps=[_step(step_number=2, file_path="src/auth.py", instruction="Implement callback")],
+        tdd_test_steps=[
+            _step(
+                step_number=1,
+                tool="create_file",
+                file_path="tests/test_auth.py",
+                instruction="Write auth callback tests",
+            )
+        ],
+        affected_files=["src/auth.py", "tests/test_auth.py"],
+        test_strategy="Run pytest.",
+    )
+
+    rendered = plan_to_markdown(plan)
+
+    assert "## TEST PHASE (Expert Model)" in rendered
+    assert "## IMPLEMENTATION PHASE (Primary Model)" in rendered
+    assert "tests/test_auth.py" in rendered
+    assert "src/auth.py" in rendered

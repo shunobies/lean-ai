@@ -12,6 +12,7 @@ from lean_ai.llm.plan_schema import (
 from lean_ai.llm.planner import (
     _check_core_functionality_success_checked,
     _check_success_checks_cover_affected_files,
+    _check_tdd_test_contract_cover_affected_files,
 )
 from lean_ai.workflow.executor import _step_scope_error
 
@@ -118,12 +119,99 @@ def test_core_functionality_requires_regression_success_check():
                 output_shape="Regression test covers AuthCallback in src/auth.py.",
                 success_checks=[
                     StepSuccessCheck(
-                        description="REGRESSION: AuthCallback in src/auth.py rejects missing state.",
+                        description=(
+                            "REGRESSION: AuthCallback in src/auth.py rejects "
+                            "missing state."
+                        ),
                         tool="run_tests",
                         command="pytest tests/regression/regression_auth_test.py -q",
                     )
                 ],
                 blocked_protocol="Report blocker.",
+            )
+        ],
+        affected_files=["src/auth.py", "tests/regression/regression_auth_test.py"],
+        test_strategy="Run pytest.",
+        core_functionality=[
+            CoreFunctionalityTag(
+                entity="AuthCallback",
+                file_path="src/auth.py",
+                reason="Public callback route.",
+                source_signal="public_api",
+                confidence="high",
+            )
+        ],
+    )
+
+    assert _check_core_functionality_success_checked(plan) == ([], False)
+
+
+def test_tdd_contract_accepts_authored_test_steps_for_affected_files():
+    plan = ExecutionPlan(
+        scope="Update auth.",
+        tdd_mode=True,
+        steps=[
+            PlanStep(
+                step_number=2,
+                job="Implement auth callback behavior.",
+                may_change=[
+                    StepChangeTarget(
+                        path="src/auth.py",
+                        change="Edit callback validation.",
+                    )
+                ],
+                allowed_tools=["read_file", "edit_file", "task_complete"],
+                output_shape="src/auth.py rejects missing state.",
+                blocked_protocol="Report blocker.",
+            )
+        ],
+        tdd_test_steps=[
+            PlanStep(
+                step_number=1,
+                tool="create_file",
+                file_path="tests/test_auth.py",
+                instruction="Add tests covering src/auth.py callback state validation.",
+                reason="Pin the intended callback behavior before implementation.",
+            )
+        ],
+        affected_files=["src/auth.py", "tests/test_auth.py"],
+        test_strategy="Run pytest.",
+    )
+    summary = FileSummary(
+        files_to_modify=[
+            FileObservation(file_path="src/auth.py", role="modify", reason="behavior")
+        ]
+    )
+
+    assert _check_tdd_test_contract_cover_affected_files(plan, summary) == ([], False)
+
+
+def test_core_functionality_can_be_satisfied_by_tdd_regression_test_step():
+    plan = ExecutionPlan(
+        scope="Update auth.",
+        tdd_mode=True,
+        steps=[
+            PlanStep(
+                step_number=2,
+                job="Implement auth callback behavior.",
+                may_change=[
+                    StepChangeTarget(
+                        path="src/auth.py",
+                        change="Edit callback validation.",
+                    )
+                ],
+                allowed_tools=["read_file", "edit_file", "task_complete"],
+                output_shape="src/auth.py rejects missing state.",
+                blocked_protocol="Report blocker.",
+            )
+        ],
+        tdd_test_steps=[
+            PlanStep(
+                step_number=1,
+                tool="create_file",
+                file_path="tests/regression/regression_auth_test.py",
+                instruction="Add regression coverage for AuthCallback in src/auth.py.",
+                reason="REGRESSION: AuthCallback must reject missing state.",
             )
         ],
         affected_files=["src/auth.py", "tests/regression/regression_auth_test.py"],

@@ -59,11 +59,11 @@ def _compose(key: str) -> str:
     if settings.enable_required_citations:
         web_search += "\n" + registry.get("policy.required_citations")
 
-    # Phase 5 strict-test-contract policy block. Empty string when the
-    # flag is off so previous-turn prompt content is preserved. The
-    # testing-environment awareness block is composed in-line at the
-    # end so Phase 5 sees setup-first guidance together with the rest
-    # of the strict contract.
+    # Strict TDD policy block. Empty string when the flag is off so
+    # previous-turn prompt content is preserved. The testing-environment
+    # awareness block is composed in-line at the end so Phase 4/legacy
+    # Phase 5 see setup-first guidance together with the rest of the
+    # strict contract.
     strict_test_contract = ""
     if settings.enable_strict_test_contract:
         strict_test_contract = registry.get("policy.strict_test_contract")
