@@ -7,9 +7,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fastapi import WebSocket
-
 from lean_ai.config import settings
+from lean_ai.workflow.ws_protocol import WorkflowSession
 from lean_ai.tools import file_ops, scratchpad, shell
 from lean_ai.tools.command_safety import CommandRisk, check_command
 from lean_ai.tools.state_ledger import append_event
@@ -124,7 +123,7 @@ def _coerce_int_arg(
 
 
 async def _request_tool_approval(
-    ws: WebSocket,
+    ws: "WorkflowSession | None",
     dispatcher: "WSMessageDispatcher | None",
     tool: str,
     command: str,
@@ -134,6 +133,9 @@ async def _request_tool_approval(
 
     Returns ``True`` if the user approves, ``False`` otherwise (denied,
     disconnected, or cancelled).
+
+    Raises ``NotImplementedError`` if no dispatcher is attached, since
+    the send-only ``WorkflowSession`` protocol cannot receive messages.
     """
     await send_tool_approval_required(
         ws,
@@ -141,33 +143,31 @@ async def _request_tool_approval(
         command=command,
         reason=reason,
     )
-    if dispatcher:
-        from lean_ai.workflow.ws_dispatcher import WorkflowCancelledError
+    if dispatcher is None:
+        raise NotImplementedError(
+            "Tool approval requires a WSMessageDispatcher to receive "
+            "the user's response. The send-only WorkflowSession protocol "
+            "cannot receive messages."
+        )
+    from lean_ai.workflow.ws_dispatcher import WorkflowCancelledError
 
-        # Loop to skip unexpected message types (e.g. stale user_message)
-        while True:
-            try:
-                approval_msg = await dispatcher.wait_for_approval()
-            except WorkflowCancelledError:
-                return False
-            if approval_msg is None:
-                return False
-            msg_type = approval_msg.get("type")
-            if msg_type == "approve_tool":
-                return True
-            if msg_type == "deny_tool":
-                return False
-            logger.debug(
-                "Skipping unexpected '%s' message during tool approval",
-                msg_type,
-            )
-    else:
-        from lean_ai.workflow.ws_handler import safe_receive
-
-        approval_msg = await safe_receive(ws)
+    # Loop to skip unexpected message types (e.g. stale user_message)
+    while True:
+        try:
+            approval_msg = await dispatcher.wait_for_approval()
+        except WorkflowCancelledError:
+            return False
         if approval_msg is None:
             return False
-        return approval_msg.get("type") == "approve_tool"
+        msg_type = approval_msg.get("type")
+        if msg_type == "approve_tool":
+            return True
+        if msg_type == "deny_tool":
+            return False
+        logger.debug(
+            "Skipping unexpected '%s' message during tool approval",
+            msg_type,
+        )
 
 
 # Tools eligible for worker-model compression
@@ -447,7 +447,7 @@ def _format_reference_doc_listing(docs: list[dict], query: str) -> str:
 
 def make_tool_executor(
     repo_root: str,
-    ws: WebSocket,
+    ws: "WorkflowSession | None",
     session_id: str = "",
     llm_client: "LLMClient | None" = None,
     worker_client: "LLMClient | None" = None,

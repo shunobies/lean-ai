@@ -11,9 +11,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
-from fastapi import WebSocket
-from pydantic import BaseModel
-
 from lean_ai.config import settings
 from lean_ai.llm.base import StructuredOutputError, format_validation_path
 from lean_ai.llm.plan_schema import (
@@ -27,9 +24,12 @@ from lean_ai.llm.plan_schema import (
 )
 from lean_ai.llm.prompt_registry import registry
 from lean_ai.llm.prompts import PLAN_ASSEMBLY_SYSTEM_PROMPT
+from lean_ai.workflow.ws_protocol import WorkflowSession
 
 if TYPE_CHECKING:
     from lean_ai.llm.facade import LLMClient
+
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -279,7 +279,7 @@ def _split_list(items: list, n: int) -> list[list]:
 
 
 async def _send_stage(
-    ws: WebSocket | None,
+    ws: "WorkflowSession | None",
     summary: str,
     model: str | None = None,
     phase: int | None = None,
@@ -302,7 +302,7 @@ async def _send_stage(
 
 
 async def _send_stage_done(
-    ws: WebSocket | None,
+    ws: "WorkflowSession | None",
     summary: str,
     model: str | None = None,
     phase: int | None = None,
@@ -325,7 +325,7 @@ async def _send_stage_done(
 
 
 async def _send_content_done(
-    ws: WebSocket | None,
+    ws: "WorkflowSession | None",
     text: str,
 ) -> None:
     """Signal that content streaming for a planning phase is complete."""
@@ -509,7 +509,7 @@ async def _chat_structured_with_repair(
     expert: "LLMClient",
     max_tokens: int,
     artifact_label: str,
-    ws: WebSocket | None = None,
+    ws: "WorkflowSession | None" = None,
     phase: int | None = None,
     on_thinking: Callable | None = None,
     on_metrics: Callable | None = None,
@@ -821,7 +821,7 @@ async def _revise_plan(
     revision_context: str,
     llm_client: "LLMClient",
     context: str = "",
-    ws: WebSocket | None = None,
+    ws: "WorkflowSession | None" = None,
     expert_llm_client: "LLMClient | None" = None,
     previous_plan: ExecutionPlan | None = None,
     on_thinking: "Callable | None" = None,

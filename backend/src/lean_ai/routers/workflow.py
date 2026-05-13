@@ -34,6 +34,7 @@ from lean_ai.tools.git_ops import (
 )
 from lean_ai.workflow.pipeline import run_workflow
 from lean_ai.workflow.ws_dispatcher import WorkflowCancelledError, WSMessageDispatcher
+from lean_ai.workflow.ws_handler import FastAPIWorkflowSession
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
       - {"type": "pong"}
     """
     await websocket.accept()
+    ws_session = FastAPIWorkflowSession(websocket)
     logger.info("WebSocket connected for session %s", session_id)
 
     try:
@@ -328,7 +330,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                 commit_msg = await run_workflow(
                                     task=task,
                                     repo_root=repo_root,
-                                    ws=websocket,
+                                    session=ws_session,
                                     llm_client=llm_client,
                                     context=context,
                                     branch_name=branch_name,
@@ -540,7 +542,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
                             commit_msg = await run_workflow(
                                 task=resume_task,
                                 repo_root=repo_root,
-                                ws=websocket,
+                                session=ws_session,
                                 llm_client=llm_client,
                                 context=context,
                                 branch_name=branch_name,

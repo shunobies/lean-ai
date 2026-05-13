@@ -11,9 +11,8 @@ import logging
 from collections.abc import Callable
 from typing import NamedTuple
 
-from fastapi import WebSocket
-
 from lean_ai.tools.descriptions import humanize_tool_call
+from lean_ai.workflow.ws_protocol import WorkflowSession
 from lean_ai.workflow.ws_messages import (
     fire_assistant_content,
     fire_metrics_reset,
@@ -44,7 +43,7 @@ class WorkflowCallbacks(NamedTuple):
 
 
 def build_workflow_callbacks(
-    ws: WebSocket,
+    session: WorkflowSession | None,
     *,
     conversation_logger: Callable | None = None,
     include_thinking: bool = True,
@@ -57,8 +56,8 @@ def build_workflow_callbacks(
 
     Parameters
     ----------
-    ws:
-        WebSocket for sending progress messages.
+    session:
+        WorkflowSession for sending progress messages.
     conversation_logger:
         Optional async callable for persisting conversation events.
     include_thinking:
@@ -82,7 +81,7 @@ def build_workflow_callbacks(
         full_desc = f"{description_prefix}{desc}"
         _last_tool_desc[name] = full_desc
         fire_tool_progress(
-            ws,
+            session,
             tool=name,
             status="running",
             description=full_desc,
@@ -101,7 +100,7 @@ def build_workflow_callbacks(
     async def on_tool_result(name: str, result: str) -> None:
         is_error = result.startswith("ERROR:")
         fire_tool_progress(
-            ws,
+            session,
             tool=name,
             status="error" if is_error else "complete",
             description=_last_tool_desc.pop(name, name),
@@ -119,7 +118,7 @@ def build_workflow_callbacks(
 
     async def on_content(text: str) -> None:
         fire_assistant_content(
-            ws,
+            session,
             content=f"{content_prefix}{text}",
             streaming=streaming,
         )
@@ -131,7 +130,7 @@ def build_workflow_callbacks(
     if include_thinking:
 
         async def _on_thinking(text: str) -> None:
-            fire_thinking_content(ws, content=text, streaming=streaming)
+            fire_thinking_content(session, content=text, streaming=streaming)
 
         on_thinking = _on_thinking
 
@@ -142,7 +141,7 @@ def build_workflow_callbacks(
         async def _on_metrics(prompt_tokens: int, context_window: int) -> None:
             context_percent = round((prompt_tokens / context_window) * 100) if context_window else 0
             fire_metrics_update(
-                ws,
+                session,
                 prompt_tokens=prompt_tokens,
                 context_window=context_window,
                 context_percent=context_percent,
@@ -151,7 +150,7 @@ def build_workflow_callbacks(
         on_metrics = _on_metrics
 
         async def _on_metrics_reset() -> None:
-            fire_metrics_reset(ws)
+            fire_metrics_reset(session)
 
         on_metrics_reset = _on_metrics_reset
 
@@ -160,7 +159,7 @@ def build_workflow_callbacks(
         ⚠ Reasoning budget exceeded chip in the streaming panel.  Fired
         by :func:`lean_ai.llm.facade.chat_with_tools` when the provider
         aborted thinking mid-stream."""
-        fire_thinking_content(ws, content="", truncated=True)
+        fire_thinking_content(session, content="", truncated=True)
         logger.info(
             "Reasoning budget interrupt — notifying extension (thinking ~%d tokens)",
             thinking_token_count,

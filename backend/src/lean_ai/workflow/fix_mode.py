@@ -7,9 +7,9 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from fastapi import WebSocket
-
 from lean_ai.config import settings
+from lean_ai.workflow.ws_protocol import WorkflowSession
+
 from lean_ai.llm.tool_definitions import (
     build_implementation_tools,
     build_investigation_tools,
@@ -57,7 +57,7 @@ def _tail(text: str, max_chars: int) -> str:
 async def _run_fix(
     task: str,
     repo_root: str,
-    ws: WebSocket,
+    ws: "WorkflowSession | None",
     llm_client: "LLMClient",
     context: str,
     branch_name: str,

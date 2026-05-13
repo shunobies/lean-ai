@@ -12,9 +12,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fastapi import WebSocket
-
 from lean_ai.config import settings
+from lean_ai.workflow.ws_protocol import WorkflowSession
 from lean_ai.context.metadata import invalidate_metadata_cache_for_paths
 from lean_ai.indexer.tree import list_repo_tree
 from lean_ai.llm.base import ToolCall
@@ -479,7 +478,7 @@ async def execute_plan(
     plan: ExecutionPlan,
     task: str,
     repo_root: str,
-    ws: WebSocket,
+    ws: WorkflowSession | None,
     llm_client: "LLMClient",
     context: str,
     branch_name: str,
@@ -1072,7 +1071,7 @@ async def _run_tdd_execution(
     *,
     plan: ExecutionPlan,
     repo_root: str,
-    ws: WebSocket,
+    ws: WorkflowSession | None,
     llm_client: "LLMClient",
     expert_llm_client: "LLMClient",
     session_id: str,
@@ -1343,7 +1342,7 @@ async def _run_tdd_execution(
 
 async def _update_project_context(
     repo_root: str,
-    ws: WebSocket,
+    ws: WorkflowSession | None,
     llm_client: "LLMClient",
     files_modified: list[str],
 ) -> None:

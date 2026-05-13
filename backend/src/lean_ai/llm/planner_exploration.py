@@ -13,8 +13,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fastapi import WebSocket
-
 from lean_ai.config import settings
 from lean_ai.llm.planner_helpers import (
     _extract_file_paths,
@@ -33,6 +31,7 @@ if TYPE_CHECKING:
     from lean_ai.llm.facade import LLMClient
     from lean_ai.llm.plan_schema import FileSummary
     from lean_ai.workflow.ws_dispatcher import WSMessageDispatcher
+    from lean_ai.workflow.ws_protocol import WorkflowSession
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +121,7 @@ def _make_read_only_executor(
     explorer: LLMClient,
     repo_root: str,
     session_id: str,
-    ws: WebSocket | None,
+    ws: "WorkflowSession | None",
     dispatcher: WSMessageDispatcher | None,
     small_ctx: bool,
 ) -> Callable:
@@ -385,7 +384,7 @@ async def run_phase2_exploration(
     session_id: str,
     explorer: LLMClient,
     phase_max_tokens: int,
-    ws: WebSocket | None,
+    ws: "WorkflowSession | None",
     dispatcher: WSMessageDispatcher | None,
     on_content: Callable | None = None,
     on_thinking: Callable | None = None,
@@ -541,7 +540,7 @@ async def _run_parallel_exploration(
     session_id: str,
     explorer: LLMClient,
     phase_max_tokens: int,
-    ws: WebSocket | None,
+    ws: "WorkflowSession | None",
     dispatcher: WSMessageDispatcher | None,
     executor: Callable,
     on_content: Callable | None,
@@ -719,7 +718,7 @@ async def _run_serial_exploration(
     session_id: str,
     explorer: LLMClient,
     phase_max_tokens: int,
-    ws: WebSocket | None,
+    ws: "WorkflowSession | None",
     dispatcher: WSMessageDispatcher | None,
     executor: Callable,
     phase2_messages: list[dict],
@@ -821,7 +820,8 @@ async def _run_serial_exploration(
                 "1. Review the journal, observations, and scratchpad above. These represent work "
                 "you ALREADY completed before the refresh.\n"
                 "2. Do NOT re-read or re-explore files that are already recorded in observations.\n"
-                "3. If you need to explore new files, add them to your journal as you go.\n"
+                "3. If you explore new files, call record_file_observation immediately after "
+                "reading or grepping each relevant file.\n"
                 "4. Resume from where you left off — check the scratchpad for your "
                 "last known state."
             )
@@ -840,7 +840,10 @@ async def _run_serial_exploration(
                 {
                     "role": "user",
                     "content": (
-                        "[CONTEXT REFRESHED]\n\nContinue exploring the codebase for this task."
+                        "[CONTEXT REFRESHED]\n\nNo file observations, journal, or scratchpad "
+                        "state were found from before the refresh. Continue Phase 2 exploration, "
+                        "and call record_file_observation immediately after each relevant read "
+                        "or grep so findings survive future refreshes."
                     ),
                 }
             )
@@ -870,6 +873,30 @@ async def _run_serial_exploration(
             base_reminder + "\n\nCall record_file_observation for every relevant file, "
             "update_scratchpad for volatile progress, and add_journal_entry "
             "for findings that must survive a context refresh."
+        )
+
+    def _phase2_pre_context_refresh_nudge() -> str:
+        obs = read_observations(repo_root, session_id)
+        recorded_paths: list[str] = []
+        if isinstance(obs, list):
+            for item in obs:
+                if isinstance(item, dict) and item.get("file_path"):
+                    recorded_paths.append(str(item["file_path"]))
+
+        recorded_note = ""
+        if recorded_paths:
+            shown = ", ".join(recorded_paths[:12])
+            suffix = " ..." if len(recorded_paths) > 12 else ""
+            recorded_note = f" Already recorded: {shown}{suffix}."
+
+        return (
+            "CONTEXT WARNING: Phase 2 is nearing context refresh. Before continuing, "
+            "call record_file_observation for every relevant file you have already "
+            "read or grepped but have not recorded yet. Observations are the "
+            "authoritative bridge into downstream synthesis; prose alone is not "
+            "a reliable refresh bridge. Then add_journal_entry for durable findings "
+            "and update_scratchpad with the single best next action."
+            + recorded_note
         )
 
     # Phase-2-specific tool filter: drop KB tools (not useful for file
@@ -924,6 +951,7 @@ async def _run_serial_exploration(
         on_metrics_reset=on_metrics_reset,
         dispatcher=dispatcher,
         on_context_refresh=_build_phase2_refresh,
+        pre_context_refresh_nudge=_phase2_pre_context_refresh_nudge,
         telemetry_context={
             "repo_root": repo_root,
             "session_id": session_id,

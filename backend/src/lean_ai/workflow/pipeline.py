@@ -11,7 +11,9 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocketDisconnect
+
+from lean_ai.workflow.ws_protocol import WorkflowSession
 
 from lean_ai.config import settings
 from lean_ai.llm.plan_schema import ExecutionPlan, plan_to_markdown
@@ -39,7 +41,7 @@ _MAX_REVISIONS = 5
 async def run_workflow(
     task: str,
     repo_root: str,
-    ws: WebSocket,
+    session: WorkflowSession | None,
     llm_client: "LLMClient",
     context: str = "",
     branch_name: str = "",
@@ -117,7 +119,7 @@ async def run_workflow(
             "TDD mode enabled but no expert model configured — falling back to normal mode",
         )
         await ws_send(
-            ws,
+            session,
             "stage_status",
             {
                 "stage": "tdd",
@@ -133,7 +135,7 @@ async def run_workflow(
             settings._active_context_window,
         )
         await ws_send(
-            ws,
+            session,
             "stage_status",
             {
                 "stage": "tdd",
@@ -154,7 +156,7 @@ async def run_workflow(
         return await _run_fix(
             task=task,
             repo_root=repo_root,
-            ws=ws,
+            ws=session,
             llm_client=llm_client,
             context=context,
             branch_name=branch_name,
@@ -175,20 +177,20 @@ async def run_workflow(
     # with verify_hints for Phase 2 to falsify.
 
     # ── Phase 2: Plan ────────────────────────────────────────────
-    await ws_send(ws, "stage_change", {"stage": "planning"})
+    await ws_send(session, "stage_change", {"stage": "planning"})
     plan_commands = _effective_post_commands(repo_root)
 
     # Planning-specific streaming callbacks — include streaming flag
     # so the extension can distinguish token-level updates from
     # per-turn bulk content used during execution.
-    planning_cb = build_workflow_callbacks(ws, streaming=True)
+    planning_cb = build_workflow_callbacks(session=session, streaming=True)
 
     plan = await create_plan(
         task=task,
         repo_root=repo_root,
         llm_client=llm_client,
         context=context,
-        ws=ws,
+        ws=session,
         dispatcher=dispatcher,
         refiner=refiner,
         test_command=plan_commands.get("test", ""),
@@ -209,7 +211,7 @@ async def run_workflow(
         repo_root=repo_root,
         llm_client=llm_client,
         context=context,
-        ws=ws,
+        ws=session,
         refiner=refiner,
         test_command=plan_commands.get("test", ""),
         expert_llm_client=expert_llm_client,
@@ -218,12 +220,12 @@ async def run_workflow(
     )
 
     # ── Phase 4: Execute per-step ────────────────────────────────
-    await ws_send(ws, "stage_change", {"stage": "implementing"})
+    await ws_send(session, "stage_change", {"stage": "implementing"})
     return await execute_plan(
         plan=approved_plan,
         task=task,
         repo_root=repo_root,
-        ws=ws,
+        ws=session,
         llm_client=llm_client,
         context=context,
         branch_name=branch_name,
@@ -255,7 +257,7 @@ async def _wait_for_approval(
     repo_root: str,
     llm_client: "LLMClient",
     context: str,
-    ws: WebSocket,
+    ws: WorkflowSession,
     refiner: "PromptRefiner | None" = None,
     test_command: str = "",
     expert_llm_client: "LLMClient | None" = None,

@@ -11,9 +11,8 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
-from fastapi import WebSocket
-
 from lean_ai.config import settings
+from lean_ai.workflow.ws_protocol import WorkflowSession
 from lean_ai.llm.plan_schema import ExecutionPlan, plan_to_markdown
 
 if TYPE_CHECKING:
@@ -22,13 +21,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _make_memory_notifier(ws: WebSocket | None) -> Callable[[dict], Awaitable[None]] | None:
+def _make_memory_notifier(session: WorkflowSession | None) -> Callable[[dict], Awaitable[None]] | None:
     """Build an ``on_memory_created`` callback that fires a `memory_suggested`
     WS message so the extension can surface the memory inline for confirmation.
 
     Returns None when ws is None (extraction runs but no notification).
     """
-    if ws is None:
+    if session is None:
         return None
     from lean_ai.workflow.ws_messages import fire_memory_suggested
 
@@ -37,7 +36,7 @@ def _make_memory_notifier(ws: WebSocket | None) -> Callable[[dict], Awaitable[No
         if memory.get("curation_status") != "auto":
             return
         try:
-            fire_memory_suggested(ws, memory=memory)
+            fire_memory_suggested(session, memory=memory)
         except Exception:
             logger.debug("memory_suggested fire failed (non-fatal)", exc_info=True)
 
@@ -185,7 +184,7 @@ async def on_plan_decision(
     plan_after: str | None,
     decision: str,
     revision_count: int = 0,
-    ws: WebSocket | None = None,
+    ws: WorkflowSession | None = None,
 ) -> None:
     """Hook: user approved or rejected a plan.
 
@@ -264,7 +263,7 @@ async def on_validation_attempt_complete(
     succeeded: bool,
     failures_before: dict | None = None,
     failures_after: dict | None = None,
-    ws: WebSocket | None = None,
+    ws: WorkflowSession | None = None,
 ) -> None:
     """Hook: one validation fix-loop attempt completed.
 

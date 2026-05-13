@@ -313,6 +313,51 @@ async def test_chat_with_tools_emits_metrics_reset_at_start_and_refresh():
 
 
 @pytest.mark.asyncio
+async def test_custom_pre_context_refresh_nudge_runs_before_refresh_at_threshold():
+    responses = [
+        _make_tool_call_response_with_metrics(
+            "read_file",
+            {"path": "a.py"},
+            prompt_tokens=160,
+        ),
+        _make_task_complete_response(),
+    ]
+    client, fake = _build_client(responses)
+    fake._context_window_val = 200
+    refresh_called = False
+
+    def on_refresh(_msgs):
+        nonlocal refresh_called
+        refresh_called = True
+        return [
+            {"role": "system", "content": "Fresh system prompt"},
+            {"role": "user", "content": "Original task"},
+        ]
+
+    await client.chat_with_tools(
+        messages=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "task"},
+        ],
+        tools=[],
+        tool_executor_fn=_noop_executor,
+        max_turns=3,
+        on_context_refresh=on_refresh,
+        pre_context_refresh_nudge=lambda: (
+            "PHASE 2 CHECKPOINT: call record_file_observation before refresh."
+        ),
+    )
+
+    assert refresh_called is False
+    assert fake.call_count == 2
+    second_call_messages = fake.messages_at_each_call[1]
+    assert any(
+        m.get("role") == "user" and "record_file_observation" in m.get("content", "")
+        for m in second_call_messages
+    )
+
+
+@pytest.mark.asyncio
 async def test_user_interrupt_stops_remaining_same_turn_tool_calls():
     responses = [
         (

@@ -1,46 +1,72 @@
-"""WebSocket message handling utilities."""
+"""WebSocket message handling utilities.
+
+Provides convenience send helpers that operate on the framework-agnostic
+``WorkflowSession`` protocol, plus a ``FastAPIWorkflowSession`` adapter
+that wraps a raw FastAPI ``WebSocket``.
+"""
 
 import asyncio
 import logging
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
+
+from lean_ai.workflow.ws_protocol import WorkflowSession
 
 logger = logging.getLogger(__name__)
 
 
-async def ws_send(ws: WebSocket, msg_type: str, data: dict | None = None) -> None:
+# ── FastAPI adapter ──────────────────────────────────────────────
+
+
+class FastAPIWorkflowSession:
+    """Wraps a raw FastAPI ``WebSocket`` to satisfy ``WorkflowSession``."""
+
+    def __init__(self, ws: WebSocket) -> None:
+        self._ws = ws
+
+    async def send(self, data: dict[str, object]) -> None:
+        """Send a JSON message, suppressing transport errors."""
+        try:
+            await self._ws.send_json(data)
+        except Exception:
+            logger.warning("Failed to send WS message: %s", data.get("type"))
+
+    def send_nowait(self, data: dict[str, object]) -> None:
+        """Fire-and-forget send backed by an asyncio task."""
+        asyncio.create_task(self.send(data))
+
+    def is_connected(self) -> bool:
+        """Return True if the underlying WebSocket has not closed."""
+        return self._ws.client is not None
+
+
+# ── Convenience helpers (accept WorkflowSession) ─────────────────
+
+
+async def ws_send(session: WorkflowSession, msg_type: str, data: dict | None = None) -> None:
     """Send a typed WebSocket message (awaited — blocks until queued)."""
     payload = {"type": msg_type, **(data or {})}
-    try:
-        await ws.send_json(payload)
-    except Exception:
-        logger.warning("Failed to send WS message: %s", msg_type)
+    await session.send(payload)
 
 
-def ws_send_nowait(ws: WebSocket, msg_type: str, data: dict | None = None) -> None:
+def ws_send_nowait(session: WorkflowSession, msg_type: str, data: dict | None = None) -> None:
     """Fire-and-forget WebSocket send for non-critical progress messages."""
-    asyncio.create_task(_ws_send_quiet(ws, msg_type, data))
+    asyncio.create_task(_ws_send_quiet(session, msg_type, data))
 
 
 async def _ws_send_quiet(
-    ws: WebSocket,
+    session: WorkflowSession,
     msg_type: str,
     data: dict | None = None,
 ) -> None:
     """Send with suppressed errors — used by fire-and-forget tasks."""
     payload = {"type": msg_type, **(data or {})}
     try:
-        await ws.send_json(payload)
+        await session.send(payload)
     except Exception:
         logger.debug("Fire-and-forget WS send failed: %s", msg_type)
 
 
-async def safe_receive(ws: WebSocket) -> dict | None:
-    """Receive a JSON message, return None on disconnect."""
-    try:
-        return await ws.receive_json()
-    except WebSocketDisconnect:
-        return None
-    except Exception as e:
-        logger.warning("WS receive error: %s", e)
-        return None
+def is_connected(session: WorkflowSession) -> bool:
+    """Return True if the session's transport is still open."""
+    return session.is_connected()

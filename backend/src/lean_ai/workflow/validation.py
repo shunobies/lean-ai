@@ -8,9 +8,8 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from fastapi import WebSocket
-
 from lean_ai.config import settings
+from lean_ai.workflow.ws_protocol import WorkflowSession
 from lean_ai.llm.tool_definitions import (
     build_implementation_tools,
     build_tdd_implementation_tools,
@@ -84,7 +83,7 @@ def _effective_post_commands(repo_root: str) -> dict[str, str]:
 
 async def _run_post_validation(
     repo_root: str,
-    ws: WebSocket,
+    ws: "WorkflowSession | None",
 ) -> dict:
     """Run deterministic post-execution lint, test, and auto-fix commands.
 
@@ -225,7 +224,7 @@ async def _run_post_validation(
 
 async def _run_validation_fix_loop(
     repo_root: str,
-    ws: WebSocket,
+    ws: "WorkflowSession | None",
     llm_client: "LLMClient",
     context: str,
     validation_results: dict,

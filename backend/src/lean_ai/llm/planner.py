@@ -19,9 +19,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fastapi import WebSocket
-
 from lean_ai.config import settings
+from lean_ai.workflow.ws_protocol import WorkflowSession
 from lean_ai.llm.plan_schema import (
     IMPLEMENTATION_STEP_TOOLS,
     DesignAndRisks,
@@ -76,7 +75,7 @@ async def create_plan(
     context: str = "",
     revision_context: str | None = None,
     previous_plan: ExecutionPlan | None = None,
-    ws: WebSocket | None = None,
+    ws: WorkflowSession | None = None,
     dispatcher: "WSMessageDispatcher | None" = None,
     refiner: "PromptRefiner | None" = None,
     test_command: str = "",
@@ -106,7 +105,7 @@ async def create_plan(
         llm_client: Primary LLM client — runs phases 1–2 and implementation.
         context: Pre-assembled context (project context, search results, etc.).
         revision_context: If revising, the previous plan JSON + user feedback.
-        ws: Optional WebSocket for streaming stage progress.
+        ws: Optional WorkflowSession for streaming stage progress.
         refiner: Optional local refiner for privacy-stripping file summaries.
         test_command: If set, planner folds test commands into success checks.
         expert_llm_client: Optional expert model for phases 3–4 reasoning.
@@ -809,7 +808,7 @@ async def _run_phase5_verification(
     test_command: str,
     expert: "LLMClient",
     plan_assembly_max_tokens: int,
-    ws: WebSocket | None,
+    ws: WorkflowSession | None,
     repo_root: str,
     session_id: str,
     on_thinking: Callable | None,

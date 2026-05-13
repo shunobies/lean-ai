@@ -488,6 +488,7 @@ class LLMClient:
         on_metrics: Callable | None = None,
         on_metrics_reset: Callable | None = None,
         on_context_refresh: Callable | None = None,
+        pre_context_refresh_nudge: str | Callable[[], str] | None = None,
         on_budget_interrupt: Callable | None = None,
         dispatcher: "WSMessageDispatcher | None" = None,
         telemetry_context: dict | None = None,
@@ -977,6 +978,7 @@ class LLMClient:
                 reminder_interval=reminder_interval,
                 max_turns=effective_max,
                 on_context_refresh=on_context_refresh,
+                pre_context_refresh_nudge=pre_context_refresh_nudge,
             )
 
             if action.verdict == TurnVerdict.EXIT:
@@ -1138,6 +1140,7 @@ class LLMClient:
         reminder_interval: int,
         max_turns: int,
         on_context_refresh: Callable | None,
+        pre_context_refresh_nudge: str | Callable[[], str] | None,
     ) -> TurnAction:
         """Make ONE decision after each turn.
 
@@ -1206,24 +1209,33 @@ class LLMClient:
             limit = int(settings.refresh_threshold * self._provider.context_window)
             # Pre-refresh warning should be tied to the existing configurable
             # refresh threshold (default 0.7), not a separate hardcoded ratio.
-            # Fire shortly before refresh so the model can checkpoint journal
-            # and scratchpad state before callback-based context rebuild.
+            # Fire shortly before refresh so the model can checkpoint durable
+            # phase state before callback-based context rebuild.
             pre_refresh_buffer = max(256, int(self._provider.context_window * 0.03))
             pre_refresh_limit = max(1, limit - pre_refresh_buffer)
-            if (
+            should_checkpoint_before_refresh = (
                 prompt_tokens >= pre_refresh_limit
-                and prompt_tokens < limit
                 and not state.pre_refresh_nudge_sent
-            ):
-                state.pre_refresh_nudge_sent = True
-                return TurnAction(
-                    verdict=TurnVerdict.NUDGE,
-                    message=(
+                and (prompt_tokens < limit or pre_context_refresh_nudge is not None)
+            )
+            if should_checkpoint_before_refresh:
+                if pre_context_refresh_nudge is not None:
+                    nudge = (
+                        pre_context_refresh_nudge()
+                        if callable(pre_context_refresh_nudge)
+                        else pre_context_refresh_nudge
+                    )
+                else:
+                    nudge = (
                         "CONTEXT WARNING: You are nearing context refresh. "
                         "Before continuing, summarize progress and key findings with "
                         "add_journal_entry, then write the single best next action to "
                         "update_scratchpad so it can be resumed after refresh."
-                    ),
+                    )
+                state.pre_refresh_nudge_sent = True
+                return TurnAction(
+                    verdict=TurnVerdict.NUDGE,
+                    message=nudge,
                     nudge_key="nudge.pre_context_refresh",
                     log_level=logging.WARNING,
                 )

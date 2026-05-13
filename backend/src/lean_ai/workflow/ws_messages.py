@@ -1,332 +1,61 @@
-"""Typed WebSocket message contracts.
+"""Typed WebSocket message send helpers.
 
-Defines ``TypedDict`` shapes for every server→client and client→server
-message.  Use the ``Literal`` type unions as the single source of truth
-for the protocol.
+Thin wrappers that construct the correct payload and delegate to
+``ws_handler.ws_send`` / ``ws_handler.ws_send_nowait``.  All TypedDict
+message contracts and type aliases are imported from ``ws_protocol``.
 
-Usage — typed send helpers::
+Usage::
 
     from lean_ai.workflow.ws_messages import send_stage_change, send_error
 
-    await send_stage_change(ws, stage="planning")
-    await send_error(ws, message="something broke")
-
-Usage — building a payload manually::
-
-    msg: StageStatusMessage = {
-        "type": "stage_status",
-        "stage": "PLANNING",
-        "status": "running",
-        "summary": "Phase 1 — scope analysis",
-    }
-    await ws_send(ws, msg["type"], {k: v for k, v in msg.items() if k != "type"})
+    await send_stage_change(session, stage="planning")
+    await send_error(session, message="something broke")
 """
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict
-
-from fastapi import WebSocket
-
 from lean_ai.workflow.ws_handler import ws_send, ws_send_nowait
-
-# ── Server → Client messages ────────────────────────────────────
-
-
-class StageChangeMessage(TypedDict):
-    type: Literal["stage_change"]
-    stage: str
-
-
-class StageStatusMessage(TypedDict, total=False):
-    type: Literal["stage_status"]  # pyright: ignore[reportGeneralTypeIssues]
-    stage: str
-    status: str
-    summary: str
-    model: str
-    phase: int
-
-
-# Make required keys explicit
-class _StageStatusRequired(TypedDict):
-    type: Literal["stage_status"]
-    stage: str
-    status: str
-    summary: str
-
-
-class ApprovalRequiredMessage(TypedDict, total=False):
-    type: Literal["approval_required"]  # pyright: ignore[reportGeneralTypeIssues]
-    plan: str
-    plan_object: dict
-    user_summary: str
-    plan_validation_warnings: list[str]
-
-
-class _ApprovalRequiredBase(TypedDict):
-    type: Literal["approval_required"]
-    plan: str
-
-
-class ToolApprovalRequiredMessage(TypedDict):
-    type: Literal["tool_approval_required"]
-    tool: str
-    command: str
-    reason: str
-
-
-class ClarificationNeededMessage(TypedDict):
-    type: Literal["clarification_needed"]
-    questions: str
-
-
-class PlanRejectedMessage(TypedDict):
-    type: Literal["plan_rejected"]
-    message: str
-
-
-class PlanRevisionMessage(TypedDict, total=False):
-    type: Literal["plan_revision"]  # pyright: ignore[reportGeneralTypeIssues]
-    plan: str
-    plan_object: dict
-
-
-class ToolProgressMessage(TypedDict, total=False):
-    type: Literal["tool_progress"]  # pyright: ignore[reportGeneralTypeIssues]
-    tool: str
-    status: str
-    description: str
-    output: str
-
-
-class _ToolProgressRequired(TypedDict):
-    type: Literal["tool_progress"]
-    tool: str
-    status: str
-    description: str
-
-
-class DiffMessage(TypedDict, total=False):
-    type: Literal["diff"]  # pyright: ignore[reportGeneralTypeIssues]
-    file: str
-    diff: str
-    diff_hash: str  # sha256(diff)[:16] — used to pair accept/reject decisions
-
-
-class TestResultMessage(TypedDict, total=False):
-    type: Literal["test_result"]  # pyright: ignore[reportGeneralTypeIssues]
-    passed: bool
-    output: str
-    command: str
-
-
-class _TestResultRequired(TypedDict):
-    type: Literal["test_result"]
-    passed: bool
-    output: str
-
-
-class ErrorMessage(TypedDict):
-    type: Literal["error"]
-    message: str
-
-
-class CompleteMessage(TypedDict, total=False):
-    type: Literal["complete"]  # pyright: ignore[reportGeneralTypeIssues]
-    commit_message: str
-    files_changed: list[str]
-    affected_files: list[str]
-
-
-class CancelledMessage(TypedDict):
-    type: Literal["cancelled"]
-
-
-class CheckpointMessage(TypedDict, total=False):
-    type: Literal["checkpoint"]  # pyright: ignore[reportGeneralTypeIssues]
-    step: int
-    total: int
-    tool: str
-    file_path: str
-    description: str
-
-
-class ExecutionChecklistMessage(TypedDict, total=False):
-    type: Literal["execution_checklist"]  # pyright: ignore[reportGeneralTypeIssues]
-    steps: list[dict]
-
-
-class ContextRefreshedMessage(TypedDict, total=False):
-    type: Literal["context_refreshed"]  # pyright: ignore[reportGeneralTypeIssues]
-    dropped_messages: int
-    reason: str
-
-
-class AssistantContentMessage(TypedDict, total=False):
-    type: Literal["assistant_content"]  # pyright: ignore[reportGeneralTypeIssues]
-    content: str
-    done: bool
-    streaming: bool
-
-
-class ThinkingContentMessage(TypedDict, total=False):
-    type: Literal["thinking_content"]  # pyright: ignore[reportGeneralTypeIssues]
-    content: str
-    streaming: bool
-    # When True, the provider's thinking stream was aborted because
-    # accumulated tokens crossed the reasoning_effort soft limit or the
-    # max_thinking_tokens safety rail.  The extension renders a warning
-    # chip inline in the collapsible thinking panel.
-    truncated: bool
-
-
-class MetricsUpdateMessage(TypedDict, total=False):
-    type: Literal["metrics_update"]  # pyright: ignore[reportGeneralTypeIssues]
-    prompt_tokens: int
-    context_window: int
-    context_percent: int
-
-
-class MetricsResetMessage(TypedDict):
-    type: Literal["metrics_reset"]
-
-
-class BranchCreatedMessage(TypedDict):
-    type: Literal["branch_created"]
-    branch_name: str
-    base_branch: str
-
-
-class PongMessage(TypedDict):
-    type: Literal["pong"]
-
-
-class VisionDescriptionMessage(TypedDict):
-    type: Literal["vision_description"]
-    descriptions: str
-
-
-class RefinerStatusMessage(TypedDict, total=False):
-    type: Literal["refiner_status"]  # pyright: ignore[reportGeneralTypeIssues]
-    status: str
-    original: str
-    refined: str
-    changes: str
-
-
-class MemorySuggestedMessage(TypedDict, total=False):
-    type: Literal["memory_suggested"]  # pyright: ignore[reportGeneralTypeIssues]
-    memory_id: str
-    category: str
-    content: str
-    source_phase: str
-    tags: list[str]
-
-
-# ── Server message type union ───────────────────────────────────
-
-ServerMessageType = Literal[
-    "stage_change",
-    "stage_status",
-    "approval_required",
-    "tool_approval_required",
-    "clarification_needed",
-    "plan_rejected",
-    "plan_revision",
-    "tool_progress",
-    "diff",
-    "test_result",
-    "error",
-    "complete",
-    "cancelled",
-    "checkpoint",
-    "execution_checklist",
-    "context_refreshed",
-    "assistant_content",
-    "thinking_content",
-    "metrics_update",
-    "metrics_reset",
-    "branch_created",
-    "pong",
-    "vision_description",
-    "refiner_status",
-    "memory_suggested",
-]
-
-# ── Client → Server messages ────────────────────────────────────
-
-
-class UserMessage(TypedDict, total=False):
-    type: Literal["user_message"]  # pyright: ignore[reportGeneralTypeIssues]
-    content: str
-    text: str
-    repo_root: str
-    workspace_path: str
-
-
-class RejectMessage(TypedDict, total=False):
-    type: Literal["reject"]  # pyright: ignore[reportGeneralTypeIssues]
-    feedback: str
-    content: str
-    text: str
-
-
-class CancelMessage(TypedDict):
-    type: Literal["cancel"]
-
-
-class ApproveMessage(TypedDict):
-    type: Literal["approve"]
-
-
-class ApproveToolMessage(TypedDict):
-    type: Literal["approve_tool"]
-
-
-class DenyToolMessage(TypedDict):
-    type: Literal["deny_tool"]
-
-
-class PingMessage(TypedDict):
-    type: Literal["ping"]
-
-
-class ResumeMessage(TypedDict, total=False):
-    type: Literal["resume"]  # pyright: ignore[reportGeneralTypeIssues]
-    session_id: str
-    repo_root: str
-
-
-class ConfirmMemoryMessage(TypedDict):
-    type: Literal["confirm_memory"]
-    memory_id: str
-
-
-class RejectMemoryMessage(TypedDict):
-    type: Literal["reject_memory"]
-    memory_id: str
-
-
-class SaveMemoryManualMessage(TypedDict, total=False):
-    type: Literal["save_memory_manual"]  # pyright: ignore[reportGeneralTypeIssues]
-    category: str
-    content: str
-    tags: list[str]
-
-
-ClientMessageType = Literal[
-    "user_message",
-    "reject",
-    "cancel",
-    "approve",
-    "approve_tool",
-    "deny_tool",
-    "ping",
-    "resume",
-    "confirm_memory",
-    "reject_memory",
-    "save_memory_manual",
-]
+from lean_ai.workflow.ws_protocol import (
+    ApprovalRequiredMessage,
+    ApproveMessage,
+    ApproveToolMessage,
+    AssistantContentMessage,
+    BranchCreatedMessage,
+    CancelMessage,
+    CancelledMessage,
+    TestResultMessage,
+    CheckpointMessage,
+    ClarificationNeededMessage,
+    ClientMessageType,
+    CompleteMessage,
+    ConfirmMemoryMessage,
+    ContextRefreshedMessage,
+    DiffMessage,
+    DenyToolMessage,
+    ErrorMessage,
+    ExecutionChecklistMessage,
+    MemorySuggestedMessage,
+    MetricsResetMessage,
+    MetricsUpdateMessage,
+    PongMessage,
+    PingMessage,
+    PlanRejectedMessage,
+    PlanRevisionMessage,
+    RefinerStatusMessage,
+    RejectMessage,
+    RejectMemoryMessage,
+    ResumeMessage,
+    SaveMemoryManualMessage,
+    ServerMessageType,
+    StageChangeMessage,
+    StageStatusMessage,
+    ThinkingContentMessage,
+    ToolApprovalRequiredMessage,
+    ToolProgressMessage,
+    UserMessage,
+    VisionDescriptionMessage,
+    WorkflowSession,
+)
 
 # ── Typed send helpers ──────────────────────────────────────────
 #
@@ -335,12 +64,12 @@ ClientMessageType = Literal[
 # for compile-time type safety without changing the wire format.
 
 
-async def send_stage_change(ws: WebSocket, *, stage: str) -> None:
-    await ws_send(ws, "stage_change", {"stage": stage})
+async def send_stage_change(session: WorkflowSession, *, stage: str) -> None:
+    await ws_send(session, "stage_change", {"stage": stage})
 
 
 async def send_stage_status(
-    ws: WebSocket,
+    session: WorkflowSession,
     *,
     stage: str,
     status: str,
@@ -353,19 +82,19 @@ async def send_stage_status(
         data["model"] = model
     if phase is not None:
         data["phase"] = phase
-    await ws_send(ws, "stage_status", data)
+    await ws_send(session, "stage_status", data)
 
 
-async def send_error(ws: WebSocket, *, message: str) -> None:
-    await ws_send(ws, "error", {"message": message})
+async def send_error(session: WorkflowSession, *, message: str) -> None:
+    await ws_send(session, "error", {"message": message})
 
 
-async def send_diff(ws: WebSocket, *, file: str, diff: str) -> None:
+async def send_diff(session: WorkflowSession, *, file: str, diff: str) -> None:
     import hashlib
 
     diff_hash = hashlib.sha256((diff or "").encode("utf-8")).hexdigest()[:16]
     await ws_send(
-        ws,
+        session,
         "diff",
         {
             "file": file,
@@ -376,7 +105,7 @@ async def send_diff(ws: WebSocket, *, file: str, diff: str) -> None:
 
 
 async def send_test_result(
-    ws: WebSocket,
+    session: WorkflowSession,
     *,
     passed: bool,
     output: str,
@@ -385,18 +114,18 @@ async def send_test_result(
     data: dict = {"passed": passed, "output": output}
     if command is not None:
         data["command"] = command
-    await ws_send(ws, "test_result", data)
+    await ws_send(session, "test_result", data)
 
 
 async def send_tool_approval_required(
-    ws: WebSocket,
+    session: WorkflowSession,
     *,
     tool: str,
     command: str,
     reason: str,
 ) -> None:
     await ws_send(
-        ws,
+        session,
         "tool_approval_required",
         {
             "tool": tool,
@@ -407,7 +136,7 @@ async def send_tool_approval_required(
 
 
 async def send_checkpoint(
-    ws: WebSocket,
+    session: WorkflowSession,
     *,
     step: int,
     total: int,
@@ -424,15 +153,15 @@ async def send_checkpoint(
         data["file_path"] = file_path
     if description:
         data["description"] = description
-    await ws_send(ws, "checkpoint", data)
+    await ws_send(session, "checkpoint", data)
 
 
-async def send_complete(ws: WebSocket, **data: object) -> None:
-    await ws_send(ws, "complete", dict(data))
+async def send_complete(session: WorkflowSession, **data: object) -> None:
+    await ws_send(session, "complete", dict(data))
 
 
 def fire_tool_progress(
-    ws: WebSocket,
+    session: WorkflowSession,
     *,
     tool: str,
     status: str,
@@ -443,11 +172,11 @@ def fire_tool_progress(
     data: dict = {"tool": tool, "status": status, "description": description}
     if output is not None:
         data["output"] = output
-    ws_send_nowait(ws, "tool_progress", data)
+    ws_send_nowait(session, "tool_progress", data)
 
 
 def fire_assistant_content(
-    ws: WebSocket,
+    session: WorkflowSession,
     *,
     content: str,
     done: bool = False,
@@ -459,11 +188,11 @@ def fire_assistant_content(
         data["done"] = True
     if streaming:
         data["streaming"] = True
-    ws_send_nowait(ws, "assistant_content", data)
+    ws_send_nowait(session, "assistant_content", data)
 
 
 def fire_thinking_content(
-    ws: WebSocket,
+    session: WorkflowSession,
     *,
     content: str = "",
     streaming: bool = False,
@@ -480,11 +209,11 @@ def fire_thinking_content(
         data["streaming"] = True
     if truncated:
         data["truncated"] = True
-    ws_send_nowait(ws, "thinking_content", data)
+    ws_send_nowait(session, "thinking_content", data)
 
 
 def fire_context_refreshed(
-    ws: WebSocket,
+    session: WorkflowSession,
     *,
     dropped_messages: int,
     reason: str = "",
@@ -493,11 +222,11 @@ def fire_context_refreshed(
     data: dict = {"dropped_messages": dropped_messages}
     if reason:
         data["reason"] = reason
-    ws_send_nowait(ws, "context_refreshed", data)
+    ws_send_nowait(session, "context_refreshed", data)
 
 
 def fire_metrics_update(
-    ws: WebSocket,
+    session: WorkflowSession,
     *,
     prompt_tokens: int,
     context_window: int,
@@ -505,7 +234,7 @@ def fire_metrics_update(
 ) -> None:
     """Fire-and-forget metrics update (non-blocking)."""
     ws_send_nowait(
-        ws,
+        session,
         "metrics_update",
         {
             "prompt_tokens": prompt_tokens,
@@ -515,12 +244,12 @@ def fire_metrics_update(
     )
 
 
-def fire_metrics_reset(ws: WebSocket) -> None:
+def fire_metrics_reset(session: WorkflowSession) -> None:
     """Fire-and-forget metrics reset (non-blocking)."""
-    ws_send_nowait(ws, "metrics_reset", {})
+    ws_send_nowait(session, "metrics_reset", {})
 
 
-def fire_memory_suggested(ws: WebSocket, *, memory: dict) -> None:
+def fire_memory_suggested(session: WorkflowSession, *, memory: dict) -> None:
     """Fire-and-forget memory-suggestion chip (non-blocking).
 
     Sent when an auto-extracted memory is eligible for user confirmation.
@@ -537,4 +266,4 @@ def fire_memory_suggested(ws: WebSocket, *, memory: dict) -> None:
     tags = memory.get("tags")
     if tags:
         data["tags"] = tags
-    ws_send_nowait(ws, "memory_suggested", data)
+    ws_send_nowait(session, "memory_suggested", data)
