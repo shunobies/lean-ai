@@ -66,6 +66,51 @@ async def _emit_progress(
         await callback(kwargs)
 
 
+def _primary_generation_limits(settings) -> tuple[int, int]:
+    """Return ``(context_window, max_tokens)`` for the primary model."""
+    provider = settings.llm_provider.lower()
+    return (
+        settings._active_context_window,
+        settings._provider_max_tokens(provider, settings.ollama_max_tokens),
+    )
+
+
+def _request_generation_limits(settings) -> tuple[int, int]:
+    """Return ``(context_window, max_tokens)`` for the request model."""
+    provider = (settings.request_llm_provider or "").lower()
+    if not provider or provider == "ollama":
+        context_window = settings.ollama_request_context_window or settings.ollama_context_window
+        max_tokens = settings.ollama_request_max_tokens or (context_window // 4)
+        return context_window, max_tokens
+    return settings._provider_context_window(provider), settings._provider_max_tokens(provider)
+
+
+def _resolve_extraction_client(
+    settings,
+    llm_client: "LLMClient",
+    worker_client: "LLMClient | None" = None,
+    request_client: "LLMClient | None" = None,
+) -> tuple["LLMClient", int, int, str]:
+    """Pick the model for file extraction and return its limits.
+
+    Project-context generation is dominated by many small extraction calls,
+    so prefer the worker model when configured, then request, then primary.
+    """
+    if worker_client is not None:
+        return (
+            worker_client,
+            settings.effective_worker_context_window,
+            settings.effective_worker_max_tokens,
+            "worker",
+        )
+    if request_client is not None:
+        context_window, max_tokens = _request_generation_limits(settings)
+        return request_client, context_window, max_tokens, "request"
+
+    context_window, max_tokens = _primary_generation_limits(settings)
+    return llm_client, context_window, max_tokens, "primary"
+
+
 # ---------------------------------------------------------------------------
 # Phase 1: Single-file extraction
 # ---------------------------------------------------------------------------
@@ -215,14 +260,29 @@ async def generate_project_context(
     via SQLite WAL mode.
 
     **Phase 2 — Export:** Export DB to Markdown, apply deterministic cleanup,
-    and optionally condense via LLM (primary model).
+    and optionally condense via the primary model.
     """
     from lean_ai.config import settings
 
     logger.info("Generating project context for %s", repo_root)
 
-    max_out = settings.ollama_max_tokens or settings.ollama_context_window // 4
-    caps = _scale_generation_caps(settings.ollama_context_window, max_out)
+    extraction_client, extraction_context_window, extraction_max_out, extraction_role = (
+        _resolve_extraction_client(
+            settings,
+            llm_client,
+            worker_client=worker_client,
+            request_client=request_client,
+        )
+    )
+    condense_context_window, condense_max_out = _primary_generation_limits(settings)
+
+    logger.info(
+        "Project context extraction using %s model (%s)",
+        extraction_role,
+        getattr(extraction_client, "model_name", "unknown"),
+    )
+
+    caps = _scale_generation_caps(extraction_context_window, extraction_max_out)
     max_file = caps.get("max_file_chars", _MAX_FILE_CHARS)
 
     # ── Phase 0: deterministic skeleton (no LLM call) ────────────────
@@ -297,20 +357,16 @@ async def generate_project_context(
             )
 
         # ── Model resolution ────────────────────────────────────────
-        # Use the request model (chatty, larger context) for extraction when
-        # available, falling back to the primary model.  Condensation always
-        # uses the primary model.
-        extraction_client = request_client or llm_client
+        # Per-file extraction prefers worker → request → primary, while
+        # whole-document condensation stays on the primary model.
         condense_client = llm_client
 
         # ── Phase 1: file-by-file extraction ────────────────────────
-        context_window = settings.ollama_context_window
-
         if settings.num_parallel >= 2 and total_files > 1:
             await _phase1_parallel(
                 candidates,
                 extraction_client,
-                max_out,
+                extraction_max_out,
                 repo_root,
                 thinking_callback,
                 progress_callback,
@@ -320,7 +376,7 @@ async def generate_project_context(
             await _phase1_sequential(
                 candidates,
                 extraction_client,
-                max_out,
+                extraction_max_out,
                 db,
                 thinking_callback,
                 progress_callback,
@@ -362,8 +418,8 @@ async def generate_project_context(
     content = await _condense(
         content,
         condense_client,
-        max_tokens=max_out,
-        context_window=context_window,
+        max_tokens=condense_max_out,
+        context_window=condense_context_window,
         thinking_callback=thinking_callback,
         progress_callback=progress_callback,
     )
@@ -512,6 +568,7 @@ async def update_project_context(
     modified_paths: list[str],
     llm_client: "LLMClient",
     thinking_callback: Callable[[str], Awaitable[None]] | None = None,
+    worker_client: "LLMClient | None" = None,
 ) -> str | None:
     """Incrementally update project_context.md with changes from modified files.
 
@@ -526,8 +583,16 @@ async def update_project_context(
         logger.info("update_project_context: no existing context file, skipping")
         return None
 
-    max_out = settings.ollama_max_tokens or settings.ollama_context_window // 4
-    caps = _scale_generation_caps(settings.ollama_context_window, max_out)
+    extraction_client, extraction_context_window, extraction_max_out, extraction_role = (
+        _resolve_extraction_client(settings, llm_client, worker_client=worker_client)
+    )
+    logger.info(
+        "update_project_context: using %s model (%s) for extraction",
+        extraction_role,
+        getattr(extraction_client, "model_name", "unknown"),
+    )
+
+    caps = _scale_generation_caps(extraction_context_window, extraction_max_out)
     max_file = caps.get("max_file_chars", _MAX_FILE_CHARS)
 
     root = Path(repo_root)
@@ -562,8 +627,8 @@ async def update_project_context(
                 entries = await _extract_single_file(
                     rel_path,
                     file_content,
-                    llm_client,
-                    max_out,
+                    extraction_client,
+                    extraction_max_out,
                     thinking_callback,
                 )
                 if entries:

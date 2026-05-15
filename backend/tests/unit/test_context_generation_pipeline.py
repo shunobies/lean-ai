@@ -332,8 +332,10 @@ async def test_generate_project_context_progress_callback(repo_root, mock_llm_cl
 
 
 @pytest.mark.asyncio
-async def test_generate_project_context_worker_not_used_for_extraction(repo_root, mock_llm_client):
-    """Worker model is too small for extraction — should NOT be used."""
+async def test_generate_project_context_worker_preferred_for_extraction(
+    repo_root, mock_llm_client
+):
+    """Worker model should be preferred for per-file extraction when configured."""
     worker = AsyncMock()
     worker.chat_structured = AsyncMock(
         return_value=ContextExtractionResult(
@@ -354,10 +356,8 @@ async def test_generate_project_context_worker_not_used_for_extraction(repo_root
         worker_client=worker,
     )
 
-    # Worker should NOT be called for extraction (too small).
-    # Primary (mock_llm_client) should be used instead.
-    assert not worker.chat_structured.called
-    assert mock_llm_client.chat_structured.called
+    assert worker.chat_structured.called
+    assert not mock_llm_client.chat_structured.called
 
 
 @pytest.mark.asyncio
@@ -484,6 +484,38 @@ async def test_update_project_context_incremental(repo_root, mock_llm_client):
     md_path = Path(repo_root) / ".lean_ai" / "project_context.md"
     assert md_path.is_file()
     assert len(md_path.read_text()) > 0
+
+
+@pytest.mark.asyncio
+async def test_update_project_context_prefers_worker_for_extraction(repo_root, mock_llm_client):
+    await generate_project_context(repo_root, mock_llm_client)
+
+    (Path(repo_root) / "src" / "utils.py").write_text(
+        'def helper():\n    return "updated"\n\ndef new_func():\n    pass\n'
+    )
+
+    worker = AsyncMock()
+    worker.chat_structured = AsyncMock(
+        return_value=ContextExtractionResult(
+            entries=[
+                ContextExtractionEntry(
+                    section="Module Map",
+                    symbol="worker",
+                    description="incremental worker extraction",
+                    file_path="src/utils.py",
+                ),
+            ],
+        )
+    )
+
+    await update_project_context(
+        repo_root,
+        ["src/utils.py"],
+        mock_llm_client,
+        worker_client=worker,
+    )
+
+    assert worker.chat_structured.called
 
 
 @pytest.mark.asyncio

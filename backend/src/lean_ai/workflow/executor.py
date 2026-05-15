@@ -1402,11 +1402,13 @@ async def _update_project_context(
     )
     try:
         from lean_ai.context.generation import update_project_context
+        from lean_ai.routers.dependencies import worker_llm_client
 
         ctx_path = await update_project_context(
             repo_root,
             files_modified,
             llm_client,
+            worker_client=worker_llm_client,
         )
         if ctx_path:
             logger.info(
