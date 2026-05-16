@@ -10,8 +10,9 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from lean_ai.config import settings
 from lean_ai.llm.planner_helpers import (
@@ -34,6 +35,44 @@ if TYPE_CHECKING:
     from lean_ai.workflow.ws_protocol import WorkflowSession
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ToolContext:
+    """Execution context passed to every tool handler."""
+
+    repo_root: str
+    session_id: str
+    explorer: "LLMClient"
+    small_ctx: bool = False
+    ws: Optional["WorkflowSession"] = None
+    dispatcher: Optional["WSMessageDispatcher"] = None
+
+
+class ToolRegistry:
+    """Central registry that maps tool names to async handler callables.
+
+    Follows the same module-level dictionary pattern used by
+    ``integrations.registry`` for ``@register_integration``.
+    """
+
+    _handlers: dict[str, Callable] = {}
+
+    @classmethod
+    def register(cls, name: str) -> Callable[[Callable], Callable]:
+        """Decorator to register a tool handler under *name*."""
+
+        def decorator(func: Callable) -> Callable:
+            cls._handlers[name] = func
+            logger.debug("Registered tool handler: %s", name)
+            return func
+
+        return decorator
+
+    @classmethod
+    def get_handler(cls, name: str) -> Callable | None:
+        """Return the handler for *name*, or None if not registered."""
+        return cls._handlers.get(name)
 
 
 def _fire_clarification_capture(
@@ -117,6 +156,335 @@ def _fire_phase2_synthesis_capture(
     t.add_done_callback(lambda tk: tk.exception() if tk.done() else None)
 
 
+# ---------------------------------------------------------------------------
+# Tool handler classes — each implements execute(context, args) -> str
+# and is registered via @ToolRegistry.register('tool_name').
+# ---------------------------------------------------------------------------
+
+
+class ReadFileHandler:
+    """Handle read_file tool calls with external-path approval and small-context truncation."""
+
+    @ToolRegistry.register("read_file")
+    @staticmethod
+    async def execute(context: ToolContext, args: dict) -> str:
+        from lean_ai.tools.file_ops import read_file
+        from lean_ai.workflow.tool_executor import (
+            _is_external_path,
+            _request_tool_approval,
+        )
+
+        target_path = args.get("path", "")
+        external = _is_external_path(target_path, context.repo_root)
+        if external:
+            if context.ws is None:
+                return (
+                    "ERROR: Cannot read files outside the project without an active connection"
+                )
+            approved = await _request_tool_approval(
+                context.ws,
+                context.dispatcher,
+                "read_file",
+                target_path,
+                "File is outside the project directory",
+            )
+            if not approved:
+                return "ERROR: Access to external file not approved by user"
+        # At small windows, cap visible range to 200 lines
+        end_line = args.get("end_line")
+        if context.small_ctx and end_line is None:
+            start = args.get("start_line") or 1
+            end_line = start + 199
+        result = await read_file(
+            path=target_path,
+            repo_root=context.repo_root,
+            start_line=args.get("start_line"),
+            end_line=end_line,
+            allow_external=external,
+        )
+        output = result.output if result.success else result.error or "Error"
+        # Notify the LLM when a small-context cap truncated the file
+        if (
+            context.small_ctx
+            and end_line is not None
+            and result.success
+            and "[END OF FILE]" not in output
+        ):
+            output += (
+                f"\n\n[TRUNCATED at line {end_line} — small context "
+                f"window. Use start_line={end_line + 1} to read more.]"
+            )
+        return output
+
+
+class GrepFilesHandler:
+    """Handle grep_files tool calls for pattern-based file searches."""
+
+    @ToolRegistry.register("grep_files")
+    @staticmethod
+    async def execute(context: ToolContext, args: dict) -> str:
+        from lean_ai.tools.file_ops import grep_files
+
+        result = await grep_files(
+            pattern=args.get("pattern", ""),
+            repo_root=context.repo_root,
+            file_glob=args.get("file_glob"),
+            max_results=30 if context.small_ctx else None,
+        )
+        return result.output if result.success else result.error or "Error"
+
+
+class ListDirectoryHandler:
+    """Handle list_directory tool calls to list directory contents."""
+
+    @ToolRegistry.register("list_directory")
+    @staticmethod
+    async def execute(context: ToolContext, args: dict) -> str:
+        target = Path(context.repo_root) / args.get("path", "")
+        if not target.is_dir():
+            return f"Not a directory: {args.get('path', '')}"
+        default_max = 50 if context.small_ctx else 100
+        max_entries = args.get("max_entries", default_max)
+        entries = sorted(target.iterdir())[:max_entries]
+        lines = []
+        for e in entries:
+            prefix = "d" if e.is_dir() else "f"
+            lines.append(f"  {prefix}  {e.name}")
+        return "\n".join(lines) or "(empty)"
+
+
+class DirectoryTreeHandler:
+    """Handle directory_tree tool calls for recursive repository tree listings."""
+
+    @ToolRegistry.register("directory_tree")
+    @staticmethod
+    async def execute(context: ToolContext, args: dict) -> str:
+        from lean_ai.indexer.tree import list_repo_tree
+
+        sub_path = args.get("path", "")
+        tree_root = f"{context.repo_root}/{sub_path}" if sub_path else context.repo_root
+        entries = list_repo_tree(tree_root)
+        max_depth = args.get("max_depth", 3)
+        max_tree_entries = 100 if context.small_ctx else 200
+        lines = []
+        for e in entries[:max_tree_entries]:
+            depth = e.path.count("/")
+            if depth <= max_depth:
+                indent = "  " * depth
+                lines.append(f"{indent}{e.path.split('/')[-1]}")
+        return "\n".join(lines) or "(empty)"
+
+
+class SearchInternetHandler:
+    """Handle search_internet tool calls for web searches."""
+
+    @ToolRegistry.register("search_internet")
+    @staticmethod
+    async def execute(context: ToolContext, args: dict) -> str:
+        from lean_ai.tools.internet import search_internet
+
+        result = await search_internet(
+            query=args.get("query", ""),
+            llm_client=context.explorer,
+        )
+        return result.output if result.success else result.error or "Error"
+
+
+class FetchUrlHandler:
+    """Handle fetch_url tool calls for fetching URL content."""
+
+    @ToolRegistry.register("fetch_url")
+    @staticmethod
+    async def execute(context: ToolContext, args: dict) -> str:
+        from lean_ai.tools.internet import fetch_url
+
+        result = await fetch_url(
+            url=args.get("url", ""),
+            repo_root=context.repo_root,
+            llm_client=context.explorer,
+        )
+        return result.output if result.success else result.error or "Error"
+
+
+class UpdateScratchpadHandler:
+    """Handle update_scratchpad tool calls for managing the planning scratchpad."""
+
+    @ToolRegistry.register("update_scratchpad")
+    @staticmethod
+    async def execute(context: ToolContext, args: dict) -> str:
+        from lean_ai.tools.scratchpad import update_scratchpad
+
+        result = await update_scratchpad(
+            content=args.get("content", ""),
+            repo_root=context.repo_root,
+            session_id=context.session_id,
+        )
+        return result.output if result.success else result.error or "Error"
+
+
+class AddJournalEntryHandler:
+    """Handle add_journal_entry tool calls for appending to the session journal."""
+
+    @ToolRegistry.register("add_journal_entry")
+    @staticmethod
+    async def execute(context: ToolContext, args: dict) -> str:
+        from lean_ai.tools.journal import add_journal_entry
+
+        result = await add_journal_entry(
+            content=args.get("content", ""),
+            repo_root=context.repo_root,
+            session_id=context.session_id,
+        )
+        return result.output if result.success else result.error or "Error"
+
+
+class QueryProjectContextHandler:
+    """Handle query_project_context tool calls for querying the project context database."""
+
+    @ToolRegistry.register("query_project_context")
+    @staticmethod
+    async def execute(context: ToolContext, args: dict) -> str:
+        from lean_ai.context.context_db import (
+            get_context_db,
+            query_entries,
+        )
+
+        db = await get_context_db(context.repo_root)
+        try:
+            results = await query_entries(
+                db,
+                section=args.get("section"),
+                file_path=args.get("file_path"),
+                keyword=args.get("keyword"),
+            )
+            if not results:
+                return "No matching context entries found."
+            lines = []
+            for r in results:
+                lines.append(f"[{r['section']}] {r['content']}")
+            return "\n".join(lines)
+        finally:
+            await db.close()
+
+
+class RecordFileObservationHandler:
+    """Handle record_file_observation tool calls for recording file analysis notes."""
+
+    @ToolRegistry.register("record_file_observation")
+    @staticmethod
+    async def execute(context: ToolContext, args: dict) -> str:
+        from lean_ai.tools.observations import record_observation
+
+        result = await record_observation(
+            file_path=args.get("file_path", ""),
+            role=args.get("role", ""),
+            reason=args.get("reason", ""),
+            relevant_sections=args.get("relevant_sections", ""),
+            key_snippets=args.get("key_snippets") or [],
+            repo_root=context.repo_root,
+            session_id=context.session_id,
+        )
+        return result.output if result.success else result.error or "Error"
+
+
+class TaskCompleteHandler:
+    """Handle task_complete tool calls to signal exploration completion."""
+
+    @ToolRegistry.register("task_complete")
+    @staticmethod
+    async def execute(context: ToolContext, args: dict) -> str:
+        return "Exploration marked complete."
+
+
+class RequestClarificationHandler:
+    """Handle request_clarification tool calls for Phase 1 scope verification."""
+
+    @ToolRegistry.register("request_clarification")
+    @staticmethod
+    async def execute(context: ToolContext, args: dict) -> str:
+        # Phase 1 scope verification only. Blocks until the user replies
+        # via the approval queue — safe because planning runs before
+        # dispatcher.enter_execution_mode() switches user_message to
+        # the interrupt queue.
+        from lean_ai.workflow.ws_dispatcher import WorkflowCancelledError
+        from lean_ai.workflow.ws_handler import ws_send
+
+        question = (args.get("question") or "").strip()
+        if not question:
+            return "ERROR: request_clarification requires a non-empty 'question' string."
+        if context.ws is None or context.dispatcher is None:
+            _fire_clarification_capture(
+                context.repo_root,
+                context.session_id,
+                question=question,
+                answer=None,
+                outcome="error",
+            )
+            return (
+                "ERROR: no active user session — cannot request "
+                "clarification. Proceed with a best-guess interpretation "
+                "and record it as an ASSUMPTION."
+            )
+        await ws_send(
+            context.ws,
+            "clarification_needed",
+            {"questions": [question]},
+        )
+        try:
+            msg = await context.dispatcher.wait_for_approval()
+        except WorkflowCancelledError:
+            _fire_clarification_capture(
+                context.repo_root,
+                context.session_id,
+                question=question,
+                answer=None,
+                outcome="cancelled",
+            )
+            return "ERROR: user cancelled while clarification was pending."
+        if msg is None:
+            _fire_clarification_capture(
+                context.repo_root,
+                context.session_id,
+                question=question,
+                answer=None,
+                outcome="disconnected",
+            )
+            return (
+                "ERROR: session disconnected before the user "
+                "responded to the clarification question."
+            )
+        if msg.get("type") != "user_message":
+            _fire_clarification_capture(
+                context.repo_root,
+                context.session_id,
+                question=question,
+                answer=None,
+                outcome="error",
+            )
+            return f"ERROR: unexpected message type during clarification: {msg.get('type')}"
+        answer = (msg.get("content") or "").strip()
+        if not answer:
+            _fire_clarification_capture(
+                context.repo_root,
+                context.session_id,
+                question=question,
+                answer="",
+                outcome="empty",
+            )
+            return (
+                "User response was empty — proceed with a best-guess "
+                "interpretation and record it as an ASSUMPTION."
+            )
+        _fire_clarification_capture(
+            context.repo_root,
+            context.session_id,
+            question=question,
+            answer=answer,
+            outcome="answered",
+        )
+        return f"User answered: {answer}"
+
+
 def _make_read_only_executor(
     explorer: LLMClient,
     repo_root: str,
@@ -127,250 +495,24 @@ def _make_read_only_executor(
 ) -> Callable:
     """Create a tool executor for read-only planning tools.
 
-    Returns an async function usable as ``tool_executor_fn`` in
-    ``chat_with_tools``.
+    Resolves the handler from ToolRegistry, constructs a ToolContext,
+    and delegates to handler.execute().
     """
 
     async def _read_only_executor(name: str, arguments: dict) -> str:
-        """Execute read-only tools for planning phase."""
-        from lean_ai.tools.file_ops import grep_files, read_file
-        from lean_ai.workflow.tool_executor import (
-            _is_external_path,
-            _request_tool_approval,
+        """Execute read-only tools for planning phase via registry dispatch."""
+        handler = ToolRegistry.get_handler(name)
+        if handler is None:
+            return f"Unknown tool: {name}"
+        ctx = ToolContext(
+            repo_root=repo_root,
+            session_id=session_id,
+            explorer=explorer,
+            small_ctx=small_ctx,
+            ws=ws,
+            dispatcher=dispatcher,
         )
-
-        if name == "read_file":
-            target_path = arguments.get("path", "")
-            external = _is_external_path(target_path, repo_root)
-            if external:
-                if ws is None:
-                    return (
-                        "ERROR: Cannot read files outside the project without an active connection"
-                    )
-                approved = await _request_tool_approval(
-                    ws,
-                    dispatcher,
-                    "read_file",
-                    target_path,
-                    "File is outside the project directory",
-                )
-                if not approved:
-                    return "ERROR: Access to external file not approved by user"
-            # At small windows, cap visible range to 200 lines
-            end_line = arguments.get("end_line")
-            if small_ctx and end_line is None:
-                start = arguments.get("start_line") or 1
-                end_line = start + 199
-            result = await read_file(
-                path=target_path,
-                repo_root=repo_root,
-                start_line=arguments.get("start_line"),
-                end_line=end_line,
-                allow_external=external,
-            )
-            output = result.output if result.success else result.error or "Error"
-            # Notify the LLM when a small-context cap truncated the file
-            if (
-                small_ctx
-                and end_line is not None
-                and result.success
-                and "[END OF FILE]" not in output
-            ):
-                output += (
-                    f"\n\n[TRUNCATED at line {end_line} — small context "
-                    f"window. Use start_line={end_line + 1} to read more.]"
-                )
-            return output
-        elif name == "grep_files":
-            result = await grep_files(
-                pattern=arguments.get("pattern", ""),
-                repo_root=repo_root,
-                file_glob=arguments.get("file_glob"),
-                max_results=30 if small_ctx else None,
-            )
-            return result.output if result.success else result.error or "Error"
-        elif name == "list_directory":
-            target = Path(repo_root) / arguments.get("path", "")
-            if not target.is_dir():
-                return f"Not a directory: {arguments.get('path', '')}"
-            default_max = 50 if small_ctx else 100
-            max_entries = arguments.get("max_entries", default_max)
-            entries = sorted(target.iterdir())[:max_entries]
-            lines = []
-            for e in entries:
-                prefix = "d" if e.is_dir() else "f"
-                lines.append(f"  {prefix}  {e.name}")
-            return "\n".join(lines) or "(empty)"
-        elif name == "directory_tree":
-            from lean_ai.indexer.tree import list_repo_tree
-
-            sub_path = arguments.get("path", "")
-            tree_root = f"{repo_root}/{sub_path}" if sub_path else repo_root
-            entries = list_repo_tree(tree_root)
-            max_depth = arguments.get("max_depth", 3)
-            max_tree_entries = 100 if small_ctx else 200
-            lines = []
-            for e in entries[:max_tree_entries]:
-                depth = e.path.count("/")
-                if depth <= max_depth:
-                    indent = "  " * depth
-                    lines.append(f"{indent}{e.path.split('/')[-1]}")
-            return "\n".join(lines) or "(empty)"
-        elif name == "search_internet":
-            from lean_ai.tools.internet import search_internet
-
-            result = await search_internet(
-                query=arguments.get("query", ""),
-                llm_client=explorer,
-            )
-            return result.output if result.success else result.error or "Error"
-        elif name == "fetch_url":
-            from lean_ai.tools.internet import fetch_url
-
-            result = await fetch_url(
-                url=arguments.get("url", ""),
-                repo_root=repo_root,
-                llm_client=explorer,
-            )
-            return result.output if result.success else result.error or "Error"
-        elif name == "update_scratchpad":
-            from lean_ai.tools.scratchpad import update_scratchpad
-
-            result = await update_scratchpad(
-                content=arguments.get("content", ""),
-                repo_root=repo_root,
-                session_id=session_id,
-            )
-            return result.output if result.success else result.error or "Error"
-        elif name == "add_journal_entry":
-            from lean_ai.tools.journal import add_journal_entry
-
-            result = await add_journal_entry(
-                content=arguments.get("content", ""),
-                repo_root=repo_root,
-                session_id=session_id,
-            )
-            return result.output if result.success else result.error or "Error"
-        elif name == "query_project_context":
-            from lean_ai.context.context_db import (
-                get_context_db,
-                query_entries,
-            )
-
-            db = await get_context_db(repo_root)
-            try:
-                results = await query_entries(
-                    db,
-                    section=arguments.get("section"),
-                    file_path=arguments.get("file_path"),
-                    keyword=arguments.get("keyword"),
-                )
-                if not results:
-                    return "No matching context entries found."
-                lines = []
-                for r in results:
-                    lines.append(f"[{r['section']}] {r['content']}")
-                return "\n".join(lines)
-            finally:
-                await db.close()
-        elif name == "record_file_observation":
-            from lean_ai.tools.observations import record_observation
-
-            result = await record_observation(
-                file_path=arguments.get("file_path", ""),
-                role=arguments.get("role", ""),
-                reason=arguments.get("reason", ""),
-                relevant_sections=arguments.get("relevant_sections", ""),
-                key_snippets=arguments.get("key_snippets") or [],
-                repo_root=repo_root,
-                session_id=session_id,
-            )
-            return result.output if result.success else result.error or "Error"
-        elif name == "task_complete":
-            return "Exploration marked complete."
-        elif name == "request_clarification":
-            # Phase 1 scope verification only. Blocks until the user replies
-            # via the approval queue — safe because planning runs before
-            # dispatcher.enter_execution_mode() switches user_message to
-            # the interrupt queue.
-            from lean_ai.workflow.ws_dispatcher import WorkflowCancelledError
-            from lean_ai.workflow.ws_handler import ws_send
-
-            question = (arguments.get("question") or "").strip()
-            if not question:
-                return "ERROR: request_clarification requires a non-empty 'question' string."
-            if ws is None or dispatcher is None:
-                _fire_clarification_capture(
-                    repo_root,
-                    session_id,
-                    question=question,
-                    answer=None,
-                    outcome="error",
-                )
-                return (
-                    "ERROR: no active user session — cannot request "
-                    "clarification. Proceed with a best-guess interpretation "
-                    "and record it as an ASSUMPTION."
-                )
-            await ws_send(
-                ws,
-                "clarification_needed",
-                {"questions": [question]},
-            )
-            try:
-                msg = await dispatcher.wait_for_approval()
-            except WorkflowCancelledError:
-                _fire_clarification_capture(
-                    repo_root,
-                    session_id,
-                    question=question,
-                    answer=None,
-                    outcome="cancelled",
-                )
-                return "ERROR: user cancelled while clarification was pending."
-            if msg is None:
-                _fire_clarification_capture(
-                    repo_root,
-                    session_id,
-                    question=question,
-                    answer=None,
-                    outcome="disconnected",
-                )
-                return (
-                    "ERROR: session disconnected before the user "
-                    "responded to the clarification question."
-                )
-            if msg.get("type") != "user_message":
-                _fire_clarification_capture(
-                    repo_root,
-                    session_id,
-                    question=question,
-                    answer=None,
-                    outcome="error",
-                )
-                return f"ERROR: unexpected message type during clarification: {msg.get('type')}"
-            answer = (msg.get("content") or "").strip()
-            if not answer:
-                _fire_clarification_capture(
-                    repo_root,
-                    session_id,
-                    question=question,
-                    answer="",
-                    outcome="empty",
-                )
-                return (
-                    "User response was empty — proceed with a best-guess "
-                    "interpretation and record it as an ASSUMPTION."
-                )
-            _fire_clarification_capture(
-                repo_root,
-                session_id,
-                question=question,
-                answer=answer,
-                outcome="answered",
-            )
-            return f"User answered: {answer}"
-        return f"Unknown tool: {name}"
+        return await handler(ctx, arguments)
 
     return _read_only_executor
 

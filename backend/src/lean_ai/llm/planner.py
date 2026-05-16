@@ -15,6 +15,7 @@ Verification is folded into each Phase 4 step's success checks.
 import json
 import logging
 import time
+from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -27,6 +28,7 @@ from lean_ai.llm.plan_schema import (
     FileSummary,
     MissingFile,
     PlanStep,
+    ScopeDocument,
     VerificationPlan,
     plan_to_markdown,
 )
@@ -68,119 +70,128 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def create_plan(
-    task: str,
-    repo_root: str,
-    llm_client: "LLMClient",
-    context: str = "",
-    revision_context: str | None = None,
-    previous_plan: ExecutionPlan | None = None,
-    ws: WorkflowSession | None = None,
-    dispatcher: "WSMessageDispatcher | None" = None,
-    refiner: "PromptRefiner | None" = None,
-    test_command: str = "",
-    session_id: str = "",
-    expert_llm_client: "LLMClient | None" = None,
-    on_content: "Callable | None" = None,
-    on_thinking: "Callable | None" = None,
-    on_tool_call: "Callable | None" = None,
-    on_tool_result: "Callable | None" = None,
-    on_metrics: "Callable | None" = None,
-    on_metrics_reset: "Callable | None" = None,
-) -> ExecutionPlan:
-    """Create a plan using decomposed planning.
+class RoutingPolicy:
+    """Resolve per-phase model roles to LLMClient instances.
 
-    Phases 1–2 (scope + codebase exploration) run on the **primary** model
-    because exploration benefits from a coder-tuned model that can read
-    files precisely. The worker model already compresses large tool
-    outputs before they re-enter the primary's context (see
-    ``workflow/tool_executor.py``), so the primary isn't on its own.
-    Phases 3–4 (design + assembly) run on the **expert**
-    model when configured. The **request** model is reserved for chat
-    and ``/request`` mode — not planning.
-
-    Args:
-        task: The user's task description (may include clarification answers).
-        repo_root: Path to the repository root.
-        llm_client: Primary LLM client — runs phases 1–2 and implementation.
-        context: Pre-assembled context (project context, search results, etc.).
-        revision_context: If revising, the previous plan JSON + user feedback.
-        ws: Optional WorkflowSession for streaming stage progress.
-        refiner: Optional local refiner for privacy-stripping file summaries.
-        test_command: If set, planner folds test commands into success checks.
-        expert_llm_client: Optional expert model for phases 3–4 reasoning.
-        on_content: Streaming callback for content tokens.
-        on_thinking: Streaming callback for thinking tokens.
-        on_tool_call: Callback for tool call events (phase 2).
-        on_tool_result: Callback for tool result events (phase 2).
-        on_metrics: Callback for metrics updates (phase 2).
-
-    Returns:
-        Structured ExecutionPlan ready for per-step execution.
+    Reads the per-phase role settings (scope_model_role, exploration_model_role,
+    design_model_role, assembly_model_role) and maps them to the configured
+    LLMClient for that role. Falls back to the primary client if the role
+    client is not configured.
     """
-    if revision_context:
-        return await _revise_plan(
-            task,
-            revision_context,
-            llm_client,
-            context,
-            ws,
-            expert_llm_client=expert_llm_client,
-            previous_plan=previous_plan,
-            on_thinking=on_thinking,
-            on_metrics=on_metrics,
-            on_metrics_reset=on_metrics_reset,
-        )
 
-    # Explorer for phases 1–2 is always the primary model. The request
-    # model is chat-only — routing it through codebase exploration wastes
-    # a chatty-tuned model on a task the coder-tuned primary does better.
-    explorer = llm_client
-    phase_max_tokens = settings.ollama_max_tokens
+    def __init__(
+        self,
+        primary: "LLMClient",
+        expert: "LLMClient | None" = None,
+        worker: "LLMClient | None" = None,
+        request: "LLMClient | None" = None,
+    ) -> None:
+        self._clients: dict[str, "LLMClient"] = {
+            "primary": primary,
+        }
+        if expert is not None:
+            self._clients["expert"] = expert
+        if worker is not None:
+            self._clients["worker"] = worker
+        if request is not None:
+            self._clients["request"] = request
 
-    # Expert client for reasoning-heavy phases (3-4), falls back to standard
-    expert = expert_llm_client or llm_client
-    expert_max_tokens = (
-        settings.effective_expert_max_tokens if expert_llm_client else phase_max_tokens
-    )
+    def get_client(self, phase_name: str) -> "LLMClient":
+        """Return the LLMClient for the given phase based on settings.
 
-    expert_ctx = (
-        settings.effective_expert_context_window
-        if expert_llm_client
-        else settings._active_context_window
-    )
-    plan_assembly_max_tokens = max(
-        expert_max_tokens,
-        int(expert_ctx * PLAN_OUTPUT_PERCENT),
-    )
-    plan_start = time.monotonic()
-    phase_timings: dict[str, float] = {}
-    scope = task
-    file_summary = ""
-    file_summary_obj: FileSummary | None = None
-    design_and_risks_obj = DesignAndRisks()
+        Args:
+            phase_name: One of "scope", "exploration", "design", "assembly".
 
-    # Expert phases (3, 4) need project context for architectural awareness.
-    # Reuse the context parameter (already loaded by the workflow router)
-    # rather than re-reading from disk.
-    project_context = context
+        Returns:
+            The LLMClient configured for the phase's model role.
+        """
+        role_field = f"{phase_name}_model_role"
+        role = getattr(settings, role_field, "primary")
+        return self._clients.get(role, self._clients["primary"])
 
-    # ── Cross-session memory retrieval ──
-    memory_context = ""
-    if settings.enable_session_memory:
-        memory_context = await _retrieve_session_memories(repo_root, task)
 
-    try:
-        # ── Phase 1: Clarification / verification ──
+class PlanningPhase(ABC):
+    """Abstract base class for all planning phase implementations.
+
+    Concrete subclasses implement ``execute()`` to perform a single phase
+    of the planning pipeline (scope analysis, codebase exploration,
+    design synthesis, or plan assembly).
+    """
+
+    @abstractmethod
+    async def execute(
+        self,
+        task: str,
+        context: str,
+        repo_root: str,
+        llm_client: "LLMClient",
+        session_id: str = "",
+    ) -> dict:
+        """Execute this phase of the planning pipeline.
+
+        Args:
+            task: The user's task description.
+            context: Pre-assembled context (project context, search results).
+            repo_root: Path to the repository root.
+            llm_client: The LLM client to use for this phase.
+            session_id: Optional session identifier for debug output.
+
+        Returns:
+            A dict with phase-specific output data.
+        """
+
+
+class ScopePhase(PlanningPhase):
+    """Phase 1: Scope analysis — clarification loop + structured scope synthesis.
+
+    Runs the LLM with read-only tools (grep, read_file, list_directory, etc.)
+    to explore the codebase and clarify the task, then synthesizes the
+    exploration prose into a validated ``ScopeDocument``.
+    """
+
+    async def execute(
+        self,
+        task: str,
+        llm_client: "LLMClient",
+        ws: "WorkflowSession | None" = None,
+        dispatcher: "WSMessageDispatcher | None" = None,
+        **kwargs,
+    ) -> ScopeDocument:
+        """Execute Phase 1 and return a validated ScopeDocument.
+
+        Args:
+            task: The user's task description.
+            llm_client: The LLM client to use for scope analysis.
+            ws: Optional WorkflowSession for streaming stage progress.
+            dispatcher: Optional WebSocket message dispatcher.
+            **kwargs: Additional keyword arguments (context, repo_root,
+                session_id, on_content, on_thinking, on_tool_call,
+                on_tool_result, on_metrics, on_metrics_reset).
+
+        Returns:
+            A validated ScopeDocument with the 8 required scope sections.
+        """
+        context = kwargs.get("context", "")
+        repo_root = kwargs.get("repo_root", "")
+        session_id = kwargs.get("session_id", "")
+        on_content = kwargs.get("on_content")
+        on_thinking = kwargs.get("on_thinking")
+        on_tool_call = kwargs.get("on_tool_call")
+        on_tool_result = kwargs.get("on_tool_result")
+        on_metrics = kwargs.get("on_metrics")
+        on_metrics_reset = kwargs.get("on_metrics_reset")
+
+        phase_max_tokens = settings.ollama_max_tokens
+
         await _send_stage(
             ws,
             "Phase 1: Verifying task (asking clarifying questions if needed)...",
-            model=explorer.model_name,
+            model=llm_client.model_name,
             phase=1,
         )
         logger.info(
             "Planning Phase 1 clarification (model=%s, tool_budget=%d)",
-            explorer.model_name,
+            llm_client.model_name,
             settings.plan_phase1_max_turns,
         )
         t0 = time.monotonic()
@@ -196,6 +207,11 @@ async def create_plan(
             context=context,
             PHASE1_MAX_TURNS=phase1_turns_str,
         )
+
+        # Cross-session memory retrieval
+        memory_context = ""
+        if settings.enable_session_memory:
+            memory_context = await _retrieve_session_memories(repo_root, task)
         if memory_context:
             phase1_user_content += memory_context
 
@@ -216,7 +232,7 @@ async def create_plan(
 
         small_ctx = settings._active_context_window <= 32768
         phase1_executor = _make_read_only_executor(
-            explorer,
+            llm_client,
             repo_root,
             session_id,
             ws,
@@ -224,7 +240,7 @@ async def create_plan(
             small_ctx,
         )
 
-        _phase1_tool_calls, scope_prose = await explorer.chat_with_tools(
+        _phase1_tool_calls, scope_prose = await llm_client.chat_with_tools(
             messages=[
                 {"role": "system", "content": phase1_system},
                 {"role": "user", "content": phase1_user_content},
@@ -251,38 +267,39 @@ async def create_plan(
         if on_content:
             await _send_content_done(ws, scope_prose)
 
-        phase_timings["phase_1_clarification"] = time.monotonic() - t0
+        elapsed = time.monotonic() - t0
         _save_debug_phase(
             repo_root,
             session_id,
             "phase_1_clarification",
             scope_prose,
-            phase_timings["phase_1_clarification"],
+            elapsed,
         )
         logger.info(
             "Phase 1 clarification used %d tool calls in %.1fs",
             len(_phase1_tool_calls),
-            phase_timings["phase_1_clarification"],
+            elapsed,
         )
         await _send_stage_done(
             ws,
             "Task verified",
-            model=explorer.model_name,
+            model=llm_client.model_name,
             phase=1,
         )
 
+        # Phase 1a: Synthesize structured ScopeDocument
         await _send_stage(
             ws,
             "Phase 1a: Generating scope document...",
-            model=explorer.model_name,
+            model=llm_client.model_name,
             phase=1,
         )
         t0a = time.monotonic()
-        scope_obj, scope, scope_synthesized = await _synthesize_scope(
+        scope_obj, scope_markdown, scope_synthesized = await _synthesize_scope(
             task=task,
             context=context,
             exploration_prose=scope_prose,
-            explorer=explorer,
+            explorer=llm_client,
             phase_max_tokens=phase_max_tokens,
             on_thinking=on_thinking,
             on_metrics=on_metrics,
@@ -296,25 +313,72 @@ async def create_plan(
                 "exploration.",
             )
 
-        phase_timings["phase_1a_scope"] = time.monotonic() - t0a
+        elapsed_a = time.monotonic() - t0a
         _save_debug_phase(
             repo_root,
             session_id,
             "phase_1a_scope",
-            scope,
-            phase_timings["phase_1a_scope"],
+            scope_markdown,
+            elapsed_a,
         )
         await _send_stage_done(
             ws,
             "Scope document generated",
-            model=explorer.model_name,
+            model=llm_client.model_name,
             phase=1,
         )
+
+        return scope_obj
+
+
+class ExplorationPhase(PlanningPhase):
+    """Phase 2: Codebase exploration — file identification + content reading.
+
+    Runs the LLM with read-only tools to explore the codebase, identify
+    relevant files, and produce a validated ``FileSummary``.
+    """
+
+    async def execute(
+        self,
+        task: str,
+        scope: str,
+        llm_client: "LLMClient",
+        ws: "WorkflowSession | None" = None,
+        dispatcher: "WSMessageDispatcher | None" = None,
+        **kwargs,
+    ) -> FileSummary:
+        """Execute Phase 2 and return a validated FileSummary.
+
+        Args:
+            task: The user's task description.
+            scope: The scope markdown from Phase 1.
+            llm_client: The LLM client to use for exploration.
+            ws: Optional WorkflowSession for streaming stage progress.
+            dispatcher: Optional WebSocket message dispatcher.
+            **kwargs: Additional keyword arguments (context, repo_root,
+                session_id, refiner, on_content, on_thinking, on_tool_call,
+                on_tool_result, on_metrics, on_metrics_reset).
+
+        Returns:
+            A validated FileSummary with file observations and metadata.
+        """
+        context = kwargs.get("context", "")
+        repo_root = kwargs.get("repo_root", "")
+        session_id = kwargs.get("session_id", "")
+        refiner = kwargs.get("refiner")
+        on_content = kwargs.get("on_content")
+        on_thinking = kwargs.get("on_thinking")
+        on_tool_call = kwargs.get("on_tool_call")
+        on_tool_result = kwargs.get("on_tool_result")
+        on_metrics = kwargs.get("on_metrics")
+        on_metrics_reset = kwargs.get("on_metrics_reset")
+
+        phase_max_tokens = settings.ollama_max_tokens
 
         await _send_stage(
             ws,
             "Phase 2: Exploring codebase and reading files...",
-            model=explorer.model_name,
+            model=llm_client.model_name,
             phase=2,
         )
         logger.info("Planning Phase 2: File identification and reading")
@@ -325,7 +389,7 @@ async def create_plan(
             context=context,
             repo_root=repo_root,
             session_id=session_id,
-            explorer=explorer,
+            explorer=llm_client,
             phase_max_tokens=phase_max_tokens,
             ws=ws,
             dispatcher=dispatcher,
@@ -337,7 +401,6 @@ async def create_plan(
             on_metrics_reset=on_metrics_reset,
         )
 
-        phase_timings["phase_2_file_identification"] = phase2_elapsed
         _save_debug_phase(
             repo_root,
             session_id,
@@ -348,37 +411,84 @@ async def create_plan(
         await _send_stage_done(
             ws,
             "Codebase exploration complete",
-            model=explorer.model_name,
+            model=llm_client.model_name,
             phase=2,
         )
 
-        file_summary = file_identification
-
-        if refiner and refiner.is_active:
-            file_summary, redactions = await refiner.strip_privacy(file_summary)
+        # Privacy stripping if refiner is active
+        file_summary_markdown = file_identification
+        if refiner is not None and hasattr(refiner, "is_active") and refiner.is_active:
+            file_summary_markdown, redactions = await refiner.strip_privacy(
+                file_summary_markdown
+            )
             if redactions:
                 logger.info(
                     "Privacy: stripped %d items from file summary",
                     len(redactions),
                 )
 
+        # Compact file summary for small context windows
         if settings._active_context_window <= 32768:
-            file_summary = await _compact_file_summary(
-                file_summary,
-                explorer,
+            file_summary_markdown = await _compact_file_summary(
+                file_summary_markdown,
+                llm_client,
                 settings._active_context_window,
             )
 
-        if expert_llm_client:
-            await _send_stage(
-                ws,
-                f"Switching to expert model ({expert_llm_client.model_name}) for design phases...",
-                model=expert_llm_client.model_name,
-            )
-            logger.info(
-                "Switching to expert model for phases 3-4: %s",
-                expert_llm_client.model_name,
-            )
+        # Return the structured object if available, otherwise create a minimal one
+        if file_summary_obj is not None:
+            return file_summary_obj
+
+        return FileSummary()
+
+
+class DesignPhase(PlanningPhase):
+    """Phase 3: Design synthesis — change design, naming conventions, gap analysis.
+
+    Runs the LLM with search-only tools (search_internet, fetch_url) to
+    verify external dependencies, then synthesizes the exploration prose
+    into a validated ``DesignAndRisks``.
+    """
+
+    async def execute(
+        self,
+        task: str,
+        scope: str,
+        file_summary: str,
+        llm_client: "LLMClient",
+        ws: "WorkflowSession | None" = None,
+        dispatcher: "WSMessageDispatcher | None" = None,
+        **kwargs,
+    ) -> DesignAndRisks:
+        """Execute Phase 3 and return a validated DesignAndRisks.
+
+        Args:
+            task: The user's task description.
+            scope: The scope markdown from Phase 1.
+            file_summary: The file summary markdown from Phase 2.
+            llm_client: The LLM client to use for design synthesis.
+            ws: Optional WorkflowSession for streaming stage progress.
+            dispatcher: Optional WebSocket message dispatcher.
+            **kwargs: Additional keyword arguments (context, repo_root,
+                session_id, on_content, on_thinking, on_tool_call,
+                on_tool_result, on_metrics, on_metrics_reset).
+
+        Returns:
+            A validated DesignAndRisks with design decisions and risks.
+        """
+        context = kwargs.get("context", "")
+        repo_root = kwargs.get("repo_root", "")
+        session_id = kwargs.get("session_id", "")
+        on_content = kwargs.get("on_content")
+        on_thinking = kwargs.get("on_thinking")
+        on_tool_call = kwargs.get("on_tool_call")
+        on_tool_result = kwargs.get("on_tool_result")
+        on_metrics = kwargs.get("on_metrics")
+        on_metrics_reset = kwargs.get("on_metrics_reset")
+
+        expert = llm_client
+        expert_max_tokens = settings.effective_expert_max_tokens
+
         await _send_stage(
             ws,
             "Phase 3: Designing changes and assessing risks...",
@@ -389,7 +499,7 @@ async def create_plan(
         t0 = time.monotonic()
 
         phase3_project_context_block = (
-            f"PROJECT CONTEXT:\n{project_context}\n\n" if project_context else ""
+            f"PROJECT CONTEXT:\n{context}\n\n" if context else ""
         )
         phase3_user_content = registry.format(
             "planning.design_user",
@@ -472,16 +582,14 @@ async def create_plan(
             on_metrics=on_metrics,
             on_metrics_reset=on_metrics_reset,
         )
-        design_and_risks = _format_design_and_risks(design_and_risks_obj)
-        missing_files = _format_missing_files(design_and_risks_obj.missing_files)
 
-        phase_timings["phase_3_design_and_risks"] = time.monotonic() - t0
+        elapsed = time.monotonic() - t0
         _save_debug_phase(
             repo_root,
             session_id,
             "phase_3_design_and_risks",
-            design_and_risks,
-            phase_timings["phase_3_design_and_risks"],
+            _format_design_and_risks(design_and_risks_obj),
+            elapsed,
         )
         logger.info(
             (
@@ -494,7 +602,7 @@ async def create_plan(
             len(design_and_risks_obj.dependency_order),
             len(design_and_risks_obj.critical_risks),
             len(design_and_risks_obj.citations),
-            phase_timings["phase_3_design_and_risks"],
+            elapsed,
         )
         await _send_stage_done(
             ws,
@@ -503,7 +611,80 @@ async def create_plan(
             phase=3,
         )
 
-        # ── Phase 4a: Deterministic test discovery ──
+        return design_and_risks_obj
+
+
+class AssemblyPhase(PlanningPhase):
+    """Phase 4: Structured plan assembly — produces ExecutionPlan.
+
+    Runs deterministic test discovery (Phase 4a), assembles the structured
+    plan via chat_structured (Phase 4b/4c), and runs validation with
+    auto-revision for blocking warnings.
+    """
+
+    async def execute(
+        self,
+        task: str,
+        scope: str,
+        file_summary: str,
+        design_and_risks: DesignAndRisks,
+        llm_client: "LLMClient",
+        ws: "WorkflowSession | None" = None,
+        dispatcher: "WSMessageDispatcher | None" = None,
+        **kwargs,
+    ) -> ExecutionPlan:
+        """Execute Phase 4 and return a validated ExecutionPlan.
+
+        Args:
+            task: The user's task description.
+            scope: The scope markdown from Phase 1.
+            file_summary: The file summary markdown from Phase 2.
+            design_and_risks: The DesignAndRisks from Phase 3.
+            llm_client: The LLM client to use for plan assembly.
+            ws: Optional WorkflowSession for streaming stage progress.
+            dispatcher: Optional WebSocket message dispatcher.
+            **kwargs: Additional keyword arguments (context, repo_root,
+                session_id, refiner, test_command, expert_llm_client,
+                file_summary_obj, on_content, on_thinking, on_tool_call,
+                on_tool_result, on_metrics, on_metrics_reset).
+
+        Returns:
+            A validated ExecutionPlan ready for per-step execution.
+        """
+        context = kwargs.get("context", "")
+        repo_root = kwargs.get("repo_root", "")
+        session_id = kwargs.get("session_id", "")
+        refiner = kwargs.get("refiner")
+        test_command = kwargs.get("test_command", "")
+        expert_llm_client = kwargs.get("expert_llm_client")
+        file_summary_obj = kwargs.get("file_summary_obj")
+        on_content = kwargs.get("on_content")
+        on_thinking = kwargs.get("on_thinking")
+        on_tool_call = kwargs.get("on_tool_call")
+        on_tool_result = kwargs.get("on_tool_result")
+        on_metrics = kwargs.get("on_metrics")
+        on_metrics_reset = kwargs.get("on_metrics_reset")
+
+        expert = expert_llm_client or llm_client
+        expert_max_tokens = (
+            settings.effective_expert_max_tokens if expert_llm_client else settings.ollama_max_tokens
+        )
+        expert_ctx = (
+            settings.effective_expert_context_window
+            if expert_llm_client
+            else settings._active_context_window
+        )
+        plan_assembly_max_tokens = max(
+            expert_max_tokens,
+            int(expert_ctx * PLAN_OUTPUT_PERCENT),
+        )
+
+        # Keep the structured object for validation; format for prompts.
+        dar_obj = design_and_risks
+        design_and_risks_md = _format_design_and_risks(dar_obj)
+        missing_files = _format_missing_files(dar_obj.missing_files)
+
+        # Phase 4a: Deterministic test discovery
         await _send_stage(
             ws,
             "Phase 4a: Discovering test files...",
@@ -513,9 +694,8 @@ async def create_plan(
         logger.info("Planning Phase 4a: Deterministic test discovery")
         t0_4a = time.monotonic()
 
-        # Collect affected file paths from design_and_risks_obj
         phase4a_affected: list[str] = []
-        for cd in design_and_risks_obj.change_designs:
+        for cd in dar_obj.change_designs:
             if cd.file_path and cd.file_path not in phase4a_affected:
                 phase4a_affected.append(cd.file_path)
         if file_summary_obj is not None:
@@ -528,17 +708,16 @@ async def create_plan(
 
         test_discovery = await _run_phase_4a(repo_root, phase4a_affected)
 
-        phase_timings["phase_4a_test_discovery"] = time.monotonic() - t0_4a
         _save_debug_phase(
             repo_root,
             session_id,
             "phase_4a_test_discovery",
             test_discovery,
-            phase_timings["phase_4a_test_discovery"],
+            time.monotonic() - t0_4a,
         )
         logger.info(
             "Phase 4a test discovery completed in %.1fs",
-            phase_timings["phase_4a_test_discovery"],
+            time.monotonic() - t0_4a,
         )
         await _send_stage_done(
             ws,
@@ -548,22 +727,22 @@ async def create_plan(
         )
 
         phase4_scope = scope
-        phase4_project_context = project_context
+        phase4_project_context = context
 
         verification_targets = _build_verification_targets(
             file_summary_obj,
-            design_and_risks_obj,
+            dar_obj,
         )
-        security_concerns = _build_security_concerns(design_and_risks_obj)
+        security_concerns = _build_security_concerns(dar_obj)
         testing_inventory_raw = _format_testing_inventory(file_summary_obj)
         testing_inventory = _format_test_inventory_for_phase4(
             test_discovery,
             testing_inventory_raw,
         )
-        core_functionality = _format_core_functionality(design_and_risks_obj)
-        dependency_order_block = _format_dependency_order(design_and_risks_obj)
-        naming_conventions_block = _format_naming_conventions_section(design_and_risks_obj)
-        risk_assessment_block = _format_risk_assessment_section(design_and_risks_obj)
+        core_functionality = _format_core_functionality(dar_obj)
+        dependency_order_block = _format_dependency_order(dar_obj)
+        naming_conventions_block = _format_naming_conventions_section(dar_obj)
+        risk_assessment_block = _format_risk_assessment_section(dar_obj)
         missing_files_block = (
             "REQUIRED MISSING FILES — these were identified "
             "during risk assessment as files that MUST exist "
@@ -580,7 +759,7 @@ async def create_plan(
         if settings.enable_strict_test_contract:
             draft_plan, draft_elapsed = await _assemble_phase4_plan(
                 task=task,
-                design_and_risks=design_and_risks,
+                design_and_risks=design_and_risks_md,
                 file_summary=file_summary,
                 project_context=phase4_project_context,
                 scope=phase4_scope,
@@ -605,15 +784,14 @@ async def create_plan(
                 done_prefix="Draft implementation plan assembled",
                 artifact_label="draft structured plan",
             )
-            phase_timings["phase_4b_draft_plan_assembly"] = draft_elapsed
             if settings.enable_core_functionality_tagging:
-                draft_plan.core_functionality = list(design_and_risks_obj.core_functionality)
+                draft_plan.core_functionality = list(dar_obj.core_functionality)
             _save_debug_phase(
                 repo_root,
                 session_id,
                 "phase_4b_draft_plan",
                 draft_plan.model_dump_json(indent=2),
-                phase_timings["phase_4b_draft_plan_assembly"],
+                draft_elapsed,
             )
 
             tdd_verification, tdd_elapsed = await _run_phase_4b_tdd_test_design(
@@ -633,13 +811,12 @@ async def create_plan(
                 on_metrics=on_metrics,
                 on_metrics_reset=on_metrics_reset,
             )
-            phase_timings["phase_4b_tdd_test_design"] = tdd_elapsed
             _save_debug_phase(
                 repo_root,
                 session_id,
                 "phase_4b_tdd_test_design",
                 tdd_verification.model_dump_json(indent=2),
-                phase_timings["phase_4b_tdd_test_design"],
+                tdd_elapsed,
             )
 
             tdd_guidance = (
@@ -654,7 +831,7 @@ async def create_plan(
             planned_tdd_tests = _render_tdd_test_plan_for_phase4(tdd_verification)
             plan, final_elapsed = await _assemble_phase4_plan(
                 task=task,
-                design_and_risks=design_and_risks,
+                design_and_risks=design_and_risks_md,
                 file_summary=file_summary,
                 project_context=phase4_project_context,
                 scope=phase4_scope,
@@ -680,12 +857,11 @@ async def create_plan(
                 artifact_label="structured TDD plan",
             )
             final_assembly_timing_key = "phase_4c_plan_assembly"
-            phase_timings[final_assembly_timing_key] = final_elapsed
             _attach_tdd_contract(plan, tdd_verification.steps)
         else:
             plan, final_elapsed = await _assemble_phase4_plan(
                 task=task,
-                design_and_risks=design_and_risks,
+                design_and_risks=design_and_risks_md,
                 file_summary=file_summary,
                 project_context=phase4_project_context,
                 scope=phase4_scope,
@@ -710,22 +886,19 @@ async def create_plan(
                 done_prefix="Plan assembled",
                 artifact_label="structured plan",
             )
-            phase_timings[final_assembly_timing_key] = final_elapsed
 
         if settings.enable_core_functionality_tagging:
-            plan.core_functionality = list(design_and_risks_obj.core_functionality)
+            plan.core_functionality = list(dar_obj.core_functionality)
         if tdd_verification is None:
             plan.tdd_mode = False
 
         plan_warnings, is_blocking = _run_plan_validations(
             plan,
             file_summary_obj,
-            design_and_risks_obj,
+            dar_obj,
         )
 
         # Revision loop with hard cap of 2 iterations for blocking warnings.
-        # Each iteration asks the LLM to revise the plan to address the
-        # blocking validation failures, then re-validates.
         max_revisions = 2
         revision_count = 0
         while is_blocking and revision_count < max_revisions:
@@ -736,7 +909,6 @@ async def create_plan(
                 revision_count,
                 max_revisions,
             )
-            # Build feedback from blocking warnings.
             blocking_warnings = [
                 w for w in plan_warnings
                 if "[BLOCKING]" in w
@@ -768,7 +940,7 @@ async def create_plan(
             )
             _strip_non_implementation_steps(plan)
             if settings.enable_core_functionality_tagging:
-                plan.core_functionality = list(design_and_risks_obj.core_functionality)
+                plan.core_functionality = list(dar_obj.core_functionality)
             if tdd_verification is not None:
                 _attach_tdd_contract(plan, tdd_verification.steps)
             else:
@@ -777,7 +949,7 @@ async def create_plan(
             plan_warnings, is_blocking = _run_plan_validations(
                 plan,
                 file_summary_obj,
-                design_and_risks_obj,
+                dar_obj,
             )
 
         if revision_count >= max_revisions and is_blocking:
@@ -795,32 +967,15 @@ async def create_plan(
             session_id,
             "phase_4_plan",
             plan.model_dump_json(indent=2),
-            phase_timings[final_assembly_timing_key],
+            final_elapsed,
         )
         _save_debug_phase(
             repo_root,
             session_id,
             "phase_4_plan_markdown",
             plan_to_markdown(plan),
-            phase_timings[final_assembly_timing_key],
+            final_elapsed,
         )
-
-        phase_timings["total"] = time.monotonic() - plan_start
-
-        if settings.debug_planning and session_id:
-            meta = {
-                "session_id": session_id,
-                "task": task,
-                "timings": phase_timings,
-                "steps": len(plan.steps),
-                "affected_files": len(plan.affected_files),
-            }
-            debug_dir = Path(repo_root) / ".lean_ai" / "plan_debug" / session_id
-            debug_dir.mkdir(parents=True, exist_ok=True)
-            (debug_dir / "meta.json").write_text(
-                json.dumps(meta, indent=2),
-                encoding="utf-8",
-            )
 
         logger.info(
             "Plan created: %d steps, %d affected files",
@@ -828,37 +983,365 @@ async def create_plan(
             len(plan.affected_files),
         )
         return plan
-    except Exception as exc:
-        logger.exception("Planning pipeline failed — returning fallback plan")
-        plan = _build_fallback_execution_plan(
-            task=task,
-            scope=scope,
-            file_summary_obj=file_summary_obj,
-            design_and_risks_obj=design_and_risks_obj,
-            test_command=test_command,
-            failure_summary=(
-                f"planning pipeline aborted before normal completion: {type(exc).__name__}: {exc}"
-            ),
+
+
+class PlanningPipeline:
+    """Orchestrator for the 4-phase planning pipeline with telemetry integration.
+
+    Manages phase execution, telemetry signaling, and model routing without
+    leaking implementation details between phases. Uses ``RoutingPolicy`` to
+    resolve per-phase model roles and fires ``_send_stage`` / ``_send_stage_done``
+    at phase boundaries for WebSocket streaming.
+    """
+
+    def __init__(
+        self,
+        task: str,
+        repo_root: str,
+        llm_client: "LLMClient",
+        context: str = "",
+        revision_context: str | None = None,
+        previous_plan: ExecutionPlan | None = None,
+        ws: WorkflowSession | None = None,
+        dispatcher: "WSMessageDispatcher | None" = None,
+        refiner: "PromptRefiner | None" = None,
+        test_command: str = "",
+        session_id: str = "",
+        expert_llm_client: "LLMClient | None" = None,
+        on_content: "Callable | None" = None,
+        on_thinking: "Callable | None" = None,
+        on_tool_call: "Callable | None" = None,
+        on_tool_result: "Callable | None" = None,
+        on_metrics: "Callable | None" = None,
+        on_metrics_reset: "Callable | None" = None,
+    ) -> None:
+        self.task = task
+        self.repo_root = repo_root
+        self.llm_client = llm_client
+        self.context = context
+        self.revision_context = revision_context
+        self.previous_plan = previous_plan
+        self.ws = ws
+        self.dispatcher = dispatcher
+        self.refiner = refiner
+        self.test_command = test_command
+        self.session_id = session_id
+        self.expert_llm_client = expert_llm_client
+        self.on_content = on_content
+        self.on_thinking = on_thinking
+        self.on_tool_call = on_tool_call
+        self.on_tool_result = on_tool_result
+        self.on_metrics = on_metrics
+        self.on_metrics_reset = on_metrics_reset
+        self.routing = RoutingPolicy(
+            primary=llm_client,
+            expert=expert_llm_client,
         )
-        phase_timings["total"] = time.monotonic() - plan_start
-        if settings.debug_planning and session_id:
-            _save_debug_phase(
-                repo_root,
-                session_id,
-                "phase_fallback_plan",
-                plan.model_dump_json(indent=2),
-                phase_timings["total"],
+
+    async def run(self) -> ExecutionPlan:
+        """Execute the four-phase planning pipeline and return an ExecutionPlan.
+
+        Orchestrates ScopePhase, ExplorationPhase, DesignPhase, and AssemblyPhase
+        with explicit argument passing. Fires _send_stage/_send_stage_done at
+        phase boundaries. Uses RoutingPolicy for per-phase model selection.
+
+        Returns:
+            A validated ExecutionPlan ready for per-step execution.
+        """
+        # If revision context is provided, delegate to the revision helper.
+        if self.revision_context:
+            return await _revise_plan(
+                self.task,
+                self.revision_context,
+                self.llm_client,
+                self.context,
+                self.ws,
+                expert_llm_client=self.expert_llm_client,
+                previous_plan=self.previous_plan,
+                on_thinking=self.on_thinking,
+                on_metrics=self.on_metrics,
+                on_metrics_reset=self.on_metrics_reset,
             )
-        await _send_stage_done(
-            ws,
-            (
-                "Fallback plan assembled — "
-                f"{len(plan.steps)} steps across {len(plan.affected_files)} file(s)"
-            ),
-            model=expert.model_name,
-            phase=4,
+
+        # Resolve model clients via RoutingPolicy.
+        explorer = self.routing.get_client("scope")
+        phase_max_tokens = settings.ollama_max_tokens
+
+        expert = self.expert_llm_client or self.llm_client
+        expert_max_tokens = (
+            settings.effective_expert_max_tokens
+            if self.expert_llm_client
+            else phase_max_tokens
         )
-        return plan
+
+        expert_ctx = (
+            settings.effective_expert_context_window
+            if self.expert_llm_client
+            else settings._active_context_window
+        )
+        plan_assembly_max_tokens = max(
+            expert_max_tokens,
+            int(expert_ctx * PLAN_OUTPUT_PERCENT),
+        )
+        plan_start = time.monotonic()
+        phase_timings: dict[str, float] = {}
+        scope = self.task
+        file_summary = ""
+        file_summary_obj: FileSummary | None = None
+        design_and_risks_obj = DesignAndRisks()
+        project_context = self.context
+
+        # ── Cross-session memory retrieval ──
+        memory_context = ""
+        if settings.enable_session_memory:
+            memory_context = await _retrieve_session_memories(self.repo_root, self.task)
+
+        try:
+            # ── Phase 1: Scope analysis ──
+            scope_phase = ScopePhase()
+            scope_obj = await scope_phase.execute(
+                task=self.task,
+                llm_client=explorer,
+                ws=self.ws,
+                dispatcher=self.dispatcher,
+                context=self.context,
+                repo_root=self.repo_root,
+                session_id=self.session_id,
+                on_content=self.on_content,
+                on_thinking=self.on_thinking,
+                on_tool_call=self.on_tool_call,
+                on_tool_result=self.on_tool_result,
+                on_metrics=self.on_metrics,
+                on_metrics_reset=self.on_metrics_reset,
+            )
+            # Convert ScopeDocument to markdown for downstream phases.
+            scope = scope_obj.to_markdown() if scope_obj else self.task
+
+            # ── Phase 2: Codebase exploration ──
+            exploration_phase = ExplorationPhase()
+            file_summary_obj = await exploration_phase.execute(
+                task=self.task,
+                scope=scope,
+                llm_client=explorer,
+                ws=self.ws,
+                dispatcher=self.dispatcher,
+                context=self.context,
+                repo_root=self.repo_root,
+                session_id=self.session_id,
+                refiner=self.refiner,
+                on_content=self.on_content,
+                on_thinking=self.on_thinking,
+                on_tool_call=self.on_tool_call,
+                on_tool_result=self.on_tool_result,
+                on_metrics=self.on_metrics,
+                on_metrics_reset=self.on_metrics_reset,
+            )
+            file_summary = file_summary_obj.to_markdown() if file_summary_obj else ""
+
+            # Privacy stripping if refiner is active
+            if self.refiner is not None and hasattr(self.refiner, "is_active") and self.refiner.is_active:
+                file_summary, redactions = await self.refiner.strip_privacy(file_summary)
+                if redactions:
+                    logger.info(
+                        "Privacy: stripped %d items from file summary",
+                        len(redactions),
+                    )
+
+            # Compact file summary for small context windows
+            if settings._active_context_window <= 32768:
+                file_summary = await _compact_file_summary(
+                    file_summary,
+                    explorer,
+                    settings._active_context_window,
+                )
+
+            # Signal model switch if using expert
+            if self.expert_llm_client:
+                await _send_stage(
+                    self.ws,
+                    f"Switching to expert model ({self.expert_llm_client.model_name}) for design phases...",
+                    model=self.expert_llm_client.model_name,
+                )
+                logger.info(
+                    "Switching to expert model for phases 3-4: %s",
+                    self.expert_llm_client.model_name,
+                )
+
+            # ── Phase 3: Design synthesis ──
+            design_phase = DesignPhase()
+            design_and_risks_obj = await design_phase.execute(
+                task=self.task,
+                scope=scope,
+                file_summary=file_summary,
+                llm_client=expert,
+                ws=self.ws,
+                dispatcher=self.dispatcher,
+                context=self.context,
+                repo_root=self.repo_root,
+                session_id=self.session_id,
+                on_content=self.on_content,
+                on_thinking=self.on_thinking,
+                on_tool_call=self.on_tool_call,
+                on_tool_result=self.on_tool_result,
+                on_metrics=self.on_metrics,
+                on_metrics_reset=self.on_metrics_reset,
+            )
+
+            design_and_risks = _format_design_and_risks(design_and_risks_obj)
+            missing_files = _format_missing_files(design_and_risks_obj.missing_files)
+
+            # ── Phase 4: Plan assembly ──
+            assembly_phase = AssemblyPhase()
+            plan = await assembly_phase.execute(
+                task=self.task,
+                scope=scope,
+                file_summary=file_summary,
+                design_and_risks=design_and_risks_obj,
+                llm_client=expert,
+                ws=self.ws,
+                dispatcher=self.dispatcher,
+                context=self.context,
+                repo_root=self.repo_root,
+                session_id=self.session_id,
+                refiner=self.refiner,
+                test_command=self.test_command,
+                expert_llm_client=self.expert_llm_client,
+                file_summary_obj=file_summary_obj,
+                on_content=self.on_content,
+                on_thinking=self.on_thinking,
+                on_tool_call=self.on_tool_call,
+                on_tool_result=self.on_tool_result,
+                on_metrics=self.on_metrics,
+                on_metrics_reset=self.on_metrics_reset,
+            )
+
+            phase_timings["total"] = time.monotonic() - plan_start
+
+            if settings.debug_planning and self.session_id:
+                meta = {
+                    "session_id": self.session_id,
+                    "task": self.task,
+                    "timings": phase_timings,
+                    "steps": len(plan.steps),
+                    "affected_files": len(plan.affected_files),
+                }
+                debug_dir = Path(self.repo_root) / ".lean_ai" / "plan_debug" / self.session_id
+                debug_dir.mkdir(parents=True, exist_ok=True)
+                (debug_dir / "meta.json").write_text(
+                    json.dumps(meta, indent=2),
+                    encoding="utf-8",
+                )
+
+            logger.info(
+                "Plan created: %d steps, %d affected files",
+                len(plan.steps),
+                len(plan.affected_files),
+            )
+            return plan
+        except Exception as exc:
+            logger.exception("Planning pipeline failed — returning fallback plan")
+            plan = _build_fallback_execution_plan(
+                task=self.task,
+                scope=scope,
+                file_summary_obj=file_summary_obj,
+                design_and_risks_obj=design_and_risks_obj,
+                test_command=self.test_command,
+                failure_summary=(
+                    f"planning pipeline aborted before normal completion: {type(exc).__name__}: {exc}"
+                ),
+            )
+            phase_timings["total"] = time.monotonic() - plan_start
+            if settings.debug_planning and self.session_id:
+                _save_debug_phase(
+                    self.repo_root,
+                    self.session_id,
+                    "phase_fallback_plan",
+                    plan.model_dump_json(indent=2),
+                    phase_timings["total"],
+                )
+            await _send_stage_done(
+                self.ws,
+                (
+                    "Fallback plan assembled — "
+                    f"{len(plan.steps)} steps across {len(plan.affected_files)} file(s)"
+                ),
+                model=expert.model_name,
+                phase=4,
+            )
+            return plan
+
+
+async def create_plan(
+    task: str,
+    repo_root: str,
+    llm_client: "LLMClient",
+    context: str = "",
+    revision_context: str | None = None,
+    previous_plan: ExecutionPlan | None = None,
+    ws: WorkflowSession | None = None,
+    dispatcher: "WSMessageDispatcher | None" = None,
+    refiner: "PromptRefiner | None" = None,
+    test_command: str = "",
+    session_id: str = "",
+    expert_llm_client: "LLMClient | None" = None,
+    on_content: "Callable | None" = None,
+    on_thinking: "Callable | None" = None,
+    on_tool_call: "Callable | None" = None,
+    on_tool_result: "Callable | None" = None,
+    on_metrics: "Callable | None" = None,
+    on_metrics_reset: "Callable | None" = None,
+) -> ExecutionPlan:
+    """Create a plan using decomposed planning.
+
+    Phases 1–2 (scope + codebase exploration) run on the **primary** model
+    because exploration benefits from a coder-tuned model that can read
+    files precisely. The worker model already compresses large tool
+    outputs before they re-enter the primary's context (see
+    ``workflow/tool_executor.py``), so the primary isn't on its own.
+    Phases 3–4 (design + assembly) run on the **expert**
+    model when configured. The **request** model is reserved for chat
+    and ``/request`` mode — not planning.
+
+    Args:
+        task: The user's task description (may include clarification answers).
+        repo_root: Path to the repository root.
+        llm_client: Primary LLM client — runs phases 1–2 and implementation.
+        context: Pre-assembled context (project context, search results, etc.).
+        revision_context: If revising, the previous plan JSON + user feedback.
+        ws: Optional WorkflowSession for streaming stage progress.
+        refiner: Optional local refiner for privacy-stripping file summaries.
+        test_command: If set, planner folds test commands into success checks.
+        expert_llm_client: Optional expert model for phases 3–4 reasoning.
+        on_content: Streaming callback for content tokens.
+        on_thinking: Streaming callback for thinking tokens.
+        on_tool_call: Callback for tool call events (phase 2).
+        on_tool_result: Callback for tool result events (phase 2).
+        on_metrics: Callback for metrics updates (phase 2).
+
+    Returns:
+        Structured ExecutionPlan ready for per-step execution.
+    """
+    pipeline = PlanningPipeline(
+        task=task,
+        repo_root=repo_root,
+        llm_client=llm_client,
+        context=context,
+        revision_context=revision_context,
+        previous_plan=previous_plan,
+        ws=ws,
+        dispatcher=dispatcher,
+        refiner=refiner,
+        test_command=test_command,
+        session_id=session_id,
+        expert_llm_client=expert_llm_client,
+        on_content=on_content,
+        on_thinking=on_thinking,
+        on_tool_call=on_tool_call,
+        on_tool_result=on_tool_result,
+        on_metrics=on_metrics,
+        on_metrics_reset=on_metrics_reset,
+    )
+    return await pipeline.run()
 
 
 async def _run_phase5_verification(

@@ -305,6 +305,14 @@ class Settings(BaseSettings):
     gemini_worker_model: str = ""  # Falls back to gemini_model when empty
     serve_worker_model: str = ""  # Falls back to serve_model when empty
 
+    # ── Per-phase model role selection ──
+    # Each phase can use a different model role: "primary", "expert", "worker", or "request".
+    # The RoutingPolicy resolves the role to the actual model/provider at runtime.
+    scope_model_role: str = "primary"
+    exploration_model_role: str = "worker"
+    design_model_role: str = "expert"
+    assembly_model_role: str = "expert"
+
     # ── Thinking mode ──
     enable_thinking: bool = True  # Pass think=True to Ollama for reasoning models (Qwen3, Qwen3.5)
     enable_thinking_expert: bool = True  # Independent per-model thinking toggle
