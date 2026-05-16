@@ -172,6 +172,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="LEAN_AI_",
         env_file=".env",
+        extra="ignore",
     )
 
     @classmethod
@@ -706,11 +707,17 @@ class Settings(BaseSettings):
 
     @property
     def effective_expert_min_p(self) -> float | None:
-        return self.ollama_expert_min_p if self.ollama_expert_min_p is not None else self.ollama_min_p
+        return (
+            self.ollama_expert_min_p if self.ollama_expert_min_p is not None else self.ollama_min_p
+        )
 
     @property
     def effective_expert_presence_penalty(self) -> float | None:
-        return self.ollama_expert_presence_penalty if self.ollama_expert_presence_penalty is not None else self.ollama_presence_penalty
+        return (
+            self.ollama_expert_presence_penalty
+            if self.ollama_expert_presence_penalty is not None
+            else self.ollama_presence_penalty
+        )
 
     @property
     def effective_expert_context_window(self) -> int:
