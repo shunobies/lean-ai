@@ -637,48 +637,6 @@ async def _compact_file_summary(
     return file_summary[:budget] + "\n... (truncated to fit context budget)"
 
 
-def format_scope_document(scope: ScopeDocument) -> str:
-    """Render a ``ScopeDocument`` to the 8-section markdown shape that the
-    downstream Phase 2 / 3 / 4 prompts already consume as ``{scope}``.
-
-    Section names and ordering match ``planning.scope_user`` so prompt
-    consumers do not need to change. Empty sections still emit the heading
-    with a placeholder bullet so downstream parsers see the shape.
-    """
-    lines: list[str] = []
-
-    def _render_bullets(header: str, items: list[str]) -> None:
-        lines.append(f"{header}:")
-        if items:
-            for item in items:
-                lines.append(f"- {item}")
-        else:
-            lines.append("- (none identified)")
-        lines.append("")
-
-    lines.append("PROBLEM / PURPOSE:")
-    lines.append(scope.problem.strip() or "(not specified)")
-    lines.append("")
-
-    _render_bullets("DELIVERABLES", scope.deliverables)
-    _render_bullets("IN SCOPE", scope.in_scope)
-    _render_bullets("OUT OF SCOPE", scope.out_of_scope)
-    _render_bullets("DOWNSTREAM CONSUMERS", scope.downstream_consumers)
-
-    lines.append("ASSUMPTIONS (with verification hints):")
-    if scope.assumptions:
-        for a in scope.assumptions:
-            lines.append(f"- Assumption: {a.assumption} — verify: {a.verify_hint}")
-    else:
-        lines.append("- (none identified)")
-    lines.append("")
-
-    _render_bullets("SUCCESS CRITERIA", scope.success_criteria)
-    _render_bullets("RISKS", scope.risks)
-
-    return "\n".join(lines).rstrip() + "\n"
-
-
 async def _synthesize_scope(
     *,
     task: str,
@@ -764,7 +722,7 @@ async def _synthesize_scope(
                 exc_info=True,
             )
             scope = _fallback_scope_document(task)
-            return scope, format_scope_document(scope), False
+            return scope, scope.to_markdown(), False
 
     logger.info(
         "Phase 1 synthesis: deliverables=%d in_scope=%d assumptions=%d "
@@ -775,7 +733,7 @@ async def _synthesize_scope(
         len(scope.success_criteria),
         len(scope.risks),
     )
-    return scope, format_scope_document(scope), True
+    return scope, scope.to_markdown(), True
 
 
 def _fallback_scope_document(task: str) -> ScopeDocument:

@@ -65,6 +65,47 @@ class ScopeDocument(BaseModel):
     """Scope-level risks — misunderstandings about the problem itself.
     Distinct from implementation risks (Phase 3 captures those)."""
 
+    def to_markdown(self) -> str:
+        """Render the scope document to the 8-section markdown shape consumed
+        by downstream Phase 2/3/4 prompts.
+
+        Empty sections emit the heading with a placeholder bullet so
+        downstream parsers see the shape. Assumptions use the special
+        ``- Assumption: ... — verify: ...`` format.
+        """
+        lines: list[str] = []
+
+        def _render_bullets(header: str, items: list[str]) -> None:
+            lines.append(f"{header}:")
+            if items:
+                for item in items:
+                    lines.append(f"- {item}")
+            else:
+                lines.append("- (none identified)")
+            lines.append("")
+
+        lines.append("PROBLEM / PURPOSE:")
+        lines.append(self.problem.strip() or "(not specified)")
+        lines.append("")
+
+        _render_bullets("DELIVERABLES", self.deliverables)
+        _render_bullets("IN SCOPE", self.in_scope)
+        _render_bullets("OUT OF SCOPE", self.out_of_scope)
+        _render_bullets("DOWNSTREAM CONSUMERS", self.downstream_consumers)
+
+        lines.append("ASSUMPTIONS (with verification hints):")
+        if self.assumptions:
+            for a in self.assumptions:
+                lines.append(f"- Assumption: {a.assumption} — verify: {a.verify_hint}")
+        else:
+            lines.append("- (none identified)")
+        lines.append("")
+
+        _render_bullets("SUCCESS CRITERIA", self.success_criteria)
+        _render_bullets("RISKS", self.risks)
+
+        return "\n".join(lines).rstrip() + "\n"
+
 
 # ── Phase 2 exploration schemas ─────────────────────────────────────────────
 #
@@ -220,6 +261,127 @@ class FileSummary(BaseModel):
     notes: str = ""
     """Free-form catch-all for cross-file references, tricky invariants, or
     anything the structured fields do not capture."""
+
+    def to_markdown(self) -> str:
+        """Render the file summary to the 8-section markdown shape consumed
+        by downstream Phase 3/4/5 prompts.
+
+        Empty sections emit the heading with a placeholder bullet so
+        downstream parsers see the shape. TestingInventory None case
+        is handled gracefully with a fallback message.
+        """
+        lines: list[str] = []
+
+        def _render_file_observations(header: str, items: list[FileObservation]) -> None:
+            lines.append(f"{header}:")
+            if items:
+                for obs in items:
+                    lines.append(f"- **{obs.file_path}** ({obs.role})")
+                    lines.append(f"  - Reason: {obs.reason}")
+                    if obs.relevant_sections:
+                        lines.append(f"  - Relevant sections: {obs.relevant_sections}")
+            else:
+                lines.append("- (none identified)")
+            lines.append("")
+
+        def _render_missing_items(header: str, items: list[MissingItem]) -> None:
+            lines.append(f"{header}:")
+            if items:
+                for item in items:
+                    blocking_str = "BLOCKING" if item.blocking else "non-blocking"
+                    lines.append(f"- **{item.name}** ({blocking_str})")
+                    lines.append(f"  - Reason: {item.reason}")
+            else:
+                lines.append("- (none identified)")
+            lines.append("")
+
+        def _render_verified_refs(header: str, items: list[VerifiedReference]) -> None:
+            lines.append(f"{header}:")
+            if items:
+                for ref in items:
+                    lines.append(f"- **{ref.dependency}**")
+                    if ref.docs_url:
+                        lines.append(f"  - Docs: {ref.docs_url}")
+                    if ref.version:
+                        lines.append(f"  - Version: {ref.version}")
+            else:
+                lines.append("- (none identified)")
+            lines.append("")
+
+        def _render_assumptions(header: str, items: list[AssumptionStatus]) -> None:
+            lines.append(f"{header}:")
+            if items:
+                for a in items:
+                    lines.append(f"- **{a.assumption}** — status: {a.status}")
+                    if a.evidence:
+                        lines.append(f"  - Evidence: {a.evidence}")
+            else:
+                lines.append("- (none identified)")
+            lines.append("")
+
+        # Section 1: Files to Modify
+        _render_file_observations("FILES TO MODIFY", self.files_to_modify)
+
+        # Section 2: Files to Create
+        _render_file_observations("FILES TO CREATE", self.files_to_create)
+
+        # Section 3: Files Read for Context
+        _render_file_observations("FILES READ FOR CONTEXT", self.files_read_for_context)
+
+        # Section 4: Missing Infrastructure
+        _render_missing_items("MISSING INFRASTRUCTURE", self.missing_infrastructure)
+
+        # Section 5: Verified References
+        _render_verified_refs("VERIFIED REFERENCES", self.verified_references)
+
+        # Section 6: Assumptions Resolved
+        _render_assumptions("ASSUMPTIONS RESOLVED", self.assumptions_resolved)
+
+        # Section 7: Testing Inventory (handle None)
+        lines.append("TESTING INVENTORY:")
+        if self.testing_inventory is not None:
+            ti = self.testing_inventory
+            if ti.test_framework:
+                lines.append(f"- Framework: {ti.test_framework}")
+            if ti.test_directory:
+                lines.append(f"- Test directory: {ti.test_directory}")
+            if ti.test_file_pattern:
+                lines.append(f"- File pattern: {ti.test_file_pattern}")
+            if ti.assertion_style_excerpt:
+                lines.append(f"- Assertion style excerpt: {ti.assertion_style_excerpt}")
+            if ti.existing_regression_files:
+                lines.append("- Existing regression files:")
+                for rf in ti.existing_regression_files:
+                    lines.append(f"  - {rf}")
+            if ti.affected_files_existing_coverage:
+                lines.append("- Affected files coverage:")
+                for cov in ti.affected_files_existing_coverage:
+                    lines.append(f"  - Source: {cov.source_file}, Tests: {cov.test_files}")
+                    if cov.coverage_notes:
+                        lines.append(f"    - Notes: {cov.coverage_notes}")
+            if ti.strategy_summary:
+                lines.append(f"- Strategy: {ti.strategy_summary}")
+            if ti.notes:
+                lines.append(f"- Notes: {ti.notes}")
+            if not any([
+                ti.test_framework, ti.test_directory, ti.test_file_pattern,
+                ti.assertion_style_excerpt, ti.existing_regression_files,
+                ti.affected_files_existing_coverage, ti.strategy_summary, ti.notes,
+            ]):
+                lines.append("- (none identified)")
+        else:
+            lines.append("- (none identified)")
+        lines.append("")
+
+        # Section 8: Notes
+        lines.append("NOTES:")
+        if self.notes:
+            lines.append(self.notes.strip())
+        else:
+            lines.append("- (none identified)")
+        lines.append("")
+
+        return "\n".join(lines).rstrip() + "\n"
 
 
 # ── Phase 3 design + risk schemas ───────────────────────────────────────────
