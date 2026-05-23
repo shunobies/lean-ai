@@ -21,6 +21,7 @@ import { SettingsPanel } from "./settingsPanel";
 import { NotesPanel } from "./notesPanel";
 import { MemoriesPanel } from "./memoriesPanel";
 import { PromptsPanel } from "./promptsPanel";
+import { ObservabilityPanel } from "./observabilityPanel";
 import { initNotifications } from "./notifications";
 import {
     installUiVerificationCommand,
@@ -132,6 +133,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
         vscode.commands.registerCommand("lean-ai.openMemories", () => {
             MemoriesPanel.createOrShow(context);
+        }),
+        vscode.commands.registerCommand("lean-ai.openObservabilityDashboard", () => {
+            ObservabilityPanel.createOrShow(context);
         }),
         vscode.commands.registerCommand("lean-ai.openChatInNewWindow", () => {
             sidebarProvider.openChatInNewWindow();

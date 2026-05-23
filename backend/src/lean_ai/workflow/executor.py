@@ -30,6 +30,7 @@ from lean_ai.llm.tool_definitions import (
 from lean_ai.routers.context_helpers import load_execution_context
 from lean_ai.tools import scratchpad
 from lean_ai.tools.journal import read_journal
+from lean_ai.training.span_context import trace_span
 from lean_ai.workflow.callbacks import build_workflow_callbacks
 from lean_ai.workflow.hooks import (
     auto_extract_session_memories,
@@ -710,7 +711,34 @@ async def execute_plan(
             if name in _IMPLICIT_MUTATION_TOOLS and pre_step_snapshot is None:
                 pre_step_snapshot = await asyncio.to_thread(_snapshot_repo_state, repo_root)
 
-            result = await executor(name, arguments)
+            # Tool-level trace span — leaf node in Session→Phase→Turn→Tool hierarchy.
+            # trace_span swallows exceptions by design; we capture the exception
+            # so we can re-raise after the span has recorded status='failed'.
+            _tool_result = None
+            _tool_exc = None
+
+            tool_metadata = {
+                "tool_name": name,
+                "arguments": {k: v for k, v in arguments.items()
+                             if k in ("path", "command")},
+            }
+
+            async with trace_span(
+                span_type="tool",
+                span_name=name,
+                session_id=session_id,
+                metadata=tool_metadata,
+            ):
+                try:
+                    _tool_result = await executor(name, arguments)
+                except Exception as exc:
+                    _tool_exc = exc
+                    raise
+
+            if _tool_exc is not None:
+                raise _tool_exc
+
+            result = _tool_result
 
             call = ToolCall(
                 tool_name=name,

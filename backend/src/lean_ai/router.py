@@ -16,6 +16,7 @@ from lean_ai.routers.info import info_router
 from lean_ai.routers.integrations import integrations_router
 from lean_ai.routers.memories import memories_router
 from lean_ai.routers.notes import notes_router
+from lean_ai.routers.observability import observability_router
 from lean_ai.routers.prompts import prompts_router
 from lean_ai.routers.reference_endpoints import reference_router
 from lean_ai.routers.scaffold_endpoints import scaffold_router
@@ -43,3 +44,4 @@ router.include_router(integrations_router)
 router.include_router(diffs_router)
 router.include_router(export_router)
 router.include_router(workspace_router)
+router.include_router(observability_router)

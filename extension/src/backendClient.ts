@@ -820,4 +820,167 @@ export class BackendClient {
 
         return ws;
     }
+
+    // -----------------------------------------------------------------------
+    // Observability
+    // -----------------------------------------------------------------------
+
+    async getObservabilitySessions(
+        repoRoot: string,
+        filters?: { session_id?: string },
+    ): Promise<SessionMetrics[]> {
+        const params = new URLSearchParams({ repo_root: repoRoot });
+        if (filters?.session_id) { params.set("session_id", filters.session_id); }
+        const qs = params.toString();
+        const resp = await fetch(`${this.baseUrl}/observability/sessions?${qs}`);
+        if (!resp.ok) {
+            throw new Error(`Failed to list observability sessions: ${resp.statusText}`);
+        }
+        return resp.json() as Promise<SessionMetrics[]>;
+    }
+
+    async getSessionDetail(
+        repoRoot: string,
+        sessionId: string,
+    ): Promise<SessionDetail> {
+        const params = new URLSearchParams({ repo_root: repoRoot });
+        const qs = params.toString();
+        const resp = await fetch(`${this.baseUrl}/observability/sessions/${sessionId}?${qs}`);
+        if (!resp.ok) {
+            throw new Error(`Failed to get session detail: ${resp.statusText}`);
+        }
+        return resp.json() as Promise<SessionDetail>;
+    }
+
+    async getTraceTree(
+        repoRoot: string,
+        sessionId: string,
+    ): Promise<{ session_id: string; tree: TraceTreeNode[] }> {
+        const params = new URLSearchParams({ repo_root: repoRoot, session_id: sessionId });
+        const qs = params.toString();
+        const resp = await fetch(`${this.baseUrl}/observability/traces/tree?${qs}`);
+        if (!resp.ok) {
+            throw new Error(`Failed to get trace tree: ${resp.statusText}`);
+        }
+        return resp.json() as Promise<{ session_id: string; tree: TraceTreeNode[] }>;
+    }
+
+    async getFeedbackEntries(
+        repoRoot: string,
+        filters?: { session_id?: string },
+    ): Promise<FeedbackEntry[]> {
+        const params = new URLSearchParams({ repo_root: repoRoot });
+        if (filters?.session_id) { params.set("session_id", filters.session_id); }
+        const qs = params.toString();
+        const resp = await fetch(`${this.baseUrl}/observability/feedback?${qs}`);
+        if (!resp.ok) {
+            throw new Error(`Failed to list feedback entries: ${resp.statusText}`);
+        }
+        return resp.json() as Promise<FeedbackEntry[]>;
+    }
+
+    async submitFeedback(
+        repoRoot: string,
+        feedback: FeedbackPayload,
+    ): Promise<{ status: string; feedback_id: string }> {
+        const params = new URLSearchParams({ repo_root: repoRoot, session_id: feedback.session_id });
+        if (feedback.thumbs_up !== undefined) { params.set("thumbs_up", String(feedback.thumbs_up)); }
+        if (feedback.rating !== undefined) { params.set("rating", String(feedback.rating)); }
+        if (feedback.comment) { params.set("comment", feedback.comment); }
+        if (feedback.tags && feedback.tags.length > 0) { params.set("tags", feedback.tags.join(",")); }
+        if (feedback.trace_span_uuid) { params.set("trace_span_uuid", feedback.trace_span_uuid); }
+        const qs = params.toString();
+        const resp = await fetch(`${this.baseUrl}/observability/feedback?${qs}`, {
+            method: "POST",
+        });
+        if (!resp.ok) {
+            throw new Error(`Failed to submit feedback: ${resp.statusText}`);
+        }
+        return resp.json() as Promise<{ status: string; feedback_id: string }>;
+    }
+
+    async getMetricsSummary(repoRoot: string): Promise<MetricsSummary> {
+        const params = new URLSearchParams({ repo_root: repoRoot });
+        const qs = params.toString();
+        const resp = await fetch(`${this.baseUrl}/observability/metrics/summary?${qs}`);
+        if (!resp.ok) {
+            throw new Error(`Failed to get metrics summary: ${resp.statusText}`);
+        }
+        return resp.json() as Promise<MetricsSummary>;
+    }
+}
+
+// ── Observability TypeScript interfaces ─────────────────────────────────────
+
+/** Session with observability metrics (span count, feedback count). */
+export interface SessionMetrics {
+    id: string;
+    repo_root: string;
+    session_status: string;
+    plan_branch?: string | null;
+    created_at: string;
+    updated_at?: string | null;
+    span_count: number;
+    feedback_count: number;
+    [key: string]: unknown;
+}
+
+/** Full session detail including trace tree and feedback entries. */
+export interface SessionDetail {
+    id: string;
+    repo_root: string;
+    session_status: string;
+    plan_branch?: string | null;
+    created_at: string;
+    updated_at?: string | null;
+    trace_tree: TraceTreeNode[];
+    feedback: FeedbackEntry[];
+    [key: string]: unknown;
+}
+
+/** A single node in the trace tree hierarchy. */
+export interface TraceTreeNode {
+    span_uuid: string;
+    parent_span_uuid?: string | null;
+    session_id: string;
+    span_type: string;
+    span_name?: string | null;
+    start_time: string;
+    end_time?: string | null;
+    status?: string | null;
+    depth?: number;
+    children?: TraceTreeNode[];
+    [key: string]: unknown;
+}
+
+/** A feedback entry from the session_feedback table. */
+export interface FeedbackEntry {
+    id: string;
+    session_id: string;
+    thumbs_up?: boolean | null;
+    rating?: number | null;
+    comment?: string | null;
+    tags?: string | null;
+    trace_span_uuid?: string | null;
+    created_at: string;
+    [key: string]: unknown;
+}
+
+/** Payload for submitting new feedback. */
+export interface FeedbackPayload {
+    session_id: string;
+    thumbs_up?: boolean;
+    rating?: number;
+    comment?: string;
+    tags?: string[];
+    trace_span_uuid?: string;
+}
+
+/** Aggregate metrics summary across all sessions. */
+export interface MetricsSummary {
+    total_spans: number;
+    by_type: Record<string, number>;
+    by_status: Record<string, number>;
+    total_feedback: number;
+    thumbs_breakdown: Record<string, number>;
 }

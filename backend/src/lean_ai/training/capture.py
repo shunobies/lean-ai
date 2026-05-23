@@ -23,6 +23,7 @@ from lean_ai.training.db import (
     get_training_db,
     insert_clarification,
     insert_diff_decision,
+    insert_feedback,
     insert_phase2_synthesis,
     insert_plan_decision,
     insert_tool_compression,
@@ -32,6 +33,7 @@ from lean_ai.training.db import (
     insert_workflow_event,
     new_trace_uuid,
 )
+from lean_ai.training.span_context import trace_span
 from lean_ai.training.scrubber import (
     ScrubberError,
     persist_audit_rows,
@@ -105,6 +107,7 @@ async def capture_turn(
     latency_ms: int | None = None,
     role: str | None = None,
     turn_index: int | None = None,
+    span_uuid: str | None = None,
 ) -> str | None:
     """Persist one LLM turn to ``training_traces``.
 
@@ -140,6 +143,12 @@ async def capture_turn(
             role=role,
             turn_index=turn_index,
         )
+        if span_uuid is not None:
+            await db.execute(
+                "UPDATE training_traces SET span_uuid = ? WHERE trace_uuid = ?",
+                (span_uuid, trace_uuid),
+            )
+            await db.commit()
         return trace_uuid
 
     try:
@@ -174,6 +183,7 @@ async def capture_tool_execution(
     trace_uuid: str | None = None,
     pair_id: str | None = None,
     preference: int | None = None,
+    span_uuid: str | None = None,
 ) -> int | None:
     """Persist one tool invocation to ``tool_executions``.
 
@@ -555,3 +565,84 @@ async def capture_workflow_event(
             exc_info=True,
         )
         return None
+
+
+async def capture_feedback(
+    repo_root: str,
+    *,
+    session_id: str,
+    thumbs_up: bool | None = None,
+    rating: int | None = None,
+    comment: str | None = None,
+    tags: list[str] | None = None,
+    trace_span_uuid: str | None = None,
+) -> int | None:
+    """Persist user feedback to ``session_feedback``.
+
+    Returns the feedback row id or ``None`` if capture was dropped.
+    """
+    if not _is_enabled():
+        return None
+
+    payload: dict[str, Any] = {
+        "comment": comment,
+        "tags": tags,
+    }
+
+    async def _write(db, *, scrubbed, audit_rows):
+        return await insert_feedback(
+            db,
+            session_id=session_id,
+            thumbs_up=thumbs_up,
+            rating=rating,
+            comment=scrubbed.get("comment"),
+            tags=scrubbed.get("tags"),
+            trace_span_uuid=trace_span_uuid,
+        )
+
+    try:
+        return await _scrub_and_write(
+            repo_root,
+            writer=_write,
+            audit_source_table="session_feedback",
+            audit_source_id_factory=lambda row_id: f"sf-{row_id}",
+            payload=payload,
+        )
+    except Exception:
+        logger.debug(
+            "capture_feedback failed (non-fatal)",
+            exc_info=True,
+        )
+        return None
+
+
+async def capture_span(
+    span_type: str,
+    span_name: str,
+    session_id: str,
+    parent_span: Any = None,
+    metadata: dict | None = None,
+):
+    """Convenience wrapper around the ``trace_span`` context manager.
+
+    Provides a fire-and-forget safe async context manager for creating
+    timing spans that record LLM calls, tool invocations, and workflow
+    phases into the ``trace_spans`` table.  Exceptions inside span
+    bodies are caught, logged, and mark spans as failed without
+    propagating to the caller.
+
+    Args:
+        span_type: Category of the operation (e.g. 'llm_call', 'tool_call').
+        span_name: Descriptive name for the span.
+        session_id: The session identifier.
+        parent_span: Optional parent TraceSpan for hierarchical nesting.
+        metadata: Optional dict of arbitrary metadata (stored as JSON).
+    """
+    async with trace_span(
+        span_type=span_type,
+        span_name=span_name,
+        session_id=session_id,
+        parent_span=parent_span,
+        metadata=metadata,
+    ) as span:
+        yield span

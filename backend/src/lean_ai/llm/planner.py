@@ -60,6 +60,7 @@ from lean_ai.llm.tool_definitions import (
     build_design_tools,
     build_planning_tools,
 )
+from lean_ai.training.span_context import trace_span
 from lean_ai.workflow.ws_protocol import WorkflowSession
 
 if TYPE_CHECKING:
@@ -240,30 +241,40 @@ class ScopePhase(PlanningPhase):
             small_ctx,
         )
 
-        _phase1_tool_calls, scope_prose = await llm_client.chat_with_tools(
-            messages=[
-                {"role": "system", "content": phase1_system},
-                {"role": "user", "content": phase1_user_content},
-            ],
-            tools=phase1_tools,
-            tool_executor_fn=phase1_executor,
-            max_turns=settings.plan_phase1_max_turns,
-            max_tokens=phase_max_tokens,
-            text_only_exit_count=1,
-            on_tool_call=on_tool_call,
-            on_tool_result=on_tool_result,
-            on_content=on_content,
-            on_thinking=on_thinking,
-            on_metrics=on_metrics,
-            on_metrics_reset=on_metrics_reset,
-            dispatcher=dispatcher,
-            telemetry_context={
-                "repo_root": repo_root,
-                "session_id": session_id,
+        async with trace_span(
+            span_type="turn",
+            span_name="scope_turn",
+            session_id=session_id,
+            metadata={
+                "model": llm_client.model_name,
+                "provider": getattr(llm_client, "provider", "unknown"),
                 "phase": "planning.phase1",
-                "role": "primary",
             },
-        )
+        ) as turn_span:
+            _phase1_tool_calls, scope_prose = await llm_client.chat_with_tools(
+                messages=[
+                    {"role": "system", "content": phase1_system},
+                    {"role": "user", "content": phase1_user_content},
+                ],
+                tools=phase1_tools,
+                tool_executor_fn=phase1_executor,
+                max_turns=settings.plan_phase1_max_turns,
+                max_tokens=phase_max_tokens,
+                text_only_exit_count=1,
+                on_tool_call=on_tool_call,
+                on_tool_result=on_tool_result,
+                on_content=on_content,
+                on_thinking=on_thinking,
+                on_metrics=on_metrics,
+                on_metrics_reset=on_metrics_reset,
+                dispatcher=dispatcher,
+                telemetry_context={
+                    "repo_root": repo_root,
+                    "session_id": session_id,
+                    "phase": "planning.phase1",
+                    "role": "primary",
+                },
+            )
         if on_content:
             await _send_content_done(ws, scope_prose)
 
@@ -383,23 +394,33 @@ class ExplorationPhase(PlanningPhase):
         )
         logger.info("Planning Phase 2: File identification and reading")
 
-        file_summary_obj, file_identification, phase2_elapsed = await run_phase2_exploration(
-            task=task,
-            scope=scope,
-            context=context,
-            repo_root=repo_root,
+        async with trace_span(
+            span_type="turn",
+            span_name="exploration_turn",
             session_id=session_id,
-            explorer=llm_client,
-            phase_max_tokens=phase_max_tokens,
-            ws=ws,
-            dispatcher=dispatcher,
-            on_content=on_content,
-            on_thinking=on_thinking,
-            on_tool_call=on_tool_call,
-            on_tool_result=on_tool_result,
-            on_metrics=on_metrics,
-            on_metrics_reset=on_metrics_reset,
-        )
+            metadata={
+                "model": llm_client.model_name,
+                "provider": getattr(llm_client, "provider", "unknown"),
+                "phase": "planning.phase2",
+            },
+        ) as exploration_turn_span:
+            file_summary_obj, file_identification, phase2_elapsed = await run_phase2_exploration(
+                task=task,
+                scope=scope,
+                context=context,
+                repo_root=repo_root,
+                session_id=session_id,
+                explorer=llm_client,
+                phase_max_tokens=phase_max_tokens,
+                ws=ws,
+                dispatcher=dispatcher,
+                on_content=on_content,
+                on_thinking=on_thinking,
+                on_tool_call=on_tool_call,
+                on_tool_result=on_tool_result,
+                on_metrics=on_metrics,
+                on_metrics_reset=on_metrics_reset,
+            )
 
         _save_debug_phase(
             repo_root,
@@ -546,27 +567,37 @@ class DesignPhase(PlanningPhase):
                 return "Design synthesis marked complete."
             return f"Unknown tool: {name}"
 
-        _phase3_tool_calls, phase3_exploration_prose = await expert.chat_with_tools(
-            messages=phase3_messages,
-            tools=build_design_tools(),
-            tool_executor_fn=_search_only_executor,
-            max_turns=15,
-            max_tokens=expert_max_tokens,
-            text_only_exit_count=1,
-            on_tool_call=on_tool_call,
-            on_tool_result=on_tool_result,
-            on_content=on_content,
-            on_thinking=on_thinking,
-            on_metrics=on_metrics,
-            on_metrics_reset=on_metrics_reset,
-            dispatcher=dispatcher,
-            telemetry_context={
-                "repo_root": repo_root,
-                "session_id": session_id,
+        async with trace_span(
+            span_type="turn",
+            span_name="design_turn",
+            session_id=session_id,
+            metadata={
+                "model": expert.model_name,
+                "provider": getattr(expert, "provider", "unknown"),
                 "phase": "planning.phase3",
-                "role": "expert",
             },
-        )
+        ) as design_turn_span:
+            _phase3_tool_calls, phase3_exploration_prose = await expert.chat_with_tools(
+                messages=phase3_messages,
+                tools=build_design_tools(),
+                tool_executor_fn=_search_only_executor,
+                max_turns=15,
+                max_tokens=expert_max_tokens,
+                text_only_exit_count=1,
+                on_tool_call=on_tool_call,
+                on_tool_result=on_tool_result,
+                on_content=on_content,
+                on_thinking=on_thinking,
+                on_metrics=on_metrics,
+                on_metrics_reset=on_metrics_reset,
+                dispatcher=dispatcher,
+                telemetry_context={
+                    "repo_root": repo_root,
+                    "session_id": session_id,
+                    "phase": "planning.phase3",
+                    "role": "expert",
+                },
+            )
         if on_content:
             await _send_content_done(ws, phase3_exploration_prose)
 

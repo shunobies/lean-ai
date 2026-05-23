@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from lean_ai.config import settings
 from lean_ai.llm.plan_schema import ExecutionPlan, plan_to_markdown
 from lean_ai.llm.planner import create_plan
+from lean_ai.training.span_context import trace_span
 from lean_ai.workflow.callbacks import build_workflow_callbacks
 from lean_ai.workflow.executor import execute_plan
 from lean_ai.workflow.fix_mode import _run_fix
@@ -61,177 +62,209 @@ async def run_workflow(
     """
     logger.info("Workflow (%s): starting task: %s", mode, task[:100])
 
-    # Emit a session_start fingerprint — one row per workflow invocation,
-    # carrying the exact model layout used. Consumers need this to
-    # partition training data by model + provider before fine-tuning.
-    try:
-        from lean_ai.routers.dependencies import worker_llm_client
-        from lean_ai.workflow.hooks import fire_workflow_event
+    async with trace_span(
+        span_type="session",
+        span_name=session_id,
+        session_id=session_id,
+        metadata={"mode": mode, "task": task},
+    ) as session_span:
+        # Emit a session_start fingerprint — one row per workflow invocation,
+        # carrying the exact model layout used. Consumers need this to
+        # partition training data by model + provider before fine-tuning.
+        try:
+            from lean_ai.routers.dependencies import worker_llm_client
+            from lean_ai.workflow.hooks import fire_workflow_event
 
-        fire_workflow_event(
-            repo_root=repo_root,
+            fire_workflow_event(
+                repo_root=repo_root,
+                session_id=session_id,
+                event_type="session_start",
+                payload={
+                    "mode": mode,
+                    "task_length": len(task),
+                    "primary_model": getattr(llm_client, "model_name", None),
+                    "primary_provider": getattr(llm_client, "provider_name", None),
+                    "expert_model": (
+                        getattr(expert_llm_client, "model_name", None)
+                        if expert_llm_client
+                        else None
+                    ),
+                    "expert_provider": (
+                        getattr(expert_llm_client, "provider_name", None)
+                        if expert_llm_client
+                        else None
+                    ),
+                    "request_model": (
+                        getattr(request_llm_client, "model_name", None)
+                        if request_llm_client
+                        else None
+                    ),
+                    "request_provider": (
+                        getattr(request_llm_client, "provider_name", None)
+                        if request_llm_client
+                        else None
+                    ),
+                    "worker_model": (
+                        getattr(worker_llm_client, "model_name", None)
+                        if worker_llm_client
+                        else None
+                    ),
+                    "worker_provider": (
+                        getattr(worker_llm_client, "provider_name", None)
+                        if worker_llm_client
+                        else None
+                    ),
+                    "context_window": getattr(
+                        settings,
+                        "_active_context_window",
+                        None,
+                    ),
+                    "tdd_enabled": expert_llm_client is not None,
+                },
+            )
+        except Exception:
+            logger.debug("session_start event failed (non-fatal)", exc_info=True)
+
+        # Validate TDD requirements: expert model + sufficient context window
+        if expert_llm_client is None:
+            logger.warning(
+                "TDD mode enabled but no expert model configured — falling back to normal mode",
+            )
+            await ws_send(
+                session,
+                "stage_status",
+                {
+                    "stage": "tdd",
+                    "status": "done",
+                    "summary": ("TDD mode requires an expert model. Falling back to normal mode."),
+                },
+            )
+
+        if expert_llm_client is not None and settings._active_context_window <= 32768:
+            logger.warning(
+                "TDD mode disabled — context window too small (%d). "
+                "TDD requires cross-phase context that exceeds 32k budget.",
+                settings._active_context_window,
+            )
+            await ws_send(
+                session,
+                "stage_status",
+                {
+                    "stage": "tdd",
+                    "status": "done",
+                    "summary": (
+                        "TDD mode auto-disabled: context window too small "
+                        f"({settings._active_context_window}). "
+                        "Increase to 64k+ to enable TDD."
+                    ),
+                },
+            )
+
+        # Log the initial task
+        if conversation_logger:
+            await conversation_logger("user", task)
+
+        if mode in ("fix", "request"):
+            return await _run_fix(
+                task=task,
+                repo_root=repo_root,
+                ws=session,
+                llm_client=llm_client,
+                context=context,
+                branch_name=branch_name,
+                base_branch=base_branch,
+                conversation_logger=conversation_logger,
+                session_id=session_id,
+                expert_llm_client=expert_llm_client,
+                request_llm_client=request_llm_client,
+                mode=mode,
+                dispatcher=dispatcher,
+            )
+
+        # Clarifications happen in the chat's two-round Suggested Agent Prompt
+        # flow — by the time a task reaches the planner, the user has already
+        # answered every question the chat surfaced. The planner does NOT run
+        # its own clarify step: Phase 1 rewrites the task into an 8-section
+        # ScopeDocument, recording any under-specified details as ASSUMPTIONS
+        # with verify_hints for Phase 2 to falsify.
+
+        # ── Phase 2: Plan ────────────────────────────────────────────
+        await ws_send(session, "stage_change", {"stage": "planning"})
+        plan_commands = _effective_post_commands(repo_root)
+
+        # Planning-specific streaming callbacks — include streaming flag
+        # so the extension can distinguish token-level updates from
+        # per-turn bulk content used during execution.
+        planning_cb = build_workflow_callbacks(session=session, streaming=True)
+
+        async with trace_span(
+            span_type="phase",
+            span_name="planning",
             session_id=session_id,
-            event_type="session_start",
-            payload={
-                "mode": mode,
-                "task_length": len(task),
-                "primary_model": getattr(llm_client, "model_name", None),
-                "primary_provider": getattr(llm_client, "provider_name", None),
-                "expert_model": (
-                    getattr(expert_llm_client, "model_name", None) if expert_llm_client else None
-                ),
-                "expert_provider": (
-                    getattr(expert_llm_client, "provider_name", None) if expert_llm_client else None
-                ),
-                "request_model": (
-                    getattr(request_llm_client, "model_name", None) if request_llm_client else None
-                ),
-                "request_provider": (
-                    getattr(request_llm_client, "provider_name", None)
-                    if request_llm_client
-                    else None
-                ),
-                "worker_model": (
-                    getattr(worker_llm_client, "model_name", None) if worker_llm_client else None
-                ),
-                "worker_provider": (
-                    getattr(worker_llm_client, "provider_name", None)
-                    if worker_llm_client
-                    else None
-                ),
-                "context_window": getattr(
-                    settings,
-                    "_active_context_window",
-                    None,
-                ),
-                "tdd_enabled": expert_llm_client is not None,
-            },
-        )
-    except Exception:
-        logger.debug("session_start event failed (non-fatal)", exc_info=True)
+            parent_span=session_span,
+        ) as _planning_span:
+            plan = await create_plan(
+                task=task,
+                repo_root=repo_root,
+                llm_client=llm_client,
+                context=context,
+                ws=session,
+                dispatcher=dispatcher,
+                refiner=refiner,
+                test_command=plan_commands.get("test", ""),
+                session_id=session_id,
+                expert_llm_client=expert_llm_client,
+                on_content=planning_cb.on_content,
+                on_thinking=planning_cb.on_thinking,
+                on_tool_call=planning_cb.on_tool_call,
+                on_tool_result=planning_cb.on_tool_result,
+                on_metrics=planning_cb.on_metrics,
+                on_metrics_reset=planning_cb.on_metrics_reset,
+            )
 
-    # Validate TDD requirements: expert model + sufficient context window
-    if expert_llm_client is None:
-        logger.warning(
-            "TDD mode enabled but no expert model configured — falling back to normal mode",
-        )
-        await ws_send(
-            session,
-            "stage_status",
-            {
-                "stage": "tdd",
-                "status": "done",
-                "summary": ("TDD mode requires an expert model. Falling back to normal mode."),
-            },
-        )
-
-    if expert_llm_client is not None and settings._active_context_window <= 32768:
-        logger.warning(
-            "TDD mode disabled — context window too small (%d). "
-            "TDD requires cross-phase context that exceeds 32k budget.",
-            settings._active_context_window,
-        )
-        await ws_send(
-            session,
-            "stage_status",
-            {
-                "stage": "tdd",
-                "status": "done",
-                "summary": (
-                    "TDD mode auto-disabled: context window too small "
-                    f"({settings._active_context_window}). "
-                    "Increase to 64k+ to enable TDD."
-                ),
-            },
-        )
-
-    # Log the initial task
-    if conversation_logger:
-        await conversation_logger("user", task)
-
-    if mode in ("fix", "request"):
-        return await _run_fix(
-            task=task,
-            repo_root=repo_root,
-            ws=session,
-            llm_client=llm_client,
-            context=context,
-            branch_name=branch_name,
-            base_branch=base_branch,
-            conversation_logger=conversation_logger,
+        # ── Phase 3: Approve ─────────────────────────────────────────
+        async with trace_span(
+            span_type="phase",
+            span_name="approval",
             session_id=session_id,
-            expert_llm_client=expert_llm_client,
-            request_llm_client=request_llm_client,
-            mode=mode,
-            dispatcher=dispatcher,
-        )
+            parent_span=session_span,
+        ) as _approval_span:
+            approved_plan = await _wait_for_approval(
+                plan=plan,
+                task=task,
+                repo_root=repo_root,
+                llm_client=llm_client,
+                context=context,
+                ws=session,
+                refiner=refiner,
+                test_command=plan_commands.get("test", ""),
+                expert_llm_client=expert_llm_client,
+                dispatcher=dispatcher,
+                session_id=session_id,
+            )
 
-    # Clarifications happen in the chat's two-round Suggested Agent Prompt
-    # flow — by the time a task reaches the planner, the user has already
-    # answered every question the chat surfaced. The planner does NOT run
-    # its own clarify step: Phase 1 rewrites the task into an 8-section
-    # ScopeDocument, recording any under-specified details as ASSUMPTIONS
-    # with verify_hints for Phase 2 to falsify.
-
-    # ── Phase 2: Plan ────────────────────────────────────────────
-    await ws_send(session, "stage_change", {"stage": "planning"})
-    plan_commands = _effective_post_commands(repo_root)
-
-    # Planning-specific streaming callbacks — include streaming flag
-    # so the extension can distinguish token-level updates from
-    # per-turn bulk content used during execution.
-    planning_cb = build_workflow_callbacks(session=session, streaming=True)
-
-    plan = await create_plan(
-        task=task,
-        repo_root=repo_root,
-        llm_client=llm_client,
-        context=context,
-        ws=session,
-        dispatcher=dispatcher,
-        refiner=refiner,
-        test_command=plan_commands.get("test", ""),
-        session_id=session_id,
-        expert_llm_client=expert_llm_client,
-        on_content=planning_cb.on_content,
-        on_thinking=planning_cb.on_thinking,
-        on_tool_call=planning_cb.on_tool_call,
-        on_tool_result=planning_cb.on_tool_result,
-        on_metrics=planning_cb.on_metrics,
-        on_metrics_reset=planning_cb.on_metrics_reset,
-    )
-
-    # ── Phase 3: Approve ─────────────────────────────────────────
-    approved_plan = await _wait_for_approval(
-        plan=plan,
-        task=task,
-        repo_root=repo_root,
-        llm_client=llm_client,
-        context=context,
-        ws=session,
-        refiner=refiner,
-        test_command=plan_commands.get("test", ""),
-        expert_llm_client=expert_llm_client,
-        dispatcher=dispatcher,
-        session_id=session_id,
-    )
-
-    # ── Phase 4: Execute per-step ────────────────────────────────
-    await ws_send(session, "stage_change", {"stage": "implementing"})
-    return await execute_plan(
-        plan=approved_plan,
-        task=task,
-        repo_root=repo_root,
-        ws=session,
-        llm_client=llm_client,
-        context=context,
-        branch_name=branch_name,
-        base_branch=base_branch,
-        conversation_logger=conversation_logger,
-        session_id=session_id,
-        expert_llm_client=expert_llm_client,
-        dispatcher=dispatcher,
-    )
+        # ── Phase 4: Execute per-step ────────────────────────────────
+        await ws_send(session, "stage_change", {"stage": "implementing"})
+        async with trace_span(
+            span_type="phase",
+            span_name="execution",
+            session_id=session_id,
+            parent_span=session_span,
+        ) as _execution_span:
+            return await execute_plan(
+                plan=approved_plan,
+                task=task,
+                repo_root=repo_root,
+                ws=session,
+                llm_client=llm_client,
+                context=context,
+                branch_name=branch_name,
+                base_branch=base_branch,
+                conversation_logger=conversation_logger,
+                session_id=session_id,
+                expert_llm_client=expert_llm_client,
+                dispatcher=dispatcher,
+            )
 
 
 # ── Phase 3: Approval ──────────────────────────────────────────────

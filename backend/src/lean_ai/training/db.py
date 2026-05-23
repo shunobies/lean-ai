@@ -209,6 +209,41 @@ CREATE TABLE IF NOT EXISTS diff_decisions (
 
 CREATE INDEX IF NOT EXISTS idx_dd_session ON diff_decisions(session_id);
 CREATE INDEX IF NOT EXISTS idx_dd_hash ON diff_decisions(diff_hash);
+
+-- Observability trace spans: hierarchical timing data for LLM calls,
+-- tool invocations, and workflow phases.
+CREATE TABLE IF NOT EXISTS trace_spans (
+    span_uuid TEXT PRIMARY KEY,
+    parent_span_uuid TEXT,
+    session_id TEXT NOT NULL,
+    span_type TEXT NOT NULL,
+    span_name TEXT NOT NULL,
+    start_time TEXT NOT NULL,
+    end_time TEXT,
+    status TEXT,
+    metadata_json TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ts_session ON trace_spans(session_id);
+CREATE INDEX IF NOT EXISTS idx_ts_parent ON trace_spans(parent_span_uuid);
+CREATE INDEX IF NOT EXISTS idx_ts_type ON trace_spans(span_type);
+CREATE INDEX IF NOT EXISTS idx_ts_start ON trace_spans(start_time);
+
+-- User feedback on sessions or individual spans.
+CREATE TABLE IF NOT EXISTS session_feedback (
+    feedback_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    trace_span_uuid TEXT,
+    thumbs_up INTEGER,
+    rating INTEGER,
+    comment TEXT,
+    tags TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sf_session ON session_feedback(session_id);
+CREATE INDEX IF NOT EXISTS idx_sf_span ON session_feedback(trace_span_uuid);
 """
 
 
@@ -264,6 +299,49 @@ async def _migrate(db: aiosqlite.Connection) -> None:
         await db.commit()
     if not await _has_column("workflow_events", "trace_uuid"):
         await db.execute("ALTER TABLE workflow_events ADD COLUMN trace_uuid TEXT")
+        await db.commit()
+
+    # Add span_uuid column to training_traces for older DBs.
+    if not await _has_column("training_traces", "span_uuid"):
+        await db.execute("ALTER TABLE training_traces ADD COLUMN span_uuid TEXT")
+        await db.commit()
+
+    # Ensure trace_spans table exists (new in observability addition).
+    if not await _has_column("trace_spans", "span_uuid"):
+        await db.executescript(
+            "CREATE TABLE IF NOT EXISTS trace_spans ("
+            "span_uuid TEXT PRIMARY KEY, "
+            "parent_span_uuid TEXT, "
+            "session_id TEXT NOT NULL, "
+            "span_type TEXT NOT NULL, "
+            "span_name TEXT NOT NULL, "
+            "start_time TEXT NOT NULL, "
+            "end_time TEXT, "
+            "status TEXT, "
+            "metadata_json TEXT, "
+            "created_at TEXT NOT NULL)"
+        )
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_ts_session ON trace_spans(session_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_ts_parent ON trace_spans(parent_span_uuid)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_ts_type ON trace_spans(span_type)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_ts_start ON trace_spans(start_time)")
+        await db.commit()
+
+    # Ensure session_feedback table exists (new in observability addition).
+    if not await _has_column("session_feedback", "feedback_id"):
+        await db.executescript(
+            "CREATE TABLE IF NOT EXISTS session_feedback ("
+            "feedback_id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "session_id TEXT NOT NULL, "
+            "trace_span_uuid TEXT, "
+            "thumbs_up INTEGER, "
+            "rating INTEGER, "
+            "comment TEXT, "
+            "tags TEXT, "
+            "created_at TEXT NOT NULL)"
+        )
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_sf_session ON session_feedback(session_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_sf_span ON session_feedback(trace_span_uuid)")
         await db.commit()
 
 
@@ -628,6 +706,170 @@ async def insert_redaction_audit(
     )
     await db.commit()
     return cursor.lastrowid or 0
+
+
+# ── Observability: trace spans and feedback ──
+
+
+async def insert_trace_span(
+    db: aiosqlite.Connection,
+    *,
+    span_uuid: str,
+    session_id: str,
+    span_type: str,
+    span_name: str,
+    start_time: str,
+    parent_span_uuid: str | None = None,
+    status: str | None = None,
+    metadata: dict | None = None,
+) -> None:
+    """Insert a new trace span row into ``trace_spans``."""
+    await db.execute(
+        "INSERT INTO trace_spans ("
+        "span_uuid, parent_span_uuid, session_id, span_type, span_name, "
+        "start_time, status, metadata_json, created_at"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            span_uuid,
+            parent_span_uuid,
+            session_id,
+            span_type,
+            span_name,
+            start_time,
+            status,
+            _json_dump(metadata) if metadata is not None else None,
+            _now(),
+        ),
+    )
+    await db.commit()
+
+
+async def update_trace_span_end(
+    db: aiosqlite.Connection,
+    span_uuid: str,
+    end_time: str,
+    status: str | None = None,
+) -> None:
+    """Set end_time and status on an existing trace span."""
+    await db.execute(
+        "UPDATE trace_spans SET end_time = ?, status = ? WHERE span_uuid = ?",
+        (end_time, status, span_uuid),
+    )
+    await db.commit()
+
+
+async def insert_feedback(
+    db: aiosqlite.Connection,
+    *,
+    session_id: str,
+    thumbs_up: bool | None = None,
+    rating: int | None = None,
+    comment: str | None = None,
+    tags: list[str] | None = None,
+    trace_span_uuid: str | None = None,
+) -> int:
+    """Insert a user feedback row into ``session_feedback``."""
+    cursor = await db.execute(
+        "INSERT INTO session_feedback ("
+        "session_id, trace_span_uuid, thumbs_up, rating, comment, tags, created_at"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            session_id,
+            trace_span_uuid,
+            1 if thumbs_up else 0 if thumbs_up is not None else None,
+            rating,
+            comment,
+            _json_dump(tags) if tags is not None else None,
+            _now(),
+        ),
+    )
+    await db.commit()
+    return cursor.lastrowid or 0
+
+
+async def get_trace_tree(
+    db: aiosqlite.Connection,
+    session_id: str,
+) -> list[dict[str, Any]]:
+    """Return all spans for a session as a flat list using a recursive CTE.
+
+    Each row contains span_uuid, parent_span_uuid, span_type, span_name,
+    start_time, end_time, status, metadata_json, depth, and created_at.
+    """
+    cursor = await db.execute(
+        """
+        WITH RECURSIVE span_tree AS (
+            SELECT
+                span_uuid,
+                parent_span_uuid,
+                session_id,
+                span_type,
+                span_name,
+                start_time,
+                end_time,
+                status,
+                metadata_json,
+                created_at,
+                0 AS depth
+            FROM trace_spans
+            WHERE parent_span_uuid IS NULL AND session_id = ?
+
+            UNION ALL
+
+            SELECT
+                ts.span_uuid,
+                ts.parent_span_uuid,
+                ts.session_id,
+                ts.span_type,
+                ts.span_name,
+                ts.start_time,
+                ts.end_time,
+                ts.status,
+                ts.metadata_json,
+                ts.created_at,
+                st.depth + 1
+            FROM trace_spans ts
+            INNER JOIN span_tree st ON ts.parent_span_uuid = st.span_uuid
+        )
+        SELECT
+            span_uuid,
+            parent_span_uuid,
+            span_type,
+            span_name,
+            start_time,
+            end_time,
+            status,
+            metadata_json,
+            depth,
+            created_at
+        FROM span_tree
+        ORDER BY start_time
+        """,
+        (session_id,),
+    )
+    rows = await cursor.fetchall()
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        entry: dict[str, Any] = {
+            "span_uuid": row["span_uuid"],
+            "parent_span_uuid": row["parent_span_uuid"],
+            "span_type": row["span_type"],
+            "span_name": row["span_name"],
+            "start_time": row["start_time"],
+            "end_time": row["end_time"],
+            "status": row["status"],
+            "depth": row["depth"],
+            "created_at": row["created_at"],
+        }
+        if row["metadata_json"]:
+            try:
+                entry["metadata"] = json.loads(row["metadata_json"])
+            except (json.JSONDecodeError, TypeError):
+                entry["metadata"] = None
+        else:
+            entry["metadata"] = None
+        result.append(entry)
+    return result
 
 
 # ── Maintenance ──
