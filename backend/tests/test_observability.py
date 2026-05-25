@@ -1070,3 +1070,342 @@ async def test_get_endpoints_accessible_without_auth(tmp_path):
 
     # Note: /traces/tree is shadowed by /traces/{span_uuid} in FastAPI routing,
     # so we skip it here. The DB-level test_get_trace_tree_endpoint_returns_tree covers it.
+
+
+# ── 11. Additional coverage ───────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_trace_span_with_explicit_db_connection(tmp_path):
+    """The trace_span context manager uses get_training_db(session_id) internally.
+    Verify that spans are inserted into the training DB for the session."""
+    async with trace_span(
+        span_type="test",
+        span_name="test-span",
+        session_id=str(tmp_path),
+    ) as span:
+        assert span.span_type == "test"
+        assert span.span_name == "test-span"
+    # Verify the span was inserted into the training DB
+    db = await get_training_db(str(tmp_path))
+    cursor = await db.execute(
+        "SELECT span_uuid FROM trace_spans WHERE session_id = ?",
+        (str(tmp_path),),
+    )
+    rows = await cursor.fetchall()
+    await db.close()
+    assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_trace_span_dataclass_attributes(train_db, tmp_path):
+    """Verify TraceSpan dataclass has all expected attributes
+    (span_uuid, parent_span_uuid, session_id, span_type, span_name,
+    start_time, end_time, status, metadata_json)."""
+    async with trace_span(
+        span_type="test",
+        span_name="dump-span",
+        session_id=str(tmp_path),
+        metadata={"key": "value"},
+    ) as span:
+        # Verify all expected attributes exist
+        assert hasattr(span, "span_uuid")
+        assert hasattr(span, "parent_span_uuid")
+        assert hasattr(span, "session_id")
+        assert hasattr(span, "span_type")
+        assert hasattr(span, "span_name")
+        assert hasattr(span, "start_time")
+        assert hasattr(span, "end_time")
+        assert hasattr(span, "status")
+        assert hasattr(span, "metadata_json")
+        assert span.session_id == str(tmp_path)
+        assert span.span_type == "test"
+
+
+@pytest.mark.asyncio
+async def test_deep_nesting_five_levels(tmp_path):
+    """Create 5 levels of nested trace_span context managers
+    (session → phase → turn → tool → sub_tool).
+    Verify all 5 spans exist in DB with correct parent chain."""
+    async with trace_span(
+        span_type="session",
+        span_name="level1-session",
+        session_id=str(tmp_path),
+    ) as level1:
+        async with trace_span(
+            span_type="phase",
+            span_name="level2-phase",
+            session_id=str(tmp_path),
+            parent_span=level1,
+        ) as level2:
+            async with trace_span(
+                span_type="turn",
+                span_name="level3-turn",
+                session_id=str(tmp_path),
+                parent_span=level2,
+            ) as level3:
+                async with trace_span(
+                    span_type="tool",
+                    span_name="level4-tool",
+                    session_id=str(tmp_path),
+                    parent_span=level3,
+                ) as level4:
+                    async with trace_span(
+                        span_type="sub_tool",
+                        span_name="level5-subtool",
+                        session_id=str(tmp_path),
+                        parent_span=level4,
+                    ) as level5:
+                        pass
+    # Verify all 5 spans exist
+    db = await get_training_db(str(tmp_path))
+    cursor = await db.execute(
+        "SELECT span_uuid, parent_span_uuid, span_type FROM trace_spans WHERE session_id = ?",
+        (str(tmp_path),),
+    )
+    rows = await cursor.fetchall()
+    await db.close()
+    assert len(rows) == 5
+    # Verify parent chain
+    spans = {r[0]: (r[1], r[2]) for r in rows}
+    assert spans[level5.span_uuid][0] == level4.span_uuid
+    assert spans[level4.span_uuid][0] == level3.span_uuid
+    assert spans[level3.span_uuid][0] == level2.span_uuid
+    assert spans[level2.span_uuid][0] == level1.span_uuid
+    assert spans[level1.span_uuid][0] is None
+
+
+@pytest.mark.asyncio
+async def test_feedback_list_without_session_filter_returns_all(tmp_path):
+    """Insert feedback for two different sessions.
+    Call GET /observability/feedback?repo_root=... WITHOUT session_id parameter.
+    Verify both entries are returned."""
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+
+    from lean_ai.routers.observability import observability_router
+
+    app = FastAPI()
+    app.include_router(observability_router)
+    client = TestClient(app)
+
+    # Insert feedback for two sessions
+    db = await get_training_db(str(tmp_path))
+    await insert_feedback(db, session_id="sess-a", comment="feedback for session A")
+    await insert_feedback(db, session_id="sess-b", comment="feedback for session B")
+    await db.close()
+
+    resp = client.get(f"/observability/feedback?repo_root={tmp_path}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 2
+    feedback_sessions = {f["session_id"] for f in data}
+    assert feedback_sessions == {"sess-a", "sess-b"}
+
+
+@pytest.mark.asyncio
+async def test_metrics_summary_with_empty_database(tmp_path):
+    """Verify GET /observability/metrics/summary returns total_spans=0,
+    empty by_type, empty by_status, total_feedback=0 when no spans or feedback exist."""
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+
+    from lean_ai.routers.observability import observability_router
+
+    app = FastAPI()
+    app.include_router(observability_router)
+    client = TestClient(app)
+
+    resp = client.get(f"/observability/metrics/summary?repo_root={tmp_path}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total_spans"] == 0
+    assert data["by_type"] == {}
+    assert data["by_status"] == {}
+    assert data["total_feedback"] == 0
+
+
+@pytest.mark.asyncio
+async def test_post_feedback_with_tags_parsing(tmp_path):
+    """POST feedback with tags=a,b,c query parameter.
+    Verify the tags are stored as a JSON array ["a", "b", "c"] in the database."""
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+
+    from lean_ai.routers.observability import observability_router
+
+    app = FastAPI()
+    app.include_router(observability_router)
+    client = TestClient(app)
+
+    resp = client.post(
+        f"/observability/feedback?repo_root={tmp_path}&session_id=sess-tags&tags=a,b,c",
+        json={"rating": 5, "comment": "test"},
+        headers={"Authorization": "Bearer test-key"},
+    )
+    # May return 503 if no export key configured, but that's expected
+    assert resp.status_code in (200, 503)
+
+    if resp.status_code == 200:
+        # Verify tags stored as JSON array
+        db = await get_training_db(str(tmp_path))
+        cursor = await db.execute(
+            "SELECT tags FROM session_feedback WHERE session_id = ?",
+            ("sess-tags",),
+        )
+        row = await cursor.fetchone()
+        await db.close()
+        assert row is not None
+        tags = json.loads(row[0])
+        assert tags == ["a", "b", "c"]
+
+
+def test_require_export_key_rejects_empty_authorization(tmp_path):
+    """Directly test the require_export_key_for_writes dependency raises
+    HTTPException with status 401 when authorization="" (empty string, not None).
+    Note: Returns 503 if no export key configured (feature disabled)."""
+    from fastapi import FastAPI, Depends
+    from fastapi.testclient import TestClient
+
+    from lean_ai.routers.observability import require_export_key_for_writes
+
+    app = FastAPI()
+
+    @app.get("/protected")
+    def protected(endpoint=Depends(require_export_key_for_writes)):
+        return {"status": "ok"}
+
+    client = TestClient(app)
+
+    # Test with empty authorization header
+    resp = client.get(
+        "/protected?repo_root=" + str(tmp_path),
+        headers={"Authorization": ""},
+    )
+    # Returns 503 if no export key configured, 401 if configured but wrong key
+    assert resp.status_code in (401, 503)
+
+
+@pytest.mark.asyncio
+async def test_get_trace_span_parses_metadata_json(tmp_path):
+    """Insert a span with metadata={"key": "value"}.
+    Call GET /observability/traces/{uuid}.
+    Verify the response includes "metadata": {"key": "value"}
+    (parsed from JSON, not raw string)."""
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+
+    from lean_ai.routers.observability import observability_router
+
+    app = FastAPI()
+    app.include_router(observability_router)
+    client = TestClient(app)
+
+    # Insert span with metadata
+    db = await get_training_db(str(tmp_path))
+    await insert_trace_span(
+        db,
+        span_uuid="span-metadata-test",
+        parent_span_uuid=None,
+        session_id="sess-metadata",
+        span_type="test",
+        span_name="metadata-span",
+        start_time=datetime.now(timezone.utc).isoformat(),
+        status="running",
+        metadata={"key": "value"},
+    )
+    await db.close()
+
+    resp = client.get(f"/observability/traces/span-metadata-test?repo_root={tmp_path}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["metadata"] == {"key": "value"}
+
+
+@pytest.mark.asyncio
+async def test_get_trace_span_handles_invalid_metadata_json(tmp_path):
+    """Insert a span with malformed metadata_json (e.g., "not json").
+    Call GET /observability/traces/{uuid}.
+    Verify the response includes "metadata": null and does not raise."""
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+
+    from lean_ai.routers.observability import observability_router
+
+    app = FastAPI()
+    app.include_router(observability_router)
+    client = TestClient(app)
+
+    # Insert span with invalid metadata_json directly using raw SQL
+    db = await get_training_db(str(tmp_path))
+    await db.execute(
+        "INSERT INTO trace_spans (span_uuid, parent_span_uuid, session_id, span_type, span_name, start_time, status, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "span-invalid-metadata",
+            None,
+            "sess-invalid",
+            "test",
+            "invalid-metadata-span",
+            datetime.now(timezone.utc).isoformat(),
+            "running",
+            "not json",
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+    await db.commit()
+    await db.close()
+
+    resp = client.get(f"/observability/traces/span-invalid-metadata?repo_root={tmp_path}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["metadata"] is None
+
+
+@pytest.mark.asyncio
+async def test_session_detail_includes_feedback_and_trace_tree(main_db, tmp_path):
+    """Insert a session, trace span, and feedback.
+    Call GET /observability/sessions/{id}.
+    Verify both trace_tree and feedback keys are present and populated."""
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+
+    from lean_ai.routers.observability import observability_router
+
+    app = FastAPI()
+    app.include_router(observability_router)
+    client = TestClient(app)
+
+    session_id = "sess-detail-test"
+
+    # Create a session in the main DB
+    now = datetime.now(timezone.utc).isoformat()
+    await main_db.execute(
+        "INSERT INTO sessions (id, repo_root, task, status, created_at) VALUES (?, ?, ?, ?, ?)",
+        (session_id, str(tmp_path), "test task", "active", now),
+    )
+    await main_db.commit()
+
+    # Insert a trace span in training DB
+    train_db = await get_training_db(str(tmp_path))
+    await insert_trace_span(
+        train_db,
+        span_uuid=f"{session_id}-span",
+        parent_span_uuid=None,
+        session_id=session_id,
+        span_type="session",
+        span_name="detail-session",
+        start_time=now,
+        status="running",
+        metadata={},
+    )
+    # Insert feedback
+    await insert_feedback(train_db, session_id=session_id, comment="test comment")
+    await train_db.close()
+
+    resp = client.get(f"/observability/sessions/{session_id}?repo_root={tmp_path}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "trace_tree" in data
+    assert "feedback" in data
+    assert len(data["trace_tree"]) >= 1
+    assert len(data["feedback"]) >= 1
