@@ -8,16 +8,12 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from lean_ai.config import settings
-from lean_ai.workflow.ws_protocol import WorkflowSession
-
 from lean_ai.llm.tool_definitions import (
     build_implementation_tools,
     build_investigation_tools,
     build_request_tools,
 )
 from lean_ai.routers.context_helpers import load_condensed_context
-from lean_ai.tools import scratchpad
-from lean_ai.tools.journal import read_journal
 from lean_ai.tools.state_ledger import append_event, summarize_recent_events
 from lean_ai.workflow.callbacks import build_workflow_callbacks
 from lean_ai.workflow.prompts import (
@@ -25,6 +21,7 @@ from lean_ai.workflow.prompts import (
     build_fix_system_prompt,
     build_request_system_prompt,
 )
+from lean_ai.workflow.state import StateManager
 from lean_ai.workflow.tool_executor import make_tool_executor
 from lean_ai.workflow.validation import (
     _effective_post_commands,
@@ -33,6 +30,7 @@ from lean_ai.workflow.validation import (
 )
 from lean_ai.workflow.ws_dispatcher import WSMessageDispatcher
 from lean_ai.workflow.ws_handler import ws_send, ws_send_nowait
+from lean_ai.workflow.ws_protocol import WorkflowSession
 
 if TYPE_CHECKING:
     from lean_ai.llm.facade import LLMClient
@@ -63,7 +61,7 @@ async def _run_fix(
     branch_name: str,
     base_branch: str = "",
     conversation_logger: Callable | None = None,
-    session_id: str = "",
+    state_manager: StateManager = None,
     expert_llm_client: "LLMClient | None" = None,
     request_llm_client: "LLMClient | None" = None,
     mode: str = "fix",
@@ -79,7 +77,7 @@ async def _run_fix(
         dispatcher.enter_execution_mode()
     append_event(
         repo_root=repo_root,
-        session_id=session_id,
+        session_id=state_manager.session_id,
         event_type="phase_transition",
         payload={"phase": mode},
     )
@@ -96,14 +94,14 @@ async def _run_fix(
     )
     fix_telemetry = {
         "repo_root": repo_root,
-        "session_id": session_id,
+        "session_id": state_manager.session_id,
         "phase": mode,
         "role": fix_role,
     }
     tool_executor = make_tool_executor(
         repo_root,
         ws,
-        session_id,
+        state_manager.session_id,
         llm_client=active_client,
         dispatcher=dispatcher,
         telemetry_context=fix_telemetry,
@@ -135,8 +133,10 @@ async def _run_fix(
             {"role": "user", "content": task},
         ]
 
-        if session_id:
-            existing_journal = read_journal(repo_root, session_id)
+        state = state_manager.get_state()
+
+        if state.session_id:
+            existing_journal = "\n".join(state.journal_entries) if state.journal_entries else ""
             if existing_journal:
                 new_messages.append(
                     {
@@ -144,7 +144,7 @@ async def _run_fix(
                         "content": (f"[JOURNAL FROM PREVIOUS EXECUTION]\n{existing_journal}"),
                     }
                 )
-            existing_pad = scratchpad.read_scratchpad(repo_root, session_id)
+            existing_pad = state.scratchpad_content
             if existing_pad:
                 new_messages.append(
                     {
@@ -208,8 +208,11 @@ async def _run_fix(
         ]
 
         # Inject existing journal + scratchpad for session recovery
-        if session_id:
-            existing_journal = read_journal(repo_root, session_id)
+        if state_manager.session_id:
+            inv_state = state_manager.get_state()
+            existing_journal = (
+                "\n".join(inv_state.journal_entries) if inv_state.journal_entries else ""
+            )
             if existing_journal:
                 messages.append(
                     {
@@ -217,7 +220,7 @@ async def _run_fix(
                         "content": (f"[JOURNAL FROM PREVIOUS EXECUTION]\n{existing_journal}"),
                     }
                 )
-            existing_pad = scratchpad.read_scratchpad(repo_root, session_id)
+            existing_pad = inv_state.scratchpad_content
             if existing_pad:
                 messages.append(
                     {
@@ -238,8 +241,9 @@ async def _run_fix(
                 fresh_context,
                 test_command=commands.get("test", ""),
             )
-            pad = scratchpad.read_scratchpad(repo_root, session_id)
-            jrnl = read_journal(repo_root, session_id)
+            refresh_state = state_manager.get_state()
+            pad = refresh_state.scratchpad_content
+            jrnl = "\n".join(refresh_state.journal_entries) if refresh_state.journal_entries else ""
             refreshed: list[dict] = [
                 {"role": "system", "content": fresh_prompt},
                 {"role": "user", "content": task},
@@ -295,10 +299,11 @@ async def _run_fix(
 
     def _build_fix_reminder() -> str:
         parts = [f"REMINDER — Your task: {task}"]
-        jrnl = read_journal(repo_root, session_id)
+        reminder_state = state_manager.get_state()
+        jrnl = "\n".join(reminder_state.journal_entries) if reminder_state.journal_entries else ""
         if jrnl:
             parts.append(f"\nYour session journal:\n{jrnl}")
-        pad = scratchpad.read_scratchpad(repo_root, session_id)
+        pad = reminder_state.scratchpad_content
         if pad:
             parts.append(f"\nYour current scratchpad:\n{pad}")
         else:
@@ -316,8 +321,9 @@ async def _run_fix(
                 test_command=commands.get("test", ""),
                 task=task,
             )
-        pad = scratchpad.read_scratchpad(repo_root, session_id)
-        jrnl = read_journal(repo_root, session_id)
+        refresh_state = state_manager.get_state()
+        pad = refresh_state.scratchpad_content
+        jrnl = "\n".join(refresh_state.journal_entries) if refresh_state.journal_entries else ""
 
         new_messages: list[dict] = [
             {"role": "system", "content": fresh_system_prompt},
@@ -331,8 +337,7 @@ async def _run_fix(
             )
         if pad:
             refresh_parts.append(
-                "SCRATCHPAD (recent current state):\n"
-                f"{_tail(pad, _REFRESH_PAD_MAX_CHARS)}"
+                f"SCRATCHPAD (recent current state):\n{_tail(pad, _REFRESH_PAD_MAX_CHARS)}"
             )
         if pad or jrnl:
             new_messages.append(
@@ -348,7 +353,7 @@ async def _run_fix(
                     "content": "[CONTEXT REFRESHED]\n\nContinue working on the task.",
                 }
             )
-        ledger_summary = summarize_recent_events(repo_root, session_id)
+        ledger_summary = summarize_recent_events(repo_root, state_manager.session_id)
         if ledger_summary:
             new_messages.append(
                 {
@@ -358,7 +363,7 @@ async def _run_fix(
             )
         append_event(
             repo_root=repo_root,
-            session_id=session_id,
+            session_id=state_manager.session_id,
             event_type="context_refreshed",
             payload={"phase": mode},
         )
@@ -428,7 +433,7 @@ async def _run_fix(
                 llm_client,
                 context,
                 validation_results,
-                session_id,
+                state_manager.session_id,
                 conversation_logger=conversation_logger,
                 expert_llm_client=expert_llm_client,
                 dispatcher=dispatcher,
@@ -452,7 +457,8 @@ async def _run_fix(
         else:
             summary += "\n\n✓ Post-validation passed."
 
-    journal_content = read_journal(repo_root, session_id)
+    final_state = state_manager.get_state()
+    journal_content = "\n".join(final_state.journal_entries) if final_state.journal_entries else ""
     if journal_content:
         summary += f"\n\nSession Journal:\n{journal_content}"
 

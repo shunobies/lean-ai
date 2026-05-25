@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from lean_ai.config import settings
+from lean_ai.workflow.state import StateManager
 from lean_ai.llm.planner_helpers import (
     _extract_file_paths,
     _save_debug_phase,
@@ -528,6 +529,7 @@ async def run_phase2_exploration(
     phase_max_tokens: int,
     ws: "WorkflowSession | None",
     dispatcher: WSMessageDispatcher | None,
+    state_manager: StateManager,
     on_content: Callable | None = None,
     on_thinking: Callable | None = None,
     on_tool_call: Callable | None = None,
@@ -582,6 +584,7 @@ async def run_phase2_exploration(
             phase_max_tokens=phase_max_tokens,
             ws=ws,
             dispatcher=dispatcher,
+            state_manager=state_manager,
             executor=executor,
             on_content=on_content,
             on_thinking=on_thinking,
@@ -602,6 +605,7 @@ async def run_phase2_exploration(
             phase_max_tokens=phase_max_tokens,
             ws=ws,
             dispatcher=dispatcher,
+            state_manager=state_manager,
             executor=executor,
             phase2_messages=phase2_messages,
             on_content=on_content,
@@ -625,6 +629,7 @@ async def run_phase2_exploration(
             session_id=session_id,
             explorer=explorer,
             phase_max_tokens=phase_max_tokens,
+            state_manager=state_manager,
             on_thinking=on_thinking,
             on_metrics=on_metrics,
             on_metrics_reset=on_metrics_reset,
@@ -636,22 +641,10 @@ async def run_phase2_exploration(
         # pipeline produces for "exploration → structured summary".
         if file_summary_obj is not None:
             try:
-                from lean_ai.tools.observations import read_observations
-                from lean_ai.tools.scratchpad import read_scratchpad
-
-                observations = read_observations(repo_root, session_id)
-                scratchpad_text = ""
-                try:
-                    scratchpad_text = read_scratchpad(repo_root, session_id)
-                except Exception:
-                    scratchpad_text = ""
-                journal_path = Path(repo_root) / ".lean_ai" / "journals" / f"{session_id}.md"
-                journal_text = ""
-                if journal_path.is_file():
-                    try:
-                        journal_text = journal_path.read_text(encoding="utf-8")
-                    except Exception:
-                        journal_text = ""
+                state = state_manager.get_state()
+                observations = state.observations
+                scratchpad_text = state.scratchpad_content or ""
+                journal_text = "\n".join(state.journal_entries) if state.journal_entries else ""
                 _fire_phase2_synthesis_capture(
                     repo_root,
                     session_id,
@@ -684,6 +677,7 @@ async def _run_parallel_exploration(
     phase_max_tokens: int,
     ws: "WorkflowSession | None",
     dispatcher: WSMessageDispatcher | None,
+    state_manager: StateManager,
     executor: Callable,
     on_content: Callable | None,
     on_thinking: Callable | None,
@@ -843,6 +837,7 @@ async def _run_parallel_exploration(
         session_id=session_id,
         explorer=explorer,
         phase_max_tokens=phase_max_tokens,
+        state_manager=state_manager,
         on_thinking=on_thinking,
         on_metrics=on_metrics,
         on_metrics_reset=on_metrics_reset,
@@ -862,6 +857,7 @@ async def _run_serial_exploration(
     phase_max_tokens: int,
     ws: "WorkflowSession | None",
     dispatcher: WSMessageDispatcher | None,
+    state_manager: StateManager,
     executor: Callable,
     phase2_messages: list[dict],
     on_content: Callable | None,
@@ -875,9 +871,6 @@ async def _run_serial_exploration(
     import json as _json
 
     from lean_ai.llm.tool_definitions import RECORD_FILE_OBSERVATION_TOOL
-    from lean_ai.tools import scratchpad
-    from lean_ai.tools.journal import read_journal
-    from lean_ai.tools.observations import read_observations
     from lean_ai.tools.state_ledger import append_event, summarize_recent_events
     from lean_ai.workflow.ws_handler import ws_send_nowait
 
@@ -890,8 +883,9 @@ async def _run_serial_exploration(
 
     # Inject existing scratchpad + journal (crash recovery)
     if session_id:
-        existing_pad = scratchpad.read_scratchpad(repo_root, session_id)
-        existing_journal = read_journal(repo_root, session_id)
+        state = state_manager.get_state()
+        existing_pad = state.scratchpad_content or ""
+        existing_journal = "\n".join(state.journal_entries) if state.journal_entries else ""
         if existing_journal:
             phase2_messages.append(
                 {
@@ -914,9 +908,10 @@ async def _run_serial_exploration(
         current_messages: list[dict],
     ) -> list[dict]:
         """Rebuild Phase 2 messages for context refresh."""
-        pad = scratchpad.read_scratchpad(repo_root, session_id)
-        jrnl = read_journal(repo_root, session_id)
-        obs = read_observations(repo_root, session_id)
+        state = state_manager.get_state()
+        pad = state.scratchpad_content or ""
+        jrnl = "\n".join(state.journal_entries) if state.journal_entries else ""
+        obs = state.observations
         new_messages: list[dict] = [
             {"role": "system", "content": PLAN_EXPLORATION_SYSTEM_PROMPT},
             {
@@ -1018,7 +1013,8 @@ async def _run_serial_exploration(
         )
 
     def _phase2_pre_context_refresh_nudge() -> str:
-        obs = read_observations(repo_root, session_id)
+        state = state_manager.get_state()
+        obs = state.observations
         recorded_paths: list[str] = []
         if isinstance(obs, list):
             for item in obs:
@@ -1062,7 +1058,8 @@ async def _run_serial_exploration(
     # written to disk, so combined turns like
     # [record_file_observation, task_complete] approve naturally.
     def _phase2_task_complete_validator() -> str | None:
-        obs = read_observations(repo_root, session_id)
+        state = state_manager.get_state()
+        obs = state.observations
         if obs:
             return None
         return (
@@ -1115,6 +1112,7 @@ async def _synthesize_file_summary(
     session_id: str,
     explorer: LLMClient,
     phase_max_tokens: int,
+    state_manager: StateManager,
     on_thinking: Callable | None = None,
     on_metrics: Callable | None = None,
     on_metrics_reset: Callable | None = None,
@@ -1136,13 +1134,11 @@ async def _synthesize_file_summary(
     import json as _json
 
     from lean_ai.llm.plan_schema import FileSummary
-    from lean_ai.tools import scratchpad
-    from lean_ai.tools.journal import read_journal
-    from lean_ai.tools.observations import read_observations
 
-    observations = read_observations(repo_root, session_id)
-    pad = scratchpad.read_scratchpad(repo_root, session_id) if session_id else ""
-    jrnl = read_journal(repo_root, session_id) if session_id else ""
+    state = state_manager.get_state()
+    observations = state.observations
+    pad = state.scratchpad_content or ""
+    jrnl = "\n".join(state.journal_entries) if state.journal_entries else ""
 
     if not observations:
         logger.warning(

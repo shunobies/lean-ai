@@ -28,8 +28,7 @@ from lean_ai.llm.tool_definitions import (
     build_tdd_implementation_tools,
 )
 from lean_ai.routers.context_helpers import load_execution_context
-from lean_ai.tools import scratchpad
-from lean_ai.tools.journal import read_journal
+from lean_ai.workflow.state import StateManager
 from lean_ai.training.span_context import trace_span
 from lean_ai.workflow.callbacks import build_workflow_callbacks
 from lean_ai.workflow.hooks import (
@@ -485,11 +484,12 @@ async def execute_plan(
     branch_name: str,
     base_branch: str = "",
     conversation_logger: Callable | None = None,
-    session_id: str = "",
+    state_manager: StateManager | None = None,
     expert_llm_client: "LLMClient | None" = None,
     dispatcher: WSMessageDispatcher | None = None,
 ) -> str:
     """Execute each plan step sequentially with a constrained LLM."""
+    session_id = state_manager.session_id if state_manager else ""
     _clear_incomplete_file(repo_root)
     if dispatcher:
         dispatcher.enter_execution_mode()
@@ -640,8 +640,9 @@ async def execute_plan(
                 total_steps,
                 step_artifacts=step_artifacts,
             )
-            pad = scratchpad.read_scratchpad(repo_root, session_id)
-            jrnl = read_journal(repo_root, session_id)
+            pad = state_manager.get_state().scratchpad_content if state_manager else ""
+            jrnl_entries = state_manager.get_state().journal_entries if state_manager else []
+            jrnl = "\n".join(jrnl_entries) if jrnl_entries else ""
             new_messages: list[dict] = [
                 {"role": "system", "content": fresh_sys},
                 {"role": "user", "content": fresh_user},
@@ -864,6 +865,10 @@ async def execute_plan(
                 oldest_key = next(iter(step_artifacts))
                 del step_artifacts[oldest_key]
 
+            # Persist state after each successful step
+            if state_manager:
+                state_manager.save()
+
         await ws_send(
             ws,
             "checkpoint",
@@ -1020,7 +1025,8 @@ async def execute_plan(
             f"{tdd_metrics['steps_missing_test_checks']}"
         )
 
-    journal_content = read_journal(repo_root, session_id)
+    journal_entries = state_manager.get_state().journal_entries if state_manager else []
+    journal_content = "\n".join(journal_entries) if journal_entries else ""
     if journal_content:
         summary += f"\n\nSession Journal:\n{journal_content}"
 

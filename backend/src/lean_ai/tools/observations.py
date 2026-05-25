@@ -1,7 +1,9 @@
 """Per-session structured file observations for Phase 2 exploration.
 
-File-based state: ``.lean_ai/observations/{session_id}.json`` in the target
-project. Session-scoped: persists until ``/approve`` or ``/reject`` closes
+State-based: operates on WorkflowState.observations for unified
+state management. File-based operations are deprecated; the StateManager
+handles persistence to .lean_ai/state/{session_id}.json.
+Session-scoped: persists until ``/approve`` or ``/reject`` closes
 the session. Survives crashes for recovery.
 
 The exploration model calls ``record_file_observation`` whenever it decides
@@ -21,6 +23,7 @@ import logging
 from pathlib import Path
 
 from lean_ai.tools.executor import ToolResult
+from lean_ai.workflow.state import WorkflowState
 
 logger = logging.getLogger(__name__)
 
@@ -107,13 +110,20 @@ async def record_observation(
     key_snippets: list[str] | None = None,
     repo_root: str,
     session_id: str,
+    state: WorkflowState = None,
 ) -> ToolResult:
     """Upsert a single file observation by ``file_path``.
 
     If an observation already exists for this path, the new observation
     replaces it in place (preserving list order). Otherwise the new
     observation is appended.
+
+    Deprecated: File-based operations are no longer used directly.
+    When state is provided, operates on state.observations instead.
     """
+    # DEPRECATED: File-based observation writes are replaced by WorkflowState fields.
+    # The StateManager persists state to .lean_ai/state/{session_id}.json.
+
     file_path = (file_path or "").strip()
     if not file_path:
         return ToolResult(
@@ -132,10 +142,6 @@ async def record_observation(
             error="record_file_observation requires a non-empty reason.",
         )
 
-    path = observations_path(repo_root, session_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    observations = _load_all(path)
     new_entry = {
         "file_path": file_path,
         "role": role,
@@ -143,6 +149,39 @@ async def record_observation(
         "relevant_sections": (relevant_sections or "").strip(),
         "key_snippets": _normalize_key_snippets(key_snippets),
     }
+
+    if state is not None:
+        # Upsert on state.observations
+        replaced = False
+        for i, existing in enumerate(state.observations):
+            if existing.get("file_path") == file_path:
+                state.observations[i] = new_entry
+                replaced = True
+                break
+        if not replaced:
+            state.observations.append(new_entry)
+
+        action = "Replaced" if replaced else "Recorded"
+        logger.info(
+            "%s observation: %s (role=%s) [%d total]",
+            action,
+            file_path,
+            role,
+            len(state.observations),
+        )
+        return ToolResult(
+            success=True,
+            output=(
+                f"{action} observation for {file_path} (role={role}). "
+                f"{len(state.observations)} observation(s) recorded so far."
+            ),
+        )
+
+    # Legacy file-based fallback
+    path = observations_path(repo_root, session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    observations = _load_all(path)
 
     replaced = False
     for i, existing in enumerate(observations):
@@ -175,13 +214,43 @@ async def record_observation(
     )
 
 
-def read_observations(repo_root: str, session_id: str) -> list[dict]:
-    """Return the current list of observations. Empty list if none."""
+def read_observations(
+    repo_root: str,
+    session_id: str,
+    state: WorkflowState = None,
+) -> list[dict]:
+    """Return the current list of observations. Empty list if none.
+
+    Deprecated: File-based operations are no longer used directly.
+    When state is provided, returns state.observations instead.
+    """
+    # DEPRECATED: File-based observation reads are replaced by WorkflowState fields.
+    # The StateManager persists state to .lean_ai/state/{session_id}.json.
+
+    if state is not None:
+        return state.observations
+
     return _load_all(observations_path(repo_root, session_id))
 
 
-def delete_observations(repo_root: str, session_id: str) -> None:
-    """Remove the observations file (cleanup on session close)."""
+def delete_observations(
+    repo_root: str,
+    session_id: str,
+    state: WorkflowState = None,
+) -> None:
+    """Remove the observations data (cleanup on session close).
+
+    Deprecated: File-based operations are no longer used directly.
+    When state is provided, clears state.observations instead.
+    """
+    # DEPRECATED: File-based observation deletion is replaced by WorkflowState fields.
+    # The StateManager persists state to .lean_ai/state/{session_id}.json.
+
+    if state is not None:
+        state.observations = []
+        logger.info("Observations cleared on WorkflowState for session %s", session_id)
+        return
+
     path = observations_path(repo_root, session_id)
     if path.is_file():
         path.unlink()

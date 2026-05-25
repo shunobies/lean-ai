@@ -18,6 +18,7 @@ from lean_ai.training.span_context import trace_span
 from lean_ai.workflow.callbacks import build_workflow_callbacks
 from lean_ai.workflow.executor import execute_plan
 from lean_ai.workflow.fix_mode import _run_fix
+from lean_ai.workflow.state import StateManager
 from lean_ai.workflow.validation import _effective_post_commands
 from lean_ai.workflow.ws_dispatcher import WSMessageDispatcher
 from lean_ai.workflow.ws_handler import ws_send
@@ -61,6 +62,9 @@ async def run_workflow(
     Returns a structured commit message summarising the actions taken.
     """
     logger.info("Workflow (%s): starting task: %s", mode, task[:100])
+
+    # Create StateManager for this session — used throughout the workflow
+    state_manager = StateManager(session_id)
 
     async with trace_span(
         span_type="session",
@@ -222,6 +226,12 @@ async def run_workflow(
                 on_metrics_reset=planning_cb.on_metrics_reset,
             )
 
+        # Save state after planning phase
+        state = state_manager.get_state()
+        state.current_phase = "planning"
+        state.set_current_plan(plan.model_dump())
+        state_manager.save()
+
         # ── Phase 3: Approve ─────────────────────────────────────────
         async with trace_span(
             span_type="phase",
@@ -240,8 +250,13 @@ async def run_workflow(
                 test_command=plan_commands.get("test", ""),
                 expert_llm_client=expert_llm_client,
                 dispatcher=dispatcher,
-                session_id=session_id,
+                state_manager=state_manager,
             )
+
+        # Save state after approval phase
+        state = state_manager.get_state()
+        state.current_phase = "approval"
+        state_manager.save()
 
         # ── Phase 4: Execute per-step ────────────────────────────────
         await ws_send(session, "stage_change", {"stage": "implementing"})
@@ -292,7 +307,7 @@ async def _wait_for_approval(
     test_command: str = "",
     expert_llm_client: "LLMClient | None" = None,
     dispatcher: WSMessageDispatcher | None = None,
-    session_id: str = "",
+    state_manager: StateManager | None = None,
 ) -> ExecutionPlan:
     """Send the plan for user approval. Handle feedback/revision loop.
 
@@ -327,7 +342,7 @@ async def _wait_for_approval(
                 prev_plan_json, prev_feedback = last_rejection
                 fire_plan_decision_hook(
                     repo_root=repo_root,
-                    session_id=session_id,
+                    session_id=state_manager.session_id,
                     llm_client=llm_client,
                     task=task,
                     plan_before=prev_plan_json,
@@ -342,7 +357,7 @@ async def _wait_for_approval(
                 # with empty feedback so memory extraction skips it.
                 fire_plan_decision_hook(
                     repo_root=repo_root,
-                    session_id=session_id,
+                    session_id=state_manager.session_id,
                     llm_client=llm_client,
                     task=task,
                     plan_before="",

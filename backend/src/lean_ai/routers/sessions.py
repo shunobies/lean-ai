@@ -14,6 +14,7 @@ from lean_ai.db import (
     list_sessions,
     update_session,
 )
+from lean_ai.workflow.state import StateManager
 from lean_ai.db import (
     search_sessions as db_search_sessions,
 )
@@ -154,9 +155,9 @@ async def resume_session(session_id: str, request: ResumeSessionRequest):
         # Reset status to active for resumption
         await update_session(db, session_id, status="active")
 
-        from lean_ai.tools.scratchpad import scratchpad_path
-
-        pad_exists = scratchpad_path(repo_root, session_id).is_file()
+        sm = StateManager(session_id)
+        state = sm.get_state()
+        pad_exists = bool(state.scratchpad_content)
 
         return {
             "status": "ready",

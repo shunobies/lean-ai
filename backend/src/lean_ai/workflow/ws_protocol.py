@@ -7,7 +7,9 @@ FastAPI / asyncio dependencies so it can be imported in isolation.
 
 from __future__ import annotations
 
-from typing import Literal, Protocol, TypedDict
+from typing import Any, Literal, Protocol, TypedDict
+
+from lean_ai.workflow.state import WorkflowState
 
 # ── WorkflowSession protocol ──────────────────────────────────────
 
@@ -39,12 +41,17 @@ class StageChangeMessage(TypedDict):
 
 
 class StageStatusMessage(TypedDict, total=False):
+    """Status update during a workflow stage.
+
+    Maps to WorkflowState.current_phase via the ``phase`` field.
+    """
+
     type: Literal["stage_status"]  # pyright: ignore[reportGeneralTypeIssues]
     stage: str
     status: str
     summary: str
     model: str
-    phase: int
+    phase: int  # Corresponds to WorkflowState.current_phase
 
 
 # Make required keys explicit
@@ -56,9 +63,14 @@ class _StageStatusRequired(TypedDict):
 
 
 class ApprovalRequiredMessage(TypedDict, total=False):
+    """Sent when a plan needs user approval.
+
+    The ``plan_object`` field corresponds to WorkflowState.current_plan.
+    """
+
     type: Literal["approval_required"]  # pyright: ignore[reportGeneralTypeIssues]
     plan: str
-    plan_object: dict
+    plan_object: dict  # WorkflowState.current_plan serialized
     user_summary: str
     plan_validation_warnings: list[str]
 
@@ -86,9 +98,14 @@ class PlanRejectedMessage(TypedDict):
 
 
 class PlanRevisionMessage(TypedDict, total=False):
+    """Sent when a revised plan is ready for approval.
+
+    The ``plan_object`` field corresponds to WorkflowState.current_plan.
+    """
+
     type: Literal["plan_revision"]  # pyright: ignore[reportGeneralTypeIssues]
     plan: str
-    plan_object: dict
+    plan_object: dict  # WorkflowState.current_plan serialized
 
 
 class ToolProgressMessage(TypedDict, total=False):
@@ -221,6 +238,40 @@ class MemorySuggestedMessage(TypedDict, total=False):
     content: str
     source_phase: str
     tags: list[str]
+
+
+class ScratchpadMessage(TypedDict, total=False):
+    """Carries scratchpad content from WorkflowState.scratchpad_content."""
+
+    type: Literal["scratchpad"]  # pyright: ignore[reportGeneralTypeIssues]
+    content: str  # WorkflowState.scratchpad_content
+
+
+class JournalMessage(TypedDict, total=False):
+    """Carries journal entries from WorkflowState.journal_entries."""
+
+    type: Literal["journal"]  # pyright: ignore[reportGeneralTypeIssues]
+    entries: list[str]  # WorkflowState.journal_entries
+
+
+class ObservationsMessage(TypedDict, total=False):
+    """Carries file observations from WorkflowState.observations."""
+
+    type: Literal["observations"]  # pyright: ignore[reportGeneralTypeIssues]
+    observations: list[dict[str, Any]]  # WorkflowState.observations
+
+
+class WorkflowStateMessage(TypedDict, total=False):
+    """Full state snapshot from WorkflowState for session recovery."""
+
+    type: Literal["workflow_state"]  # pyright: ignore[reportGeneralTypeIssues]
+    session_id: str  # WorkflowState.session_id
+    current_phase: str  # WorkflowState.current_phase
+    scratchpad_content: str  # WorkflowState.scratchpad_content
+    journal_entries: list[str]  # WorkflowState.journal_entries
+    observations: list[dict[str, Any]]  # WorkflowState.observations
+    current_plan: dict[str, Any]  # WorkflowState.current_plan
+    session_metadata: dict[str, Any]  # WorkflowState.session_metadata
 
 
 # ── Server message type union ─────────────────────────────────────

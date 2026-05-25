@@ -15,8 +15,7 @@ from lean_ai.llm.tool_definitions import (
     build_tdd_implementation_tools,
 )
 from lean_ai.routers.context_helpers import load_condensed_context
-from lean_ai.tools import scratchpad
-from lean_ai.tools.journal import read_journal
+from lean_ai.workflow.state import StateManager
 from lean_ai.workflow.callbacks import build_workflow_callbacks
 from lean_ai.workflow.prompts import build_fix_system_prompt
 from lean_ai.workflow.tool_executor import make_tool_executor
@@ -228,7 +227,7 @@ async def _run_validation_fix_loop(
     llm_client: "LLMClient",
     context: str,
     validation_results: dict,
-    session_id: str = "",
+    state_manager: StateManager = None,
     conversation_logger: Callable | None = None,
     expert_llm_client: "LLMClient | None" = None,
     dispatcher: WSMessageDispatcher | None = None,
@@ -407,8 +406,9 @@ async def _run_validation_fix_loop(
         ]
 
         # Inject execution-phase state so the fix LLM has context
-        if session_id:
-            jrnl = read_journal(repo_root, session_id)
+        if state_manager:
+            state = state_manager.get_state()
+            jrnl = "\n".join(state.journal_entries) if state.journal_entries else ""
             if jrnl:
                 messages.append(
                     {
@@ -416,7 +416,7 @@ async def _run_validation_fix_loop(
                         "content": f"[SESSION JOURNAL]\n{jrnl}",
                     }
                 )
-            pad = scratchpad.read_scratchpad(repo_root, session_id)
+            pad = state.scratchpad_content
             if pad:
                 messages.append(
                     {
@@ -434,8 +434,9 @@ async def _run_validation_fix_loop(
                 load_condensed_context(repo_root),
                 task=task,
             )
-            pad = scratchpad.read_scratchpad(repo_root, session_id)
-            jrnl = read_journal(repo_root, session_id)
+            state = state_manager.get_state() if state_manager else None
+            pad = state.scratchpad_content if state else ""
+            jrnl = "\n".join(state.journal_entries) if state and state.journal_entries else ""
             refreshed: list[dict] = [
                 {"role": "system", "content": fresh_sys},
                 # Preserve the failure text (second message)
@@ -475,14 +476,14 @@ async def _run_validation_fix_loop(
         )
         validation_telemetry = {
             "repo_root": repo_root,
-            "session_id": session_id,
+            "session_id": state_manager.session_id if state_manager else "",
             "phase": "validation_fix",
             "role": ("expert" if active_client is expert_llm_client else "primary"),
         }
         tool_executor = make_tool_executor(
             repo_root,
             ws,
-            session_id,
+            state_manager.session_id if state_manager else "",
             llm_client=active_client,
             dispatcher=dispatcher,
             tdd_protect_tests=tdd_fix_protect,
@@ -540,7 +541,7 @@ async def _run_validation_fix_loop(
             }
             fire_validation_attempt_hook(
                 repo_root=repo_root,
-                session_id=session_id or "",
+                session_id=state_manager.session_id if state_manager else "",
                 llm_client=active_client,
                 task=task or "",
                 attempt_num=attempts_used,

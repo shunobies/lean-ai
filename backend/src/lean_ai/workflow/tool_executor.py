@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lean_ai.config import settings
+from lean_ai.workflow.state import StateManager
 from lean_ai.workflow.ws_protocol import WorkflowSession
 from lean_ai.tools import file_ops, scratchpad, shell
 from lean_ai.tools.command_safety import CommandRisk, check_command
@@ -448,7 +449,7 @@ def _format_reference_doc_listing(docs: list[dict], query: str) -> str:
 def make_tool_executor(
     repo_root: str,
     ws: "WorkflowSession | None",
-    session_id: str = "",
+    state_manager: "StateManager | None" = None,
     llm_client: "LLMClient | None" = None,
     worker_client: "LLMClient | None" = None,
     dispatcher: "WSMessageDispatcher | None" = None,
@@ -483,11 +484,17 @@ def make_tool_executor(
     if session_created_regression_files is None:
         session_created_regression_files = set()
 
+    # Derive session_id from state_manager for all closure uses
+    _session_id = state_manager.session_id if state_manager else ""
+    # Ensure telemetry_context carries the session_id from state_manager
+    if telemetry_context is not None and state_manager is not None:
+        telemetry_context["session_id"] = state_manager.session_id
+
     async def execute(name: str, arguments: dict) -> str:
         """Execute a tool and return the result as a string."""
         append_event(
             repo_root=repo_root,
-            session_id=session_id,
+            session_id=_session_id,
             event_type="tool_called",
             payload={
                 "tool": name,
@@ -519,7 +526,7 @@ def make_tool_executor(
         )
         append_event(
             repo_root=repo_root,
-            session_id=session_id,
+            session_id=_session_id,
             event_type=("tool_succeeded" if success else "tool_failed"),
             payload={
                 "tool": name,
@@ -812,7 +819,7 @@ def make_tool_executor(
             result = await scratchpad.update_scratchpad(
                 content=arguments["content"],
                 repo_root=repo_root,
-                session_id=session_id,
+                session_id=_session_id,
             )
             return result.output if result.success else f"ERROR: {result.error}"
 
@@ -822,7 +829,7 @@ def make_tool_executor(
             result = await add_journal_entry(
                 content=arguments["content"],
                 repo_root=repo_root,
-                session_id=session_id,
+                session_id=_session_id,
             )
             return result.output if result.success else f"ERROR: {result.error}"
 

@@ -61,6 +61,7 @@ from lean_ai.llm.tool_definitions import (
     build_planning_tools,
 )
 from lean_ai.training.span_context import trace_span
+from lean_ai.workflow.state import StateManager
 from lean_ai.workflow.ws_protocol import WorkflowSession
 
 if TYPE_CHECKING:
@@ -1037,7 +1038,7 @@ class PlanningPipeline:
         dispatcher: "WSMessageDispatcher | None" = None,
         refiner: "PromptRefiner | None" = None,
         test_command: str = "",
-        session_id: str = "",
+        state_manager: StateManager,
         expert_llm_client: "LLMClient | None" = None,
         on_content: "Callable | None" = None,
         on_thinking: "Callable | None" = None,
@@ -1056,7 +1057,8 @@ class PlanningPipeline:
         self.dispatcher = dispatcher
         self.refiner = refiner
         self.test_command = test_command
-        self.session_id = session_id
+        self.state_manager = state_manager
+        self.session_id = state_manager.get_state().session_id
         self.expert_llm_client = expert_llm_client
         self.on_content = on_content
         self.on_thinking = on_thinking
@@ -1268,6 +1270,9 @@ class PlanningPipeline:
                 len(plan.steps),
                 len(plan.affected_files),
             )
+            state = self.state_manager.get_state()
+            state.current_plan = plan.model_dump()
+            self.state_manager.save()
             return plan
         except Exception as exc:
             logger.exception("Planning pipeline failed — returning fallback plan")
@@ -1299,6 +1304,9 @@ class PlanningPipeline:
                 model=expert.model_name,
                 phase=4,
             )
+            state = self.state_manager.get_state()
+            state.current_plan = plan.model_dump()
+            self.state_manager.save()
             return plan
 
 
@@ -1313,7 +1321,7 @@ async def create_plan(
     dispatcher: "WSMessageDispatcher | None" = None,
     refiner: "PromptRefiner | None" = None,
     test_command: str = "",
-    session_id: str = "",
+    state_manager: StateManager,
     expert_llm_client: "LLMClient | None" = None,
     on_content: "Callable | None" = None,
     on_thinking: "Callable | None" = None,
@@ -1363,7 +1371,7 @@ async def create_plan(
         dispatcher=dispatcher,
         refiner=refiner,
         test_command=test_command,
-        session_id=session_id,
+        state_manager=state_manager,
         expert_llm_client=expert_llm_client,
         on_content=on_content,
         on_thinking=on_thinking,

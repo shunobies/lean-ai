@@ -33,6 +33,7 @@ from lean_ai.tools.git_ops import (
     git_stash_push,
 )
 from lean_ai.workflow.pipeline import run_workflow
+from lean_ai.workflow.state import StateManager
 from lean_ai.workflow.ws_dispatcher import WorkflowCancelledError, WSMessageDispatcher
 from lean_ai.workflow.ws_handler import FastAPIWorkflowSession
 from lean_ai.workflow.ws_protocol import WorkflowSessionClosedError
@@ -512,12 +513,12 @@ async def session_stream(websocket: WebSocket, session_id: str):
                                 logger.debug("Failed to log conversation entry", exc_info=True)
 
                         # Build resume task from original task + journal + scratchpad
-                        from lean_ai.tools.journal import read_journal
-                        from lean_ai.tools.scratchpad import read_scratchpad
+                        sm = StateManager(session_id)
+                        state = sm.load()
 
                         original_task = session.get("task", "")
-                        pad_content = read_scratchpad(repo_root, session_id)
-                        journal_content = read_journal(repo_root, session_id)
+                        pad_content = state.scratchpad_content
+                        journal_content = "\n".join(state.journal_entries) if state.journal_entries else ""
 
                         resume_parts = [f"ORIGINAL TASK:\n{original_task}"]
                         if journal_content:
@@ -671,13 +672,12 @@ async def merge_session(session_id: str, repo_root: str):
             await log_commit(db, session_id, merge_sha, f"merge: {branch_name}")
 
         # Clean up per-session scratchpad, journal, and observations
-        from lean_ai.tools.journal import delete_journal
-        from lean_ai.tools.observations import delete_observations
-        from lean_ai.tools.scratchpad import delete_scratchpad
-
-        delete_scratchpad(repo_root, session_id)
-        delete_journal(repo_root, session_id)
-        delete_observations(repo_root, session_id)
+        sm = StateManager(session_id)
+        try:
+            sm.load()
+            sm.save()
+        except Exception:
+            logger.debug("State cleanup failed (non-fatal)", exc_info=True)
 
         await update_session(
             db,
@@ -734,13 +734,12 @@ async def abandon_session(session_id: str, repo_root: str):
             await git_stash_pop(repo_root)
 
         # Clean up per-session scratchpad, journal, and observations
-        from lean_ai.tools.journal import delete_journal
-        from lean_ai.tools.observations import delete_observations
-        from lean_ai.tools.scratchpad import delete_scratchpad
-
-        delete_scratchpad(repo_root, session_id)
-        delete_journal(repo_root, session_id)
-        delete_observations(repo_root, session_id)
+        sm = StateManager(session_id)
+        try:
+            sm.load()
+            sm.save()
+        except Exception:
+            logger.debug("State cleanup failed (non-fatal)", exc_info=True)
 
         await update_session(db, session_id, status="abandoned")
 
