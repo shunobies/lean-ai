@@ -61,6 +61,16 @@ from lean_ai.llm.tool_definitions import (
     build_planning_tools,
 )
 from lean_ai.training.span_context import trace_span
+from lean_ai.workflow.graph import (
+    Continue,
+    Fail,
+    LLMNode,
+    NodeResult,
+    SubgraphNode,
+    ToolNode,
+    WorkflowEngine,
+    WorkflowGraph,
+)
 from lean_ai.workflow.state import StateManager
 from lean_ai.workflow.ws_protocol import WorkflowSession
 
@@ -1017,6 +1027,253 @@ class AssemblyPhase(PlanningPhase):
         return plan
 
 
+# ── Phase graph nodes ────────────────────────────────────────────────────────
+# Each phase node wraps the corresponding PlanningPhase logic as an LLMNode
+# or ToolNode that can be composed into a SubgraphNode WorkflowGraph.
+
+
+class ScopePhaseNode(LLMNode):
+    """Graph node for Phase 1: Scope analysis.
+
+    Executes the ScopePhase logic via an LLM interaction with read-only
+    tools for codebase exploration and clarification, then synthesizes
+    a structured ScopeDocument.
+    """
+
+    def __init__(
+        self,
+        llm_client: "LLMClient",
+        ws: "WorkflowSession | None" = None,
+        dispatcher: "WSMessageDispatcher | None" = None,
+        **kwargs,
+    ) -> None:
+        """Initialise a scope phase node.
+
+        Args:
+            llm_client: The LLM client for scope analysis.
+            ws: Optional WorkflowSession for streaming.
+            dispatcher: Optional WebSocket dispatcher.
+            **kwargs: Additional keyword arguments forwarded to ScopePhase.
+        """
+        super().__init__("scope_phase")
+        self._llm_client = llm_client
+        self._ws = ws
+        self._dispatcher = dispatcher
+        self._kwargs = kwargs
+
+    async def execute(self, state: WorkflowState) -> NodeResult:
+        """Run Phase 1 scope analysis and store the result in state."""
+        try:
+            scope_phase = ScopePhase()
+            scope_obj = await scope_phase.execute(
+                task=state.session_metadata.get("task", ""),
+                llm_client=self._llm_client,
+                ws=self._ws,
+                dispatcher=self._dispatcher,
+                context=state.session_metadata.get("context", ""),
+                repo_root=state.session_metadata.get("repo_root", ""),
+                session_id=state.session_metadata.get("session_id", ""),
+                on_content=self._kwargs.get("on_content"),
+                on_thinking=self._kwargs.get("on_thinking"),
+                on_tool_call=self._kwargs.get("on_tool_call"),
+                on_tool_result=self._kwargs.get("on_tool_result"),
+                on_metrics=self._kwargs.get("on_metrics"),
+                on_metrics_reset=self._kwargs.get("on_metrics_reset"),
+            )
+            state.session_metadata["scope_obj"] = scope_obj
+            state.session_metadata["scope"] = (
+                scope_obj.to_markdown() if scope_obj else state.session_metadata.get("task", "")
+            )
+            return Continue(
+                next_node_id=None,
+                payload={"scope": state.session_metadata["scope"]},
+            )
+        except Exception as exc:
+            return Fail(error=f"Scope phase failed: {exc}")
+
+
+class ExplorationPhaseNode(ToolNode):
+    """Graph node for Phase 2: Codebase exploration.
+
+    Executes the ExplorationPhase logic using read-only tools to explore
+    the codebase, identify relevant files, and produce a FileSummary.
+    """
+
+    def __init__(
+        self,
+        llm_client: "LLMClient",
+        ws: "WorkflowSession | None" = None,
+        dispatcher: "WSMessageDispatcher | None" = None,
+        **kwargs,
+    ) -> None:
+        """Initialise an exploration phase node.
+
+        Args:
+            llm_client: The LLM client for exploration.
+            ws: Optional WorkflowSession for streaming.
+            dispatcher: Optional WebSocket dispatcher.
+            **kwargs: Additional keyword arguments forwarded to ExplorationPhase.
+        """
+        super().__init__("exploration_phase")
+        self._llm_client = llm_client
+        self._ws = ws
+        self._dispatcher = dispatcher
+        self._kwargs = kwargs
+
+    async def execute(self, state: WorkflowState) -> NodeResult:
+        """Run Phase 2 codebase exploration and store the result in state."""
+        try:
+            exploration_phase = ExplorationPhase()
+            file_summary_obj = await exploration_phase.execute(
+                task=state.session_metadata.get("task", ""),
+                scope=state.session_metadata.get("scope", ""),
+                llm_client=self._llm_client,
+                ws=self._ws,
+                dispatcher=self._dispatcher,
+                context=state.session_metadata.get("context", ""),
+                repo_root=state.session_metadata.get("repo_root", ""),
+                session_id=state.session_metadata.get("session_id", ""),
+                refiner=self._kwargs.get("refiner"),
+                on_content=self._kwargs.get("on_content"),
+                on_thinking=self._kwargs.get("on_thinking"),
+                on_tool_call=self._kwargs.get("on_tool_call"),
+                on_tool_result=self._kwargs.get("on_tool_result"),
+                on_metrics=self._kwargs.get("on_metrics"),
+                on_metrics_reset=self._kwargs.get("on_metrics_reset"),
+            )
+            state.session_metadata["file_summary_obj"] = file_summary_obj
+            state.session_metadata["file_summary"] = (
+                file_summary_obj.to_markdown() if file_summary_obj else ""
+            )
+            return Continue(
+                next_node_id=None,
+                payload={"file_summary": state.session_metadata["file_summary"]},
+            )
+        except Exception as exc:
+            return Fail(error=f"Exploration phase failed: {exc}")
+
+
+class DesignPhaseNode(LLMNode):
+    """Graph node for Phase 3: Design synthesis.
+
+    Executes the DesignPhase logic using an expert LLM with search tools
+    to verify external dependencies and synthesize design decisions and risks.
+    """
+
+    def __init__(
+        self,
+        llm_client: "LLMClient",
+        ws: "WorkflowSession | None" = None,
+        dispatcher: "WSMessageDispatcher | None" = None,
+        **kwargs,
+    ) -> None:
+        """Initialise a design phase node.
+
+        Args:
+            llm_client: The LLM client for design synthesis.
+            ws: Optional WorkflowSession for streaming.
+            dispatcher: Optional WebSocket dispatcher.
+            **kwargs: Additional keyword arguments forwarded to DesignPhase.
+        """
+        super().__init__("design_phase")
+        self._llm_client = llm_client
+        self._ws = ws
+        self._dispatcher = dispatcher
+        self._kwargs = kwargs
+
+    async def execute(self, state: WorkflowState) -> NodeResult:
+        """Run Phase 3 design synthesis and store the result in state."""
+        try:
+            design_phase = DesignPhase()
+            design_and_risks_obj = await design_phase.execute(
+                task=state.session_metadata.get("task", ""),
+                scope=state.session_metadata.get("scope", ""),
+                file_summary=state.session_metadata.get("file_summary", ""),
+                llm_client=self._llm_client,
+                ws=self._ws,
+                dispatcher=self._dispatcher,
+                context=state.session_metadata.get("context", ""),
+                repo_root=state.session_metadata.get("repo_root", ""),
+                session_id=state.session_metadata.get("session_id", ""),
+                on_content=self._kwargs.get("on_content"),
+                on_thinking=self._kwargs.get("on_thinking"),
+                on_tool_call=self._kwargs.get("on_tool_call"),
+                on_tool_result=self._kwargs.get("on_tool_result"),
+                on_metrics=self._kwargs.get("on_metrics"),
+                on_metrics_reset=self._kwargs.get("on_metrics_reset"),
+            )
+            state.session_metadata["design_and_risks_obj"] = design_and_risks_obj
+            return Continue(
+                next_node_id=None,
+                payload={"design_and_risks": design_and_risks_obj},
+            )
+        except Exception as exc:
+            return Fail(error=f"Design phase failed: {exc}")
+
+
+class AssemblyPhaseNode(LLMNode):
+    """Graph node for Phase 4: Structured plan assembly.
+
+    Executes the AssemblyPhase logic to produce a validated ExecutionPlan
+    with per-step success checks, including optional TDD test design.
+    """
+
+    def __init__(
+        self,
+        llm_client: "LLMClient",
+        ws: "WorkflowSession | None" = None,
+        dispatcher: "WSMessageDispatcher | None" = None,
+        **kwargs,
+    ) -> None:
+        """Initialise an assembly phase node.
+
+        Args:
+            llm_client: The LLM client for plan assembly.
+            ws: Optional WorkflowSession for streaming.
+            dispatcher: Optional WebSocket dispatcher.
+            **kwargs: Additional keyword arguments forwarded to AssemblyPhase.
+        """
+        super().__init__("assembly_phase")
+        self._llm_client = llm_client
+        self._ws = ws
+        self._dispatcher = dispatcher
+        self._kwargs = kwargs
+
+    async def execute(self, state: WorkflowState) -> NodeResult:
+        """Run Phase 4 plan assembly and store the result in state."""
+        try:
+            assembly_phase = AssemblyPhase()
+            plan = await assembly_phase.execute(
+                task=state.session_metadata.get("task", ""),
+                scope=state.session_metadata.get("scope", ""),
+                file_summary=state.session_metadata.get("file_summary", ""),
+                design_and_risks=state.session_metadata.get("design_and_risks_obj", DesignAndRisks()),
+                llm_client=self._llm_client,
+                ws=self._ws,
+                dispatcher=self._dispatcher,
+                context=state.session_metadata.get("context", ""),
+                repo_root=state.session_metadata.get("repo_root", ""),
+                session_id=state.session_metadata.get("session_id", ""),
+                refiner=self._kwargs.get("refiner"),
+                test_command=self._kwargs.get("test_command", ""),
+                expert_llm_client=self._kwargs.get("expert_llm_client"),
+                file_summary_obj=state.session_metadata.get("file_summary_obj"),
+                on_content=self._kwargs.get("on_content"),
+                on_thinking=self._kwargs.get("on_thinking"),
+                on_tool_call=self._kwargs.get("on_tool_call"),
+                on_tool_result=self._kwargs.get("on_tool_result"),
+                on_metrics=self._kwargs.get("on_metrics"),
+                on_metrics_reset=self._kwargs.get("on_metrics_reset"),
+            )
+            state.session_metadata["plan"] = plan
+            return Continue(
+                next_node_id=None,
+                payload={"plan": plan},
+            )
+        except Exception as exc:
+            return Fail(error=f"Assembly phase failed: {exc}")
+
+
 class PlanningPipeline:
     """Orchestrator for the 4-phase planning pipeline with telemetry integration.
 
@@ -1031,6 +1288,7 @@ class PlanningPipeline:
         task: str,
         repo_root: str,
         llm_client: "LLMClient",
+        state_manager: StateManager,
         context: str = "",
         revision_context: str | None = None,
         previous_plan: ExecutionPlan | None = None,
@@ -1038,7 +1296,6 @@ class PlanningPipeline:
         dispatcher: "WSMessageDispatcher | None" = None,
         refiner: "PromptRefiner | None" = None,
         test_command: str = "",
-        state_manager: StateManager,
         expert_llm_client: "LLMClient | None" = None,
         on_content: "Callable | None" = None,
         on_thinking: "Callable | None" = None,
@@ -1314,6 +1571,7 @@ async def create_plan(
     task: str,
     repo_root: str,
     llm_client: "LLMClient",
+    state_manager: StateManager,
     context: str = "",
     revision_context: str | None = None,
     previous_plan: ExecutionPlan | None = None,
@@ -1321,7 +1579,6 @@ async def create_plan(
     dispatcher: "WSMessageDispatcher | None" = None,
     refiner: "PromptRefiner | None" = None,
     test_command: str = "",
-    state_manager: StateManager,
     expert_llm_client: "LLMClient | None" = None,
     on_content: "Callable | None" = None,
     on_thinking: "Callable | None" = None,
@@ -1360,27 +1617,120 @@ async def create_plan(
     Returns:
         Structured ExecutionPlan ready for per-step execution.
     """
-    pipeline = PlanningPipeline(
-        task=task,
-        repo_root=repo_root,
-        llm_client=llm_client,
-        context=context,
-        revision_context=revision_context,
-        previous_plan=previous_plan,
+    # If revision context is provided, delegate to the revision helper.
+    if revision_context:
+        return await _revise_plan(
+            task,
+            revision_context,
+            llm_client,
+            context,
+            ws,
+            expert_llm_client=expert_llm_client,
+            previous_plan=previous_plan,
+            on_thinking=on_thinking,
+            on_metrics=on_metrics,
+            on_metrics_reset=on_metrics_reset,
+        )
+
+    # Resolve model clients via RoutingPolicy.
+    routing = RoutingPolicy(
+        primary=llm_client,
+        expert=expert_llm_client,
+    )
+    explorer = routing.get_client("scope")
+    expert = expert_llm_client or llm_client
+
+    session_id = state_manager.get_state().session_id
+
+    # Build the 4-phase subgraph
+    phase_kwargs = {
+        "refiner": refiner,
+        "test_command": test_command,
+        "expert_llm_client": expert_llm_client,
+        "on_content": on_content,
+        "on_thinking": on_thinking,
+        "on_tool_call": on_tool_call,
+        "on_tool_result": on_tool_result,
+        "on_metrics": on_metrics,
+        "on_metrics_reset": on_metrics_reset,
+    }
+
+    scope_node = ScopePhaseNode(
+        llm_client=explorer,
         ws=ws,
         dispatcher=dispatcher,
-        refiner=refiner,
-        test_command=test_command,
-        state_manager=state_manager,
-        expert_llm_client=expert_llm_client,
-        on_content=on_content,
-        on_thinking=on_thinking,
-        on_tool_call=on_tool_call,
-        on_tool_result=on_tool_result,
-        on_metrics=on_metrics,
-        on_metrics_reset=on_metrics_reset,
+        **phase_kwargs,
     )
-    return await pipeline.run()
+    exploration_node = ExplorationPhaseNode(
+        llm_client=explorer,
+        ws=ws,
+        dispatcher=dispatcher,
+        **phase_kwargs,
+    )
+    design_node = DesignPhaseNode(
+        llm_client=expert,
+        ws=ws,
+        dispatcher=dispatcher,
+        **phase_kwargs,
+    )
+    assembly_node = AssemblyPhaseNode(
+        llm_client=expert,
+        ws=ws,
+        dispatcher=dispatcher,
+        **phase_kwargs,
+    )
+
+    # Build the WorkflowGraph with 4 phase nodes
+    graph = WorkflowGraph()
+    graph.add_node(scope_node)
+    graph.add_node(exploration_node)
+    graph.add_node(design_node)
+    graph.add_node(assembly_node)
+
+    # Wrap in a SubgraphNode
+    planning_subgraph = SubgraphNode("planning_subgraph", subgraph=graph)
+
+    # Prepare state with metadata needed by phase nodes
+    state = state_manager.get_state()
+    state.session_metadata["task"] = task
+    state.session_metadata["context"] = context
+    state.session_metadata["repo_root"] = repo_root
+    state.session_metadata["session_id"] = session_id
+
+    # Execute the subgraph
+    engine = WorkflowEngine()
+    result = await engine.run(graph, state_manager=state_manager, state=state)
+
+    if isinstance(result, Fail):
+        logger.exception("Planning subgraph failed — returning fallback plan")
+        plan = _build_fallback_execution_plan(
+            task=task,
+            scope=task,
+            file_summary_obj=state.session_metadata.get("file_summary_obj"),
+            design_and_risks_obj=state.session_metadata.get("design_and_risks_obj", DesignAndRisks()),
+            test_command=test_command,
+            failure_summary=f"planning subgraph failed: {result.error}",
+        )
+        state.current_plan = plan.model_dump()
+        state_manager.save()
+        return plan
+
+    # Extract the plan from state
+    plan = state.session_metadata.get("plan")
+    if plan is None:
+        logger.warning("Planning subgraph completed but no plan found — returning fallback")
+        plan = _build_fallback_execution_plan(
+            task=task,
+            scope=task,
+            file_summary_obj=None,
+            design_and_risks_obj=DesignAndRisks(),
+            test_command=test_command,
+            failure_summary="planning subgraph completed without producing a plan",
+        )
+
+    state.current_plan = plan.model_dump()
+    state_manager.save()
+    return plan
 
 
 async def _run_phase5_verification(

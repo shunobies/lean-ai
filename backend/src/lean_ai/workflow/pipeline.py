@@ -18,7 +18,16 @@ from lean_ai.training.span_context import trace_span
 from lean_ai.workflow.callbacks import build_workflow_callbacks
 from lean_ai.workflow.executor import execute_plan
 from lean_ai.workflow.fix_mode import _run_fix
-from lean_ai.workflow.state import StateManager
+from lean_ai.workflow.graph import (
+    ApprovalNode,
+    Continue,
+    Fail,
+    Node,
+    Suspend,
+    WorkflowEngine,
+    WorkflowGraph,
+)
+from lean_ai.workflow.state import StateManager, WorkflowState
 from lean_ai.workflow.validation import _effective_post_commands
 from lean_ai.workflow.ws_dispatcher import WSMessageDispatcher
 from lean_ai.workflow.ws_handler import ws_send
@@ -32,6 +41,285 @@ logger = logging.getLogger(__name__)
 
 # Max plan revision rounds before giving up
 _MAX_REVISIONS = 5
+
+
+# ── Graph node implementations ───────────────────────────────────
+
+
+class PlanningNode(Node):
+    """Node that calls create_plan to produce an ExecutionPlan."""
+
+    def __init__(
+        self,
+        task: str,
+        repo_root: str,
+        llm_client: "LLMClient",
+        context: str,
+        session: WorkflowSession | None,
+        dispatcher: WSMessageDispatcher | None,
+        refiner: "PromptRefiner | None",
+        test_command: str,
+        session_id: str,
+        expert_llm_client: "LLMClient | None",
+    ) -> None:
+        super().__init__("planning_node")
+        self.task = task
+        self.repo_root = repo_root
+        self.llm_client = llm_client
+        self.context = context
+        self.session = session
+        self.dispatcher = dispatcher
+        self.refiner = refiner
+        self.test_command = test_command
+        self.session_id = session_id
+        self.expert_llm_client = expert_llm_client
+
+    async def execute(self, state: WorkflowState) -> NodeResult:
+        """Run the planning phase and store the plan in state."""
+        planning_cb = build_workflow_callbacks(session=self.session, streaming=True)
+        try:
+            async with trace_span(
+                span_type="phase",
+                span_name="planning",
+                session_id=self.session_id,
+            ) as _planning_span:
+                plan = await create_plan(
+                    task=self.task,
+                    repo_root=self.repo_root,
+                    llm_client=self.llm_client,
+                    context=self.context,
+                    ws=self.session,
+                    dispatcher=self.dispatcher,
+                    refiner=self.refiner,
+                    test_command=self.test_command,
+                    session_id=self.session_id,
+                    expert_llm_client=self.expert_llm_client,
+                    on_content=planning_cb.on_content,
+                    on_thinking=planning_cb.on_thinking,
+                    on_tool_call=planning_cb.on_tool_call,
+                    on_tool_result=planning_cb.on_tool_result,
+                    on_metrics=planning_cb.on_metrics,
+                    on_metrics_reset=planning_cb.on_metrics_reset,
+                )
+            state.current_phase = "planning"
+            state.set_current_plan(plan.model_dump())
+            state.session_metadata["plan"] = plan
+            state.session_metadata["planning_checkpoint_id"] = (
+                state.session_metadata.get("planning_checkpoint_id")
+            )
+            return Continue(
+                next_node_id=None,
+                payload={"plan": plan.model_dump()},
+            )
+        except Exception as exc:
+            return Fail(error=str(exc))
+
+
+class ApprovalNodeExtended(ApprovalNode):
+    """ApprovalNode that handles the full approval/revision loop."""
+
+    def __init__(
+        self,
+        task: str,
+        repo_root: str,
+        llm_client: "LLMClient",
+        context: str,
+        session: WorkflowSession | None,
+        dispatcher: WSMessageDispatcher | None,
+        refiner: "PromptRefiner | None",
+        test_command: str,
+        expert_llm_client: "LLMClient | None",
+        session_id: str,
+    ) -> None:
+        super().__init__("approval_node", prompt="Approve the generated plan")
+        self.task = task
+        self.repo_root = repo_root
+        self.llm_client = llm_client
+        self.context = context
+        self.session = session
+        self.dispatcher = dispatcher
+        self.refiner = refiner
+        self.test_command = test_command
+        self.expert_llm_client = expert_llm_client
+        self.session_id = session_id
+
+    async def execute(self, state: WorkflowState) -> NodeResult:
+        """Wait for user approval, handling feedback/revision loop."""
+        plan = state.session_metadata.get("plan")
+        if plan is None:
+            return Fail(error="No plan found in state")
+
+        plan_md = plan_to_markdown(plan)
+        await ws_send(
+            self.session,
+            "approval_required",
+            {
+                "plan": plan_md,
+                "user_summary": plan.user_summary,
+                "plan_validation_warnings": list(plan.plan_validation_warnings),
+            },
+        )
+        revision_count = 0
+        last_rejection: tuple[str, str] | None = None
+
+        while True:
+            msg = await self.dispatcher.wait_for_approval() if self.dispatcher else None
+            if msg is None:
+                raise WorkflowSessionClosedError()
+
+            if msg.get("type") == "approve":
+                from lean_ai.workflow.hooks import fire_plan_decision_hook
+
+                if last_rejection is not None:
+                    prev_plan_json, prev_feedback = last_rejection
+                    fire_plan_decision_hook(
+                        repo_root=self.repo_root,
+                        session_id=self.session_id,
+                        llm_client=self.llm_client,
+                        task=self.task,
+                        plan_before=prev_plan_json,
+                        feedback=prev_feedback,
+                        plan_after=plan.model_dump_json(indent=2),
+                        decision="approved",
+                        revision_count=revision_count,
+                        ws=self.session,
+                    )
+                else:
+                    fire_plan_decision_hook(
+                        repo_root=self.repo_root,
+                        session_id=self.session_id,
+                        llm_client=self.llm_client,
+                        task=self.task,
+                        plan_before="",
+                        feedback="",
+                        plan_after=plan.model_dump_json(indent=2),
+                        decision="approved",
+                        revision_count=0,
+                        ws=self.session,
+                    )
+                state.current_phase = "approval"
+                state.session_metadata["approved_plan"] = plan
+                return Continue(next_node_id=None, payload={"approved": True})
+
+            feedback = _approval_feedback(msg)
+            if feedback is not None:
+                revision_count += 1
+                last_rejection = (plan.model_dump_json(indent=2), feedback)
+
+                if revision_count > _MAX_REVISIONS:
+                    await ws_send(
+                        self.session,
+                        "error",
+                        {
+                            "message": (
+                                f"Maximum revision limit ({_MAX_REVISIONS}) "
+                                "reached. Please start a new session."
+                            ),
+                            "recoverable": False,
+                        },
+                    )
+                    raise WorkflowSessionClosedError()
+
+                await ws_send(
+                    self.session,
+                    "plan_rejected",
+                    {"feedback": feedback, "stage": "planning"},
+                )
+
+                revision_context = (
+                    f"PREVIOUS PLAN:\n{plan.model_dump_json(indent=2)}\n\nUSER FEEDBACK:\n{feedback}"
+                )
+                plan = await create_plan(
+                    task=self.task,
+                    repo_root=self.repo_root,
+                    llm_client=self.llm_client,
+                    context=self.context,
+                    revision_context=revision_context,
+                    previous_plan=plan,
+                    ws=self.session,
+                    dispatcher=self.dispatcher,
+                    refiner=self.refiner,
+                    test_command=self.test_command,
+                    expert_llm_client=self.expert_llm_client,
+                )
+                plan_md = plan_to_markdown(plan)
+                state.set_current_plan(plan.model_dump())
+                state.session_metadata["plan"] = plan
+                await ws_send(
+                    self.session,
+                    "plan_revision",
+                    {
+                        "review_feedback": feedback,
+                        "revision_number": revision_count,
+                    },
+                )
+                await ws_send(
+                    self.session,
+                    "approval_required",
+                    {
+                        "plan": plan_md,
+                        "user_summary": plan.user_summary,
+                    },
+                )
+                continue
+
+        return Continue(next_node_id=None)
+
+
+class ExecutionNode(Node):
+    """Node that calls execute_plan to carry out the approved plan."""
+
+    def __init__(
+        self,
+        task: str,
+        repo_root: str,
+        session: WorkflowSession | None,
+        llm_client: "LLMClient",
+        context: str,
+        branch_name: str,
+        base_branch: str,
+        conversation_logger: Callable | None,
+        session_id: str,
+        expert_llm_client: "LLMClient | None",
+        dispatcher: WSMessageDispatcher | None,
+    ) -> None:
+        super().__init__("execution_node")
+        self.task = task
+        self.repo_root = repo_root
+        self.session = session
+        self.llm_client = llm_client
+        self.context = context
+        self.branch_name = branch_name
+        self.base_branch = base_branch
+        self.conversation_logger = conversation_logger
+        self.session_id = session_id
+        self.expert_llm_client = expert_llm_client
+        self.dispatcher = dispatcher
+
+    async def execute(self, state: WorkflowState) -> NodeResult:
+        """Run the execution phase and store the result in state."""
+        approved_plan = state.session_metadata.get("approved_plan")
+        if approved_plan is None:
+            return Fail(error="No approved plan found in state")
+        try:
+            result = await execute_plan(
+                plan=approved_plan,
+                task=self.task,
+                repo_root=self.repo_root,
+                ws=self.session,
+                llm_client=self.llm_client,
+                context=self.context,
+                branch_name=self.branch_name,
+                base_branch=self.base_branch,
+                conversation_logger=self.conversation_logger,
+                session_id=self.session_id,
+                expert_llm_client=self.expert_llm_client,
+                dispatcher=self.dispatcher,
+            )
+            state.session_metadata["execution_result"] = result
+            return Continue(next_node_id=None, payload={"result": result})
+        except Exception as exc:
+            return Fail(error=str(exc))
 
 
 # ── Public API ──────────────────────────────────────────────────────
@@ -192,100 +480,48 @@ async def run_workflow(
         # ScopeDocument, recording any under-specified details as ASSUMPTIONS
         # with verify_hints for Phase 2 to falsify.
 
-        # ── Phase 2: Plan ────────────────────────────────────────────
+        # ── Build declarative graph and run via WorkflowEngine ──
         await ws_send(session, "stage_change", {"stage": "planning"})
         plan_commands = _effective_post_commands(repo_root)
 
-        # Planning-specific streaming callbacks — include streaming flag
-        # so the extension can distinguish token-level updates from
-        # per-turn bulk content used during execution.
-        planning_cb = build_workflow_callbacks(session=session, streaming=True)
+        # Load or create initial state
+        state = state_manager.get_state()
 
-        async with trace_span(
-            span_type="phase",
-            span_name="planning",
-            session_id=session_id,
-            parent_span=session_span,
-        ) as _planning_span:
-            plan = await create_plan(
+        # Build the workflow graph with planning, approval, and execution nodes
+        graph = WorkflowGraph()
+        graph.add_node(
+            PlanningNode(
                 task=task,
                 repo_root=repo_root,
                 llm_client=llm_client,
                 context=context,
-                ws=session,
+                session=session,
                 dispatcher=dispatcher,
                 refiner=refiner,
                 test_command=plan_commands.get("test", ""),
                 session_id=session_id,
                 expert_llm_client=expert_llm_client,
-                on_content=planning_cb.on_content,
-                on_thinking=planning_cb.on_thinking,
-                on_tool_call=planning_cb.on_tool_call,
-                on_tool_result=planning_cb.on_tool_result,
-                on_metrics=planning_cb.on_metrics,
-                on_metrics_reset=planning_cb.on_metrics_reset,
             )
-
-        # Save state after planning phase
-        state = state_manager.get_state()
-        state.current_phase = "planning"
-        state.set_current_plan(plan.model_dump())
-        state_manager.save()
-
-        # Save checkpoint after planning phase
-        _planning_checkpoint_id = state_manager.save_checkpoint(
-            state=state,
-            phase="Phase 1: Planning",
-            summary=plan.user_summary,
         )
-
-        # ── Phase 3: Approve ─────────────────────────────────────────
-        async with trace_span(
-            span_type="phase",
-            span_name="approval",
-            session_id=session_id,
-            parent_span=session_span,
-        ) as _approval_span:
-            approved_plan = await _wait_for_approval(
-                plan=plan,
+        graph.add_node(
+            ApprovalNodeExtended(
                 task=task,
                 repo_root=repo_root,
                 llm_client=llm_client,
                 context=context,
-                ws=session,
+                session=session,
+                dispatcher=dispatcher,
                 refiner=refiner,
                 test_command=plan_commands.get("test", ""),
                 expert_llm_client=expert_llm_client,
-                dispatcher=dispatcher,
-                state_manager=state_manager,
+                session_id=session_id,
             )
-
-        # Save state after approval phase
-        state = state_manager.get_state()
-        state.current_phase = "approval"
-        state_manager.save()
-
-        # Save checkpoint after approval phase
-        _approval_checkpoint_id = state_manager.save_checkpoint(
-            state=state,
-            phase="Phase 2: Approval",
-            summary="Plan approved by user",
-            parent_id=_planning_checkpoint_id,
         )
-
-        # ── Phase 4: Execute per-step ────────────────────────────────
-        await ws_send(session, "stage_change", {"stage": "implementing"})
-        async with trace_span(
-            span_type="phase",
-            span_name="execution",
-            session_id=session_id,
-            parent_span=session_span,
-        ) as _execution_span:
-            result = await execute_plan(
-                plan=approved_plan,
+        graph.add_node(
+            ExecutionNode(
                 task=task,
                 repo_root=repo_root,
-                ws=session,
+                session=session,
                 llm_client=llm_client,
                 context=context,
                 branch_name=branch_name,
@@ -295,28 +531,34 @@ async def run_workflow(
                 expert_llm_client=expert_llm_client,
                 dispatcher=dispatcher,
             )
+        )
 
-    # Save checkpoint after execution phase
-    state = state_manager.get_state()
-    state.current_phase = "execution_complete"
-    state_manager.save()
-    _execution_checkpoint_id = state_manager.save_checkpoint(
-        state=state,
-        phase="Phase 3: Execution Complete",
-        summary="Execution completed successfully",
-        parent_id=_approval_checkpoint_id,
-    )
+        # Run the graph via WorkflowEngine — state saved after each node
+        engine = WorkflowEngine()
+        result_node = await engine.run(graph, state_manager=state_manager, state=state)
 
-    # Save checkpoint after final validation phase
-    state = state_manager.get_state()
-    state.current_phase = "validation"
-    state_manager.save()
-    state_manager.save_checkpoint(
-        state=state,
-        phase="Phase 4: Validation",
-        summary="Final validation completed",
-        parent_id=_execution_checkpoint_id,
-    )
+        # Extract the execution result from state
+        state = state_manager.get_state()
+        result = state.session_metadata.get("execution_result", "")
+
+        # Save checkpoint after execution phase
+        state.current_phase = "execution_complete"
+        state_manager.save()
+        _execution_checkpoint_id = state_manager.save_checkpoint(
+            state=state,
+            phase="Phase 3: Execution Complete",
+            summary="Execution completed successfully",
+        )
+
+        # Save checkpoint after final validation phase
+        state.current_phase = "validation"
+        state_manager.save()
+        state_manager.save_checkpoint(
+            state=state,
+            phase="Phase 4: Validation",
+            summary="Final validation completed",
+            parent_id=_execution_checkpoint_id,
+        )
 
     return result
 
