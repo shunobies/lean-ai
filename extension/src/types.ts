@@ -266,6 +266,8 @@ export interface CheckpointSummary {
     head_commit_sha: string | null;
     created_at: string;
     completed_at: string | null;
+    parent_id?: string;
+    is_head?: boolean;
 }
 
 export interface GitEventSummary {

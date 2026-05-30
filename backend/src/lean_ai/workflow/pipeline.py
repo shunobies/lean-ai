@@ -232,6 +232,13 @@ async def run_workflow(
         state.set_current_plan(plan.model_dump())
         state_manager.save()
 
+        # Save checkpoint after planning phase
+        _planning_checkpoint_id = state_manager.save_checkpoint(
+            state=state,
+            phase="Phase 1: Planning",
+            summary=plan.user_summary,
+        )
+
         # ── Phase 3: Approve ─────────────────────────────────────────
         async with trace_span(
             span_type="phase",
@@ -258,6 +265,14 @@ async def run_workflow(
         state.current_phase = "approval"
         state_manager.save()
 
+        # Save checkpoint after approval phase
+        _approval_checkpoint_id = state_manager.save_checkpoint(
+            state=state,
+            phase="Phase 2: Approval",
+            summary="Plan approved by user",
+            parent_id=_planning_checkpoint_id,
+        )
+
         # ── Phase 4: Execute per-step ────────────────────────────────
         await ws_send(session, "stage_change", {"stage": "implementing"})
         async with trace_span(
@@ -266,7 +281,7 @@ async def run_workflow(
             session_id=session_id,
             parent_span=session_span,
         ) as _execution_span:
-            return await execute_plan(
+            result = await execute_plan(
                 plan=approved_plan,
                 task=task,
                 repo_root=repo_root,
@@ -280,6 +295,30 @@ async def run_workflow(
                 expert_llm_client=expert_llm_client,
                 dispatcher=dispatcher,
             )
+
+    # Save checkpoint after execution phase
+    state = state_manager.get_state()
+    state.current_phase = "execution_complete"
+    state_manager.save()
+    _execution_checkpoint_id = state_manager.save_checkpoint(
+        state=state,
+        phase="Phase 3: Execution Complete",
+        summary="Execution completed successfully",
+        parent_id=_approval_checkpoint_id,
+    )
+
+    # Save checkpoint after final validation phase
+    state = state_manager.get_state()
+    state.current_phase = "validation"
+    state_manager.save()
+    state_manager.save_checkpoint(
+        state=state,
+        phase="Phase 4: Validation",
+        summary="Final validation completed",
+        parent_id=_execution_checkpoint_id,
+    )
+
+    return result
 
 
 # ── Phase 3: Approval ──────────────────────────────────────────────

@@ -3,6 +3,7 @@
 import logging
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from lean_ai.db import (
     create_session,
@@ -12,9 +13,9 @@ from lean_ai.db import (
     get_session,
     get_session_raw,
     list_sessions,
+    log_conversation_entry,
     update_session,
 )
-from lean_ai.workflow.state import StateManager
 from lean_ai.db import (
     search_sessions as db_search_sessions,
 )
@@ -28,10 +29,18 @@ from lean_ai.tools.git_ops import (
     git_stash_pop,
     git_stash_push,
 )
+from lean_ai.workflow.state import StateManager
 
 logger = logging.getLogger(__name__)
 
 sessions_router = APIRouter()
+
+
+class RestoreCheckpointRequest(BaseModel):
+    """Request body for restoring a checkpoint."""
+
+    checkpoint_id: str
+    repo_root: str
 
 
 @sessions_router.post("/sessions", response_model=CreateSessionResponse)
@@ -97,9 +106,66 @@ async def get_session_conversation(session_id: str, repo_root: str):
 
 
 @sessions_router.get("/sessions/{session_id}/checkpoints")
-async def list_checkpoints(session_id: str):
-    """List checkpoints for a session (stub — returns empty list)."""
-    return []
+async def list_checkpoints(session_id: str, repo_root: str):
+    """List checkpoints for a session as a tree structure."""
+    db = await get_db(repo_root)
+    try:
+        session = await get_session_raw(db, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+    finally:
+        await db.close()
+
+    sm = StateManager(session_id)
+    checkpoints = sm.list_checkpoints(session_id)
+    return checkpoints
+
+
+@sessions_router.post("/sessions/{session_id}/restore")
+async def restore_checkpoint(session_id: str, request: RestoreCheckpointRequest):
+    """Restore a session to a previous checkpoint state."""
+    db = await get_db(request.repo_root)
+    try:
+        # Validate session exists
+        session = await get_session_raw(db, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Load the checkpoint and validate it belongs to this session
+        sm = StateManager(session_id)
+        try:
+            checkpoint_state = sm.get_checkpoint(request.checkpoint_id)
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=404, detail=f"Checkpoint {request.checkpoint_id} not found"
+            ) from None
+
+        # Validate checkpoint session_id matches
+        if checkpoint_state.session_id != session_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Checkpoint does not belong to this session",
+            )
+
+        # Overwrite the active state file
+        sm._state = checkpoint_state
+        sm.save()
+
+        # Log restore event to conversation_logs
+        await log_conversation_entry(
+            db,
+            session_id,
+            role="system",
+            content=f"Session restored to checkpoint {request.checkpoint_id}",
+        )
+
+        return {
+            "status": "restored",
+            "session_id": session_id,
+            "checkpoint_id": request.checkpoint_id,
+        }
+    finally:
+        await db.close()
 
 
 @sessions_router.get("/sessions/{session_id}/git-events")

@@ -65,6 +65,13 @@ export class SessionDetailProvider {
                         vscode.window.showInformationMessage("Session abandoned.");
                         await this.updatePanel(panel, sessionId);
                         break;
+                    case "restore": {
+                        const checkpointId = msg.checkpointId as string;
+                        await this.client.restoreCheckpoint(sessionId, checkpointId);
+                        vscode.window.showInformationMessage("Session restored to checkpoint.");
+                        await this.updatePanel(panel, sessionId);
+                        break;
+                    }
                     case "resume": {
                         const checkpointId = msg.checkpointId as string;
                         await this.client.resumeSession(sessionId, checkpointId);
@@ -247,6 +254,11 @@ export class SessionDetailProvider {
         font-size: var(--vscode-editor-font-size);
     }
     .empty { opacity: 0.5; font-style: italic; font-size: 12px; }
+    .btn-restore { padding: 3px 8px; font-size: 11px; }
+    tr.active-branch {
+        background: var(--vscode-list-activeSelectionBackground);
+        border-left: 3px solid var(--vscode-list-activeSelectionForeground);
+    }
 
     /* Tab navigation */
     .tabs {
@@ -420,17 +432,21 @@ export class SessionDetailProvider {
     <div id="tab-checkpoints" class="tab-content">
         ${checkpoints.length > 0 ? `
         <table>
-            <thead><tr><th>#</th><th>Description</th><th>Status</th><th>Commit</th><th>Time</th></tr></thead>
+            <thead><tr><th>#</th><th>Description</th><th>Status</th><th>Commit</th><th>Time</th><th>Restore</th></tr></thead>
             <tbody>
-                ${checkpoints.map((cp) => `
-                    <tr>
+                ${checkpoints.map((cp) => {
+                    const isHead = cp.is_head ?? false;
+                    const rowClass = isHead ? ' class="active-branch"' : '';
+                    return `
+                    <tr${rowClass}>
                         <td>${cp.step_index + 1}</td>
                         <td>${escapeHtml(cp.step_description || "\u2014")}</td>
                         <td>${escapeHtml(cp.status)}</td>
                         <td>${cp.head_commit_sha ? `<code>${escapeHtml(cp.head_commit_sha.slice(0, 7))}</code>` : "\u2014"}</td>
                         <td>${escapeHtml(cp.created_at)}</td>
-                    </tr>
-                `).join("")}
+                        <td><button class="btn-secondary btn-restore" onclick="restoreCheckpoint('${cp.id}')">${isHead ? '&#9733; Restore' : 'Restore'}</button></td>
+                    </tr>`;
+                }).join("")}
             </tbody>
         </table>
         ` : '<p class="empty">No checkpoints recorded.</p>'}
@@ -505,6 +521,11 @@ export class SessionDetailProvider {
     }
     function refresh() {
         vscode.postMessage({ command: "refresh" });
+    }
+    function restoreCheckpoint(checkpointId) {
+        if (confirm("Restore the session to this checkpoint? Current changes will be lost.")) {
+            vscode.postMessage({ command: "restore", checkpointId: checkpointId });
+        }
     }
 </script>
 </body>

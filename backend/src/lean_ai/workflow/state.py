@@ -114,11 +114,16 @@ class StateManager:
     SQLite table. Deletes legacy files after a successful save.
     """
 
-    def __init__(self, session_id: str) -> None:
+    def __init__(
+        self, session_id: str, checkpoints_dir: str | Path | None = None
+    ) -> None:
         self.session_id = session_id
         self._state_dir = Path(".lean_ai") / "state"
         self._state_file = self._state_dir / f"{session_id}.json"
         self._state: WorkflowState | None = None
+        self._checkpoints_dir = Path(
+            checkpoints_dir if checkpoints_dir is not None else ".lean_ai" / "checkpoints"
+        )
 
     def _state_path(self) -> Path:
         """Return the path to the consolidated state file."""
@@ -190,7 +195,7 @@ class StateManager:
 
         # Conversation history from SQLite conversation_logs table
         try:
-            from lean_ai.db import get_conversation_log, get_db
+            from lean_ai.db import get_conversation_log, get_db  # noqa: I001
 
             import asyncio
 
@@ -269,3 +274,236 @@ class StateManager:
         """Reload state from disk, overwriting any in-memory changes."""
         self._state = None
         return self.load()
+
+    # ── Checkpoint helpers ────────────────────────────────────────
+
+    def _checkpoints_dir(self, session_id: str) -> Path:
+        """Return the checkpoint directory for a given session."""
+        return self._checkpoints_dir_base / session_id
+
+    @property
+    def _checkpoints_dir_base(self) -> Path:
+        """Return the base checkpoints directory."""
+        return self._checkpoints_dir_base_prop
+
+    @_checkpoints_dir_base.setter
+    def _checkpoints_dir_base(self, value: Path) -> None:
+        self._checkpoints_dir_base_prop = value
+
+    def save_checkpoint(
+        self,
+        state: WorkflowState,
+        phase: str,
+        summary: str,
+        parent_id: str | None = None,
+    ) -> str:
+        """Save a checkpoint of the given state.
+
+        Serialises *state* to JSON, writes the JSON file to the
+        per-session checkpoint directory, and persists the full
+        serialised state into the SQLite ``checkpoints`` table.
+
+        Returns the checkpoint ID (a hex string).
+        """
+        import asyncio
+        import uuid
+
+        checkpoint_id = uuid.uuid4().hex[:12]
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Ensure checkpoint directory exists
+        cp_dir = self._checkpoints_dir_base / self.session_id
+        cp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Write JSON cache file
+        cp_file = cp_dir / f"{checkpoint_id}.json"
+        cp_file.write_text(
+            json.dumps(state.model_dump(), indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        # Persist state_json into SQLite
+        try:
+            from lean_ai.db import get_db
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                db = loop.run_until_complete(
+                    get_db(str(Path(".").resolve()))
+                )
+                loop.run_until_complete(
+                    db.execute(
+                        "INSERT INTO checkpoints "
+                        "(id, session_id, parent_id, phase, state_json, timestamp, summary) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            checkpoint_id,
+                            self.session_id,
+                            parent_id,
+                            phase,
+                            json.dumps(state.model_dump(), ensure_ascii=False),
+                            now,
+                            summary,
+                        ),
+                    )
+                )
+                loop.run_until_complete(db.commit())
+            finally:
+                loop.close()
+        except Exception:
+            logger.warning(
+                "Failed to persist checkpoint %s to SQLite for %s",
+                checkpoint_id,
+                self.session_id,
+                exc_info=True,
+            )
+
+        logger.info(
+            "Saved checkpoint %s for session %s (phase=%s)",
+            checkpoint_id,
+            self.session_id,
+            phase,
+        )
+
+        # Enforce cache limit
+        self._cleanup_checkpoint_cache()
+
+        return checkpoint_id
+
+    def get_checkpoint(self, checkpoint_id: str) -> WorkflowState:
+        """Load a checkpoint by ID.
+
+        Attempts to read the JSON cache file first; on ``FileNotFoundError``
+        falls back to reconstructing the state from the SQLite ``state_json``
+        blob.
+        """
+        cp_dir = self._checkpoints_dir_base / self.session_id
+        cp_file = cp_dir / f"{checkpoint_id}.json"
+
+        # Try JSON cache first
+        if cp_file.is_file():
+            try:
+                data = json.loads(cp_file.read_text(encoding="utf-8"))
+                return WorkflowState(**data)
+            except Exception:
+                logger.warning(
+                    "Failed to load checkpoint %s from JSON cache, falling back to SQLite",
+                    checkpoint_id,
+                    exc_info=True,
+                )
+
+        # Fallback: reconstruct from SQLite
+        try:
+            import asyncio
+
+            from lean_ai.db import get_db
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                db = loop.run_until_complete(
+                    get_db(str(Path(".").resolve()))
+                )
+                cursor = loop.run_until_complete(
+                    db.execute(
+                        "SELECT state_json FROM checkpoints WHERE id = ?",
+                        (checkpoint_id,),
+                    )
+                )
+                row = loop.run_until_complete(cursor.fetchone())
+                if row is None:
+                    raise FileNotFoundError(
+                        f"Checkpoint {checkpoint_id} not found"
+                    )
+                state_json = row.get("state_json") or row[0]
+                data = json.loads(state_json)
+                return WorkflowState(**data)
+            finally:
+                loop.close()
+        except Exception:
+            logger.warning(
+                "Failed to load checkpoint %s from SQLite",
+                checkpoint_id,
+                exc_info=True,
+            )
+            raise FileNotFoundError(
+                f"Checkpoint {checkpoint_id} not found in cache or database"
+            ) from None
+
+    def list_checkpoints(self, session_id: str) -> list[dict]:
+        """Return metadata-only checkpoint tree for *session_id*.
+
+        Queries only ``id, session_id, parent_id, phase, summary, timestamp``
+        columns from SQLite (never loads ``state_json`` blobs).
+        """
+        try:
+            import asyncio
+
+            from lean_ai.db import get_db
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                db = loop.run_until_complete(
+                    get_db(str(Path(".").resolve()))
+                )
+                cursor = loop.run_until_complete(
+                    db.execute(
+                        "SELECT id, session_id, parent_id, phase, summary, "
+                        "timestamp FROM checkpoints "
+                        "WHERE session_id = ? ORDER BY timestamp ASC",
+                        (session_id,),
+                    )
+                )
+                rows = loop.run_until_complete(cursor.fetchall())
+            finally:
+                loop.close()
+        except Exception:
+            logger.warning(
+                "Failed to list checkpoints for session %s", session_id, exc_info=True
+            )
+            return []
+
+        # Determine which checkpoint is the head (latest by timestamp)
+        if rows:
+            head_id = rows[-1]["id"] if isinstance(rows[-1], dict) else rows[-1][0]
+        else:
+            head_id = None
+
+        result: list[dict] = []
+        for row in rows:
+            rid = row["id"] if isinstance(row, dict) else row[0]
+            result.append(
+                {
+                    "id": rid,
+                    "session_id": row["session_id"] if isinstance(row, dict) else row[1],
+                    "parent_id": row["parent_id"] if isinstance(row, dict) else row[2],
+                    "phase": row["phase"] if isinstance(row, dict) else row[3],
+                    "summary": row["summary"] if isinstance(row, dict) else row[4],
+                    "timestamp": row["timestamp"] if isinstance(row, dict) else row[5],
+                    "is_head": rid == head_id,
+                }
+            )
+        return result
+
+    def _cleanup_checkpoint_cache(self) -> None:
+        """Delete oldest JSON checkpoint files when count exceeds 50."""
+        cp_dir = self._checkpoints_dir_base / self.session_id
+        if not cp_dir.is_dir():
+            return
+
+        cp_files = sorted(
+            cp_dir.glob("*.json"),
+            key=lambda p: p.stat().st_mtime,
+        )
+
+        max_cache = 50
+        if len(cp_files) > max_cache:
+            to_delete = cp_files[: len(cp_files) - max_cache]
+            for f in to_delete:
+                try:
+                    f.unlink()
+                    logger.info("Removed stale checkpoint file: %s", f)
+                except Exception:
+                    logger.warning("Failed to remove checkpoint file: %s", f, exc_info=True)

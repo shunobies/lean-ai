@@ -70,18 +70,24 @@ class GroupItem extends vscode.TreeItem {
 
 class CheckpointItem extends vscode.TreeItem {
     constructor(public readonly checkpoint: CheckpointSummary, public readonly sessionId: string) {
+        const isHead = checkpoint.is_head ?? false;
         const statusIcon = checkpoint.status === "completed" ? "$(pass)" : checkpoint.status === "failed" ? "$(error)" : "$(watch)";
-        const label = `Step ${checkpoint.step_index + 1}: ${checkpoint.step_description || "unnamed"}`;
+        const label = `Step ${checkpoint.step_index + 1}: ${checkpoint.step_description || "unnamed"}${isHead ? " (active)" : ""}`;
         super(label, vscode.TreeItemCollapsibleState.None);
 
         this.contextValue = "checkpoint";
-        this.description = statusIcon;
-        this.tooltip = `Status: ${checkpoint.status}\nCreated: ${checkpoint.created_at}${checkpoint.head_commit_sha ? `\nCommit: ${checkpoint.head_commit_sha.slice(0, 7)}` : ""}`;
+        this.description = isHead ? "$(circle-filled) " + statusIcon : statusIcon;
+        this.tooltip = `Status: ${checkpoint.status}${isHead ? "\nActive branch checkpoint" : ""}\nCreated: ${checkpoint.created_at}${checkpoint.head_commit_sha ? `\nCommit: ${checkpoint.head_commit_sha.slice(0, 7)}` : ""}`;
         this.iconPath = checkpoint.status === "completed"
             ? new vscode.ThemeIcon("pass", new vscode.ThemeColor("testing.iconPassed"))
             : checkpoint.status === "failed"
                 ? new vscode.ThemeIcon("error", new vscode.ThemeColor("testing.iconFailed"))
                 : new vscode.ThemeIcon("watch");
+        this.command = {
+            command: "lean-ai.restoreCheckpoint",
+            title: "Restore to here",
+            arguments: [this],
+        };
     }
 }
 

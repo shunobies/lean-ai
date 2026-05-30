@@ -28,7 +28,6 @@ from lean_ai.llm.tool_definitions import (
     build_tdd_implementation_tools,
 )
 from lean_ai.routers.context_helpers import load_execution_context
-from lean_ai.workflow.state import StateManager
 from lean_ai.training.span_context import trace_span
 from lean_ai.workflow.callbacks import build_workflow_callbacks
 from lean_ai.workflow.hooks import (
@@ -41,6 +40,7 @@ from lean_ai.workflow.prompts import (
     build_tdd_step_system_prompt,
     build_tdd_test_writing_prompt,
 )
+from lean_ai.workflow.state import StateManager
 from lean_ai.workflow.tool_executor import make_tool_executor
 from lean_ai.workflow.validation import (
     _run_post_validation,
@@ -869,6 +869,25 @@ async def execute_plan(
             if state_manager:
                 state_manager.save()
 
+                # Save checkpoint for fine-grained restore points
+                step_summary = (
+                    f"Step {step.step_number} completed. "
+                    f"Tool calls: {len(successful_calls)}. "
+                    f"Files changed: {', '.join(sorted(p for p in changed_paths if p)) or 'none'}."
+                )
+                try:
+                    state_manager.save_checkpoint(
+                        state=state_manager.get_state(),
+                        phase=f"Step {step.step_number}: {step.job or step.instruction}",
+                        summary=step_summary,
+                    )
+                except Exception:
+                    logger.debug(
+                        "Checkpoint save failed for step %d (non-fatal)",
+                        step.step_number,
+                        exc_info=True,
+                    )
+
         await ws_send(
             ws,
             "checkpoint",
@@ -898,6 +917,25 @@ async def execute_plan(
             run_step=_run_step,
         )
         halted_early = not tdd_completed
+
+        # Save checkpoint after TDD execution completes
+        if state_manager and tdd_completed:
+            try:
+                test_steps = len(
+                    getattr(plan, "tdd_test_steps", None) or []
+                )
+                impl_steps = len(plan.steps)
+                state_manager.save_checkpoint(
+                    state=state_manager.get_state(),
+                    phase="TDD Execution Complete",
+                    summary=(
+                        f"TDD execution completed. "
+                        f"Test steps: {test_steps}. "
+                        f"Implementation steps: {impl_steps}."
+                    ),
+                )
+            except Exception:
+                logger.debug("TDD checkpoint save failed (non-fatal)", exc_info=True)
     else:
         # ── Normal (non-TDD) execution ────────────────────────────
         step_groups = _build_step_groups(plan.steps)
@@ -950,6 +988,26 @@ async def execute_plan(
         | implicit_modified_files
     )
 
+    # Save final checkpoint after all steps complete
+    if state_manager:
+        try:
+            step_count = len(completed_descriptions)
+            files_str = (
+                ", ".join(files_modified) if files_modified else "none"
+            )
+            state_manager.save_checkpoint(
+                state=state_manager.get_state(),
+                phase="Execution Plan Complete",
+                summary=(
+                    f"All steps done. "
+                    f"Completed {step_count}/{total_steps} plan steps, "
+                    f"{len(all_executed)} tool calls. "
+                    f"Files modified: {files_str}."
+                ),
+            )
+        except Exception:
+            logger.debug("Final checkpoint save failed (non-fatal)", exc_info=True)
+
     # ── Post-execution validation ──
     validation_results: dict = {}
     if files_modified and settings.enable_post_validation:
@@ -974,6 +1032,29 @@ async def execute_plan(
                 allowed_files=plan.affected_files,
                 task=task,
             )
+
+    # Save checkpoint after post-execution validation
+    if state_manager:
+        validation_passed = all(
+            r.get("success", True)
+            for r in (validation_results or {}).values()
+        )
+        validation_status = "passed" if validation_passed else "failed"
+        check_count = (
+            len(validation_results) if validation_results else 0
+        )
+        try:
+            state_manager.save_checkpoint(
+                state=state_manager.get_state(),
+                phase="Validation Complete",
+                summary=(
+                    f"Post-execution validation "
+                    f"{validation_status}. "
+                    f"Checks: {check_count}."
+                ),
+            )
+        except Exception:
+            logger.debug("Validation checkpoint save failed (non-fatal)", exc_info=True)
 
     # Check for incomplete.md
     incomplete_path = os.path.join(

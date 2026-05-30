@@ -12,7 +12,8 @@ from pathlib import Path
 
 import aiosqlite
 
-from lean_ai.sqlite_compat import SQLITE_ROW_FACTORY, SQLiteConnection, connect as connect_sqlite
+from lean_ai.sqlite_compat import SQLITE_ROW_FACTORY, SQLiteConnection
+from lean_ai.sqlite_compat import connect as connect_sqlite
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,16 @@ ON architecture_decisions(status);
 
 CREATE INDEX IF NOT EXISTS idx_architecture_decisions_created_at
 ON architecture_decisions(created_at);
+
+CREATE TABLE IF NOT EXISTS checkpoints (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    parent_id TEXT,
+    phase TEXT,
+    state_json TEXT,
+    timestamp TEXT,
+    summary TEXT
+);
 """
 
 
@@ -139,6 +150,22 @@ async def _ensure_columns(db: aiosqlite.Connection) -> None:
             await db.commit()
         except Exception:
             pass
+
+    # Create checkpoints table if it doesn't exist (migration for older databases)
+    try:
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS checkpoints ("
+            "id TEXT PRIMARY KEY, "
+            "session_id TEXT NOT NULL, "
+            "parent_id TEXT, "
+            "phase TEXT, "
+            "state_json TEXT, "
+            "timestamp TEXT, "
+            "summary TEXT)"
+        )
+        await db.commit()
+    except Exception:
+        pass
 
 
 # ── Session helpers ──
@@ -448,6 +475,7 @@ async def delete_session(db: aiosqlite.Connection, session_id: str) -> bool:
     await db.execute("DELETE FROM session_commits WHERE session_id = ?", (session_id,))
     await db.execute("DELETE FROM conversation_logs WHERE session_id = ?", (session_id,))
     await db.execute("DELETE FROM tool_logs WHERE session_id = ?", (session_id,))
+    await db.execute("DELETE FROM checkpoints WHERE session_id = ?", (session_id,))
     await db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
     await db.commit()
     return True

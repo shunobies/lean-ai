@@ -407,6 +407,23 @@ export class BackendClient {
         return resp.json() as Promise<Record<string, unknown>>;
     }
 
+    /**
+     * Restore a session to a specific checkpoint.
+     *
+     * POSTs to /api/sessions/${sessionId}/restore with { checkpoint_id } body.
+     */
+    async restoreCheckpoint(sessionId: string, checkpointId: string): Promise<void> {
+        const resp = await fetch(`${this.baseUrl}/api/sessions/${sessionId}/restore`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ checkpoint_id: checkpointId }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };
+            throw new Error(err.detail ?? resp.statusText);
+        }
+    }
+
     async listGitEvents(sessionId: string): Promise<GitEventSummary[]> {
         const resp = await fetch(`${this.baseUrl}/api/sessions/${sessionId}/git-events`);
         if (!resp.ok) {
