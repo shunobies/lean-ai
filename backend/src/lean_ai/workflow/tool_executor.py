@@ -450,6 +450,7 @@ def make_tool_executor(
     repo_root: str,
     ws: "WorkflowSession | None",
     state_manager: "StateManager | None" = None,
+    session_id: str = "",
     llm_client: "LLMClient | None" = None,
     worker_client: "LLMClient | None" = None,
     dispatcher: "WSMessageDispatcher | None" = None,
@@ -485,7 +486,7 @@ def make_tool_executor(
         session_created_regression_files = set()
 
     # Derive session_id from state_manager for all closure uses
-    _session_id = state_manager.session_id if state_manager else ""
+    _session_id = state_manager.session_id if state_manager else session_id
     # Ensure telemetry_context carries the session_id from state_manager
     if telemetry_context is not None and state_manager is not None:
         telemetry_context["session_id"] = state_manager.session_id

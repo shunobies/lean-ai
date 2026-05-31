@@ -258,8 +258,12 @@ async def analyze_screenshot(
         )
 
     # ── Pass 1 — inventory ────────────────────────────────────────────
-    inv_system_text, _inv_system_vid = registry.get("ui_verification.inventory_system")
-    inv_user_text, _inv_user_vid = registry.get("ui_verification.inventory_user")
+    inv_system_text, _inv_system_vid = registry.get_with_version(
+        "ui_verification.inventory_system"
+    )
+    inv_user_text, _inv_user_vid = registry.get_with_version(
+        "ui_verification.inventory_user"
+    )
     inv_result = await describe_image_structured(
         img_b64,
         UIInventory,
@@ -274,8 +278,10 @@ async def analyze_screenshot(
     warnings.extend(inv_result.warnings)
 
     # ── Pass 2 — text transcription ───────────────────────────────────
-    text_system_text, _text_system_vid = registry.get("ui_verification.text_system")
-    text_user_text, _text_user_vid = registry.get("ui_verification.text_user")
+    text_system_text, _text_system_vid = registry.get_with_version(
+        "ui_verification.text_system"
+    )
+    text_user_text, _text_user_vid = registry.get_with_version("ui_verification.text_user")
     text_result = await describe_image_structured(
         img_b64,
         UITextTranscript,
@@ -305,14 +311,16 @@ async def analyze_screenshot(
         warnings.append(f"color sampling failed: {e}")
 
     # ── Pass 4 — focused answer ──────────────────────────────────────
-    answer_user_text, _answer_user_vid = registry.format(
+    answer_user_text, _answer_user_vid = registry.format_with_version(
         "ui_verification.answer_user",
         question=question,
         inventory_json=inventory.model_dump_json(indent=2),
         text_json=text.model_dump_json(indent=2),
         colors=str(colors),
     )
-    answer_system_text, _answer_system_vid = registry.get("ui_verification.answer_system")
+    answer_system_text, _answer_system_vid = registry.get_with_version(
+        "ui_verification.answer_system"
+    )
     answer_result = await describe_image(
         img_b64,
         system_prompt=answer_system_text,

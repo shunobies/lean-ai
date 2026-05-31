@@ -929,7 +929,7 @@ class EvaluationRunner:
 
         # Build the judge prompt with criteria checkboxes.
         try:
-            judge_prompt = prompt_registry.get("judge.persona")
+            judge_prompt = await prompt_registry.get("judge.persona")
         except KeyError:
             judge_prompt = (
                 "You are an evaluation judge. Score the assistant's response "

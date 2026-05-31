@@ -1,6 +1,6 @@
 # Architecture
 
-Lean AI is a linear pipeline — no state machine, no complex orchestration. Tasks flow through clear phases, and each component has one job.
+Lean AI is a FastAPI backend with two editor clients layered on top: the VS Code extension and a JetBrains plugin. The backend exposes REST endpoints for setup, chat, sessions, memories, prompts, integrations, and export, plus a WebSocket workflow channel for long-running agent sessions.
 
 > For an end-to-end narrative walkthrough of a real session — from the first chat message through post-execution validation, with every guardrail called out — see [example-flow.md](example-flow.md). For the tool-and-state audit focused on persistence, see [workflow-flow.md](workflow-flow.md).
 
@@ -8,20 +8,24 @@ Lean AI is a linear pipeline — no state machine, no complex orchestration. Tas
 
 ```
 ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│   VSCode     │────▶│   FastAPI     │────▶│  LLM Client  │
-│  Extension   │◀────│   Backend    │◀────│  (Provider)  │
-└──────────────┘     └──────────────┘     └──────────────┘
-   WebSocket /         REST + WS            Ollama / OpenAI
-   HTTP REST                                / Anthropic / Gemini
+│   VS Code    │────▶│              │────▶│              │
+│  Extension   │     │   FastAPI    │     │ LLM Clients  │
+└──────────────┘     │   Backend    │     └──────────────┘
+                     │              │        Ollama / OpenAI
+┌──────────────┐     │              │        / Anthropic /
+│ JetBrains    │────▶│              │        Gemini / Serve
+│   Plugin     │     └──────────────┘
+└──────────────┘
+   REST / WS
 ```
 
-The extension communicates with the backend over HTTP (chat, sessions) and WebSocket (workflow streaming). The backend delegates LLM calls through a provider abstraction that supports Ollama, OpenAI, Anthropic, and Gemini.
+Both clients communicate with the backend over HTTP for request/response APIs and WebSocket for streaming workflow execution. The backend routes LLM work through a facade with provider adapters, optional role-specific clients (primary, expert, request, worker), workspace-aware tools, SQLite persistence, indexing, and optional memory/training/integration subsystems.
 
 ## Workflow Modes
 
 ### Plan Mode (`/agent`)
 
-The default mode for features and refactors. Tasks pass through four phases:
+The default mode for features and refactors. The backend enters a graph-driven workflow that still follows a mostly linear user experience:
 
 ```
 clarify → plan → approve → execute
@@ -31,13 +35,13 @@ clarify → plan → approve → execute
 
 2. **Plan** — A 6-phase decomposed planning pipeline (see below) reads the codebase, designs changes, and produces a structured `ExecutionPlan` with numbered steps.
 
-3. **Approve** — The plan is sent to the user for review. The user can approve, or send feedback to trigger a revision (up to 5 revision rounds).
+3. **Approve** — The plan is sent to the user for review over the workflow WebSocket. The user can approve, or send feedback to trigger a revision (up to 5 revision rounds).
 
-4. **Execute** — Each plan step is executed sequentially. A constrained LLM translates each step's instruction into tool calls (file creation, edits, tests, etc.). Progress is streamed via WebSocket checkpoints.
+4. **Execute** — Each plan step is executed sequentially. A constrained LLM translates each step's instruction into tool calls (file creation, edits, shell commands, tests, etc.). Progress, approvals, diffs, and validation status are streamed over WebSocket, and checkpoints are persisted so execution can resume.
 
 ### Fix Mode (`/fix`)
 
-Skips planning entirely. The LLM gets the full tool set and works autonomously until it decides the task is done. Best for bug fixes, small changes, and exploratory work.
+Skips planning entirely. The backend runs a direct tool-calling workflow that optionally begins with a read-only investigation phase, then hands off to implementation and post-validation. Best for bug fixes, small changes, and exploratory work.
 
 ```
 implement (with tools) → done
@@ -47,6 +51,10 @@ Fix mode includes:
 - **Scratchpad** — persistent memory across tool-calling turns. The agent records its progress so it can survive context window refreshes.
 - **Task reminders** — periodically re-injected to keep the agent focused.
 - **Context refresh** — when context usage hits 70% of the window, old messages are dropped and the system prompt is rebuilt from fresh disk state. The scratchpad bridges the gap.
+
+### Request Mode (`/request` and `/skill`)
+
+Uses the same direct-execution path as fix mode, but with a neutral request-oriented prompt and, when configured, a dedicated request model. It is intended for open-ended research, drafting, and skill-driven tasks where a planning gate is unnecessary.
 
 ## 6-Phase Planning Pipeline
 
@@ -81,23 +89,36 @@ When using cloud providers, the [Local Refiner](reference-library.md#local-refin
 
 ## Tools
 
-The agent has access to these tools during execution:
+Lean AI exposes different tool sets depending on the execution surface:
+
+- **Chat** uses read-heavy workspace and internet tools.
+- **Planning** uses investigation tools plus structured planning helpers.
+- **Fix/request execution** uses the full implementation tool set.
+
+Core execution tools include:
 
 | Tool | Description |
 |---|---|
 | `create_file` | Create a new file (fails if file exists) |
 | `edit_file` | Find-and-replace edit on an existing file |
 | `read_file` | Read file contents with line numbers |
+| `run_command` | Execute a general shell command |
 | `run_tests` | Execute a test command |
 | `run_lint` | Execute a linting command |
 | `format_code` | Execute a code formatter |
 | `list_directory` | List directory contents |
 | `directory_tree` | Recursive file tree view |
 | `grep_files` | Search for patterns across the codebase |
+| `web_search` / browser tools | Search the web and inspect fetched pages when enabled |
+| `git_*` helpers | Diff, branch, commit, merge, and stash operations via backend wrappers |
+| `save_note` / memory tools | Store notes, query prior sessions, and search curated memory |
+| `record_architecture_decision` | Save durable architecture decisions in the workspace DB |
+| `verify_web_ui` / `verify_desktop_ui` | Optional screenshot-based UI verification tools |
+| `request_clarification` | Ask the user a blocking question through the workflow channel |
 | `update_scratchpad` | Save progress notes (persistent across turns) |
 | `task_complete` | Signal that all work is done |
 
-Shell commands (`run_tests`, `run_lint`, `format_code`) pass through a safety gate (`tools/command_safety.py`) that blocks dangerous operations.
+Shell commands pass through a safety gate (`tools/command_safety.py`) and WebSocket-mediated approval flow for destructive or out-of-workspace operations.
 
 ## LLM Providers
 
@@ -107,18 +128,26 @@ The `LLMClient` facade (`llm/facade.py`) handles multi-turn tool-calling orchest
 - **OpenAI** (`llm/provider_openai.py`) — OpenAI API and compatible providers (Together, Groq, vLLM via `LEAN_AI_OPENAI_BASE_URL`).
 - **Anthropic** (`llm/provider_anthropic.py`) — Claude API with tool use support.
 - **Gemini** (`llm/provider_gemini.py`) — Google Gemini API via the `google-genai` SDK. Supports large context windows (1M+ tokens).
+- **Serve** (`llm/provider_openai.py` via `routers/client_factory.py`) — Lean AI Serve / vLLM using the OpenAI-compatible protocol.
 
 Inline predictions (Copilot-style completions) and embeddings always use Ollama regardless of the active provider.
 
+The backend can also create optional role-specific clients:
+
+- **Primary** — default model for normal execution.
+- **Expert** — heavier model for reasoning-heavy planning and final validation retries.
+- **Request** — optional model for `/request` and chat-oriented drafting.
+- **Worker** — lightweight auxiliary model for compression, summarization, and memory extraction.
+
 ### Context Management
 
-No `ContextWindowManager`. Ollama manages its own KV cache. The system focuses on prompt quality:
+There is no separate context-window manager object. Instead, the orchestration loop rebuilds prompts from durable state when message history grows too large:
 
 - Context refresh triggers at 70% of the context window
 - Old messages are dropped, the system prompt is rebuilt from fresh disk state
 - Scratchpad and journal continuity are re-injected as recent-tail slices during refresh (not full-file replay) to reduce context refill overhead.
 - A per-session state ledger (`.lean_ai/state/{session_id}.jsonl`) records typed workflow events (phase transitions, tool calls/results, refresh checkpoints) so refresh payloads can include deterministic machine-state summaries alongside prose notes.
-- No LLM summarization call — the scratchpad is the agent's persistent memory
+- Scratchpad, journal, and the state ledger are the durable continuity mechanisms
 
 ## Indexer
 
@@ -143,33 +172,39 @@ Files are loaded in order: `project_context.md` → `framework_guide.md` → alp
 
 ## Language Support
 
-13 languages with tree-sitter AST parsing — no regex patterns:
+The language registry currently ships 13 YAML-backed tree-sitter definitions:
 
-Python, JavaScript, TypeScript, Go, Rust, Java, C, C++, C#, Ruby, PHP, Swift, Kotlin
+Python, JavaScript, TypeScript, Go, Rust, Java, C, C++, C#, Ruby, PHP, CSS, HTML
 
 The language registry (`languages/`) defines extraction rules for classes, functions, and imports in YAML format. A generic extraction engine applies these rules to any supported language.
 
 ## Persistence
 
-Minimal SQLite via aiosqlite (`db.py`). Two core tables:
+Workspace persistence uses SQLite via `aiosqlite` (`db.py`) at `.lean_ai/lean_ai.db`. The schema has grown beyond the original two-table core and now includes workflow, memory, prompt, and checkpoint state:
 
-- **`sessions`** — Workflow sessions with task, status, branch name, plan JSON
+- **`sessions`** — Workflow sessions with task, status, branch metadata, and plan JSON
 - **`tool_logs`** — Tool execution history with timestamps and results
+- **`conversation_logs`** — Assistant/user/tool conversation log for a session
+- **`session_commits`** — Git commits created during a session
+- **`session_memories`** — Curated memory rows for later promotion/retrieval
+- **`architecture_decisions`** — Durable architecture notes captured from workflows or chat
+- **`checkpoints`** — Serialized workflow state for resume/branching
+- **`prompt_versions`, `prompt_variants`, `ab_tests`** — Prompt-registry and experimentation state
 
 No ORM. Raw SQL queries.
 
 ## Git Integration
 
-Every workflow task runs on its own branch:
+When the target workspace is a Git repository, each workflow session runs on its own branch:
 
 1. Stash uncommitted changes
 2. Switch to the default branch (main/master)
 3. Create a work branch (`lean-ai/{session_id}`)
 4. Execute the plan
-5. Auto-commit changes
+5. Auto-commit changes when there is something to commit
 6. User approves → merge and clean up, or rejects → delete branch and restore stash
 
-This keeps the main branch clean and makes every change reversible.
+The backend also tracks session commits in the workspace DB and keeps Lean AI auto-stashes separate from user-created stash entries.
 
 ## Post-Execution Validation
 

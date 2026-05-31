@@ -661,7 +661,7 @@ async def _synthesize_scope(
     is ``True`` when the structured call succeeded and ``False`` when the
     programmatic fallback kicked in (downstream can log / flag that).
     """
-    synthesis_system = registry.get("planning.scope_synthesis_system")
+    synthesis_system = registry.get_text("planning.scope_synthesis_system")
 
     # Trim the project context slice so the synthesis prompt stays bounded —
     # the exploration loop already consumed the full context.
@@ -835,7 +835,7 @@ async def _revise_plan(
     project_context_block = (
         f"PROJECT CONTEXT:\n{context}\n\n" if context else ""
     )
-    assembly_prompt = registry.format(
+    assembly_prompt = registry.format_text(
         "planning.assembly_user",
         task=task,
         design_and_risks=design_and_risks,

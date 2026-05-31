@@ -483,7 +483,7 @@ async def _run_validation_fix_loop(
         tool_executor = make_tool_executor(
             repo_root,
             ws,
-            state_manager.session_id if state_manager else "",
+            session_id=state_manager.session_id if state_manager else "",
             llm_client=active_client,
             dispatcher=dispatcher,
             tdd_protect_tests=tdd_fix_protect,

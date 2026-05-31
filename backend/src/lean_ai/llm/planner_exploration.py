@@ -562,7 +562,7 @@ async def run_phase2_exploration(
         {"role": "system", "content": PLAN_EXPLORATION_SYSTEM_PROMPT},
         {
             "role": "user",
-            "content": registry.format(
+            "content": registry.format_text(
                 "planning.exploration_user",
                 task=task,
                 scope=scope,
@@ -711,7 +711,7 @@ async def _run_parallel_exploration(
                 "ALL relevant files. Output a structured file list with "
                 "each file's role (create/edit/reference). "
                 "Do NOT read file contents.\n\n"
-                + registry.format(
+                + registry.format_text(
                     "planning.exploration_user",
                     task=task,
                     scope=scope,
@@ -916,7 +916,7 @@ async def _run_serial_exploration(
             {"role": "system", "content": PLAN_EXPLORATION_SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": registry.format(
+                "content": registry.format_text(
                     "planning.exploration_user",
                     task=task,
                     scope=scope,
@@ -1000,7 +1000,7 @@ async def _run_serial_exploration(
         )
         return new_messages
 
-    base_reminder = registry.format(
+    base_reminder = registry.format_text(
         "planning.task_reminder",
         task=task,
     )
@@ -1171,7 +1171,7 @@ async def _synthesize_file_summary(
         "not fit the structured fields."
     )
 
-    synthesis_system = registry.get("planning.exploration_synthesis_system")
+    synthesis_system = registry.get_text("planning.exploration_synthesis_system")
 
     try:
         summary = await explorer.chat_structured(

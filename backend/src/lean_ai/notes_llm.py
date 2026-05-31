@@ -90,7 +90,7 @@ async def _categorize_note(
         parts = source_workspace.rstrip("/").split("/")
         workspace_hint = f"\nSource workspace: {parts[-1]}" if parts else ""
 
-    prompt_text, version_id = registry.get("notes.categorize")
+    prompt_text, version_id = registry.get_with_version("notes.categorize")
     user_msg = prompt_text.format(
         note_content=content,
         workspace_hint=workspace_hint,

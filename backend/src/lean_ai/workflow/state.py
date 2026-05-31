@@ -122,7 +122,7 @@ class StateManager:
         self._state_file = self._state_dir / f"{session_id}.json"
         self._state: WorkflowState | None = None
         self._checkpoints_dir = Path(
-            checkpoints_dir if checkpoints_dir is not None else ".lean_ai" / "checkpoints"
+            checkpoints_dir if checkpoints_dir is not None else Path(".lean_ai") / "checkpoints"
         )
 
     def _state_path(self) -> Path:

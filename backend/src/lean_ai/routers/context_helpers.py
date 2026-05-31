@@ -515,7 +515,7 @@ def build_chat_system_prompt(
 ) -> str:
     """Build the standard chat system prompt."""
     return _build_contextual_system_prompt(
-        base_prompt=registry.format("chat.system", CHAT_MAX_TURNS=str(max_turns)),
+        base_prompt=registry.format_text("chat.system", CHAT_MAX_TURNS=str(max_turns)),
         workspace=workspace,
         file_tree=file_tree,
         active_file_content=active_file_content,
@@ -561,7 +561,10 @@ def build_architecture_review_system_prompt(
         )
 
     return _build_contextual_system_prompt(
-        base_prompt=registry.format("chat.architecture_review", CHAT_MAX_TURNS=str(max_turns)),
+        base_prompt=registry.format_text(
+            "chat.architecture_review",
+            CHAT_MAX_TURNS=str(max_turns),
+        ),
         workspace=workspace,
         file_tree=file_tree,
         active_file_content=active_file_content,

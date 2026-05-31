@@ -819,8 +819,9 @@ class LLMClient:
                                 registry,
                             )
 
-                            _repo_root = telemetry_context.get("repo_root")
-                            _ws_session = telemetry_context.get("session_id")
+                            _telemetry = telemetry_context or {}
+                            _repo_root = _telemetry.get("repo_root")
+                            _ws_session = _telemetry.get("session_id")
                             if _repo_root:
                                 _ws_db = await get_db(_repo_root)
                                 _loop_result = await registry.format(
@@ -832,7 +833,7 @@ class LLMClient:
                                 )
                                 if isinstance(_loop_result, PromptVersionResult):
                                     loop_nudge = _loop_result.text
-                                    telemetry_context["prompt_version_id"] = _loop_result.version
+                                    _telemetry["prompt_version_id"] = _loop_result.version
                                 else:
                                     loop_nudge = _loop_result
                                 await _ws_db.close()
@@ -972,8 +973,9 @@ class LLMClient:
                     registry,
                 )
 
-                _repo_root = telemetry_context.get("repo_root")
-                _ws_session = telemetry_context.get("session_id")
+                _telemetry = telemetry_context or {}
+                _repo_root = _telemetry.get("repo_root")
+                _ws_session = _telemetry.get("session_id")
                 if _repo_root:
                     _ws_db = await get_db(_repo_root)
                     _budget_result = await registry.get(
@@ -983,7 +985,7 @@ class LLMClient:
                     )
                     if isinstance(_budget_result, PromptVersionResult):
                         budget_nudge = _budget_result.text
-                        telemetry_context["prompt_version_id"] = _budget_result.version
+                        _telemetry["prompt_version_id"] = _budget_result.version
                     else:
                         budget_nudge = _budget_result
                     await _ws_db.close()
@@ -1122,8 +1124,9 @@ class LLMClient:
                     registry,
                 )
 
-                _repo_root = telemetry_context.get("repo_root")
-                _ws_session = telemetry_context.get("session_id")
+                _telemetry = telemetry_context or {}
+                _repo_root = _telemetry.get("repo_root")
+                _ws_session = _telemetry.get("session_id")
                 if _repo_root:
                     _ws_db = await get_db(_repo_root)
                     _claim_result = await registry.get(
@@ -1133,7 +1136,7 @@ class LLMClient:
                     )
                     if isinstance(_claim_result, PromptVersionResult):
                         claim_nudge = _claim_result.text
-                        telemetry_context["prompt_version_id"] = _claim_result.version
+                        _telemetry["prompt_version_id"] = _claim_result.version
                     else:
                         claim_nudge = _claim_result
                     await _ws_db.close()
@@ -1191,8 +1194,9 @@ class LLMClient:
                     registry,
                 )
 
-                _repo_root = telemetry_context.get("repo_root")
-                _ws_session = telemetry_context.get("session_id")
+                _telemetry = telemetry_context or {}
+                _repo_root = _telemetry.get("repo_root")
+                _ws_session = _telemetry.get("session_id")
                 if _repo_root:
                     _ws_db = await get_db(_repo_root)
                     _conf_result = await registry.get(
@@ -1202,7 +1206,7 @@ class LLMClient:
                     )
                     if isinstance(_conf_result, PromptVersionResult):
                         confidence_nudge = _conf_result.text
-                        telemetry_context["prompt_version_id"] = _conf_result.version
+                        _telemetry["prompt_version_id"] = _conf_result.version
                     else:
                         confidence_nudge = _conf_result
                     await _ws_db.close()

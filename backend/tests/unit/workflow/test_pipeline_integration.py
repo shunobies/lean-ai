@@ -48,6 +48,11 @@ def _setup_mock_modules(plan, execute_plan_return=None):
     lean_ai.llm.planner has a syntax error so we must inject a mock
     module before pipeline.py can be imported.
     """
+    sys.modules.pop("lean_ai.workflow.pipeline", None)
+    workflow_pkg = sys.modules.get("lean_ai.workflow")
+    if workflow_pkg is not None and hasattr(workflow_pkg, "pipeline"):
+        delattr(workflow_pkg, "pipeline")
+
     # Inject mock for the broken planner module
     mock_planner = ModuleType("lean_ai.llm.planner")
     mock_planner.create_plan = AsyncMock(return_value=plan)
@@ -137,6 +142,37 @@ def _build_state_manager_mock(captured_state_ref):
         return manager
 
     return factory
+
+
+@pytest.fixture(autouse=True)
+def _restore_mocked_modules():
+    """Restore sys.modules entries mutated by _setup_mock_modules()."""
+    names = [
+        "lean_ai.llm.planner",
+        "lean_ai.workflow.executor",
+        "lean_ai.workflow.fix_mode",
+        "lean_ai.workflow.callbacks",
+        "lean_ai.workflow.validation",
+        "lean_ai.workflow.hooks",
+        "lean_ai.training.span_context",
+        "lean_ai.routers",
+        "lean_ai.routers.dependencies",
+        "lean_ai.config",
+        "lean_ai.workflow.ws_handler",
+        "lean_ai.workflow.ws_dispatcher",
+        "lean_ai.workflow.ws_protocol",
+        "lean_ai.workflow.pipeline",
+    ]
+    saved = {name: sys.modules.get(name) for name in names}
+    try:
+        yield
+    finally:
+        for name in names:
+            original = saved[name]
+            if original is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = original
 
 
 # ── 1. Full workflow session reaching ApprovalNode ──────────────────────────

@@ -209,11 +209,11 @@ class ScopePhase(PlanningPhase):
         t0 = time.monotonic()
 
         phase1_turns_str = str(settings.plan_phase1_max_turns)
-        phase1_system = registry.format(
+        phase1_system = registry.format_text(
             "planning.scope_system",
             PHASE1_MAX_TURNS=phase1_turns_str,
         )
-        phase1_user_content = registry.format(
+        phase1_user_content = registry.format_text(
             "planning.scope_user",
             task=task,
             context=context,
@@ -533,7 +533,7 @@ class DesignPhase(PlanningPhase):
         phase3_project_context_block = (
             f"PROJECT CONTEXT:\n{context}\n\n" if context else ""
         )
-        phase3_user_content = registry.format(
+        phase3_user_content = registry.format_text(
             "planning.design_user",
             task=task,
             scope=scope,
@@ -1571,7 +1571,8 @@ async def create_plan(
     task: str,
     repo_root: str,
     llm_client: "LLMClient",
-    state_manager: StateManager,
+    state_manager: StateManager | None = None,
+    session_id: str = "",
     context: str = "",
     revision_context: str | None = None,
     previous_plan: ExecutionPlan | None = None,
@@ -1640,7 +1641,11 @@ async def create_plan(
     explorer = routing.get_client("scope")
     expert = expert_llm_client or llm_client
 
-    session_id = state_manager.get_state().session_id
+    effective_session_id = (
+        state_manager.get_state().session_id if state_manager is not None else session_id
+    )
+    if state_manager is None:
+        state_manager = StateManager(effective_session_id or "planning")
 
     # Build the 4-phase subgraph
     phase_kwargs = {
@@ -1695,7 +1700,7 @@ async def create_plan(
     state.session_metadata["task"] = task
     state.session_metadata["context"] = context
     state.session_metadata["repo_root"] = repo_root
-    state.session_metadata["session_id"] = session_id
+    state.session_metadata["session_id"] = effective_session_id
 
     # Execute the subgraph
     engine = WorkflowEngine()
@@ -1816,7 +1821,7 @@ async def _run_phase5_verification(
         )
 
     if tdd_mode:
-        user_content = registry.format(
+        user_content = registry.format_text(
             "planning.verification_user_tdd",
             task=task,
             impl_plan_md=impl_plan_md,
@@ -1830,7 +1835,7 @@ async def _run_phase5_verification(
             risk_assessment=risk_assessment_block,
         )
     else:
-        user_content = registry.format(
+        user_content = registry.format_text(
             "planning.verification_user_normal",
             task=task,
             test_command=test_command or "(none configured yet)",
@@ -2010,7 +2015,7 @@ async def _synthesize_design_and_risks(
     On structured-output failure, returns a minimal DesignAndRisks with the
     exploration prose stashed in ``notes`` so the pipeline keeps moving.
     """
-    synthesis_system = registry.get("planning.design_synthesis_system")
+    synthesis_system = registry.get_text("planning.design_synthesis_system")
     user_parts = [
         f"TASK: {task}",
         f"SCOPE:\n{scope}",
@@ -2736,7 +2741,7 @@ async def _assemble_phase4_plan(
             {"role": "system", "content": PLAN_ASSEMBLY_SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": registry.format(
+                "content": registry.format_text(
                     "planning.assembly_user",
                     task=task,
                     design_and_risks=design_and_risks,
@@ -2818,7 +2823,7 @@ async def _run_phase_4b_tdd_test_design(
             {"role": "system", "content": PLAN_VERIFICATION_SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": registry.format(
+                "content": registry.format_text(
                     "planning.verification_user_tdd",
                     task=task,
                     impl_plan_md=plan_to_markdown(draft_plan),

@@ -610,12 +610,14 @@ async def run_workflow(
             summary="Execution completed successfully",
         )
 
+        session_span_uuid = getattr(session_span, "span_uuid", "")
+
         # Detect branching after execution checkpoint
         await _detect_branching_and_request_feedback(
             state_manager=state_manager,
             new_checkpoint_id=_execution_checkpoint_id,
             new_parent_id=None,
-            session_span_uuid=session_span.span_uuid,
+            session_span_uuid=session_span_uuid,
             repo_root=repo_root,
         )
 
@@ -634,7 +636,7 @@ async def run_workflow(
             state_manager=state_manager,
             new_checkpoint_id=_validation_checkpoint_id,
             new_parent_id=_execution_checkpoint_id,
-            session_span_uuid=session_span.span_uuid,
+            session_span_uuid=session_span_uuid,
             repo_root=repo_root,
         )
 

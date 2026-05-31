@@ -454,7 +454,7 @@ async def _migrate(db: aiosqlite.Connection) -> None:
 
     # Add prompt_version_id column to training_traces for prompt versioning / A-B testing.
     if not await _has_column("training_traces", "prompt_version_id"):
-        await db.execute("ALTER TABLE training_traces ADD COLUMN prompt_version_id TEXT")
+        await db.execute("ALTER TABLE training_traces ADD COLUMN prompt_version_id INTEGER")
         await db.commit()
 
 
@@ -504,7 +504,7 @@ async def insert_training_trace(
     scrubbed: bool = True,
     role: str | None = None,
     turn_index: int | None = None,
-    prompt_version_id: str | None = None,
+    prompt_version_id: int | None = None,
 ) -> int:
     """Insert a row into ``training_traces`` and return the new id."""
     cursor = await db.execute(

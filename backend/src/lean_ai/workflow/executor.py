@@ -88,6 +88,15 @@ _INCOMPLETE_REL_PATH = ".lean_ai/incomplete.md"
 _TDD_MAX_RETRIES = 2
 
 
+def read_journal(repo_root: str, session_id: str) -> str:
+    """Compatibility helper for tests and legacy prompt-building code."""
+    path = Path(repo_root) / ".lean_ai" / "journals" / f"{session_id}.md"
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
 def _collect_step_test_commands(step: PlanStep) -> list[str]:
     """Return test commands from a step's success_checks.
 
@@ -483,13 +492,14 @@ async def execute_plan(
     context: str,
     branch_name: str,
     base_branch: str = "",
+    session_id: str = "",
     conversation_logger: Callable | None = None,
     state_manager: StateManager | None = None,
     expert_llm_client: "LLMClient | None" = None,
     dispatcher: WSMessageDispatcher | None = None,
 ) -> str:
     """Execute each plan step sequentially with a constrained LLM."""
-    session_id = state_manager.session_id if state_manager else ""
+    session_id = state_manager.session_id if state_manager else session_id
     _clear_incomplete_file(repo_root)
     if dispatcher:
         dispatcher.enter_execution_mode()
@@ -505,7 +515,7 @@ async def execute_plan(
     tool_executor = make_tool_executor(
         repo_root,
         ws,
-        session_id,
+        session_id=session_id,
         llm_client=llm_client,
         dispatcher=dispatcher,
         telemetry_context=exec_telemetry,
@@ -1241,7 +1251,7 @@ async def _run_tdd_execution(
     test_tool_executor = make_tool_executor(
         repo_root,
         ws,
-        session_id,
+        session_id=session_id,
         llm_client=test_writer_client,
         dispatcher=dispatcher,
         telemetry_context={
@@ -1324,7 +1334,7 @@ async def _run_tdd_execution(
         impl_executor = make_tool_executor(
             repo_root,
             ws,
-            session_id,
+            session_id=session_id,
             llm_client=llm_client,
             dispatcher=dispatcher,
             tdd_protect_tests=True,

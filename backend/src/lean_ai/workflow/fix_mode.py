@@ -5,6 +5,7 @@ Extracted from pipeline.py for separation of concerns.
 
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lean_ai.config import settings
@@ -14,6 +15,7 @@ from lean_ai.llm.tool_definitions import (
     build_request_tools,
 )
 from lean_ai.routers.context_helpers import load_condensed_context
+from lean_ai.tools import scratchpad
 from lean_ai.tools.state_ledger import append_event, summarize_recent_events
 from lean_ai.workflow.callbacks import build_workflow_callbacks
 from lean_ai.workflow.prompts import (
@@ -43,6 +45,15 @@ _REFRESH_JOURNAL_MAX_CHARS = 1600
 _INVESTIGATION_SUMMARY_MAX_CHARS = 2000
 
 
+def read_journal(repo_root: str, session_id: str) -> str:
+    """Compatibility helper for tests and legacy prompt-building code."""
+    path = Path(repo_root) / ".lean_ai" / "journals" / f"{session_id}.md"
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
 def _tail(text: str, max_chars: int) -> str:
     """Return the trailing slice of *text* capped at *max_chars*."""
     if not text:
@@ -60,6 +71,7 @@ async def _run_fix(
     context: str,
     branch_name: str,
     base_branch: str = "",
+    session_id: str = "",
     conversation_logger: Callable | None = None,
     state_manager: StateManager = None,
     expert_llm_client: "LLMClient | None" = None,
@@ -73,6 +85,21 @@ async def _run_fix(
     When *mode* is ``"request"``, uses a neutral prompt and optionally
     a separate request model.
     """
+    if state_manager is None:
+        state_manager = StateManager(session_id or "fix")
+    bootstrap_state = state_manager.get_state()
+    if bootstrap_state.session_id:
+        if not bootstrap_state.scratchpad_content:
+            bootstrap_state.scratchpad_content = scratchpad.read_scratchpad(
+                repo_root,
+                bootstrap_state.session_id,
+            )
+        if not bootstrap_state.journal_entries:
+            journal_text = read_journal(repo_root, bootstrap_state.session_id)
+            if journal_text:
+                bootstrap_state.journal_entries = [
+                    line.strip() for line in journal_text.splitlines() if line.strip()
+                ]
     if dispatcher:
         dispatcher.enter_execution_mode()
     append_event(
@@ -101,7 +128,7 @@ async def _run_fix(
     tool_executor = make_tool_executor(
         repo_root,
         ws,
-        state_manager.session_id,
+        session_id=state_manager.session_id,
         llm_client=active_client,
         dispatcher=dispatcher,
         telemetry_context=fix_telemetry,

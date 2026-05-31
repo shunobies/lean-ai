@@ -64,6 +64,25 @@ class PromptVersionResult:
     variant_label: str | None = None
 
 
+class SyncPromptText(str):
+    """String-like prompt value that can also be awaited.
+
+    This preserves backward compatibility for old sync call sites that
+    expect ``registry.get(...)`` to behave like a plain string, while
+    still letting newer async call sites ``await registry.get(...)``
+    even when no DB-backed version lookup is required.
+    """
+
+    def __new__(cls, value: str):
+        return super().__new__(cls, value)
+
+    def __await__(self):
+        async def _wrap():
+            return str(self)
+
+        return _wrap().__await__()
+
+
 class PromptRegistry:
     """Singleton registry for all LLM prompts.
 
@@ -146,12 +165,29 @@ class PromptRegistry:
             raise KeyError(f"Unknown prompt key: {key!r}")
         return entry.default_text
 
-    async def get(
+    def get_text(self, key: str) -> str:
+        """Synchronously return prompt text for non-versioned call sites."""
+        return self._resolve_text(key)
+
+    def get_with_version(self, key: str) -> tuple[str, int]:
+        """Synchronously return prompt text and a default local version."""
+        return self._resolve_text(key), 0
+
+    def format_text(self, key: str, **kwargs: str) -> str:
+        """Synchronously format prompt text for non-versioned call sites."""
+        text = self._resolve_text(key)
+        return text.format_map(defaultdict(str, **kwargs)) if kwargs else text
+
+    def format_with_version(self, key: str, **kwargs: str) -> tuple[str, int]:
+        """Synchronously format prompt text and return a default local version."""
+        return self.format_text(key, **kwargs), 0
+
+    def get(
         self,
-        db: aiosqlite.Connection,
-        key: str,
+        db: aiosqlite.Connection | str | None,
+        key: str | None = None,
         session_id: str | None = None,
-    ) -> PromptVersionResult | str:
+    ) -> PromptVersionResult | SyncPromptText | Any:
         """Return the resolved prompt text with version metadata.
 
         When *session_id* is provided, performs A/B variant selection and
@@ -159,69 +195,74 @@ class PromptRegistry:
         label.  Without *session_id*, returns a plain ``str`` for backward
         compatibility.
         """
+        if isinstance(db, str):
+            key, db = db, None
+        if key is None:
+            raise TypeError("PromptRegistry.get() missing required argument: 'key'")
         base_text = self._resolve_text(key)
 
         if session_id is None:
-            return base_text
+            return SyncPromptText(base_text)
 
-        # Try A/B variant selection first
-        variant = self._select_variant(key, session_id)
-        if variant is not None:
-            variant_label = variant["variant_label"]
-            try:
-                cursor = await db.execute(
-                    "SELECT id, version, text FROM prompt_versions "
-                    "WHERE prompt_key = ? AND variant_label = ? AND is_active = 1 "
-                    "ORDER BY version DESC LIMIT 1",
-                    (key, variant_label),
-                )
-                row = await cursor.fetchone()
-                if row is not None:
-                    row_dict = dict(row)
-                    return PromptVersionResult(
-                        text=row_dict["text"],
-                        version=row_dict["version"],
-                        variant_label=variant_label,
+        async def _resolve_versioned() -> PromptVersionResult:
+            variant = self._select_variant(key, session_id)
+            if variant is not None and db is not None:
+                variant_label = variant["variant_label"]
+                try:
+                    cursor = await db.execute(
+                        "SELECT id, version, text FROM prompt_versions "
+                        "WHERE prompt_key = ? AND variant_label = ? AND is_active = 1 "
+                        "ORDER BY version DESC LIMIT 1",
+                        (key, variant_label),
                     )
+                    row = await cursor.fetchone()
+                    if row is not None:
+                        row_dict = dict(row)
+                        return PromptVersionResult(
+                            text=row_dict["text"],
+                            version=row_dict["version"],
+                            variant_label=variant_label,
+                        )
+                except Exception:
+                    pass
+
+            try:
+                if db is None:
+                    raise RuntimeError("No prompt DB available for variant lookup")
+                cursor = await db.execute(
+                    "SELECT DISTINCT variant_label FROM prompt_versions "
+                    "WHERE prompt_key = ? AND is_active = 1",
+                    (key,),
+                )
+                rows = await cursor.fetchall()
+                variant_labels = [dict(r)["variant_label"] for r in rows]
+                if variant_labels:
+                    idx = hash(session_id + key) % len(variant_labels)
+                    chosen_label = variant_labels[idx]
+                    cursor = await db.execute(
+                        "SELECT id, version, text FROM prompt_versions "
+                        "WHERE prompt_key = ? AND variant_label = ? AND is_active = 1 "
+                        "ORDER BY version DESC LIMIT 1",
+                        (key, chosen_label),
+                    )
+                    row = await cursor.fetchone()
+                    if row is not None:
+                        row_dict = dict(row)
+                        return PromptVersionResult(
+                            text=row_dict["text"],
+                            version=row_dict["version"],
+                            variant_label=chosen_label,
+                        )
             except Exception:
                 pass
 
-        # Fallback: query all active variants for this prompt key and distribute
-        try:
-            cursor = await db.execute(
-                "SELECT DISTINCT variant_label FROM prompt_versions "
-                "WHERE prompt_key = ? AND is_active = 1",
-                (key,),
+            return PromptVersionResult(
+                text=base_text,
+                version=0,
+                variant_label=variant["variant_label"] if variant else None,
             )
-            rows = await cursor.fetchall()
-            variant_labels = [dict(r)["variant_label"] for r in rows]
-            if variant_labels:
-                # Use hash to deterministically pick a variant
-                idx = hash(session_id + key) % len(variant_labels)
-                chosen_label = variant_labels[idx]
-                cursor = await db.execute(
-                    "SELECT id, version, text FROM prompt_versions "
-                    "WHERE prompt_key = ? AND variant_label = ? AND is_active = 1 "
-                    "ORDER BY version DESC LIMIT 1",
-                    (key, chosen_label),
-                )
-                row = await cursor.fetchone()
-                if row is not None:
-                    row_dict = dict(row)
-                    return PromptVersionResult(
-                        text=row_dict["text"],
-                        version=row_dict["version"],
-                        variant_label=chosen_label,
-                    )
-        except Exception:
-            pass
 
-        # Final fallback: no versioned data, return base text with version 0
-        return PromptVersionResult(
-            text=base_text,
-            version=0,
-            variant_label=variant["variant_label"] if variant else None,
-        )
+        return _resolve_versioned()
 
     def get_all(self) -> list[dict[str, Any]]:
         """Return all prompts with metadata for the API."""
@@ -322,34 +363,43 @@ class PromptRegistry:
         else:
             self.save_overrides(repo_root, {})
 
-    async def format(
+    def format(
         self,
-        db: aiosqlite.Connection,
-        key: str,
+        db: aiosqlite.Connection | str | None,
+        key: str | None = None,
         session_id: str | None = None,
         **kwargs: str,
-    ) -> PromptVersionResult | str:
-        """Get a prompt, apply template variable substitution, return with version metadata.
+    ) -> PromptVersionResult | SyncPromptText | Any:
+        """Get a prompt, apply template substitution, preserving async compatibility."""
+        if isinstance(db, str):
+            key, db = db, None
+        if key is None:
+            raise TypeError("PromptRegistry.format() missing required argument: 'key'")
 
-        When *session_id* is provided, performs A/B variant selection and
-        returns a ``PromptVersionResult``.  Without *session_id*, returns
-        a plain ``str`` for backward compatibility.
-        """
-        result = await self.get(db, key, session_id=session_id)
-        if isinstance(result, PromptVersionResult):
-            text = result.text
+        result = self.get(db, key, session_id=session_id)
+        if isinstance(result, SyncPromptText):
+            text = str(result)
             if kwargs:
                 text = text.format_map(defaultdict(str, **kwargs))
-            return PromptVersionResult(
-                text=text,
-                version=result.version,
-                variant_label=result.variant_label,
-            )
-        # Plain string path (backward compat)
-        text = result
-        if kwargs:
-            text = text.format_map(defaultdict(str, **kwargs))
-        return text
+            return SyncPromptText(text)
+
+        async def _format_async():
+            awaited = await result
+            if isinstance(awaited, PromptVersionResult):
+                text = awaited.text
+                if kwargs:
+                    text = text.format_map(defaultdict(str, **kwargs))
+                return PromptVersionResult(
+                    text=text,
+                    version=awaited.version,
+                    variant_label=awaited.variant_label,
+                )
+            text = str(awaited)
+            if kwargs:
+                text = text.format_map(defaultdict(str, **kwargs))
+            return SyncPromptText(text)
+
+        return _format_async()
 
     async def save_version(
         self,
