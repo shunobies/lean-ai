@@ -3,7 +3,7 @@
 import logging
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, Field
 
 from lean_ai.db import (
     create_session,
@@ -29,6 +29,8 @@ from lean_ai.tools.git_ops import (
     git_stash_pop,
     git_stash_push,
 )
+from lean_ai.training.capture import DatasetService, EvaluationRunner
+from lean_ai.training.db import get_training_db
 from lean_ai.workflow.state import StateManager
 
 logger = logging.getLogger(__name__)
@@ -231,5 +233,170 @@ async def resume_session(session_id: str, request: ResumeSessionRequest):
             "branch_name": branch_name,
             "scratchpad_exists": pad_exists,
         }
+    finally:
+        await db.close()
+
+
+# ── Evaluation framework endpoints ──
+
+
+class CreateDatasetRequest(BaseModel):
+    """Request body for creating or updating an evaluation dataset."""
+
+    name: str
+    repo_root: str = Field(validation_alias=AliasChoices("repo_root", "workspace_path"))
+    version: str = "1"
+    description: str | None = None
+    dataset_id: int | None = None
+
+
+class CreateDatasetResponse(BaseModel):
+    """Response after creating or updating an evaluation dataset."""
+
+    dataset_id: int
+    name: str
+    version: str
+    description: str | None = None
+
+
+class CreateEvalRunRequest(BaseModel):
+    """Request body for triggering an evaluation run."""
+
+    dataset_id: int
+    repo_root: str = Field(validation_alias=AliasChoices("repo_root", "workspace_path"))
+    prompt_version: str = "1"
+
+
+class CreateEvalRunResponse(BaseModel):
+    """Response after starting an evaluation run."""
+
+    run_id: int
+    dataset_id: int
+    status: str
+
+
+class EvalResultItem(BaseModel):
+    """A single evaluation result for one trace."""
+
+    run_id: int
+    trace_uuid: str
+    score: float
+    judge_reasoning: str
+    metrics_json: str | None = None
+    created_at: str | None = None
+
+
+class EvalResultsResponse(BaseModel):
+    """Response containing all results for an evaluation run."""
+
+    run_id: int
+    dataset_id: int
+    status: str
+    results: list[EvalResultItem]
+
+
+@sessions_router.post("/eval/datasets", response_model=CreateDatasetResponse)
+async def create_or_update_dataset(request: CreateDatasetRequest):
+    """Create a new evaluation dataset or update an existing one.
+
+    If dataset_id is provided, updates the existing dataset.
+    Otherwise creates a new dataset.
+    """
+    service = DatasetService(request.repo_root)
+    if request.dataset_id is not None:
+        updated = await service.update_dataset(
+            request.dataset_id,
+            name=request.name,
+            version=request.version,
+            description=request.description,
+        )
+        if not updated:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Dataset {request.dataset_id} not found",
+            )
+        return CreateDatasetResponse(
+            dataset_id=request.dataset_id,
+            name=request.name,
+            version=request.version,
+            description=request.description,
+        )
+    else:
+        dataset_id = await service.create_dataset(
+            name=request.name,
+            version=request.version,
+            description=request.description,
+        )
+        return CreateDatasetResponse(
+            dataset_id=dataset_id,
+            name=request.name,
+            version=request.version,
+            description=request.description,
+        )
+
+
+@sessions_router.get("/eval/datasets")
+async def list_datasets(repo_root: str):
+    """List all evaluation datasets with member counts."""
+    service = DatasetService(repo_root)
+    return await service.list_datasets()
+
+
+@sessions_router.post("/eval/run", response_model=CreateEvalRunResponse)
+async def trigger_evaluation(request: CreateEvalRunRequest):
+    """Trigger a prompt-only evaluation run against a dataset."""
+    runner = EvaluationRunner(request.repo_root)
+    run_id = await runner.run_evaluation(
+        dataset_id=request.dataset_id,
+        prompt_version=request.prompt_version,
+    )
+    return CreateEvalRunResponse(
+        run_id=run_id,
+        dataset_id=request.dataset_id,
+        status="completed",
+    )
+
+
+@sessions_router.get("/eval/results/{run_id}", response_model=EvalResultsResponse)
+async def get_evaluation_results(run_id: int, repo_root: str):
+    """Retrieve all results for a completed evaluation run."""
+    db = await get_training_db(repo_root)
+    try:
+        # Fetch run metadata
+        cursor = await db.execute(
+            "SELECT id, dataset_id, status FROM evaluation_runs WHERE id = ?",
+            (run_id,),
+        )
+        run = await cursor.fetchone()
+        if not run:
+            raise HTTPException(
+                status_code=404, detail=f"Evaluation run {run_id} not found"
+            )
+
+        # Fetch all results for this run
+        res_cursor = await db.execute(
+            "SELECT run_id, trace_uuid, score, judge_reasoning, metrics_json, created_at"
+            " FROM evaluation_results WHERE run_id = ?"
+            " ORDER BY trace_uuid",
+            (run_id,),
+        )
+        rows = await res_cursor.fetchall()
+        results = [
+            EvalResultItem(
+                run_id=row["run_id"],
+                trace_uuid=row["trace_uuid"],
+                score=row["score"],
+                judge_reasoning=row["judge_reasoning"],
+                metrics_json=row["metrics_json"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
+        return EvalResultsResponse(
+            run_id=run["id"],
+            dataset_id=run["dataset_id"],
+            status=run["status"],
+            results=results,
+        )
     finally:
         await db.close()

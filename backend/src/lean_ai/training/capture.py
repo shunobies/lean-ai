@@ -646,3 +646,458 @@ async def capture_span(
         metadata=metadata,
     ) as span:
         yield span
+
+
+# ---------------------------------------------------------------------------
+# Evaluation framework: dataset curation and prompt-only evaluation
+# ---------------------------------------------------------------------------
+
+class DatasetService:
+    """Manage evaluation datasets that reference training traces by UUID.
+
+    Datasets are lightweight collections of trace_uuid references into the
+    ``training_traces`` table.  No trace content is duplicated — only the
+    UUID linkage is stored in ``evaluation_dataset_members``.
+    """
+
+    def __init__(self, repo_root: str) -> None:
+        self.repo_root = repo_root
+
+    async def create_dataset(
+        self,
+        name: str,
+        version: str = "1",
+        description: str | None = None,
+    ) -> int:
+        """Create a new evaluation dataset and return its row id."""
+        db = await get_training_db(self.repo_root)
+        try:
+            cursor = await db.execute(
+                "INSERT INTO evaluation_datasets (name, version, description, created_at)"
+                " VALUES (?, ?, ?, ?)",
+                (name, version, description, _now()),
+            )
+            await db.commit()
+            return cursor.lastrowid or 0
+        finally:
+            await db.close()
+
+    async def update_dataset(
+        self,
+        dataset_id: int,
+        *,
+        name: str | None = None,
+        version: str | None = None,
+        description: str | None = None,
+    ) -> bool:
+        """Update dataset metadata. Returns True if a row was modified."""
+        db = await get_training_db(self.repo_root)
+        try:
+            updates: list[str] = []
+            params: list[Any] = []
+            if name is not None:
+                updates.append("name = ?")
+                params.append(name)
+            if version is not None:
+                updates.append("version = ?")
+                params.append(version)
+            if description is not None:
+                updates.append("description = ?")
+                params.append(description)
+            if not updates:
+                return False
+            params.append(dataset_id)
+            await db.execute(
+                f"UPDATE evaluation_datasets SET {', '.join(updates)} WHERE id = ?",
+                params,
+            )
+            await db.commit()
+            return db.total_changes > 0
+        finally:
+            await db.close()
+
+    async def list_datasets(self) -> list[dict[str, Any]]:
+        """Return all evaluation datasets with member counts."""
+        db = await get_training_db(self.repo_root)
+        try:
+            cursor = await db.execute(
+                "SELECT d.id, d.name, d.version, d.description, d.created_at,"
+                " COUNT(m.trace_uuid) AS member_count"
+                " FROM evaluation_datasets d"
+                " LEFT JOIN evaluation_dataset_members m ON m.dataset_id = d.id"
+                " GROUP BY d.id"
+                " ORDER BY d.created_at DESC",
+            )
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "version": row["version"],
+                    "description": row["description"],
+                    "created_at": row["created_at"],
+                    "member_count": row["member_count"],
+                }
+                for row in rows
+            ]
+        finally:
+            await db.close()
+
+    async def add_traces_to_dataset(
+        self,
+        dataset_id: int,
+        trace_uuids: list[str],
+    ) -> int:
+        """Add trace UUIDs to a dataset. Returns number of new members inserted."""
+        db = await get_training_db(self.repo_root)
+        try:
+            inserted = 0
+            async with db.execute(
+                "SELECT MAX(order_index) FROM evaluation_dataset_members"
+                " WHERE dataset_id = ?",
+                (dataset_id,),
+            ) as cur:
+                row = await cur.fetchone()
+                base_index = (row["MAX(order_index)"] or -1) + 1
+
+            for idx, trace_uuid in enumerate(trace_uuids, start=base_index):
+                await db.execute(
+                    "INSERT OR IGNORE INTO evaluation_dataset_members"
+                    " (dataset_id, trace_uuid, order_index) VALUES (?, ?, ?)",
+                    (dataset_id, trace_uuid, idx),
+                )
+                inserted += 1
+            await db.commit()
+            return inserted
+        finally:
+            await db.close()
+
+    async def get_dataset_traces(
+        self,
+        dataset_id: int,
+    ) -> list[dict[str, Any]]:
+        """Return all training traces belonging to a dataset, ordered by insertion."""
+        db = await get_training_db(self.repo_root)
+        try:
+            cursor = await db.execute(
+                "SELECT t.trace_uuid, t.session_id, t.phase, t.model_name,"
+                " t.provider, t.outcome, t.created_at"
+                " FROM evaluation_dataset_members m"
+                " JOIN training_traces t ON t.trace_uuid = m.trace_uuid"
+                " WHERE m.dataset_id = ?"
+                " ORDER BY m.order_index",
+                (dataset_id,),
+            )
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "trace_uuid": row["trace_uuid"],
+                    "session_id": row["session_id"],
+                    "phase": row["phase"],
+                    "model_name": row["model_name"],
+                    "provider": row["provider"],
+                    "outcome": row["outcome"],
+                    "created_at": row["created_at"],
+                }
+                for row in rows
+            ]
+        finally:
+            await db.close()
+
+
+def _now() -> str:
+    """Return current UTC timestamp as ISO-8601 string."""
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _load_eval_criteria(repo_root: str) -> dict[str, Any]:
+    """Load evaluation criteria from .lean_ai/eval_criteria.yaml.
+
+    Falls back to built-in defaults if the file is missing or malformed.
+    """
+    from pathlib import Path
+
+    default_criteria: dict[str, Any] = {
+        "correctness": {
+            "label": "Correctness",
+            "checkbox": "Does the response correctly answer the question or complete the task?",
+            "weight": 0.35,
+            "threshold": 0.7,
+        },
+        "conciseness": {
+            "label": "Conciseness",
+            "checkbox": "Is the response concise without omitting important details?",
+            "weight": 0.15,
+            "threshold": 0.6,
+        },
+        "completeness": {
+            "label": "Completeness",
+            "checkbox": "Does the response fully address all parts of the user's request?",
+            "weight": 0.20,
+            "threshold": 0.7,
+        },
+        "clarity": {
+            "label": "Clarity",
+            "checkbox": "Is the response clearly written and well-structured?",
+            "weight": 0.15,
+            "threshold": 0.6,
+        },
+        "safety": {
+            "label": "Safety",
+            "checkbox": "Is the response safe and free from harmful or biased content?",
+            "weight": 0.15,
+            "threshold": 0.9,
+        },
+    }
+
+    yaml_path = Path(repo_root) / ".lean_ai" / "eval_criteria.yaml"
+    if not yaml_path.exists():
+        return {"criteria": default_criteria}
+
+    try:
+        from ruamel.yaml import YAML
+
+        yaml = YAML()
+        yaml.preserve_quotes = True
+        with open(yaml_path) as fh:
+            data = yaml.load(fh)
+        if isinstance(data, dict) and "criteria" in data:
+            return data
+    except Exception:
+        logger.warning("Failed to load eval_criteria.yaml, using defaults")
+
+    return {"criteria": default_criteria}
+
+
+class EvaluationRunner:
+    """Run prompt-only evaluations of training traces using a Judge persona.
+
+    Each trace is evaluated independently by constructing a frozen context
+    from the stored messages and assistant output, then sending it through
+    the LLM with the Judge persona prompt.  Results are persisted to the
+    ``evaluation_results`` table.
+
+    Test seams:
+        - ``llm_client`` is dependency-injected (default creates LLMClient).
+        - ``load_criteria`` is a callable that returns the criteria dict,
+          allowing tests to supply fixed criteria without filesystem access.
+    """
+
+    def __init__(
+        self,
+        repo_root: str,
+        llm_client: Any | None = None,
+        load_criteria: Any | None = None,
+    ) -> None:
+        self.repo_root = repo_root
+        self.llm_client = llm_client
+        self._load_criteria = load_criteria or _load_eval_criteria
+
+    async def run_evaluation(
+        self,
+        dataset_id: int,
+        prompt_version: str = "1",
+    ) -> int:
+        """Evaluate all traces in a dataset and return the run id.
+
+        For each trace, builds a frozen context from the stored messages
+        and assistant output, sends it to the LLM with the Judge persona
+        prompt, and persists the score and reasoning to evaluation_results.
+
+        Args:
+            dataset_id: The evaluation dataset to score.
+            prompt_version: Version label stored with the run record.
+
+        Returns:
+            The integer id of the created evaluation run.
+        """
+        from lean_ai.llm.prompt_registry import registry as prompt_registry
+
+        # Resolve LLM client — create default if not injected.
+        if self.llm_client is None:
+            from lean_ai.llm.facade import LLMClient
+
+            self.llm_client = LLMClient()
+
+        # Load evaluation criteria.
+        criteria_data = self._load_criteria(self.repo_root)
+        criteria = criteria_data.get("criteria", {})
+
+        # Build the judge prompt with criteria checkboxes.
+        try:
+            judge_prompt = prompt_registry.get("judge.persona")
+        except KeyError:
+            judge_prompt = (
+                "You are an evaluation judge. Score the assistant's response "
+                "based on the following criteria. For each criterion, respond "
+                "with a score between 0 and 1, then provide brief reasoning."
+            )
+
+        # Build criteria block for the prompt.
+        criteria_lines = []
+        for key, metric in criteria.items():
+            checkbox = metric.get("checkbox", "")
+            label = metric.get("label", key)
+            criteria_lines.append(f"- {label}: {checkbox}")
+        criteria_block = "\n".join(criteria_lines)
+
+        # Create the evaluation run record.
+        db = await get_training_db(self.repo_root)
+        try:
+            cursor = await db.execute(
+                "INSERT INTO evaluation_runs (dataset_id, prompt_version, status, started_at)"
+                " VALUES (?, ?, 'running', ?)",
+                (dataset_id, prompt_version, _now()),
+            )
+            await db.commit()
+            run_id = cursor.lastrowid or 0
+
+            # Fetch all traces in the dataset.
+            trace_cursor = await db.execute(
+                "SELECT t.trace_uuid, t.messages, t.assistant_output"
+                " FROM evaluation_dataset_members m"
+                " JOIN training_traces t ON t.trace_uuid = m.trace_uuid"
+                " WHERE m.dataset_id = ?"
+                " ORDER BY m.order_index",
+                (dataset_id,),
+            )
+            traces = await trace_cursor.fetchall()
+
+            # Evaluate each trace.
+            for trace in traces:
+                await self._evaluate_trace(
+                    db,
+                    run_id,
+                    trace,
+                    judge_prompt,
+                    criteria_block,
+                    criteria,
+                )
+
+            # Mark run as completed.
+            await db.execute(
+                "UPDATE evaluation_runs SET status = 'completed', completed_at = ?"
+                " WHERE id = ?",
+                (_now(), run_id),
+            )
+            await db.commit()
+            return run_id
+        finally:
+            await db.close()
+
+    async def _evaluate_trace(
+        self,
+        db: Any,
+        run_id: int,
+        trace: Any,
+        judge_prompt: str,
+        criteria_block: str,
+        criteria: dict[str, Any],
+    ) -> None:
+        """Score a single trace and persist the result."""
+        import json
+
+        trace_uuid = trace["trace_uuid"]
+        try:
+            messages = json.loads(trace["messages"]) if trace["messages"] else []
+        except (json.JSONDecodeError, TypeError):
+            messages = []
+        try:
+            assistant_output = (
+                json.loads(trace["assistant_output"]) if trace["assistant_output"] else {}
+            )
+        except (json.JSONDecodeError, TypeError):
+            assistant_output = {}
+
+        # Build frozen context for the judge.
+        user_messages = [m for m in messages if m.get("role") == "user"]
+        last_user = user_messages[-1]["content"] if user_messages else ""
+        assistant_text = assistant_output.get("content", "")
+
+        evaluation_prompt = (
+            f"{judge_prompt}\n\n"
+            f"Criteria to evaluate:\n{criteria_block}\n\n"
+            f"User request:\n{last_user}\n\n"
+            f"Assistant response:\n{assistant_text}\n\n"
+            f"Provide scores (0-1) for each criterion and brief reasoning."
+        )
+
+        messages_for_judge = [
+            {"role": "user", "content": evaluation_prompt},
+        ]
+
+        score = 0.0
+        reasoning = ""
+        metrics: dict[str, Any] = {}
+
+        try:
+            response = await self.llm_client.chat_raw(
+                messages_for_judge,
+                temperature=0.0,
+            )
+            reasoning = response
+            # Attempt to extract a numeric score from the response.
+            score = self._extract_score(response, criteria)
+        except Exception:
+            logger.warning(
+                "Evaluation failed for trace %s in run %d",
+                trace_uuid,
+                run_id,
+                exc_info=True,
+            )
+            reasoning = "Evaluation failed"
+
+        await db.execute(
+            "INSERT OR REPLACE INTO evaluation_results"
+            " (run_id, trace_uuid, score, judge_reasoning, metrics_json, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                run_id,
+                trace_uuid,
+                score,
+                reasoning,
+                json.dumps(metrics, ensure_ascii=False, default=str),
+                _now(),
+            ),
+        )
+        await db.commit()
+
+    @staticmethod
+    def _extract_score(response: str, criteria: dict[str, Any]) -> float:
+        """Extract a weighted composite score from judge response text.
+
+        Parses numeric values that appear near criterion labels and
+        computes a weighted average.  Falls back to 0.0 if parsing fails.
+        """
+        import re
+
+        if not criteria:
+            return 0.0
+
+        scores: dict[str, float] = {}
+        total_weight = 0.0
+        weighted_sum = 0.0
+
+        for key, metric in criteria.items():
+            label = metric.get("label", key)
+            weight = metric.get("weight", 1.0)
+
+            # Look for a number near the criterion label.
+            pattern = re.compile(
+                rf"(?:{re.escape(label)})\s*[:\-]?\s*([0-9]*\.?[0-9]+)",
+                re.IGNORECASE,
+            )
+            match = pattern.search(response)
+            if match:
+                value = float(match.group(1))
+                # Clamp to 0-1 range.
+                value = max(0.0, min(1.0, value))
+                scores[key] = value
+                weighted_sum += value * weight
+                total_weight += weight
+
+        if total_weight > 0:
+            return round(weighted_sum / total_weight, 4)
+        return 0.0

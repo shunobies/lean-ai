@@ -244,6 +244,56 @@ CREATE TABLE IF NOT EXISTS session_feedback (
 
 CREATE INDEX IF NOT EXISTS idx_sf_session ON session_feedback(session_id);
 CREATE INDEX IF NOT EXISTS idx_sf_span ON session_feedback(trace_span_uuid);
+
+-- Evaluation framework: datasets of training traces used for scoring.
+CREATE TABLE IF NOT EXISTS evaluation_datasets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL DEFAULT '1',
+    description TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ed_name ON evaluation_datasets(name);
+
+-- Evaluation framework: membership linking datasets to training traces.
+CREATE TABLE IF NOT EXISTS evaluation_dataset_members (
+    dataset_id INTEGER NOT NULL,
+    trace_uuid TEXT NOT NULL,
+    order_index INTEGER NOT NULL,
+    PRIMARY KEY (dataset_id, trace_uuid),
+    FOREIGN KEY (dataset_id) REFERENCES evaluation_datasets(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_edm_trace ON evaluation_dataset_members(trace_uuid);
+
+-- Evaluation framework: a single run of an evaluation against a dataset.
+CREATE TABLE IF NOT EXISTS evaluation_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    dataset_id INTEGER NOT NULL,
+    prompt_version TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    FOREIGN KEY (dataset_id) REFERENCES evaluation_datasets(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_er_dataset ON evaluation_runs(dataset_id);
+CREATE INDEX IF NOT EXISTS idx_er_status ON evaluation_runs(status);
+
+-- Evaluation framework: per-trace result from an evaluation run.
+CREATE TABLE IF NOT EXISTS evaluation_results (
+    run_id INTEGER NOT NULL,
+    trace_uuid TEXT NOT NULL,
+    score REAL,
+    judge_reasoning TEXT,
+    metrics_json TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, trace_uuid),
+    FOREIGN KEY (run_id) REFERENCES evaluation_runs(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_er_result_run ON evaluation_results(run_id);
 """
 
 
@@ -342,6 +392,64 @@ async def _migrate(db: aiosqlite.Connection) -> None:
         )
         await db.execute("CREATE INDEX IF NOT EXISTS idx_sf_session ON session_feedback(session_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_sf_span ON session_feedback(trace_span_uuid)")
+        await db.commit()
+
+    # Ensure evaluation_datasets table exists (new in evaluation framework).
+    if not await _has_column("evaluation_datasets", "id"):
+        await db.executescript(
+            "CREATE TABLE IF NOT EXISTS evaluation_datasets ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "name TEXT NOT NULL, "
+            "version TEXT NOT NULL DEFAULT '1', "
+            "description TEXT, "
+            "created_at TEXT NOT NULL)"
+        )
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_ed_name ON evaluation_datasets(name)")
+        await db.commit()
+
+    # Ensure evaluation_dataset_members table exists (new in evaluation framework).
+    if not await _has_column("evaluation_dataset_members", "dataset_id"):
+        await db.executescript(
+            "CREATE TABLE IF NOT EXISTS evaluation_dataset_members ("
+            "dataset_id INTEGER NOT NULL, "
+            "trace_uuid TEXT NOT NULL, "
+            "order_index INTEGER NOT NULL, "
+            "PRIMARY KEY (dataset_id, trace_uuid), "
+            "FOREIGN KEY (dataset_id) REFERENCES evaluation_datasets(id))"
+        )
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_edm_trace ON evaluation_dataset_members(trace_uuid)")
+        await db.commit()
+
+    # Ensure evaluation_runs table exists (new in evaluation framework).
+    if not await _has_column("evaluation_runs", "id"):
+        await db.executescript(
+            "CREATE TABLE IF NOT EXISTS evaluation_runs ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "dataset_id INTEGER NOT NULL, "
+            "prompt_version TEXT NOT NULL, "
+            "status TEXT NOT NULL DEFAULT 'pending', "
+            "started_at TEXT NOT NULL, "
+            "completed_at TEXT, "
+            "FOREIGN KEY (dataset_id) REFERENCES evaluation_datasets(id))"
+        )
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_er_dataset ON evaluation_runs(dataset_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_er_status ON evaluation_runs(status)")
+        await db.commit()
+
+    # Ensure evaluation_results table exists (new in evaluation framework).
+    if not await _has_column("evaluation_results", "run_id"):
+        await db.executescript(
+            "CREATE TABLE IF NOT EXISTS evaluation_results ("
+            "run_id INTEGER NOT NULL, "
+            "trace_uuid TEXT NOT NULL, "
+            "score REAL, "
+            "judge_reasoning TEXT, "
+            "metrics_json TEXT, "
+            "created_at TEXT NOT NULL, "
+            "PRIMARY KEY (run_id, trace_uuid), "
+            "FOREIGN KEY (run_id) REFERENCES evaluation_runs(id))"
+        )
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_er_result_run ON evaluation_results(run_id)")
         await db.commit()
 
 

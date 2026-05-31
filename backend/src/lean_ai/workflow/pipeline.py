@@ -43,6 +43,66 @@ logger = logging.getLogger(__name__)
 _MAX_REVISIONS = 5
 
 
+async def _detect_branching_and_request_feedback(
+    state_manager: StateManager,
+    new_checkpoint_id: str,
+    new_parent_id: str | None,
+    session_span_uuid: str,
+    repo_root: str,
+) -> None:
+    """Detect checkpoint branching and request feedback when divergence occurs.
+
+    When a user restores from a checkpoint and the workflow continues on a
+    divergent path, the new checkpoint's parent_id will differ from the
+    restored checkpoint ID. This signals a potential failure in the original
+    path and captures valuable training data.
+
+    Args:
+        state_manager: The StateManager for the current session.
+        new_checkpoint_id: The ID of the newly saved checkpoint.
+        new_parent_id: The parent_id used when saving the new checkpoint.
+        session_span_uuid: The trace span UUID for the current session.
+        repo_root: The repository root path (for resolving the training DB).
+    """
+    state = state_manager.get_state()
+    restored_id = state.session_metadata.get("restored_checkpoint_id")
+    if restored_id is None:
+        return
+
+    if new_parent_id != restored_id:
+        logger.info(
+            "Branching detected: restored from %s but new checkpoint %s "
+            "has parent_id %s — requesting feedback",
+            restored_id,
+            new_checkpoint_id,
+            new_parent_id,
+        )
+        try:
+            from lean_ai.training.db import get_training_db, insert_feedback
+
+            train_db = await get_training_db(repo_root)
+            try:
+                await insert_feedback(
+                    train_db,
+                    session_id=state_manager.session_id,
+                    thumbs_up=False,
+                    comment=(
+                        f"Checkpoint branching detected: restored from "
+                        f"{restored_id}, but execution continued with "
+                        f"parent_id {new_parent_id} (checkpoint {new_checkpoint_id})."
+                    ),
+                    tags=["branching-detected", "checkpoint-divergence"],
+                    trace_span_uuid=session_span_uuid,
+                )
+            finally:
+                await train_db.close()
+        except Exception:
+            logger.debug(
+                "Failed to record branching feedback (non-fatal)",
+                exc_info=True,
+            )
+
+
 # ── Graph node implementations ───────────────────────────────────
 
 
@@ -550,14 +610,32 @@ async def run_workflow(
             summary="Execution completed successfully",
         )
 
+        # Detect branching after execution checkpoint
+        await _detect_branching_and_request_feedback(
+            state_manager=state_manager,
+            new_checkpoint_id=_execution_checkpoint_id,
+            new_parent_id=None,
+            session_span_uuid=session_span.span_uuid,
+            repo_root=repo_root,
+        )
+
         # Save checkpoint after final validation phase
         state.current_phase = "validation"
         state_manager.save()
-        state_manager.save_checkpoint(
+        _validation_checkpoint_id = state_manager.save_checkpoint(
             state=state,
             phase="Phase 4: Validation",
             summary="Final validation completed",
             parent_id=_execution_checkpoint_id,
+        )
+
+        # Detect branching after validation checkpoint
+        await _detect_branching_and_request_feedback(
+            state_manager=state_manager,
+            new_checkpoint_id=_validation_checkpoint_id,
+            new_parent_id=_execution_checkpoint_id,
+            session_span_uuid=session_span.span_uuid,
+            repo_root=repo_root,
         )
 
     return result
