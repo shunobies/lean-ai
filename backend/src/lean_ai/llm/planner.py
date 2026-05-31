@@ -71,7 +71,7 @@ from lean_ai.workflow.graph import (
     WorkflowEngine,
     WorkflowGraph,
 )
-from lean_ai.workflow.state import StateManager
+from lean_ai.workflow.state import StateManager, WorkflowState
 from lean_ai.workflow.ws_protocol import WorkflowSession
 
 if TYPE_CHECKING:
