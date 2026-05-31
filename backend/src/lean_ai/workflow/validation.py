@@ -233,6 +233,7 @@ async def _run_validation_fix_loop(
     dispatcher: WSMessageDispatcher | None = None,
     allowed_files: "list[str] | None" = None,
     task: str = "",
+    plan_context: str = "",
 ) -> dict:
     """Attempt to fix post-validation failures by resubmitting to the LLM.
 
@@ -390,6 +391,15 @@ async def _run_validation_fix_loop(
                 "content": (
                     "Validation failed. Fix the failures below.\n"
                     "Workflow: re-run command → diagnose → fix → verify.\n"
+                    + (
+                        "\nAPPROVED PHASE 4 PLAN CONTEXT — this explains "
+                        "what changed and why. Preserve the plan intent while "
+                        "fixing validation failures:\n"
+                        + plan_context
+                        + "\n\n"
+                        if plan_context
+                        else ""
+                    )
                     + regression_banner
                     + (
                         "\nFILE SCOPE: Only modify files from this list "

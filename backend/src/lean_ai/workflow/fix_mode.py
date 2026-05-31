@@ -460,7 +460,7 @@ async def _run_fix(
                 llm_client,
                 context,
                 validation_results,
-                state_manager.session_id,
+                state_manager,
                 conversation_logger=conversation_logger,
                 expert_llm_client=expert_llm_client,
                 dispatcher=dispatcher,

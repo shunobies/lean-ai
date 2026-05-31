@@ -60,6 +60,15 @@ def _plan() -> ExecutionPlan:
     )
 
 
+def _empty_plan() -> ExecutionPlan:
+    return ExecutionPlan(
+        scope="No-op plan.",
+        steps=[],
+        affected_files=[],
+        test_strategy="Run pytest.",
+    )
+
+
 async def _noop_executor(_name: str, _args: dict) -> str:
     return "OK"
 
@@ -180,6 +189,116 @@ async def test_execute_plan_activates_tdd_path_and_reports_metrics(monkeypatch, 
     complete = next(msg for msg in ws.sent if msg.get("type") == "complete")
     assert "TDD Metrics:" in complete["summary"]
     assert "red-green retries: 2" in complete["summary"]
+
+
+@pytest.mark.asyncio
+async def test_execute_plan_runs_post_validation_even_without_file_edits(
+    monkeypatch,
+    tmp_path,
+):
+    ws = FakeSession()
+    primary = DummyClient("primary")
+    called: list[bool] = []
+
+    async def _fake_post_validation(repo_root, ws_arg):
+        called.append(True)
+        return {"test": {"success": True, "output": "ok", "full_output": "ok"}}
+
+    monkeypatch.setattr(workflow_executor, "make_tool_executor", _noop_factory)
+    monkeypatch.setattr(workflow_executor, "load_execution_context", lambda _repo_root: "")
+    monkeypatch.setattr(workflow_executor, "build_step_system_prompt", _const_step_prompt)
+    monkeypatch.setattr(workflow_executor, "read_journal", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(workflow_executor, "_run_post_validation", _fake_post_validation)
+    monkeypatch.setattr(
+        workflow_executor,
+        "invalidate_metadata_cache_for_paths",
+        _noop_side_effect,
+    )
+    monkeypatch.setattr(settings, "enable_post_validation", True)
+    monkeypatch.setattr(settings, "enable_project_context", False)
+    monkeypatch.setattr(settings, "enable_integrations", False)
+    monkeypatch.setattr(settings, "enable_session_memory", False)
+
+    await execute_plan(
+        plan=_empty_plan(),
+        task="Run validation",
+        repo_root=str(tmp_path),
+        ws=ws,
+        llm_client=primary,
+        context="repo context",
+        branch_name="",
+        session_id="sess-4",
+    )
+
+    assert called == [True]
+
+
+@pytest.mark.asyncio
+async def test_execute_plan_validation_fix_gets_state_manager_and_plan_context(
+    monkeypatch,
+    tmp_path,
+):
+    ws = FakeSession()
+    primary = DummyClient("primary")
+    captured: dict[str, object] = {}
+
+    class DummyStateManager:
+        session_id = "sess-5"
+
+        def get_state(self):
+            return type(
+                "State",
+                (),
+                {"journal_entries": [], "scratchpad_content": ""},
+            )()
+
+        def save(self):
+            return None
+
+        def save_checkpoint(self, **kwargs):
+            return "checkpoint"
+
+    async def _fake_post_validation(repo_root, ws_arg):
+        return {"test": {"success": False, "output": "boom", "full_output": "boom"}}
+
+    async def _fake_fix_loop(*args, **kwargs):
+        captured["state_manager"] = args[5]
+        captured["plan_context"] = kwargs.get("plan_context")
+        return {"test": {"success": True, "output": "ok", "full_output": "ok"}}
+
+    monkeypatch.setattr(workflow_executor, "make_tool_executor", _noop_factory)
+    monkeypatch.setattr(workflow_executor, "load_execution_context", lambda _repo_root: "")
+    monkeypatch.setattr(workflow_executor, "build_step_system_prompt", _const_step_prompt)
+    monkeypatch.setattr(workflow_executor, "read_journal", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(workflow_executor, "_run_post_validation", _fake_post_validation)
+    monkeypatch.setattr(workflow_executor, "_run_validation_fix_loop", _fake_fix_loop)
+    monkeypatch.setattr(
+        workflow_executor,
+        "invalidate_metadata_cache_for_paths",
+        _noop_side_effect,
+    )
+    monkeypatch.setattr(settings, "enable_post_validation", True)
+    monkeypatch.setattr(settings, "post_validation_max_retries", 1)
+    monkeypatch.setattr(settings, "enable_project_context", False)
+    monkeypatch.setattr(settings, "enable_integrations", False)
+    monkeypatch.setattr(settings, "enable_session_memory", False)
+
+    manager = DummyStateManager()
+    await execute_plan(
+        plan=_empty_plan(),
+        task="Run validation",
+        repo_root=str(tmp_path),
+        ws=ws,
+        llm_client=primary,
+        context="repo context",
+        branch_name="",
+        session_id="sess-5",
+        state_manager=manager,
+    )
+
+    assert captured["state_manager"] is manager
+    assert "PLAN MARKDOWN" in str(captured["plan_context"])
+    assert "PLAN JSON" in str(captured["plan_context"])
 
 
 @pytest.mark.asyncio

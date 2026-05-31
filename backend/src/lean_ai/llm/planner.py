@@ -14,6 +14,7 @@ Verification is folded into each Phase 4 step's success checks.
 
 import json
 import logging
+import re
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -80,6 +81,51 @@ if TYPE_CHECKING:
     from lean_ai.workflow.ws_dispatcher import WSMessageDispatcher
 
 logger = logging.getLogger(__name__)
+
+
+def _looks_like_final_suggested_agent_prompt(task: str) -> bool:
+    """Return True for completed Grill Me handoffs that can skip Phase 1 tools.
+
+    The fast path is intentionally conservative: Phase 2 still performs the
+    real codebase evidence pass, but Phase 1's exploratory loop is redundant
+    when the chat flow already produced a complete Suggested Agent Prompt.
+    """
+    if not task or "## Suggested Agent Prompt" not in task:
+        return False
+
+    prompt_start = task.find("## Suggested Agent Prompt")
+    prompt = task[prompt_start:]
+    lowered = prompt.lower()
+
+    unresolved_markers = (
+        "grill me question",
+        "question for you",
+        "before i can",
+        "need to know",
+        "tbd",
+        "todo:",
+        "[placeholder",
+        "<placeholder",
+    )
+    if any(marker in lowered for marker in unresolved_markers):
+        return False
+
+    required_section_groups = (
+        ("requirements", "deliverables", "goal", "objective", "task"),
+        ("success criteria", "acceptance criteria", "verification", "test plan", "tests"),
+        ("references", "context", "files", "relevant files"),
+        ("user decisions", "decisions", "constraints", "assumptions"),
+    )
+    for names in required_section_groups:
+        if not any(re.search(rf"(^|\n)#+\s+.*{re.escape(name)}", lowered) for name in names):
+            return False
+
+    concrete_reference_patterns = (
+        r"`[^`\n]+\.[A-Za-z0-9]+`",
+        r"\b[\w./-]+/[A-Za-z0-9_.-]+\.[A-Za-z0-9]+\b",
+        r"\b[A-Za-z0-9_.-]+\.(py|ts|tsx|js|jsx|go|rs|java|kt|cs|rb|php)\b",
+    )
+    return any(re.search(pattern, prompt) for pattern in concrete_reference_patterns)
 
 
 class RoutingPolicy:
@@ -207,93 +253,107 @@ class ScopePhase(PlanningPhase):
             settings.plan_phase1_max_turns,
         )
         t0 = time.monotonic()
-
-        phase1_turns_str = str(settings.plan_phase1_max_turns)
-        phase1_system = registry.format_text(
-            "planning.scope_system",
-            PHASE1_MAX_TURNS=phase1_turns_str,
-        )
-        phase1_user_content = registry.format_text(
-            "planning.scope_user",
-            task=task,
-            context=context,
-            PHASE1_MAX_TURNS=phase1_turns_str,
-        )
-
-        # Cross-session memory retrieval
-        memory_context = ""
-        if settings.enable_session_memory:
-            memory_context = await _retrieve_session_memories(repo_root, task)
-        if memory_context:
-            phase1_user_content += memory_context
-
-        phase1_tools = [
-            t
-            for t in build_planning_tools()
-            if t["function"]["name"]
-            in (
-                "grep_files",
-                "read_file",
-                "list_directory",
-                "query_project_context",
-                "search_reference",
-                "task_complete",
+        fast_path = _looks_like_final_suggested_agent_prompt(task)
+        if fast_path:
+            scope_prose = (
+                "Phase 1 fast path: the task is a completed Suggested Agent "
+                "Prompt from the Grill Me flow. Skip redundant exploratory "
+                "verification here and synthesize the ScopeDocument directly "
+                "from the handoff; Phase 2 remains responsible for codebase "
+                "evidence gathering and assumption checks."
             )
-        ]
-        phase1_tools.append(REQUEST_CLARIFICATION_TOOL)
+            _phase1_tool_calls = []
+            logger.info("Phase 1 fast path activated for Suggested Agent Prompt handoff")
+            if on_content:
+                await on_content(scope_prose)
+                await _send_content_done(ws, scope_prose)
+        else:
+            phase1_turns_str = str(settings.plan_phase1_max_turns)
+            phase1_system = registry.format_text(
+                "planning.scope_system",
+                PHASE1_MAX_TURNS=phase1_turns_str,
+            )
+            phase1_user_content = registry.format_text(
+                "planning.scope_user",
+                task=task,
+                context=context,
+                PHASE1_MAX_TURNS=phase1_turns_str,
+            )
 
-        small_ctx = settings._active_context_window <= 32768
-        phase1_executor = _make_read_only_executor(
-            llm_client,
-            repo_root,
-            session_id,
-            ws,
-            dispatcher,
-            small_ctx,
-        )
+            # Cross-session memory retrieval
+            memory_context = ""
+            if settings.enable_session_memory:
+                memory_context = await _retrieve_session_memories(repo_root, task)
+            if memory_context:
+                phase1_user_content += memory_context
 
-        async with trace_span(
-            span_type="turn",
-            span_name="scope_turn",
-            session_id=session_id,
-            metadata={
-                "model": llm_client.model_name,
-                "provider": getattr(llm_client, "provider", "unknown"),
-                "phase": "planning.phase1",
-            },
-        ) as turn_span:
-            _phase1_tool_calls, scope_prose = await llm_client.chat_with_tools(
-                messages=[
-                    {"role": "system", "content": phase1_system},
-                    {"role": "user", "content": phase1_user_content},
-                ],
-                tools=phase1_tools,
-                tool_executor_fn=phase1_executor,
-                max_turns=settings.plan_phase1_max_turns,
-                max_tokens=phase_max_tokens,
-                text_only_exit_count=1,
-                on_tool_call=on_tool_call,
-                on_tool_result=on_tool_result,
-                on_content=on_content,
-                on_thinking=on_thinking,
-                on_metrics=on_metrics,
-                on_metrics_reset=on_metrics_reset,
-                dispatcher=dispatcher,
-                telemetry_context={
-                    "repo_root": repo_root,
-                    "session_id": session_id,
+            phase1_tools = [
+                t
+                for t in build_planning_tools()
+                if t["function"]["name"]
+                in (
+                    "grep_files",
+                    "read_file",
+                    "list_directory",
+                    "query_project_context",
+                    "search_reference",
+                    "task_complete",
+                )
+            ]
+            phase1_tools.append(REQUEST_CLARIFICATION_TOOL)
+
+            small_ctx = settings._active_context_window <= 32768
+            phase1_executor = _make_read_only_executor(
+                llm_client,
+                repo_root,
+                session_id,
+                ws,
+                dispatcher,
+                small_ctx,
+            )
+
+            async with trace_span(
+                span_type="turn",
+                span_name="scope_turn",
+                session_id=session_id,
+                metadata={
+                    "model": llm_client.model_name,
+                    "provider": getattr(llm_client, "provider", "unknown"),
                     "phase": "planning.phase1",
-                    "role": "primary",
                 },
-            )
-        if on_content:
-            await _send_content_done(ws, scope_prose)
+            ) as turn_span:
+                _phase1_tool_calls, scope_prose = await llm_client.chat_with_tools(
+                    messages=[
+                        {"role": "system", "content": phase1_system},
+                        {"role": "user", "content": phase1_user_content},
+                    ],
+                    tools=phase1_tools,
+                    tool_executor_fn=phase1_executor,
+                    max_turns=settings.plan_phase1_max_turns,
+                    max_tokens=phase_max_tokens,
+                    text_only_exit_count=1,
+                    on_tool_call=on_tool_call,
+                    on_tool_result=on_tool_result,
+                    on_content=on_content,
+                    on_thinking=on_thinking,
+                    on_metrics=on_metrics,
+                    on_metrics_reset=on_metrics_reset,
+                    dispatcher=dispatcher,
+                    telemetry_context={
+                        "repo_root": repo_root,
+                        "session_id": session_id,
+                        "phase": "planning.phase1",
+                        "role": "primary",
+                    },
+                )
+            if on_content:
+                await _send_content_done(ws, scope_prose)
 
         elapsed = time.monotonic() - t0
         _save_debug_phase(
             repo_root,
             session_id,
-            "phase_1_clarification",
+            "phase_1_suggested_prompt_fast_path" if fast_path else "phase_1_clarification",
             scope_prose,
             elapsed,
         )
@@ -938,6 +998,7 @@ class AssemblyPhase(PlanningPhase):
             plan,
             file_summary_obj,
             dar_obj,
+            test_command,
         )
 
         # Revision loop with hard cap of 2 iterations for blocking warnings.
@@ -992,6 +1053,7 @@ class AssemblyPhase(PlanningPhase):
                 plan,
                 file_summary_obj,
                 dar_obj,
+                test_command,
             )
 
         if revision_count >= max_revisions and is_blocking:
@@ -2398,6 +2460,99 @@ def _check_tdd_test_contract_cover_affected_files(
     return warnings, bool(warnings)
 
 
+def _plan_adds_test_setup(plan: ExecutionPlan) -> bool:
+    """Return True when a plan explicitly establishes test infrastructure."""
+    setup_terms = (
+        "test setup",
+        "testing setup",
+        "test infrastructure",
+        "testing infrastructure",
+        "commands.json",
+        "pytest",
+        "vitest",
+        "jest",
+        "cargo test",
+        "go test",
+        "phpunit",
+        "rspec",
+        "junit",
+        "make test",
+    )
+    setup_paths = (
+        ".lean_ai/commands.json",
+        "pyproject.toml",
+        "pytest.ini",
+        "package.json",
+        "vitest.config",
+        "jest.config",
+        "Cargo.toml",
+        "go.mod",
+        "composer.json",
+        "phpunit.xml",
+        "Gemfile",
+        "build.gradle",
+        "pom.xml",
+    )
+    for step in plan.steps:
+        setup_text_parts = [
+            step.job or "",
+            step.instruction or "",
+            step.reason or "",
+            step.output_shape or "",
+            *(target.change for target in step.may_change),
+        ]
+        haystack = "\n".join(setup_text_parts).lower()
+        paths = [step.file_path, *(target.path for target in step.may_change)]
+        if any(term in haystack for term in setup_terms):
+            return True
+        if any(path and any(marker in path for marker in setup_paths) for path in paths):
+            return True
+    return False
+
+
+def _check_tdd_required_for_executable_files(
+    plan: ExecutionPlan,
+    file_summary: FileSummary | None,
+) -> tuple[list[str], bool]:
+    """Block strict-test plans that do not include authored TDD tests."""
+    if not settings.enable_strict_test_contract:
+        return [], False
+
+    code_paths = _collect_executable_code_paths(plan, file_summary)
+    if not code_paths:
+        return [], False
+    if plan.tdd_mode and plan.tdd_test_steps:
+        return [], False
+    if _plan_adds_test_setup(plan):
+        return [], False
+
+    paths = ", ".join(sorted(code_paths))
+    return [
+        "strict TDD contract requires pre-implementation test steps for "
+        f"executable affected files: {paths}"
+    ], True
+
+
+def _check_full_suite_command_available(
+    plan: ExecutionPlan,
+    file_summary: FileSummary | None,
+    test_command: str,
+) -> tuple[list[str], bool]:
+    """Block executable plans that have no final full-suite test command."""
+    if not settings.enable_strict_test_contract:
+        return [], False
+    if test_command.strip():
+        return [], False
+    if not _collect_executable_code_paths(plan, file_summary):
+        return [], False
+    if _plan_adds_test_setup(plan):
+        return [], False
+    return [
+        "strict test contract requires a project test command for final full-suite "
+        "validation; add test setup and record `.lean_ai/commands.json`"
+    ], True
+
+
 def _check_success_checks_are_specific(
     plan: ExecutionPlan,
 ) -> tuple[list[str], bool]:
@@ -2488,6 +2643,7 @@ def _run_plan_validations(
     plan: ExecutionPlan,
     file_summary: FileSummary | None,
     dar: DesignAndRisks,
+    test_command: str = "",
 ) -> tuple[list[str], bool]:
     """Run every validator, log each warning, and return ``(warnings, is_blocking)``.
 
@@ -2512,6 +2668,14 @@ def _run_plan_validations(
     is_blocking = is_blocking or b
 
     w, b = _check_tdd_test_contract_cover_affected_files(plan, file_summary)
+    warnings.extend(w)
+    is_blocking = is_blocking or b
+
+    w, b = _check_tdd_required_for_executable_files(plan, file_summary)
+    warnings.extend(w)
+    is_blocking = is_blocking or b
+
+    w, b = _check_full_suite_command_available(plan, file_summary, test_command)
     warnings.extend(w)
     is_blocking = is_blocking or b
 

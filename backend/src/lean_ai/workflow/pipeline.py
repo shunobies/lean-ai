@@ -343,6 +343,7 @@ class ExecutionNode(Node):
         session_id: str,
         expert_llm_client: "LLMClient | None",
         dispatcher: WSMessageDispatcher | None,
+        state_manager: StateManager | None = None,
     ) -> None:
         super().__init__("execution_node")
         self.task = task
@@ -356,6 +357,7 @@ class ExecutionNode(Node):
         self.session_id = session_id
         self.expert_llm_client = expert_llm_client
         self.dispatcher = dispatcher
+        self.state_manager = state_manager
 
     async def execute(self, state: WorkflowState) -> NodeResult:
         """Run the execution phase and store the result in state."""
@@ -376,6 +378,7 @@ class ExecutionNode(Node):
                 session_id=self.session_id,
                 expert_llm_client=self.expert_llm_client,
                 dispatcher=self.dispatcher,
+                state_manager=self.state_manager,
             )
             state.session_metadata["execution_result"] = result
             return Continue(next_node_id=None, payload={"result": result})
@@ -591,6 +594,7 @@ async def run_workflow(
                 session_id=session_id,
                 expert_llm_client=expert_llm_client,
                 dispatcher=dispatcher,
+                state_manager=state_manager,
             )
         )
 

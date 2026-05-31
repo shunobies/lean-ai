@@ -1020,7 +1020,7 @@ async def execute_plan(
 
     # ── Post-execution validation ──
     validation_results: dict = {}
-    if files_modified and settings.enable_post_validation:
+    if settings.enable_post_validation and not halted_early:
         validation_results = await _run_post_validation(repo_root, ws)
 
         # Attempt to fix validation failures via LLM
@@ -1035,12 +1035,18 @@ async def execute_plan(
                 llm_client,
                 context,
                 validation_results,
-                session_id,
+                state_manager,
                 conversation_logger=conversation_logger,
                 expert_llm_client=expert_llm_client,
                 dispatcher=dispatcher,
                 allowed_files=plan.affected_files,
                 task=task,
+                plan_context=(
+                    "PLAN MARKDOWN:\n"
+                    f"{plan_to_markdown(plan)}\n\n"
+                    "PLAN JSON:\n"
+                    f"{plan.model_dump_json(indent=2)}"
+                ),
             )
 
     # Save checkpoint after post-execution validation
