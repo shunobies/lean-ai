@@ -108,6 +108,7 @@ async def capture_turn(
     role: str | None = None,
     turn_index: int | None = None,
     span_uuid: str | None = None,
+    prompt_version_id: int | None = None,
 ) -> str | None:
     """Persist one LLM turn to ``training_traces``.
 
@@ -142,6 +143,7 @@ async def capture_turn(
             scrubbed=True,
             role=role,
             turn_index=turn_index,
+            prompt_version_id=prompt_version_id,
         )
         if span_uuid is not None:
             await db.execute(

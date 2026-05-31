@@ -813,13 +813,40 @@ class LLMClient:
                                 tc.name,
                                 state.consecutive_same_tool,
                             )
-                            from lean_ai.llm.prompt_registry import registry
-
-                            loop_nudge = registry.format(
-                                "nudge.loop_detected",
-                                tool_name=tc.name,
-                                count=str(state.consecutive_same_tool),
+                            from lean_ai.db import get_db
+                            from lean_ai.llm.prompt_registry import (
+                                PromptVersionResult,
+                                registry,
                             )
+
+                            _repo_root = telemetry_context.get("repo_root")
+                            _ws_session = telemetry_context.get("session_id")
+                            if _repo_root:
+                                _ws_db = await get_db(_repo_root)
+                                _loop_result = await registry.format(
+                                    _ws_db,
+                                    "nudge.loop_detected",
+                                    session_id=_ws_session,
+                                    tool_name=tc.name,
+                                    count=str(state.consecutive_same_tool),
+                                )
+                                if isinstance(_loop_result, PromptVersionResult):
+                                    loop_nudge = _loop_result.text
+                                    telemetry_context["prompt_version_id"] = _loop_result.version
+                                else:
+                                    loop_nudge = _loop_result
+                                await _ws_db.close()
+                            else:
+                                _loop_result = await registry.format(
+                                    None,
+                                    "nudge.loop_detected",
+                                    tool_name=tc.name,
+                                    count=str(state.consecutive_same_tool),
+                                )
+                                if isinstance(_loop_result, str):
+                                    loop_nudge = _loop_result
+                                else:
+                                    loop_nudge = _loop_result.text
                             _log_harness_message(
                                 kind="nudge",
                                 key="nudge.loop_detected",
@@ -939,9 +966,36 @@ class LLMClient:
                         state.max_budget_interrupts,
                     )
                     break
-                from lean_ai.llm.prompt_registry import registry
+                from lean_ai.db import get_db
+                from lean_ai.llm.prompt_registry import (
+                    PromptVersionResult,
+                    registry,
+                )
 
-                budget_nudge = registry.get("nudge.reasoning_budget_exceeded")
+                _repo_root = telemetry_context.get("repo_root")
+                _ws_session = telemetry_context.get("session_id")
+                if _repo_root:
+                    _ws_db = await get_db(_repo_root)
+                    _budget_result = await registry.get(
+                        _ws_db,
+                        "nudge.reasoning_budget_exceeded",
+                        session_id=_ws_session,
+                    )
+                    if isinstance(_budget_result, PromptVersionResult):
+                        budget_nudge = _budget_result.text
+                        telemetry_context["prompt_version_id"] = _budget_result.version
+                    else:
+                        budget_nudge = _budget_result
+                    await _ws_db.close()
+                else:
+                    _budget_result = await registry.get(
+                        None,
+                        "nudge.reasoning_budget_exceeded",
+                    )
+                    if isinstance(_budget_result, str):
+                        budget_nudge = _budget_result
+                    else:
+                        budget_nudge = _budget_result.text
                 _log_harness_message(
                     kind="nudge",
                     key="nudge.reasoning_budget_exceeded",
@@ -967,7 +1021,7 @@ class LLMClient:
             state.consecutive_budget_interrupts = 0
 
             # ── Evaluate turn — single decision point ─────────────
-            action = self._evaluate_turn(
+            action = await self._evaluate_turn(
                 turn=turn,
                 has_tool_calls=bool(tool_calls),
                 is_truncated=metrics.stop_reason in ("length", "max_tokens"),
@@ -979,6 +1033,7 @@ class LLMClient:
                 max_turns=effective_max,
                 on_context_refresh=on_context_refresh,
                 pre_context_refresh_nudge=pre_context_refresh_nudge,
+                telemetry_context=telemetry_context,
             )
 
             if action.verdict == TurnVerdict.EXIT:
@@ -1061,9 +1116,36 @@ class LLMClient:
                     "chat_with_tools: repeated test failures + unverified "
                     "claim detected, nudging internet search"
                 )
-                from lean_ai.llm.prompt_registry import registry
+                from lean_ai.db import get_db
+                from lean_ai.llm.prompt_registry import (
+                    PromptVersionResult,
+                    registry,
+                )
 
-                claim_nudge = registry.get("nudge.claim_verification")
+                _repo_root = telemetry_context.get("repo_root")
+                _ws_session = telemetry_context.get("session_id")
+                if _repo_root:
+                    _ws_db = await get_db(_repo_root)
+                    _claim_result = await registry.get(
+                        _ws_db,
+                        "nudge.claim_verification",
+                        session_id=_ws_session,
+                    )
+                    if isinstance(_claim_result, PromptVersionResult):
+                        claim_nudge = _claim_result.text
+                        telemetry_context["prompt_version_id"] = _claim_result.version
+                    else:
+                        claim_nudge = _claim_result
+                    await _ws_db.close()
+                else:
+                    _claim_result = await registry.get(
+                        None,
+                        "nudge.claim_verification",
+                    )
+                    if isinstance(_claim_result, str):
+                        claim_nudge = _claim_result
+                    else:
+                        claim_nudge = _claim_result.text
                 _log_harness_message(
                     kind="nudge",
                     key="nudge.claim_verification",
@@ -1103,9 +1185,36 @@ class LLMClient:
                 logger.info(
                     "chat_with_tools: [UNVERIFIED] marker detected, nudging confidence verification"
                 )
-                from lean_ai.llm.prompt_registry import registry
+                from lean_ai.db import get_db
+                from lean_ai.llm.prompt_registry import (
+                    PromptVersionResult,
+                    registry,
+                )
 
-                confidence_nudge = registry.get("nudge.confidence_verification")
+                _repo_root = telemetry_context.get("repo_root")
+                _ws_session = telemetry_context.get("session_id")
+                if _repo_root:
+                    _ws_db = await get_db(_repo_root)
+                    _conf_result = await registry.get(
+                        _ws_db,
+                        "nudge.confidence_verification",
+                        session_id=_ws_session,
+                    )
+                    if isinstance(_conf_result, PromptVersionResult):
+                        confidence_nudge = _conf_result.text
+                        telemetry_context["prompt_version_id"] = _conf_result.version
+                    else:
+                        confidence_nudge = _conf_result
+                    await _ws_db.close()
+                else:
+                    _conf_result = await registry.get(
+                        None,
+                        "nudge.confidence_verification",
+                    )
+                    if isinstance(_conf_result, str):
+                        confidence_nudge = _conf_result
+                    else:
+                        confidence_nudge = _conf_result.text
                 _log_harness_message(
                     kind="nudge",
                     key="nudge.confidence_verification",
@@ -1127,7 +1236,7 @@ class LLMClient:
 
         return executed, "\n".join(explanation_parts)
 
-    def _evaluate_turn(
+    async def _evaluate_turn(
         self,
         *,
         turn: int,
@@ -1141,6 +1250,7 @@ class LLMClient:
         max_turns: int,
         on_context_refresh: Callable | None,
         pre_context_refresh_nudge: str | Callable[[], str] | None,
+        telemetry_context: dict | None = None,
     ) -> TurnAction:
         """Make ONE decision after each turn.
 
@@ -1166,11 +1276,40 @@ class LLMClient:
                             f"{state.consecutive_truncated} consecutive truncated responses"
                         ),
                     )
-                from lean_ai.llm.prompt_registry import registry
+                from lean_ai.db import get_db
+                from lean_ai.llm.prompt_registry import (
+                    PromptVersionResult,
+                    registry,
+                )
+
+                _repo_root = telemetry_context.get("repo_root") if telemetry_context else None
+                _ws_session = telemetry_context.get("session_id") if telemetry_context else None
+                if _repo_root:
+                    _ws_db = await get_db(_repo_root)
+                    _trunc_result = await registry.get(
+                        _ws_db,
+                        "nudge.truncation",
+                        session_id=_ws_session,
+                    )
+                    if isinstance(_trunc_result, PromptVersionResult):
+                        _trunc_nudge = _trunc_result.text
+                        telemetry_context["prompt_version_id"] = _trunc_result.version
+                    else:
+                        _trunc_nudge = _trunc_result
+                    await _ws_db.close()
+                else:
+                    _trunc_result = await registry.get(
+                        None,
+                        "nudge.truncation",
+                    )
+                    if isinstance(_trunc_result, str):
+                        _trunc_nudge = _trunc_result
+                    else:
+                        _trunc_nudge = _trunc_result.text
 
                 return TurnAction(
                     verdict=TurnVerdict.NUDGE,
-                    message=registry.get("nudge.truncation"),
+                    message=_trunc_nudge,
                     nudge_key="nudge.truncation",
                     log_level=logging.WARNING,
                 )
@@ -1190,9 +1329,33 @@ class LLMClient:
                 nudge = text_only_nudge
                 nudge_key = "nudge.text_only.custom"
             else:
-                from lean_ai.llm.prompt_registry import registry
+                from lean_ai.db import get_db
+                from lean_ai.llm.prompt_registry import (
+                    PromptVersionResult,
+                    registry,
+                )
 
-                nudge = registry.get("nudge.text_only")
+                _repo_root = telemetry_context.get("repo_root") if telemetry_context else None
+                _ws_session = telemetry_context.get("session_id") if telemetry_context else None
+                if _repo_root:
+                    _ws_db = await get_db(_repo_root)
+                    _text_result = await registry.get(
+                        _ws_db,
+                        "nudge.text_only",
+                        session_id=_ws_session,
+                    )
+                    if isinstance(_text_result, PromptVersionResult):
+                        nudge = _text_result.text
+                        telemetry_context["prompt_version_id"] = _text_result.version
+                    else:
+                        nudge = _text_result
+                    await _ws_db.close()
+                else:
+                    _text_result = await registry.get(
+                        None,
+                        "nudge.text_only",
+                    )
+                    nudge = _text_result if isinstance(_text_result, str) else _text_result.text
                 nudge_key = "nudge.text_only"
             return TurnAction(
                 verdict=TurnVerdict.NUDGE,
@@ -1411,6 +1574,7 @@ def _fire_capture_turn(
     session_id = telemetry_context.get("session_id")
     phase = telemetry_context.get("phase") or "unknown"
     role = telemetry_context.get("role")
+    prompt_version_id = telemetry_context.get("prompt_version_id")
     if not repo_root or not session_id:
         return
     try:
@@ -1438,6 +1602,7 @@ def _fire_capture_turn(
                 tokens_prompt=metrics.prompt_tokens,
                 tokens_completion=metrics.completion_tokens,
                 latency_ms=latency_ms,
+                prompt_version_id=prompt_version_id,
             )
             if trace_uuid:
                 telemetry_context["last_trace_uuid"] = trace_uuid

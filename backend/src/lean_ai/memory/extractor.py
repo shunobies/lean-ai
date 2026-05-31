@@ -115,7 +115,7 @@ def _ensure_worker() -> None:
 
 async def _extract_and_store(item: _ExtractionItem) -> list[dict]:
     """Extract memories using the item's prompt and persist them."""
-    prompt_text = registry.get(item.prompt_key)
+    prompt_text, version_id = registry.get(item.prompt_key)
     template_vars = {"session_summary": item.session_summary, **item.template_vars}
     user_msg = prompt_text.format(**template_vars)
 

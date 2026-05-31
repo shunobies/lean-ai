@@ -452,6 +452,11 @@ async def _migrate(db: aiosqlite.Connection) -> None:
         await db.execute("CREATE INDEX IF NOT EXISTS idx_er_result_run ON evaluation_results(run_id)")
         await db.commit()
 
+    # Add prompt_version_id column to training_traces for prompt versioning / A-B testing.
+    if not await _has_column("training_traces", "prompt_version_id"):
+        await db.execute("ALTER TABLE training_traces ADD COLUMN prompt_version_id TEXT")
+        await db.commit()
+
 
 async def get_training_db(repo_root: str) -> SQLiteConnection:
     """Open (or create) the training archive DB with WAL mode."""
@@ -499,6 +504,7 @@ async def insert_training_trace(
     scrubbed: bool = True,
     role: str | None = None,
     turn_index: int | None = None,
+    prompt_version_id: str | None = None,
 ) -> int:
     """Insert a row into ``training_traces`` and return the new id."""
     cursor = await db.execute(
@@ -506,8 +512,8 @@ async def insert_training_trace(
         "trace_uuid, session_id, phase, role, turn_index, model_name, "
         "provider, messages, assistant_output, outcome, pair_id, preference, "
         "pair_kind, reward, tokens_prompt, tokens_completion, latency_ms, "
-        "scrubbed, created_at"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "scrubbed, prompt_version_id, created_at"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             trace_uuid,
             session_id,
@@ -527,6 +533,7 @@ async def insert_training_trace(
             tokens_completion,
             latency_ms,
             1 if scrubbed else 0,
+            prompt_version_id,
             _now(),
         ),
     )

@@ -8,13 +8,20 @@ directly.  Prompts that compose policy blocks are resolved at access time
 so that user overrides take effect.
 """
 
-from lean_ai.llm.prompt_registry import registry
+from lean_ai.llm.prompt_registry import PromptVersionResult, registry
 
 # ── Canonical policy blocks (composed into mode prompts) ──────────
 
 
+def _extract_text(result: PromptVersionResult | str) -> str:
+    """Extract the text component from a PromptVersionResult, or pass through a plain str."""
+    if isinstance(result, PromptVersionResult):
+        return result.text
+    return result
+
+
 def _policy(key: str) -> str:
-    return registry.get(key)
+    return _extract_text(registry._resolve_text(key))
 
 
 # These are accessed as module-level attributes.  We use __getattr__
@@ -50,14 +57,14 @@ def _compose(key: str) -> str:
     """Resolve a prompt that embeds policy block placeholders."""
     from lean_ai.config import settings
 
-    text = registry.get(key)
-    web_search = registry.get("policy.web_search")
+    text = _extract_text(registry._resolve_text(key))
+    web_search = _extract_text(registry._resolve_text("policy.web_search"))
     if settings.wiki_url:
-        web_search += "\n" + registry.get("policy.wiki_search")
+        web_search += "\n" + _extract_text(registry._resolve_text("policy.wiki_search"))
     if settings.enable_claim_verification:
-        web_search += "\n" + registry.get("policy.claim_verification")
+        web_search += "\n" + _extract_text(registry._resolve_text("policy.claim_verification"))
     if settings.enable_required_citations:
-        web_search += "\n" + registry.get("policy.required_citations")
+        web_search += "\n" + _extract_text(registry._resolve_text("policy.required_citations"))
 
     # Strict TDD policy block. Empty string when the flag is off so
     # previous-turn prompt content is preserved. The testing-environment
@@ -66,16 +73,20 @@ def _compose(key: str) -> str:
     # strict contract.
     strict_test_contract = ""
     if settings.enable_strict_test_contract:
-        strict_test_contract = registry.get("policy.strict_test_contract")
-        strict_test_contract += "\n\n" + registry.get(
-            "policy.testing_environment_awareness",
+        strict_test_contract = _extract_text(registry._resolve_text("policy.strict_test_contract"))
+        strict_test_contract += "\n\n" + _extract_text(
+            registry._resolve_text(
+                "policy.testing_environment_awareness",
+            ),
         )
 
     # Phase 4 testability requirement. Gated by the same strict flag.
     testability_requirement = ""
     if settings.enable_strict_test_contract:
-        testability_requirement = registry.get(
-            "policy.testability_requirement",
+        testability_requirement = _extract_text(
+            registry._resolve_text(
+                "policy.testability_requirement",
+            ),
         )
 
     # Standalone testing-environment awareness for Phase 2's
@@ -84,21 +95,25 @@ def _compose(key: str) -> str:
     testing_environment_awareness = ""
     if settings.enable_strict_test_contract:
         if key == "planning.exploration_system":
-            testing_environment_awareness = registry.get(
-                "policy.testing_environment_snapshot",
+            testing_environment_awareness = _extract_text(
+                registry._resolve_text(
+                    "policy.testing_environment_snapshot",
+                ),
             )
         else:
-            testing_environment_awareness = registry.get(
-                "policy.testing_environment_awareness",
+            testing_environment_awareness = _extract_text(
+                registry._resolve_text(
+                    "policy.testing_environment_awareness",
+                ),
             )
 
     subs = _MissingKey(
         {
-            "TOOL_POLICY": registry.get("policy.tool"),
-            "COMPLETION_CONTRACT": registry.get("policy.completion"),
-            "QUALITY_RULES": registry.get("policy.quality"),
+            "TOOL_POLICY": _extract_text(registry._resolve_text("policy.tool")),
+            "COMPLETION_CONTRACT": _extract_text(registry._resolve_text("policy.completion")),
+            "QUALITY_RULES": _extract_text(registry._resolve_text("policy.quality")),
             "WEB_SEARCH_POLICY": web_search,
-            "SCRATCHPAD_POLICY": registry.get("policy.scratchpad"),
+            "SCRATCHPAD_POLICY": _extract_text(registry._resolve_text("policy.scratchpad")),
             "STRICT_TEST_CONTRACT": strict_test_contract,
             "TESTABILITY_REQUIREMENT": testability_requirement,
             "TESTING_ENVIRONMENT_AWARENESS": testing_environment_awareness,
@@ -124,9 +139,9 @@ _COMPOSED_KEYS: dict[str, str] = {
 
 def __getattr__(name: str) -> str:
     if name in _SIMPLE_KEYS:
-        return registry.get(_SIMPLE_KEYS[name])
+        return _extract_text(registry._resolve_text(_SIMPLE_KEYS[name]))
     if name in _COMPOSED_KEYS:
         return _compose(_COMPOSED_KEYS[name])
     if name == "PLAN_SYSTEM_PROMPT":
-        return registry.get("planning.scope_system")
+        return _extract_text(registry._resolve_text("planning.scope_system"))
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

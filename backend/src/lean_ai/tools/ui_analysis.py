@@ -258,11 +258,13 @@ async def analyze_screenshot(
         )
 
     # ── Pass 1 — inventory ────────────────────────────────────────────
+    inv_system_text, _inv_system_vid = registry.get("ui_verification.inventory_system")
+    inv_user_text, _inv_user_vid = registry.get("ui_verification.inventory_user")
     inv_result = await describe_image_structured(
         img_b64,
         UIInventory,
-        system_prompt=registry.get("ui_verification.inventory_system"),
-        user_prompt=registry.get("ui_verification.inventory_user"),
+        system_prompt=inv_system_text,
+        user_prompt=inv_user_text,
         timeout=timeout,
     )
     if inv_result.success and inv_result.parsed is not None:
@@ -272,11 +274,13 @@ async def analyze_screenshot(
     warnings.extend(inv_result.warnings)
 
     # ── Pass 2 — text transcription ───────────────────────────────────
+    text_system_text, _text_system_vid = registry.get("ui_verification.text_system")
+    text_user_text, _text_user_vid = registry.get("ui_verification.text_user")
     text_result = await describe_image_structured(
         img_b64,
         UITextTranscript,
-        system_prompt=registry.get("ui_verification.text_system"),
-        user_prompt=registry.get("ui_verification.text_user"),
+        system_prompt=text_system_text,
+        user_prompt=text_user_text,
         timeout=timeout,
     )
     if text_result.success and text_result.parsed is not None:
@@ -301,17 +305,18 @@ async def analyze_screenshot(
         warnings.append(f"color sampling failed: {e}")
 
     # ── Pass 4 — focused answer ──────────────────────────────────────
-    answer_user = registry.format(
+    answer_user_text, _answer_user_vid = registry.format(
         "ui_verification.answer_user",
         question=question,
         inventory_json=inventory.model_dump_json(indent=2),
         text_json=text.model_dump_json(indent=2),
         colors=str(colors),
     )
+    answer_system_text, _answer_system_vid = registry.get("ui_verification.answer_system")
     answer_result = await describe_image(
         img_b64,
-        system_prompt=registry.get("ui_verification.answer_system"),
-        user_prompt=answer_user,
+        system_prompt=answer_system_text,
+        user_prompt=answer_user_text,
         timeout=timeout,
     )
     if answer_result.success:

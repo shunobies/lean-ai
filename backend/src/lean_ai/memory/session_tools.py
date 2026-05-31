@@ -179,7 +179,7 @@ async def _summarize_conversation(
             return ""
 
         session_data = f"TASK: {task}\n\nCONVERSATION:\n" + "\n".join(transcript_parts)
-        prompt_text = registry.get("memory.session_summary")
+        prompt_text, version_id = registry.get("memory.session_summary")
         user_msg = prompt_text.format(session_data=session_data)
 
         result = await llm.chat_raw(

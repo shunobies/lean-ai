@@ -98,6 +98,34 @@ CREATE TABLE IF NOT EXISTS checkpoints (
     timestamp TEXT,
     summary TEXT
 );
+
+CREATE TABLE IF NOT EXISTS prompt_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    prompt_key TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    variant_label TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS prompt_variants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    prompt_key TEXT NOT NULL,
+    variant_label TEXT NOT NULL,
+    weight REAL NOT NULL DEFAULT 0.5,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ab_tests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    prompt_key TEXT NOT NULL,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    start_date TEXT NOT NULL,
+    end_date TEXT,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -162,6 +190,52 @@ async def _ensure_columns(db: aiosqlite.Connection) -> None:
             "state_json TEXT, "
             "timestamp TEXT, "
             "summary TEXT)"
+        )
+        await db.commit()
+    except Exception:
+        pass
+
+    # Create prompt_versions table if it doesn't exist (migration for older databases)
+    try:
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS prompt_versions ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "prompt_key TEXT NOT NULL, "
+            "version INTEGER NOT NULL, "
+            "text TEXT NOT NULL, "
+            "variant_label TEXT, "
+            "is_active INTEGER NOT NULL DEFAULT 1, "
+            "created_at TEXT NOT NULL)"
+        )
+        await db.commit()
+    except Exception:
+        pass
+
+    # Create prompt_variants table if it doesn't exist (migration for older databases)
+    try:
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS prompt_variants ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "prompt_key TEXT NOT NULL, "
+            "variant_label TEXT NOT NULL, "
+            "weight REAL NOT NULL DEFAULT 0.5, "
+            "created_at TEXT NOT NULL)"
+        )
+        await db.commit()
+    except Exception:
+        pass
+
+    # Create ab_tests table if it doesn't exist (migration for older databases)
+    try:
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS ab_tests ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "prompt_key TEXT NOT NULL, "
+            "name TEXT NOT NULL, "
+            "status TEXT NOT NULL DEFAULT 'active', "
+            "start_date TEXT NOT NULL, "
+            "end_date TEXT, "
+            "created_at TEXT NOT NULL)"
         )
         await db.commit()
     except Exception:
