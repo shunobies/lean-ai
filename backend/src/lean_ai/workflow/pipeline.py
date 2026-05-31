@@ -23,6 +23,7 @@ from lean_ai.workflow.graph import (
     Continue,
     Fail,
     Node,
+    NodeResult,
     Suspend,
     WorkflowEngine,
     WorkflowGraph,
