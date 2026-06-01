@@ -7,7 +7,7 @@ from pathlib import Path
 from lean_ai.config import settings
 from lean_ai.indexer.indexer import search_index
 from lean_ai.indexer.tree import list_repo_tree
-from lean_ai.llm.prompt_registry import registry
+from lean_ai.llm.prompt_registry import PromptScope, registry
 from lean_ai.routers.models import WorkspaceContext
 
 logger = logging.getLogger(__name__)
@@ -500,6 +500,8 @@ def _build_contextual_system_prompt(
 
 
 def build_chat_system_prompt(
+    repo_root: str | None = None,
+    prompt_scope: PromptScope | None = None,
     workspace: WorkspaceContext | None = None,
     file_tree: list[str] | None = None,
     active_file_content: str | None = None,
@@ -514,8 +516,14 @@ def build_chat_system_prompt(
     max_turns: int = 20,
 ) -> str:
     """Build the standard chat system prompt."""
+    if repo_root:
+        registry.load(repo_root)
     return _build_contextual_system_prompt(
-        base_prompt=registry.format_text("chat.system", CHAT_MAX_TURNS=str(max_turns)),
+        base_prompt=registry.format_text(
+            "chat.system",
+            scope=prompt_scope,
+            CHAT_MAX_TURNS=str(max_turns),
+        ),
         workspace=workspace,
         file_tree=file_tree,
         active_file_content=active_file_content,
@@ -531,6 +539,7 @@ def build_chat_system_prompt(
 
 
 def build_architecture_review_system_prompt(
+    repo_root: str | None = None,
     workspace: WorkspaceContext | None = None,
     file_tree: list[str] | None = None,
     active_file_content: str | None = None,
@@ -548,6 +557,8 @@ def build_architecture_review_system_prompt(
     max_turns: int = 20,
 ) -> str:
     """Build the architecture-review chat system prompt."""
+    if repo_root:
+        registry.load(repo_root)
     extra_sections: list[tuple[str, str]] = []
     if decision_context:
         extra_sections.append(("=== DURABLE PROJECT DECISIONS ===", decision_context))

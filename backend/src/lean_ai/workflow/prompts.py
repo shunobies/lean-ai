@@ -2,11 +2,12 @@
 
 from lean_ai.config import settings
 from lean_ai.llm.plan_schema import PlanStep
+from lean_ai.llm.prompt_registry import PromptScope, registry
 from lean_ai.llm.prompts import (
     FIX_INVESTIGATION_PROMPT,
     FIX_SYSTEM_PROMPT,
-    REQUEST_SYSTEM_PROMPT,
     STEP_EXECUTION_SYSTEM_PROMPT,
+    resolve_prompt_text,
 )
 
 # Layer 8 — tokens that suggest a task is a bug fix / regression
@@ -110,9 +111,14 @@ def build_fix_investigation_prompt(
 
 def build_request_system_prompt(
     context: str,
+    *,
+    repo_root: str | None = None,
+    prompt_scope: PromptScope | None = None,
 ) -> str:
     """Build the system prompt for request mode (neutral framing, no test requirement)."""
-    base = REQUEST_SYSTEM_PROMPT
+    if repo_root:
+        registry.load(repo_root)
+    base = resolve_prompt_text("fix.request_system", scope=prompt_scope)
 
     if not context:
         return base

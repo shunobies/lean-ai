@@ -8,7 +8,7 @@ directly.  Prompts that compose policy blocks are resolved at access time
 so that user overrides take effect.
 """
 
-from lean_ai.llm.prompt_registry import PromptVersionResult, registry
+from lean_ai.llm.prompt_registry import PromptScope, PromptVersionResult, registry
 
 # ── Canonical policy blocks (composed into mode prompts) ──────────
 
@@ -53,11 +53,11 @@ class _MissingKey(dict):
         return "{" + key + "}"
 
 
-def _compose(key: str) -> str:
+def _compose(key: str, scope: PromptScope | None = None) -> str:
     """Resolve a prompt that embeds policy block placeholders."""
     from lean_ai.config import settings
 
-    text = _extract_text(registry._resolve_text(key))
+    text = _extract_text(registry._resolve_text(key, scope=scope))
     web_search = _extract_text(registry._resolve_text("policy.web_search"))
     if settings.wiki_url:
         web_search += "\n" + _extract_text(registry._resolve_text("policy.wiki_search"))
@@ -145,3 +145,10 @@ def __getattr__(name: str) -> str:
     if name == "PLAN_SYSTEM_PROMPT":
         return _extract_text(registry._resolve_text("planning.scope_system"))
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def resolve_prompt_text(key: str, *, scope: PromptScope | None = None) -> str:
+    """Resolve a prompt key, including policy composition when required."""
+    if key in _COMPOSED_KEYS.values():
+        return _compose(key, scope=scope)
+    return _extract_text(registry._resolve_text(key, scope=scope))

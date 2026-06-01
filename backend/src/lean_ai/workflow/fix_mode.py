@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lean_ai.config import settings
+from lean_ai.llm.role_tuning import ensure_request_role_tuning
 from lean_ai.llm.tool_definitions import (
     build_implementation_tools,
     build_investigation_tools,
@@ -135,8 +136,19 @@ async def _run_fix(
     )
     commands = _effective_post_commands(repo_root)
     execution_context = load_condensed_context(repo_root)
+    prompt_scope = None
     if is_request:
-        system_prompt = build_request_system_prompt(execution_context)
+        prompt_scope = await ensure_request_role_tuning(
+            repo_root=repo_root,
+            assigned_client=active_client,
+            primary_client=llm_client,
+            expert_client=expert_llm_client,
+        )
+        system_prompt = build_request_system_prompt(
+            execution_context,
+            repo_root=repo_root,
+            prompt_scope=prompt_scope,
+        )
     else:
         system_prompt = build_fix_system_prompt(
             execution_context,
@@ -341,7 +353,11 @@ async def _run_fix(
         """Rebuild message list from fresh disk state."""
         fresh_context = load_condensed_context(repo_root)
         if is_request:
-            fresh_system_prompt = build_request_system_prompt(fresh_context)
+            fresh_system_prompt = build_request_system_prompt(
+                fresh_context,
+                repo_root=repo_root,
+                prompt_scope=prompt_scope,
+            )
         else:
             fresh_system_prompt = build_fix_system_prompt(
                 fresh_context,

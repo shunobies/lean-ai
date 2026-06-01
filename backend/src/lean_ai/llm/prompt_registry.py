@@ -64,6 +64,24 @@ class PromptVersionResult:
     variant_label: str | None = None
 
 
+@dataclass(frozen=True)
+class PromptScope:
+    """Model-role scope for prompt resolution."""
+
+    model_id: str
+    agent_role: str
+
+
+@dataclass(frozen=True)
+class ScopedPromptOverride:
+    """A persisted model-role specific prompt override."""
+
+    prompt_key: str
+    model_id: str
+    agent_role: str
+    text: str
+
+
 class SyncPromptText(str):
     """String-like prompt value that can also be awaited.
 
@@ -93,9 +111,14 @@ class PromptRegistry:
     def __init__(self) -> None:
         self._defaults: dict[str, PromptEntry] = {}
         self._overrides: dict[str, str] = {}
+        self._scoped_overrides: dict[tuple[str, str, str], str] = {}
         self._loaded_root: str | None = None
         # A/B test configs cached in memory: prompt_key -> list of variant dicts
         self._ab_configs: dict[str, list[dict[str, Any]]] = {}
+
+    @staticmethod
+    def _scoped_key(key: str, scope: PromptScope) -> tuple[str, str, str]:
+        return (key, scope.model_id, scope.agent_role)
 
     async def _load_ab_configs(self, db: aiosqlite.Connection) -> None:
         """Load active A/B tests and their variants into memory.
@@ -156,8 +179,12 @@ class PromptRegistry:
         """Register a prompt entry."""
         self._defaults[entry.key] = entry
 
-    def _resolve_text(self, key: str) -> str:
+    def _resolve_text(self, key: str, scope: PromptScope | None = None) -> str:
         """Return the current text for *key* (internal helper)."""
+        if scope is not None:
+            scoped_text = self._scoped_overrides.get(self._scoped_key(key, scope))
+            if scoped_text is not None:
+                return scoped_text
         if key in self._overrides:
             return self._overrides[key]
         entry = self._defaults.get(key)
@@ -165,17 +192,23 @@ class PromptRegistry:
             raise KeyError(f"Unknown prompt key: {key!r}")
         return entry.default_text
 
-    def get_text(self, key: str) -> str:
+    def get_text(self, key: str, *, scope: PromptScope | None = None) -> str:
         """Synchronously return prompt text for non-versioned call sites."""
-        return self._resolve_text(key)
+        return self._resolve_text(key, scope=scope)
 
     def get_with_version(self, key: str) -> tuple[str, int]:
         """Synchronously return prompt text and a default local version."""
         return self._resolve_text(key), 0
 
-    def format_text(self, key: str, **kwargs: str) -> str:
+    def format_text(
+        self,
+        key: str,
+        *,
+        scope: PromptScope | None = None,
+        **kwargs: str,
+    ) -> str:
         """Synchronously format prompt text for non-versioned call sites."""
-        text = self._resolve_text(key)
+        text = self._resolve_text(key, scope=scope)
         return text.format_map(defaultdict(str, **kwargs)) if kwargs else text
 
     def format_with_version(self, key: str, **kwargs: str) -> tuple[str, int]:
@@ -187,6 +220,8 @@ class PromptRegistry:
         db: aiosqlite.Connection | str | None,
         key: str | None = None,
         session_id: str | None = None,
+        *,
+        scope: PromptScope | None = None,
     ) -> PromptVersionResult | SyncPromptText | Any:
         """Return the resolved prompt text with version metadata.
 
@@ -199,7 +234,7 @@ class PromptRegistry:
             key, db = db, None
         if key is None:
             raise TypeError("PromptRegistry.get() missing required argument: 'key'")
-        base_text = self._resolve_text(key)
+        base_text = self._resolve_text(key, scope=scope)
 
         if session_id is None:
             return SyncPromptText(base_text)
@@ -268,6 +303,9 @@ class PromptRegistry:
         """Return all prompts with metadata for the API."""
         result: list[dict[str, Any]] = []
         for entry in self._defaults.values():
+            scoped_override_count = sum(
+                1 for prompt_key, _, _ in self._scoped_overrides if prompt_key == entry.key
+            )
             result.append(
                 {
                     "key": entry.key,
@@ -277,6 +315,8 @@ class PromptRegistry:
                     "default_text": entry.default_text,
                     "current_text": self._overrides.get(entry.key, entry.default_text),
                     "is_overridden": entry.key in self._overrides,
+                    "has_scoped_overrides": scoped_override_count > 0,
+                    "scoped_override_count": scoped_override_count,
                     "template_vars": entry.template_vars,
                     "warning": entry.warning,
                 }
@@ -300,6 +340,7 @@ class PromptRegistry:
         yaml_path = root / ".lean_ai" / "prompts.yaml"
         self._loaded_root = repo_root
         self._overrides.clear()
+        self._scoped_overrides.clear()
 
         if not yaml_path.exists():
             return
@@ -319,6 +360,23 @@ class PromptRegistry:
                     self._overrides[k] = v
                 elif k not in self._defaults:
                     logger.warning("prompts.yaml: unknown key %r (ignored)", k)
+            scoped_data = data.get("_scoped_overrides", [])
+            if isinstance(scoped_data, list):
+                for item in scoped_data:
+                    if not isinstance(item, dict):
+                        continue
+                    prompt_key = item.get("prompt_key")
+                    model_id = item.get("model")
+                    agent_role = item.get("role")
+                    text = item.get("text")
+                    if (
+                        isinstance(prompt_key, str)
+                        and prompt_key in self._defaults
+                        and isinstance(model_id, str)
+                        and isinstance(agent_role, str)
+                        and isinstance(text, str)
+                    ):
+                        self._scoped_overrides[(prompt_key, model_id, agent_role)] = text
         except Exception:
             logger.exception("Failed to load prompts.yaml from %s", yaml_path)
 
@@ -331,43 +389,115 @@ class PromptRegistry:
 
         merged = dict(self._overrides)
         merged.update(overrides)
+        self._write_yaml(yaml_path, merged, self._scoped_overrides)
+        self._overrides = merged
+        self._loaded_root = repo_root
 
+    def save_scoped_overrides(
+        self,
+        repo_root: str,
+        overrides: list[ScopedPromptOverride],
+    ) -> None:
+        """Write model-role specific overrides to ``.lean_ai/prompts.yaml``."""
+        root = Path(repo_root)
+        yaml_dir = root / ".lean_ai"
+        yaml_dir.mkdir(parents=True, exist_ok=True)
+        yaml_path = yaml_dir / "prompts.yaml"
+
+        merged = dict(self._scoped_overrides)
+        for override in overrides:
+            merged[(override.prompt_key, override.model_id, override.agent_role)] = override.text
+
+        self._write_yaml(yaml_path, self._overrides, merged)
+        self._scoped_overrides = merged
+        self._loaded_root = repo_root
+
+    def get_scoped_override(self, key: str, scope: PromptScope) -> str | None:
+        """Return the matching scoped override text, if any."""
+        return self._scoped_overrides.get(self._scoped_key(key, scope))
+
+    def reset_scoped_overrides(
+        self,
+        repo_root: str,
+        *,
+        scope: PromptScope | None = None,
+        keys: list[str] | None = None,
+    ) -> None:
+        """Reset scoped overrides, optionally filtering by scope and prompt keys."""
+        retained: dict[tuple[str, str, str], str] = {}
+        for scoped_key, text in self._scoped_overrides.items():
+            prompt_key, model_id, agent_role = scoped_key
+            if keys is not None and prompt_key not in keys:
+                retained[scoped_key] = text
+                continue
+            if scope is not None and (model_id, agent_role) != (scope.model_id, scope.agent_role):
+                retained[scoped_key] = text
+        self._scoped_overrides = retained
+        root = Path(repo_root)
+        yaml_path = root / ".lean_ai" / "prompts.yaml"
+        if not self._overrides and not self._scoped_overrides:
+            if yaml_path.exists():
+                yaml_path.unlink()
+            return
+        self._write_yaml(yaml_path, self._overrides, self._scoped_overrides)
+
+    def _write_yaml(
+        self,
+        yaml_path: Path,
+        global_overrides: dict[str, str],
+        scoped_overrides: dict[tuple[str, str, str], str],
+    ) -> None:
         from ruamel.yaml import YAML
 
         yaml = YAML()
         yaml.default_flow_style = False
         yaml.width = 4096
 
-        out: dict[str, Any] = {"_version": 1}
-        for k in sorted(merged):
-            out[k] = merged[k]
-
+        out: dict[str, Any] = {"_version": 2}
+        for k in sorted(global_overrides):
+            out[k] = global_overrides[k]
+        if scoped_overrides:
+            out["_scoped_overrides"] = [
+                {
+                    "prompt_key": prompt_key,
+                    "model": model_id,
+                    "role": agent_role,
+                    "text": text,
+                }
+                for (prompt_key, model_id, agent_role), text in sorted(scoped_overrides.items())
+            ]
         yaml.dump(out, yaml_path)
-        self._overrides = merged
-        self._loaded_root = repo_root
 
     def reset(self, repo_root: str, keys: list[str] | None = None) -> None:
         """Reset overrides. *keys=None* resets all."""
         if keys is None:
             self._overrides.clear()
+            self._scoped_overrides.clear()
         else:
             for k in keys:
                 self._overrides.pop(k, None)
+            self._scoped_overrides = {
+                scoped_key: text
+                for scoped_key, text in self._scoped_overrides.items()
+                if scoped_key[0] not in keys
+            }
 
         root = Path(repo_root)
         yaml_path = root / ".lean_ai" / "prompts.yaml"
 
-        if not self._overrides:
+        if not self._overrides and not self._scoped_overrides:
             if yaml_path.exists():
                 yaml_path.unlink()
         else:
-            self.save_overrides(repo_root, {})
+            self._write_yaml(yaml_path, self._overrides, self._scoped_overrides)
 
     def format(
         self,
         db: aiosqlite.Connection | str | None,
         key: str | None = None,
         session_id: str | None = None,
+        *,
+        scope: PromptScope | None = None,
         **kwargs: str,
     ) -> PromptVersionResult | SyncPromptText | Any:
         """Get a prompt, apply template substitution, preserving async compatibility."""
@@ -376,7 +506,7 @@ class PromptRegistry:
         if key is None:
             raise TypeError("PromptRegistry.format() missing required argument: 'key'")
 
-        result = self.get(db, key, session_id=session_id)
+        result = self.get(db, key, session_id=session_id, scope=scope)
         if isinstance(result, SyncPromptText):
             text = str(result)
             if kwargs:

@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 
 from lean_ai.config import settings
 from lean_ai.llm.refiner import RefinerResult
+from lean_ai.llm.role_tuning import ensure_request_role_tuning
 from lean_ai.llm.tool_definitions import build_chat_tools
 from lean_ai.routers.context_helpers import (
     build_architecture_review_system_prompt,
@@ -25,6 +26,7 @@ from lean_ai.routers.context_helpers import (
     search_workspace,
 )
 from lean_ai.routers.dependencies import (
+    expert_llm_client,
     llm_client,
     refiner,
     request_llm_client,
@@ -640,6 +642,7 @@ async def _build_chat_messages(
 
     if request.chat_mode == "architecture_review":
         system_prompt = build_architecture_review_system_prompt(
+            repo_root=workspace.workspace_root if workspace else None,
             workspace=workspace,
             file_tree=file_tree,
             active_file_content=active_file_content,
@@ -655,7 +658,15 @@ async def _build_chat_messages(
             max_turns=_resolve_max_turns(request.extended_turns),
         )
     else:
+        prompt_scope = await ensure_request_role_tuning(
+            repo_root=workspace.workspace_root if workspace else None,
+            assigned_client=_get_chat_client(),
+            primary_client=llm_client,
+            expert_client=expert_llm_client,
+        )
         system_prompt = build_chat_system_prompt(
+            repo_root=workspace.workspace_root if workspace else None,
+            prompt_scope=prompt_scope,
             workspace=workspace,
             file_tree=file_tree,
             active_file_content=active_file_content,

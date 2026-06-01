@@ -3208,3 +3208,150 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
             template_vars=["question", "inventory_json", "text_json", "colors"],
         )
     )
+
+    reg.register(
+        PromptEntry(
+            key="role_tuning.request_work_summary",
+            category="Advanced",
+            name="Request Role Tuning Work Summary",
+            description=(
+                "Canonical work summary for calibrating the request role."
+                " Stored centrally so role tuning can invalidate when the"
+                " intended job changes."
+            ),
+            default_text=(
+                "This agent talks with executives, employees, or other stakeholders "
+                "who may not understand software internals.\n\n"
+                "The agent's job is to understand what the stakeholder wants users "
+                "to experience when interacting with a product.\n\n"
+                "The agent must gather the business goal, user goal, workflow, "
+                "constraints, edge cases, success criteria, unresolved questions, "
+                "and assumptions that need confirmation.\n\n"
+                "The agent should avoid jumping into code, architecture, databases, "
+                "frameworks, implementation planning, or technical prescriptions "
+                "unless the stakeholder explicitly asks for them.\n\n"
+                "The agent should ask a small number of focused questions at a "
+                "time, separate user intent from implementation preferences, and "
+                "produce a structured request document that downstream engineering "
+                "agents can use."
+            ),
+        )
+    )
+
+    reg.register(
+        PromptEntry(
+            key="role_tuning.discovery",
+            category="Advanced",
+            name="Role Tuning Discovery Prompt",
+            description=(
+                "Structured calibration prompt used to ask a model which"
+                " professional role title best fits the request-role work."
+            ),
+            default_text=(
+                "You are being calibrated for an agent role in a local LLM harness.\n\n"
+                "Do not begin the real task yet.\n\n"
+                "Here is the work this agent must perform:\n\n"
+                "{WORK_SUMMARY}\n\n"
+                "Based only on the work description, identify the professional "
+                "role title or combination of role titles that best describes "
+                "this work.\n\n"
+                "Return JSON only."
+            ),
+            template_vars=["WORK_SUMMARY"],
+        )
+    )
+
+    reg.register(
+        PromptEntry(
+            key="role_tuning.probe.role_definition",
+            category="Advanced",
+            name="Role Tuning Probe — Role Definition",
+            description="Probe A prompt template for request-role calibration.",
+            default_text=(
+                "You are operating as a {CANDIDATE_ROLE_TITLE} inside Lean-AI.\n\n"
+                "The work you must perform is:\n\n"
+                "{WORK_SUMMARY}\n\n"
+                "Explain how you will perform this role.\n\n"
+                "Do not start a real requirements interview.\n"
+                "Do not ask the user questions yet.\n"
+                "Focus on your operating behavior."
+            ),
+            template_vars=["CANDIDATE_ROLE_TITLE", "WORK_SUMMARY"],
+        )
+    )
+
+    reg.register(
+        PromptEntry(
+            key="role_tuning.probe.scenario_judgment",
+            category="Advanced",
+            name="Role Tuning Probe — Scenario Judgment",
+            description="Probe B prompt template for request-role calibration.",
+            default_text=(
+                "You are operating as a {CANDIDATE_ROLE_TITLE} inside Lean-AI.\n\n"
+                "A stakeholder says:\n\n"
+                "\"I want users to upload a file and have the system tell them what to do next.\"\n\n"
+                "As this role, what information would you gather before this "
+                "becomes an engineering task?\n\n"
+                "Do not design the implementation.\n"
+                "Do not choose frameworks, databases, architecture, or code changes."
+            ),
+            template_vars=["CANDIDATE_ROLE_TITLE"],
+        )
+    )
+
+    reg.register(
+        PromptEntry(
+            key="role_tuning.probe.boundary_discipline",
+            category="Advanced",
+            name="Role Tuning Probe — Boundary Discipline",
+            description="Probe C prompt template for request-role calibration.",
+            default_text=(
+                "You are operating as a {CANDIDATE_ROLE_TITLE} inside Lean-AI.\n\n"
+                "A stakeholder says:\n\n"
+                "\"Can you just tell the engineers to use PostgreSQL, Redis, and a React dashboard?\"\n\n"
+                "As this role, how should you handle this statement?\n\n"
+                "Focus on separating stakeholder intent, constraints, preferences, "
+                "and implementation decisions.\n"
+                "Do not accept the implementation suggestion as final "
+                "architecture unless the actual requirement supports it."
+            ),
+            template_vars=["CANDIDATE_ROLE_TITLE"],
+        )
+    )
+
+    reg.register(
+        PromptEntry(
+            key="role_tuning.judge",
+            category="Advanced",
+            name="Role Tuning Judge Prompt",
+            description=(
+                "Structured rubric prompt used by the strongest available"
+                " model to score request-role role-title candidates."
+            ),
+            default_text=(
+                "You are judging whether a candidate role framing causes an "
+                "assigned model to behave correctly for a Lean-AI agent role.\n\n"
+                "Agent role being tuned: {AGENT_ROLE}\n"
+                "Candidate role title: {CANDIDATE_ROLE_TITLE}\n\n"
+                "Expected work summary:\n\n"
+                "{WORK_SUMMARY}\n\n"
+                "The assigned model produced the following probe responses:\n\n"
+                "Probe A - Role Definition:\n"
+                "{PROBE_A_RESPONSE}\n\n"
+                "Probe B - Scenario Judgment:\n"
+                "{PROBE_B_RESPONSE}\n\n"
+                "Probe C - Boundary Discipline:\n"
+                "{PROBE_C_RESPONSE}\n\n"
+                "Score the candidate role title using the rubric described in "
+                "the response schema. Return JSON only."
+            ),
+            template_vars=[
+                "AGENT_ROLE",
+                "CANDIDATE_ROLE_TITLE",
+                "WORK_SUMMARY",
+                "PROBE_A_RESPONSE",
+                "PROBE_B_RESPONSE",
+                "PROBE_C_RESPONSE",
+            ],
+        )
+    )
