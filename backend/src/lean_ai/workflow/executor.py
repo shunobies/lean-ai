@@ -16,6 +16,7 @@ from lean_ai.config import settings
 from lean_ai.context.metadata import invalidate_metadata_cache_for_paths
 from lean_ai.indexer.tree import list_repo_tree
 from lean_ai.llm.base import ToolCall
+from lean_ai.llm.role_tuning import ensure_expert_role_tuning, ensure_primary_role_tuning
 from lean_ai.llm.plan_schema import (
     ExecutionPlan,
     PlanStep,
@@ -574,10 +575,18 @@ async def execute_plan(
     name_registry_text = format_name_registry_for_prompt(
         getattr(plan, "name_registry", []) or [],
     )
+    primary_prompt_scope = await ensure_primary_role_tuning(
+        repo_root=repo_root,
+        assigned_client=llm_client,
+        primary_client=llm_client,
+        expert_client=expert_llm_client,
+    )
     system_prompt = build_step_system_prompt(
         load_execution_context(repo_root),
         naming_conventions=naming_text,
         name_registry=name_registry_text,
+        repo_root=repo_root,
+        prompt_scope=primary_prompt_scope,
     )
 
     # Callbacks for WebSocket progress + conversation logging.
@@ -643,6 +652,8 @@ async def execute_plan(
                 fresh_ctx,
                 naming_conventions=naming_text,
                 name_registry=name_registry_text,
+                repo_root=repo_root,
+                prompt_scope=primary_prompt_scope,
             )
             fresh_user = build_step_user_message(
                 step,
@@ -1267,6 +1278,12 @@ async def _run_tdd_execution(
             "role": str(test_writer_role),
         },
     )
+    expert_prompt_scope = await ensure_expert_role_tuning(
+        repo_root=repo_root,
+        assigned_client=test_writer_client,
+        primary_client=llm_client,
+        expert_client=expert_llm_client,
+    )
     test_system_prompt = build_tdd_test_writing_prompt(
         load_execution_context(repo_root),
         implementation_plan_md=plan_to_markdown(plan),
@@ -1276,6 +1293,8 @@ async def _run_tdd_execution(
         name_registry=format_name_registry_for_prompt(
             getattr(plan, "name_registry", []) or [],
         ),
+        repo_root=repo_root,
+        prompt_scope=expert_prompt_scope,
     )
 
     for step in plan.tdd_test_steps:
@@ -1333,6 +1352,13 @@ async def _run_tdd_execution(
         ),
         name_registry=format_name_registry_for_prompt(
             getattr(plan, "name_registry", []) or [],
+        ),
+        repo_root=repo_root,
+        prompt_scope=await ensure_primary_role_tuning(
+            repo_root=repo_root,
+            assigned_client=llm_client,
+            primary_client=llm_client,
+            expert_client=expert_llm_client,
         ),
     )
     incomplete_results: list[dict] = []

@@ -3240,6 +3240,55 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
 
     reg.register(
         PromptEntry(
+            key="role_tuning.primary_work_summary",
+            category="Advanced",
+            name="Primary Role Tuning Work Summary",
+            description="Canonical work summary for calibrating the primary role.",
+            default_text=(
+                "This agent is the main implementation worker for Lean-AI.\n\n"
+                "The agent's job is to explore the codebase when needed, execute "
+                "bounded implementation work, and complete approved jobs without "
+                "scope drift.\n\n"
+                "The agent must read real files before editing, verify names and "
+                "signatures against the codebase, make coherent code changes, and "
+                "use tests, lint, and command output to confirm success.\n\n"
+                "The agent should respect explicit boundaries such as may-change "
+                "lists, must-not-change lists, and step success checks. It should "
+                "prefer small focused edits over broad rewrites.\n\n"
+                "The agent should avoid inventing codebase facts, expanding the "
+                "task into architecture redesign, or claiming success without "
+                "verification."
+            ),
+        )
+    )
+
+    reg.register(
+        PromptEntry(
+            key="role_tuning.expert_work_summary",
+            category="Advanced",
+            name="Expert Role Tuning Work Summary",
+            description="Canonical work summary for calibrating the expert role.",
+            default_text=(
+                "This agent is Lean-AI's high-reasoning design and review specialist.\n\n"
+                "The agent's job is to synthesize design decisions, risks, "
+                "interfaces, implementation sequencing, and verification strategy "
+                "from scope documents, file summaries, and supporting references.\n\n"
+                "The agent must reason carefully about architecture, identify gaps "
+                "or risks, verify external APIs and library behavior when needed, "
+                "and produce outputs that downstream implementation agents can "
+                "execute without guessing.\n\n"
+                "The agent should treat provided file summaries and citations as "
+                "authoritative evidence, escalate uncertainty explicitly, and keep "
+                "its guidance grounded in the available facts.\n\n"
+                "The agent should avoid fabricating repository details, drifting "
+                "into speculative implementation, or treating uncertain assumptions "
+                "as confirmed design decisions."
+            ),
+        )
+    )
+
+    reg.register(
+        PromptEntry(
             key="role_tuning.discovery",
             category="Advanced",
             name="Role Tuning Discovery Prompt",
@@ -3263,9 +3312,9 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
 
     reg.register(
         PromptEntry(
-            key="role_tuning.probe.role_definition",
+            key="role_tuning.request.probe.role_definition",
             category="Advanced",
-            name="Role Tuning Probe — Role Definition",
+            name="Request Role Tuning Probe — Role Definition",
             description="Probe A prompt template for request-role calibration.",
             default_text=(
                 "You are operating as a {CANDIDATE_ROLE_TITLE} inside Lean-AI.\n\n"
@@ -3282,9 +3331,9 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
 
     reg.register(
         PromptEntry(
-            key="role_tuning.probe.scenario_judgment",
+            key="role_tuning.request.probe.scenario_judgment",
             category="Advanced",
-            name="Role Tuning Probe — Scenario Judgment",
+            name="Request Role Tuning Probe — Scenario Judgment",
             description="Probe B prompt template for request-role calibration.",
             default_text=(
                 "You are operating as a {CANDIDATE_ROLE_TITLE} inside Lean-AI.\n\n"
@@ -3301,9 +3350,9 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
 
     reg.register(
         PromptEntry(
-            key="role_tuning.probe.boundary_discipline",
+            key="role_tuning.request.probe.boundary_discipline",
             category="Advanced",
-            name="Role Tuning Probe — Boundary Discipline",
+            name="Request Role Tuning Probe — Boundary Discipline",
             description="Probe C prompt template for request-role calibration.",
             default_text=(
                 "You are operating as a {CANDIDATE_ROLE_TITLE} inside Lean-AI.\n\n"
@@ -3314,6 +3363,122 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
                 "and implementation decisions.\n"
                 "Do not accept the implementation suggestion as final "
                 "architecture unless the actual requirement supports it."
+            ),
+            template_vars=["CANDIDATE_ROLE_TITLE"],
+        )
+    )
+
+    reg.register(
+        PromptEntry(
+            key="role_tuning.primary.probe.role_definition",
+            category="Advanced",
+            name="Primary Role Tuning Probe — Role Definition",
+            description="Probe A prompt template for primary-role calibration.",
+            default_text=(
+                "You are operating as a {CANDIDATE_ROLE_TITLE} inside Lean-AI.\n\n"
+                "The work you must perform is:\n\n"
+                "{WORK_SUMMARY}\n\n"
+                "Explain how you will perform this role.\n\n"
+                "Do not start a real implementation yet.\n"
+                "Focus on how you approach bounded execution, verification, "
+                "and scope discipline."
+            ),
+            template_vars=["CANDIDATE_ROLE_TITLE", "WORK_SUMMARY"],
+        )
+    )
+
+    reg.register(
+        PromptEntry(
+            key="role_tuning.primary.probe.scenario_judgment",
+            category="Advanced",
+            name="Primary Role Tuning Probe — Scenario Judgment",
+            description="Probe B prompt template for primary-role calibration.",
+            default_text=(
+                "You are operating as a {CANDIDATE_ROLE_TITLE} inside Lean-AI.\n\n"
+                "You receive an approved implementation step:\n\n"
+                "\"Add server-side validation to the existing POST /api/orders "
+                "handler, update any affected tests, and verify the change with "
+                "the project's test command.\"\n\n"
+                "As this role, how would you approach the work?\n\n"
+                "Focus on the files you would inspect, the implementation "
+                "discipline you would use, and how you would verify success.\n"
+                "Do not redesign the architecture."
+            ),
+            template_vars=["CANDIDATE_ROLE_TITLE"],
+        )
+    )
+
+    reg.register(
+        PromptEntry(
+            key="role_tuning.primary.probe.boundary_discipline",
+            category="Advanced",
+            name="Primary Role Tuning Probe — Boundary Discipline",
+            description="Probe C prompt template for primary-role calibration.",
+            default_text=(
+                "You are operating as a {CANDIDATE_ROLE_TITLE} inside Lean-AI.\n\n"
+                "While working on a small approved step, someone says:\n\n"
+                "\"Since you're already touching this area, redesign the whole "
+                "order system, rename the modules, and migrate the data model too.\"\n\n"
+                "As this role, how should you handle that?\n\n"
+                "Focus on scope control, verification, and how to separate the "
+                "current job from a larger architecture effort."
+            ),
+            template_vars=["CANDIDATE_ROLE_TITLE"],
+        )
+    )
+
+    reg.register(
+        PromptEntry(
+            key="role_tuning.expert.probe.role_definition",
+            category="Advanced",
+            name="Expert Role Tuning Probe — Role Definition",
+            description="Probe A prompt template for expert-role calibration.",
+            default_text=(
+                "You are operating as a {CANDIDATE_ROLE_TITLE} inside Lean-AI.\n\n"
+                "The work you must perform is:\n\n"
+                "{WORK_SUMMARY}\n\n"
+                "Explain how you will perform this role.\n\n"
+                "Do not start real implementation work.\n"
+                "Focus on design synthesis, risk analysis, verification "
+                "strategy, and evidence discipline."
+            ),
+            template_vars=["CANDIDATE_ROLE_TITLE", "WORK_SUMMARY"],
+        )
+    )
+
+    reg.register(
+        PromptEntry(
+            key="role_tuning.expert.probe.scenario_judgment",
+            category="Advanced",
+            name="Expert Role Tuning Probe — Scenario Judgment",
+            description="Probe B prompt template for expert-role calibration.",
+            default_text=(
+                "You are operating as a {CANDIDATE_ROLE_TITLE} inside Lean-AI.\n\n"
+                "A feature request says:\n\n"
+                "\"Add background document processing with status tracking, "
+                "retry behavior, and a user-facing progress indicator.\"\n\n"
+                "As this role, what design decisions, risks, interfaces, and "
+                "verification targets would you define before implementation?\n\n"
+                "Focus on the planning and review work, not code writing."
+            ),
+            template_vars=["CANDIDATE_ROLE_TITLE"],
+        )
+    )
+
+    reg.register(
+        PromptEntry(
+            key="role_tuning.expert.probe.boundary_discipline",
+            category="Advanced",
+            name="Expert Role Tuning Probe — Boundary Discipline",
+            description="Probe C prompt template for expert-role calibration.",
+            default_text=(
+                "You are operating as a {CANDIDATE_ROLE_TITLE} inside Lean-AI.\n\n"
+                "The file summary suggests one integration pattern, but the "
+                "available documentation is incomplete and a key dependency "
+                "detail is uncertain.\n\n"
+                "As this role, how should you proceed?\n\n"
+                "Focus on uncertainty handling, citation discipline, and how to "
+                "avoid fabricating repository facts or overly specific designs."
             ),
             template_vars=["CANDIDATE_ROLE_TITLE"],
         )
@@ -3342,8 +3507,8 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
                 "{PROBE_B_RESPONSE}\n\n"
                 "Probe C - Boundary Discipline:\n"
                 "{PROBE_C_RESPONSE}\n\n"
-                "Score the candidate role title using the rubric described in "
-                "the response schema. Return JSON only."
+                "Score the candidate role title using the response schema "
+                "categories. Return JSON only."
             ),
             template_vars=[
                 "AGENT_ROLE",

@@ -5,8 +5,6 @@ from lean_ai.llm.plan_schema import PlanStep
 from lean_ai.llm.prompt_registry import PromptScope, registry
 from lean_ai.llm.prompts import (
     FIX_INVESTIGATION_PROMPT,
-    FIX_SYSTEM_PROMPT,
-    STEP_EXECUTION_SYSTEM_PROMPT,
     resolve_prompt_text,
 )
 
@@ -46,6 +44,9 @@ def build_fix_system_prompt(
     context: str,
     test_command: str = "",
     task: str = "",
+    *,
+    repo_root: str | None = None,
+    prompt_scope: PromptScope | None = None,
 ) -> str:
     """Build the system prompt for fix mode (no planning).
 
@@ -56,7 +57,9 @@ def build_fix_system_prompt(
     prompt also demands a regression test using the regression-file
     convention so the bug cannot silently return.
     """
-    base = FIX_SYSTEM_PROMPT
+    if repo_root:
+        registry.load(repo_root)
+    base = resolve_prompt_text("fix.system", scope=prompt_scope)
 
     if test_command:
         base += (
@@ -130,9 +133,14 @@ def build_step_system_prompt(
     context: str,
     naming_conventions: str = "",
     name_registry: str = "",
+    *,
+    repo_root: str | None = None,
+    prompt_scope: PromptScope | None = None,
 ) -> str:
     """Build the system prompt for per-step execution."""
-    prompt = STEP_EXECUTION_SYSTEM_PROMPT
+    if repo_root:
+        registry.load(repo_root)
+    prompt = resolve_prompt_text("execution.step_system", scope=prompt_scope)
 
     if context:
         prompt += f"\n## Project Context\n\n{context}"
@@ -158,6 +166,9 @@ def build_tdd_test_writing_prompt(
     implementation_plan_md: str,
     naming_conventions: str = "",
     name_registry: str = "",
+    *,
+    repo_root: str | None = None,
+    prompt_scope: PromptScope | None = None,
 ) -> str:
     """Build the system prompt for TDD Phase A — expert writes tests.
 
@@ -170,7 +181,13 @@ def build_tdd_test_writing_prompt(
     Tools listed in the prompt match the actual tool list passed via the
     ``tools=`` parameter so the model does not hallucinate tool names.
     """
-    prompt = build_step_system_prompt(context, naming_conventions, name_registry)
+    prompt = build_step_system_prompt(
+        context,
+        naming_conventions,
+        name_registry,
+        repo_root=repo_root,
+        prompt_scope=prompt_scope,
+    )
     prompt += (
         "\n\nTDD MODE — TEST WRITING PHASE:\n"
         "You are writing TESTS BEFORE the implementation exists. The "
@@ -270,6 +287,9 @@ def build_tdd_step_system_prompt(
     context: str,
     naming_conventions: str = "",
     name_registry: str = "",
+    *,
+    repo_root: str | None = None,
+    prompt_scope: PromptScope | None = None,
 ) -> str:
     """Build the system prompt for TDD implementation steps (primary model).
 
@@ -279,7 +299,13 @@ def build_tdd_step_system_prompt(
     escape hatch (for tests that are logically impossible to satisfy or
     that encode a wrong contract) — they route through the expert via
     """
-    prompt = build_step_system_prompt(context, naming_conventions, name_registry)
+    prompt = build_step_system_prompt(
+        context,
+        naming_conventions,
+        name_registry,
+        repo_root=repo_root,
+        prompt_scope=prompt_scope,
+    )
     prompt += (
         "\n\nTDD MODE — IMPLEMENTATION PHASE:\n"
         "- Tests have already been written and reviewed. Your default "
@@ -321,13 +347,18 @@ def build_tdd_step_system_prompt(
 def build_tdd_review_prompt(
     context: str,
     test_files: list[str],
+    *,
+    repo_root: str | None = None,
+    prompt_scope: PromptScope | None = None,
 ) -> str:
     """Build the system prompt for the TDD test review phase.
 
     The primary model reviews the expert's tests before starting
     implementation and can dispute any that are flawed.
     """
-    prompt = STEP_EXECUTION_SYSTEM_PROMPT
+    if repo_root:
+        registry.load(repo_root)
+    prompt = resolve_prompt_text("execution.step_system", scope=prompt_scope)
 
     if context:
         prompt += f"\n## Project Context\n\n{context}"

@@ -23,7 +23,7 @@ from lean_ai.llm.planner_helpers import (
     _split_list,
 )
 from lean_ai.llm.prompt_registry import registry
-from lean_ai.llm.prompts import PLAN_EXPLORATION_SYSTEM_PROMPT
+from lean_ai.llm.prompts import resolve_prompt_text
 from lean_ai.llm.tool_definitions import (
     build_planning_tools,
     build_planning_tools_with_scratchpad,
@@ -530,6 +530,7 @@ async def run_phase2_exploration(
     ws: "WorkflowSession | None",
     dispatcher: WSMessageDispatcher | None,
     state_manager: StateManager,
+    prompt_scope=None,
     on_content: Callable | None = None,
     on_thinking: Callable | None = None,
     on_tool_call: Callable | None = None,
@@ -558,8 +559,9 @@ async def run_phase2_exploration(
         small_ctx,
     )
 
+    phase2_system_prompt = resolve_prompt_text("planning.exploration_system", scope=prompt_scope)
     phase2_messages = [
-        {"role": "system", "content": PLAN_EXPLORATION_SYSTEM_PROMPT},
+        {"role": "system", "content": phase2_system_prompt},
         {
             "role": "user",
             "content": registry.format_text(
@@ -592,6 +594,7 @@ async def run_phase2_exploration(
             on_tool_result=on_tool_result,
             on_metrics=on_metrics,
             on_metrics_reset=on_metrics_reset,
+            prompt_scope=prompt_scope,
             t0=t0,
         )
     else:
@@ -685,6 +688,7 @@ async def _run_parallel_exploration(
     on_tool_result: Callable | None,
     on_metrics: Callable | None,
     on_metrics_reset: Callable | None,
+    prompt_scope,
     t0: float,
 ) -> tuple[str, FileSummary | None]:
     """Parallel Phase 2: fan-out scan then merge deep-dive reads."""
@@ -701,7 +705,10 @@ async def _run_parallel_exploration(
         )
     ]
     scan_messages = [
-        {"role": "system", "content": PLAN_EXPLORATION_SYSTEM_PROMPT},
+        {
+            "role": "system",
+            "content": resolve_prompt_text("planning.exploration_system", scope=prompt_scope),
+        },
         {
             "role": "user",
             "content": (
@@ -761,7 +768,10 @@ async def _run_parallel_exploration(
 
         file_list = "\n".join(f"- {f}" for f in file_subset)
         dive_messages = [
-            {"role": "system", "content": PLAN_EXPLORATION_SYSTEM_PROMPT},
+            {
+                "role": "system",
+                "content": resolve_prompt_text("planning.exploration_system", scope=prompt_scope),
+            },
             {
                 "role": "user",
                 "content": (
@@ -913,7 +923,7 @@ async def _run_serial_exploration(
         jrnl = "\n".join(state.journal_entries) if state.journal_entries else ""
         obs = state.observations
         new_messages: list[dict] = [
-            {"role": "system", "content": PLAN_EXPLORATION_SYSTEM_PROMPT},
+            {"role": "system", "content": phase2_messages[0]["content"]},
             {
                 "role": "user",
                 "content": registry.format_text(

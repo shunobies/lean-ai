@@ -51,11 +51,8 @@ from lean_ai.llm.planner_helpers import (
     _synthesize_scope,
 )
 from lean_ai.llm.prompt_registry import registry
-from lean_ai.llm.prompts import (
-    PLAN_ASSEMBLY_SYSTEM_PROMPT,
-    PLAN_DESIGN_SYSTEM_PROMPT,
-    PLAN_VERIFICATION_SYSTEM_PROMPT,
-)
+from lean_ai.llm.prompts import resolve_prompt_text
+from lean_ai.llm.role_tuning import ensure_expert_role_tuning, ensure_primary_role_tuning
 from lean_ai.llm.tool_definitions import (
     REQUEST_CLARIFICATION_TOOL,
     build_design_tools,
@@ -269,8 +266,15 @@ class ScopePhase(PlanningPhase):
                 await _send_content_done(ws, scope_prose)
         else:
             phase1_turns_str = str(settings.plan_phase1_max_turns)
+            primary_prompt_scope = await ensure_primary_role_tuning(
+                repo_root=repo_root,
+                assigned_client=llm_client,
+                primary_client=llm_client,
+                expert_client=kwargs.get("expert_llm_client"),
+            )
             phase1_system = registry.format_text(
                 "planning.scope_system",
+                scope=primary_prompt_scope,
                 PHASE1_MAX_TURNS=phase1_turns_str,
             )
             phase1_user_content = registry.format_text(
@@ -475,6 +479,12 @@ class ExplorationPhase(PlanningPhase):
                 "phase": "planning.phase2",
             },
         ) as exploration_turn_span:
+            primary_prompt_scope = await ensure_primary_role_tuning(
+                repo_root=repo_root,
+                assigned_client=llm_client,
+                primary_client=llm_client,
+                expert_client=kwargs.get("expert_llm_client"),
+            )
             file_summary_obj, file_identification, phase2_elapsed = await run_phase2_exploration(
                 task=task,
                 scope=scope,
@@ -485,6 +495,7 @@ class ExplorationPhase(PlanningPhase):
                 phase_max_tokens=phase_max_tokens,
                 ws=ws,
                 dispatcher=dispatcher,
+                prompt_scope=primary_prompt_scope,
                 on_content=on_content,
                 on_thinking=on_thinking,
                 on_tool_call=on_tool_call,
@@ -580,6 +591,12 @@ class DesignPhase(PlanningPhase):
 
         expert = llm_client
         expert_max_tokens = settings.effective_expert_max_tokens
+        expert_prompt_scope = await ensure_expert_role_tuning(
+            repo_root=repo_root,
+            assigned_client=expert,
+            primary_client=kwargs.get("primary_llm_client") or expert,
+            expert_client=kwargs.get("expert_llm_client") or expert,
+        )
 
         await _send_stage(
             ws,
@@ -611,7 +628,10 @@ class DesignPhase(PlanningPhase):
             if design_memories:
                 phase3_user_content += design_memories
         phase3_messages = [
-            {"role": "system", "content": PLAN_DESIGN_SYSTEM_PROMPT},
+            {
+                "role": "system",
+                "content": resolve_prompt_text("planning.design_system", scope=expert_prompt_scope),
+            },
             {"role": "user", "content": phase3_user_content},
         ]
 
@@ -768,6 +788,12 @@ class AssemblyPhase(PlanningPhase):
         on_metrics_reset = kwargs.get("on_metrics_reset")
 
         expert = expert_llm_client or llm_client
+        expert_prompt_scope = await ensure_expert_role_tuning(
+            repo_root=repo_root,
+            assigned_client=expert,
+            primary_client=kwargs.get("primary_llm_client") or llm_client,
+            expert_client=expert_llm_client or expert,
+        )
         expert_max_tokens = (
             settings.effective_expert_max_tokens if expert_llm_client else settings.ollama_max_tokens
         )
@@ -882,6 +908,7 @@ class AssemblyPhase(PlanningPhase):
                 on_thinking=on_thinking,
                 on_metrics=on_metrics,
                 on_metrics_reset=on_metrics_reset,
+                prompt_scope=expert_prompt_scope,
                 stage_summary="Phase 4b: Drafting implementation plan for TDD...",
                 done_prefix="Draft implementation plan assembled",
                 artifact_label="draft structured plan",
@@ -912,6 +939,7 @@ class AssemblyPhase(PlanningPhase):
                 on_thinking=on_thinking,
                 on_metrics=on_metrics,
                 on_metrics_reset=on_metrics_reset,
+                prompt_scope=expert_prompt_scope,
             )
             _save_debug_phase(
                 repo_root,
@@ -954,6 +982,7 @@ class AssemblyPhase(PlanningPhase):
                 on_thinking=on_thinking,
                 on_metrics=on_metrics,
                 on_metrics_reset=on_metrics_reset,
+                prompt_scope=expert_prompt_scope,
                 stage_summary="Phase 4c: Assembling TDD implementation plan...",
                 done_prefix="TDD implementation plan assembled",
                 artifact_label="structured TDD plan",
@@ -984,6 +1013,7 @@ class AssemblyPhase(PlanningPhase):
                 on_thinking=on_thinking,
                 on_metrics=on_metrics,
                 on_metrics_reset=on_metrics_reset,
+                prompt_scope=expert_prompt_scope,
                 stage_summary="Phase 4: Assembling structured plan...",
                 done_prefix="Plan assembled",
                 artifact_label="structured plan",
@@ -1035,11 +1065,16 @@ class AssemblyPhase(PlanningPhase):
                 llm_client=llm_client,
                 context=context,
                 ws=ws,
+                repo_root=repo_root,
                 expert_llm_client=expert_llm_client,
+                primary_llm_client=kwargs.get("primary_llm_client") or llm_client,
                 previous_plan=plan,
                 on_thinking=on_thinking,
                 on_metrics=on_metrics,
                 on_metrics_reset=on_metrics_reset,
+                file_summary=file_summary,
+                design_and_risks=design_and_risks_md,
+                scope=scope,
             )
             _strip_non_implementation_steps(plan)
             if settings.enable_core_functionality_tagging:
@@ -1408,7 +1443,9 @@ class PlanningPipeline:
                 self.llm_client,
                 self.context,
                 self.ws,
+                repo_root=self.repo_root,
                 expert_llm_client=self.expert_llm_client,
+                primary_llm_client=self.llm_client,
                 previous_plan=self.previous_plan,
                 on_thinking=self.on_thinking,
                 on_metrics=self.on_metrics,
@@ -1465,6 +1502,7 @@ class PlanningPipeline:
                 on_tool_result=self.on_tool_result,
                 on_metrics=self.on_metrics,
                 on_metrics_reset=self.on_metrics_reset,
+                expert_llm_client=self.expert_llm_client,
             )
             # Convert ScopeDocument to markdown for downstream phases.
             scope = scope_obj.to_markdown() if scope_obj else self.task
@@ -1487,6 +1525,7 @@ class PlanningPipeline:
                 on_tool_result=self.on_tool_result,
                 on_metrics=self.on_metrics,
                 on_metrics_reset=self.on_metrics_reset,
+                expert_llm_client=self.expert_llm_client,
             )
             file_summary = file_summary_obj.to_markdown() if file_summary_obj else ""
 
@@ -1537,6 +1576,8 @@ class PlanningPipeline:
                 on_tool_result=self.on_tool_result,
                 on_metrics=self.on_metrics,
                 on_metrics_reset=self.on_metrics_reset,
+                expert_llm_client=self.expert_llm_client,
+                primary_llm_client=explorer,
             )
 
             design_and_risks = _format_design_and_risks(design_and_risks_obj)
@@ -1558,6 +1599,7 @@ class PlanningPipeline:
                 refiner=self.refiner,
                 test_command=self.test_command,
                 expert_llm_client=self.expert_llm_client,
+                primary_llm_client=explorer,
                 file_summary_obj=file_summary_obj,
                 on_content=self.on_content,
                 on_thinking=self.on_thinking,
@@ -1688,7 +1730,9 @@ async def create_plan(
             llm_client,
             context,
             ws,
+            repo_root=repo_root,
             expert_llm_client=expert_llm_client,
+            primary_llm_client=llm_client,
             previous_plan=previous_plan,
             on_thinking=on_thinking,
             on_metrics=on_metrics,
@@ -1714,6 +1758,7 @@ async def create_plan(
         "refiner": refiner,
         "test_command": test_command,
         "expert_llm_client": expert_llm_client,
+        "primary_llm_client": llm_client,
         "on_content": on_content,
         "on_thinking": on_thinking,
         "on_tool_call": on_tool_call,
@@ -1816,6 +1861,7 @@ async def _run_phase5_verification(
     on_thinking: Callable | None,
     on_metrics: Callable | None,
     on_metrics_reset: Callable | None,
+    prompt_scope=None,
 ) -> float:
     """Run the legacy Phase 5 verification helper.
 
@@ -1916,7 +1962,10 @@ async def _run_phase5_verification(
 
     verification = await _chat_structured_with_repair(
         messages=[
-            {"role": "system", "content": PLAN_VERIFICATION_SYSTEM_PROMPT},
+            {
+                "role": "system",
+                "content": resolve_prompt_text("planning.verification_system", scope=prompt_scope),
+            },
             {"role": "user", "content": user_content},
         ],
         schema=VerificationPlan,
@@ -2886,6 +2935,7 @@ async def _assemble_phase4_plan(
     on_thinking: Callable | None,
     on_metrics: Callable | None,
     on_metrics_reset: Callable | None,
+    prompt_scope,
     stage_summary: str,
     done_prefix: str,
     artifact_label: str,
@@ -2902,7 +2952,10 @@ async def _assemble_phase4_plan(
 
     plan = await _chat_structured_with_repair(
         messages=[
-            {"role": "system", "content": PLAN_ASSEMBLY_SYSTEM_PROMPT},
+            {
+                "role": "system",
+                "content": resolve_prompt_text("planning.assembly_system", scope=prompt_scope),
+            },
             {
                 "role": "user",
                 "content": registry.format_text(
@@ -2971,6 +3024,7 @@ async def _run_phase_4b_tdd_test_design(
     on_thinking: Callable | None,
     on_metrics: Callable | None,
     on_metrics_reset: Callable | None,
+    prompt_scope,
 ) -> tuple[VerificationPlan, float]:
     """Run the active Phase 4b TDD test-design pass."""
     await _send_stage(
@@ -2984,7 +3038,10 @@ async def _run_phase_4b_tdd_test_design(
 
     verification = await _chat_structured_with_repair(
         messages=[
-            {"role": "system", "content": PLAN_VERIFICATION_SYSTEM_PROMPT},
+            {
+                "role": "system",
+                "content": resolve_prompt_text("planning.verification_system", scope=prompt_scope),
+            },
             {
                 "role": "user",
                 "content": registry.format_text(

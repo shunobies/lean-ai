@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lean_ai.config import settings
-from lean_ai.llm.role_tuning import ensure_request_role_tuning
+from lean_ai.llm.role_tuning import (
+    ensure_expert_role_tuning,
+    ensure_primary_role_tuning,
+    ensure_request_role_tuning,
+)
 from lean_ai.llm.tool_definitions import (
     build_implementation_tools,
     build_investigation_tools,
@@ -150,10 +154,26 @@ async def _run_fix(
             prompt_scope=prompt_scope,
         )
     else:
+        if active_client is expert_llm_client and expert_llm_client is not None:
+            prompt_scope = await ensure_expert_role_tuning(
+                repo_root=repo_root,
+                assigned_client=active_client,
+                primary_client=llm_client,
+                expert_client=expert_llm_client,
+            )
+        else:
+            prompt_scope = await ensure_primary_role_tuning(
+                repo_root=repo_root,
+                assigned_client=active_client,
+                primary_client=llm_client,
+                expert_client=expert_llm_client,
+            )
         system_prompt = build_fix_system_prompt(
             execution_context,
             test_command=commands.get("test", ""),
             task=task,
+            repo_root=repo_root,
+            prompt_scope=prompt_scope,
         )
 
     # Callbacks — fire-and-forget (same rationale as plan mode callbacks)
@@ -363,6 +383,8 @@ async def _run_fix(
                 fresh_context,
                 test_command=commands.get("test", ""),
                 task=task,
+                repo_root=repo_root,
+                prompt_scope=prompt_scope,
             )
         refresh_state = state_manager.get_state()
         pad = refresh_state.scratchpad_content

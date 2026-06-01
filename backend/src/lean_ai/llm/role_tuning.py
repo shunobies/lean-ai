@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from lean_ai.llm.prompt_registry import PromptScope, ScopedPromptOverride, registry
 from lean_ai.llm.prompts import resolve_prompt_text
@@ -22,24 +22,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 ROLE_TUNING_SCHEMA_VERSION = 1
+ROLE_TUNING_COMPOSITION_VERSION = "role-tuning-v2"
+
 REQUEST_ROLE = "request"
-ROLE_TUNING_COMPOSITION_VERSION = "request-role-tuning-v1"
-REQUEST_PROMPT_KEYS = ("chat.system", "fix.request_system")
-REQUEST_ROLE_CANDIDATES = [
-    "Requirements Analyst",
-    "Business Analyst",
-    "Product Requirements Analyst",
-    "Product Owner",
-    "Project Manager",
-    "Subject Matter Expert",
-]
-REQUEST_JUDGE_CATEGORIES = (
-    "stakeholder_communication",
-    "requirements_gathering",
-    "question_discipline",
-    "avoiding_premature_implementation",
-    "user_outcome_focus",
-    "downstream_engineering_usefulness",
+PRIMARY_ROLE = "primary"
+EXPERT_ROLE = "expert"
+
+GENERIC_JUDGE_CATEGORIES = (
+    "clarity_and_communication",
+    "task_alignment",
+    "context_stewardship",
+    "reasoning_quality",
+    "premature_action_avoidance",
+    "downstream_usefulness",
     "uncertainty_handling",
     "role_boundary_discipline",
 )
@@ -77,6 +72,143 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
     return deduped
 
 
+@dataclass(frozen=True)
+class RoleCalibrationConfig:
+    """Configuration for calibrating a specific Lean-AI agent role."""
+
+    agent_role: str
+    work_summary_prompt_key: str
+    prompt_keys: tuple[str, ...]
+    candidate_titles: tuple[str, ...]
+    probe_prompt_keys: tuple[str, str, str]
+    tuning_header: str
+    default_contract: tuple[str, ...]
+    default_avoid: tuple[str, ...]
+    severe_failure_fields: tuple[str, ...]
+
+
+ROLE_CONFIGS: dict[str, RoleCalibrationConfig] = {
+    REQUEST_ROLE: RoleCalibrationConfig(
+        agent_role=REQUEST_ROLE,
+        work_summary_prompt_key="role_tuning.request_work_summary",
+        prompt_keys=("chat.system", "fix.request_system"),
+        candidate_titles=(
+            "Requirements Analyst",
+            "Business Analyst",
+            "Product Requirements Analyst",
+            "Product Owner",
+            "Project Manager",
+            "Subject Matter Expert",
+        ),
+        probe_prompt_keys=(
+            "role_tuning.request.probe.role_definition",
+            "role_tuning.request.probe.scenario_judgment",
+            "role_tuning.request.probe.boundary_discipline",
+        ),
+        tuning_header="MODEL-SPECIFIC REQUEST ROLE TUNING",
+        default_contract=(
+            "Use plain language with non-technical stakeholders.",
+            "Gather user-facing goals before discussing implementation.",
+            "Capture business goals, user workflow, constraints, edge cases, and success criteria.",
+            "Ask a small number of focused clarification questions at a time.",
+        ),
+        default_avoid=(
+            "Do not jump directly into architecture or framework selection.",
+            "Do not invent business rules or hidden requirements.",
+            "Do not ask stakeholders to define schemas, databases, or internal implementation details.",
+        ),
+        severe_failure_fields=(
+            "premature_action_avoidance",
+            "downstream_usefulness",
+            "role_boundary_discipline",
+        ),
+    ),
+    PRIMARY_ROLE: RoleCalibrationConfig(
+        agent_role=PRIMARY_ROLE,
+        work_summary_prompt_key="role_tuning.primary_work_summary",
+        prompt_keys=(
+            "planning.scope_system",
+            "planning.exploration_system",
+            "execution.step_system",
+            "execution.implementation_system",
+            "fix.system",
+        ),
+        candidate_titles=(
+            "Senior Software Engineer",
+            "Implementation Engineer",
+            "Feature Developer",
+            "Codebase Maintainer",
+            "Staff Software Engineer",
+            "Software Engineer",
+        ),
+        probe_prompt_keys=(
+            "role_tuning.primary.probe.role_definition",
+            "role_tuning.primary.probe.scenario_judgment",
+            "role_tuning.primary.probe.boundary_discipline",
+        ),
+        tuning_header="MODEL-SPECIFIC PRIMARY ROLE TUNING",
+        default_contract=(
+            "Execute the bounded task in front of you using the approved tools and scope limits.",
+            "Verify names, signatures, file paths, and contracts against the real codebase before editing.",
+            "Prefer small, coherent changes that satisfy the task and its checks.",
+            "Use tests, lint, and command outputs to verify completion before claiming the work is done.",
+        ),
+        default_avoid=(
+            "Do not expand the scope into broad refactors or architecture changes without justification.",
+            "Do not invent file contents, signatures, or behaviors that have not been verified.",
+            "Do not skip the step contract's success checks.",
+        ),
+        severe_failure_fields=(
+            "task_alignment",
+            "premature_action_avoidance",
+            "downstream_usefulness",
+            "role_boundary_discipline",
+        ),
+    ),
+    EXPERT_ROLE: RoleCalibrationConfig(
+        agent_role=EXPERT_ROLE,
+        work_summary_prompt_key="role_tuning.expert_work_summary",
+        prompt_keys=(
+            "planning.design_system",
+            "planning.assembly_system",
+            "planning.verification_system",
+            "fix.system",
+        ),
+        candidate_titles=(
+            "Software Architect",
+            "Principal Engineer",
+            "Systems Architect",
+            "Technical Lead",
+            "Staff Engineer",
+            "Design Reviewer",
+        ),
+        probe_prompt_keys=(
+            "role_tuning.expert.probe.role_definition",
+            "role_tuning.expert.probe.scenario_judgment",
+            "role_tuning.expert.probe.boundary_discipline",
+        ),
+        tuning_header="MODEL-SPECIFIC EXPERT ROLE TUNING",
+        default_contract=(
+            "Synthesize design, risks, interfaces, and verification strategy from the provided scope and evidence.",
+            "Use file summaries and retrieved references as authoritative inputs instead of inventing codebase facts.",
+            "Escalate uncertainty clearly and verify external dependencies when they are central to the task.",
+            "Produce guidance that downstream implementation agents can execute without guessing your intent.",
+        ),
+        default_avoid=(
+            "Do not fabricate file contents, signatures, or repository structure.",
+            "Do not drift into implementation-level code writing when the role is design and planning.",
+            "Do not treat uncertain assumptions as confirmed facts.",
+        ),
+        severe_failure_fields=(
+            "task_alignment",
+            "context_stewardship",
+            "downstream_usefulness",
+            "role_boundary_discipline",
+        ),
+    ),
+}
+
+
 class RoleDiscoveryResult(BaseModel):
     best_role_title: str
     alternate_role_titles: list[str] = []
@@ -88,12 +220,12 @@ class RoleDiscoveryResult(BaseModel):
 
 
 class ProbeScore(BaseModel):
-    stakeholder_communication: int = 0
-    requirements_gathering: int = 0
-    question_discipline: int = 0
-    avoiding_premature_implementation: int = 0
-    user_outcome_focus: int = 0
-    downstream_engineering_usefulness: int = 0
+    clarity_and_communication: int = 0
+    task_alignment: int = 0
+    context_stewardship: int = 0
+    reasoning_quality: int = 0
+    premature_action_avoidance: int = 0
+    downstream_usefulness: int = 0
     uncertainty_handling: int = 0
     role_boundary_discipline: int = 0
     notes: str = ""
@@ -178,9 +310,14 @@ def model_identity(client: "LLMClient") -> str:
     return f"{provider}:{model}"
 
 
+def prompt_scope_for_role(client: "LLMClient", agent_role: str) -> PromptScope:
+    """Return the registry scope for a model-role pair."""
+    return PromptScope(model_id=model_identity(client), agent_role=agent_role)
+
+
 def request_prompt_scope(client: "LLMClient") -> PromptScope:
-    """Return the registry scope for a request-role model."""
-    return PromptScope(model_id=model_identity(client), agent_role=REQUEST_ROLE)
+    """Backward-compatible helper for the request role."""
+    return prompt_scope_for_role(client, REQUEST_ROLE)
 
 
 def role_tuning_profile_path(repo_root: str, scope: PromptScope) -> Path:
@@ -190,64 +327,86 @@ def role_tuning_profile_path(repo_root: str, scope: PromptScope) -> Path:
     return Path(repo_root) / ".lean_ai" / "role_tuning" / f"{role_slug}--{model_slug}.json"
 
 
+def _role_config(agent_role: str) -> RoleCalibrationConfig:
+    config = ROLE_CONFIGS.get(agent_role)
+    if config is None:
+        raise KeyError(f"Unsupported role tuning agent role: {agent_role!r}")
+    return config
+
+
 def choose_judge_client(
     *,
+    agent_role: str,
     assigned_client: "LLMClient",
     primary_client: "LLMClient",
     expert_client: "LLMClient | None" = None,
 ) -> JudgeSelection:
     """Choose the strongest available judge model for role tuning."""
     assigned_id = model_identity(assigned_client)
-    if expert_client is not None:
-        expert_id = model_identity(expert_client)
-        if expert_id != assigned_id:
-            return JudgeSelection(expert_client, "expert")
+    expert_id = model_identity(expert_client) if expert_client is not None else None
     primary_id = model_identity(primary_client)
+
+    if agent_role != EXPERT_ROLE and expert_client is not None and expert_id != assigned_id:
+        return JudgeSelection(expert_client, EXPERT_ROLE)
     if primary_id != assigned_id:
-        return JudgeSelection(primary_client, "primary")
+        return JudgeSelection(primary_client, PRIMARY_ROLE)
+    if expert_client is not None and expert_id != assigned_id:
+        return JudgeSelection(expert_client, EXPERT_ROLE)
     return JudgeSelection(
         assigned_client,
-        "request",
+        agent_role,
         warning=(
             "Role tuning was judged by the same model being calibrated because "
-            "no Expert or Primary judge model was available."
+            "no stronger external judge model was available."
         ),
     )
 
 
-def request_work_summary(repo_root: str | None = None) -> str:
-    """Return the canonical request-role work summary."""
+def role_work_summary(agent_role: str, repo_root: str | None = None) -> str:
+    """Return the canonical work summary for a role."""
     if repo_root:
         registry.load(repo_root)
-    return registry.get_text("role_tuning.request_work_summary")
+    return registry.get_text(_role_config(agent_role).work_summary_prompt_key)
+
+
+def request_work_summary(repo_root: str | None = None) -> str:
+    return role_work_summary(REQUEST_ROLE, repo_root)
+
+
+def role_work_summary_hash(agent_role: str, repo_root: str | None = None) -> str:
+    """Return the current work summary hash for a role."""
+    return _sha256_text(role_work_summary(agent_role, repo_root))
 
 
 def request_work_summary_hash(repo_root: str | None = None) -> str:
-    """Return the current request-role work summary hash."""
-    return _sha256_text(request_work_summary(repo_root))
+    return role_work_summary_hash(REQUEST_ROLE, repo_root)
 
 
-def request_prompt_version_hash(repo_root: str | None = None) -> str:
-    """Return a hash that invalidates request-role tuning when prompts change."""
+def role_prompt_version_hash(agent_role: str, repo_root: str | None = None) -> str:
+    """Return a hash that invalidates tuning when a role's prompts change."""
     if repo_root:
         registry.load(repo_root)
-    composed_request = resolve_prompt_text("fix.request_system")
-    raw_chat = registry.get_text("chat.system")
+    config = _role_config(agent_role)
+    tuned_prompt_text = "\n".join(resolve_prompt_text(prompt_key) for prompt_key in config.prompt_keys)
     tuning_prompts = "\n".join(
         [
             registry.get_text("role_tuning.discovery"),
-            registry.get_text("role_tuning.probe.role_definition"),
-            registry.get_text("role_tuning.probe.scenario_judgment"),
-            registry.get_text("role_tuning.probe.boundary_discipline"),
+            registry.get_text(config.probe_prompt_keys[0]),
+            registry.get_text(config.probe_prompt_keys[1]),
+            registry.get_text(config.probe_prompt_keys[2]),
             registry.get_text("role_tuning.judge"),
         ]
     )
     return _sha256_text(
         ROLE_TUNING_COMPOSITION_VERSION,
-        raw_chat,
-        composed_request,
+        agent_role,
+        tuned_prompt_text,
         tuning_prompts,
     )
+
+
+def request_prompt_version_hash(repo_root: str | None = None) -> str:
+    return role_prompt_version_hash(REQUEST_ROLE, repo_root)
 
 
 def load_role_tuning_profile(repo_root: str, scope: PromptScope) -> RoleTuningProfile | None:
@@ -262,14 +421,19 @@ def load_role_tuning_profile(repo_root: str, scope: PromptScope) -> RoleTuningPr
         return None
 
 
-def profile_is_current(profile: RoleTuningProfile, scope: PromptScope, *, repo_root: str | None = None) -> bool:
-    """Return True when a profile still matches the current request-role inputs."""
+def profile_is_current(
+    profile: RoleTuningProfile,
+    scope: PromptScope,
+    *,
+    repo_root: str | None = None,
+) -> bool:
+    """Return True when a profile still matches the current role inputs."""
     return (
         profile.schema_version == ROLE_TUNING_SCHEMA_VERSION
         and profile.agent_role == scope.agent_role
         and profile.assigned_model == scope.model_id
-        and profile.work_summary_hash == request_work_summary_hash(repo_root)
-        and profile.prompt_version_hash == request_prompt_version_hash(repo_root)
+        and profile.work_summary_hash == role_work_summary_hash(scope.agent_role, repo_root)
+        and profile.prompt_version_hash == role_prompt_version_hash(scope.agent_role, repo_root)
     )
 
 
@@ -280,7 +444,7 @@ def _persist_role_tuning_profile(repo_root: str, scope: PromptScope, profile: Ro
 
 
 def _score_probe(probe: ProbeScore) -> int:
-    return sum(int(getattr(probe, category)) for category in REQUEST_JUDGE_CATEGORIES)
+    return sum(int(getattr(probe, category)) for category in GENERIC_JUDGE_CATEGORIES)
 
 
 def _candidate_pass_status(raw_total_score: int, consistency_penalty: int) -> Literal["pass", "partial", "fail"]:
@@ -291,23 +455,26 @@ def _candidate_pass_status(raw_total_score: int, consistency_penalty: int) -> Li
     return "fail"
 
 
-def _is_severe_role_boundary_failure(judged: JudgeEvaluation) -> bool:
+def _is_severe_role_boundary_failure(
+    config: RoleCalibrationConfig,
+    judged: JudgeEvaluation,
+) -> bool:
     probe_scores = (
         judged.probe_scores.role_definition,
         judged.probe_scores.scenario_judgment,
         judged.probe_scores.boundary_discipline,
     )
     for probe in probe_scores:
-        if probe.avoiding_premature_implementation == 0:
-            return True
-        if probe.role_boundary_discipline == 0:
-            return True
-        if probe.downstream_engineering_usefulness == 0:
-            return True
+        for field in config.severe_failure_fields:
+            if int(getattr(probe, field, 0)) == 0:
+                return True
     return False
 
 
-def _to_candidate_result(judged: JudgeEvaluation) -> CandidateResult:
+def _to_candidate_result(
+    config: RoleCalibrationConfig,
+    judged: JudgeEvaluation,
+) -> CandidateResult:
     recomputed_raw = (
         _score_probe(judged.probe_scores.role_definition)
         + _score_probe(judged.probe_scores.scenario_judgment)
@@ -321,7 +488,7 @@ def _to_candidate_result(judged: JudgeEvaluation) -> CandidateResult:
         consistency_penalty=consistency_penalty,
         final_score=final_score,
         pass_status=_candidate_pass_status(recomputed_raw, consistency_penalty),
-        severe_role_boundary_failure=_is_severe_role_boundary_failure(judged),
+        severe_role_boundary_failure=_is_severe_role_boundary_failure(config, judged),
         major_strengths=judged.major_strengths,
         major_risks=judged.major_risks,
         recommended_role_contract=judged.recommended_role_contract,
@@ -344,6 +511,7 @@ def _choose_best_candidate(candidates: list[CandidateResult]) -> CandidateResult
 
 
 def _build_approved_role_contract(
+    config: RoleCalibrationConfig,
     discovery: RoleDiscoveryResult,
     selected_candidate: CandidateResult,
 ) -> list[str]:
@@ -354,12 +522,7 @@ def _build_approved_role_contract(
     )
     if contract:
         return contract
-    return [
-        "Use plain language with non-technical stakeholders.",
-        "Gather user-facing goals before discussing implementation.",
-        "Capture business goals, user workflow, constraints, edge cases, and success criteria.",
-        "Ask a small number of focused clarification questions at a time.",
-    ]
+    return list(config.default_contract)
 
 
 def _build_avoid_role_titles(candidates: list[CandidateResult], selected_title: str) -> list[AvoidRoleTitle]:
@@ -370,14 +533,15 @@ def _build_avoid_role_titles(candidates: list[CandidateResult], selected_title: 
         if candidate.major_risks:
             reason = candidate.major_risks[0]
         elif candidate.severe_role_boundary_failure:
-            reason = "Severe role-boundary failure during request-role calibration."
+            reason = "Severe role-boundary failure during role calibration."
         else:
-            reason = "Lower-scoring request-role framing than the selected role title."
+            reason = "Lower-scoring role framing than the selected role title."
         avoid.append(AvoidRoleTitle(role_title=candidate.candidate_role_title, reason=reason))
     return avoid
 
 
 def _build_derived_prompt_guidance(
+    config: RoleCalibrationConfig,
     profile: RoleTuningProfile | None = None,
     *,
     selected_role_title: str | None = None,
@@ -392,7 +556,10 @@ def _build_derived_prompt_guidance(
     assert discovery is not None
     assert selected_candidate is not None
     avoid_behaviors = _dedupe_preserve_order(
-        discovery.behaviors_to_avoid + discovery.risks_if_role_is_misunderstood + selected_candidate.major_risks
+        discovery.behaviors_to_avoid
+        + discovery.risks_if_role_is_misunderstood
+        + selected_candidate.major_risks
+        + list(config.default_avoid)
     )
     return DerivedPromptGuidance(
         role_title=selected_role_title,
@@ -402,14 +569,18 @@ def _build_derived_prompt_guidance(
     )
 
 
-def _build_scoped_prompt_override_text(base_text: str, profile: RoleTuningProfile) -> str:
+def _build_scoped_prompt_override_text(
+    config: RoleCalibrationConfig,
+    base_text: str,
+    profile: RoleTuningProfile,
+) -> str:
     guidance = profile.derived_prompt_guidance
-    required = "\n".join(f"- {item}" for item in guidance.required_behaviors) or "- Follow the approved request-role contract."
-    avoid = "\n".join(f"- {item}" for item in guidance.avoid_behaviors) or "- Avoid premature implementation advice."
+    required = "\n".join(f"- {item}" for item in guidance.required_behaviors)
+    avoid = "\n".join(f"- {item}" for item in guidance.avoid_behaviors)
     extra = guidance.prompt_override_guidance.strip()
     extra_block = f"\nAdditional prompt guidance:\n{extra}\n" if extra else ""
     tuning_block = (
-        "MODEL-SPECIFIC REQUEST ROLE TUNING:\n"
+        f"{config.tuning_header}:\n"
         f"- Active role framing: {guidance.role_title}\n"
         "- This role title was empirically selected for the active model.\n"
         "- Treat the following contract as mandatory.\n\n"
@@ -422,34 +593,41 @@ def _build_scoped_prompt_override_text(base_text: str, profile: RoleTuningProfil
     return f"{tuning_block}\n{base_text}"
 
 
-def ensure_request_role_scoped_overrides(
+def ensure_role_scoped_overrides(
     repo_root: str,
     scope: PromptScope,
     profile: RoleTuningProfile,
 ) -> None:
     """Persist the scoped prompt overrides derived from a tuning profile."""
+    config = _role_config(scope.agent_role)
     overrides = [
         ScopedPromptOverride(
             prompt_key=prompt_key,
             model_id=scope.model_id,
             agent_role=scope.agent_role,
-            text=_build_scoped_prompt_override_text(registry.get_text(prompt_key), profile),
+            text=_build_scoped_prompt_override_text(config, registry.get_text(prompt_key), profile),
         )
-        for prompt_key in REQUEST_PROMPT_KEYS
+        for prompt_key in config.prompt_keys
     ]
     registry.save_scoped_overrides(repo_root, overrides)
 
 
+def ensure_request_role_scoped_overrides(
+    repo_root: str,
+    scope: PromptScope,
+    profile: RoleTuningProfile,
+) -> None:
+    ensure_role_scoped_overrides(repo_root, scope, profile)
+
+
 async def _run_role_discovery(
     assigned_client: "LLMClient",
+    *,
     work_summary: str,
 ) -> RoleDiscoveryResult:
     prompt = registry.format_text("role_tuning.discovery", WORK_SUMMARY=work_summary)
     messages = [
-        {
-            "role": "system",
-            "content": "Return JSON only. Do not start the real task.",
-        },
+        {"role": "system", "content": "Return JSON only. Do not start the real task."},
         {"role": "user", "content": prompt},
     ]
     return await assigned_client.chat_structured(messages, RoleDiscoveryResult)
@@ -483,6 +661,7 @@ async def _run_probe(
 async def _judge_candidate(
     judge_client: "LLMClient",
     *,
+    agent_role: str,
     candidate_role_title: str,
     work_summary: str,
     probe_a_response: str,
@@ -491,7 +670,7 @@ async def _judge_candidate(
 ) -> JudgeEvaluation:
     prompt = registry.format_text(
         "role_tuning.judge",
-        AGENT_ROLE=REQUEST_ROLE,
+        AGENT_ROLE=agent_role,
         CANDIDATE_ROLE_TITLE=candidate_role_title,
         WORK_SUMMARY=work_summary,
         PROBE_A_RESPONSE=probe_a_response,
@@ -502,8 +681,8 @@ async def _judge_candidate(
         {
             "role": "system",
             "content": (
-                "Return JSON only. Score the candidate role title using the rubric "
-                "described in the prompt and the response schema."
+                "Return JSON only. Score the candidate role title using the response schema "
+                "categories and the work summary alignment."
             ),
         },
         {"role": "user", "content": prompt},
@@ -511,20 +690,23 @@ async def _judge_candidate(
     return await judge_client.chat_structured(messages, JudgeEvaluation)
 
 
-async def calibrate_request_role(
+async def calibrate_role(
     *,
     repo_root: str,
+    agent_role: str,
     assigned_client: "LLMClient",
     primary_client: "LLMClient",
     expert_client: "LLMClient | None" = None,
 ) -> RoleTuningProfile:
-    """Run request-role tuning for the assigned model and persist the result."""
-    work_summary = request_work_summary()
-    discovery = await _run_role_discovery(assigned_client, work_summary)
+    """Run role tuning for the assigned model and persist the result."""
+    config = _role_config(agent_role)
+    work_summary = role_work_summary(agent_role, repo_root)
+    discovery = await _run_role_discovery(assigned_client, work_summary=work_summary)
     candidate_titles = _dedupe_preserve_order(
-        REQUEST_ROLE_CANDIDATES + [discovery.best_role_title] + discovery.alternate_role_titles
+        list(config.candidate_titles) + [discovery.best_role_title] + discovery.alternate_role_titles
     )
     judge = choose_judge_client(
+        agent_role=agent_role,
         assigned_client=assigned_client,
         primary_client=primary_client,
         expert_client=expert_client,
@@ -534,36 +716,38 @@ async def calibrate_request_role(
     for title in candidate_titles:
         probe_a = await _run_probe(
             assigned_client,
-            prompt_key="role_tuning.probe.role_definition",
+            prompt_key=config.probe_prompt_keys[0],
             candidate_role_title=title,
             work_summary=work_summary,
         )
         probe_b = await _run_probe(
             assigned_client,
-            prompt_key="role_tuning.probe.scenario_judgment",
+            prompt_key=config.probe_prompt_keys[1],
             candidate_role_title=title,
             work_summary=work_summary,
         )
         probe_c = await _run_probe(
             assigned_client,
-            prompt_key="role_tuning.probe.boundary_discipline",
+            prompt_key=config.probe_prompt_keys[2],
             candidate_role_title=title,
             work_summary=work_summary,
         )
         judged = await _judge_candidate(
             judge.client,
+            agent_role=agent_role,
             candidate_role_title=title,
             work_summary=work_summary,
             probe_a_response=probe_a,
             probe_b_response=probe_b,
             probe_c_response=probe_c,
         )
-        candidate_results.append(_to_candidate_result(judged))
+        candidate_results.append(_to_candidate_result(config, judged))
 
     selected_candidate = _choose_best_candidate(candidate_results)
     selected_role_title = selected_candidate.candidate_role_title
-    approved_role_contract = _build_approved_role_contract(discovery, selected_candidate)
+    approved_role_contract = _build_approved_role_contract(config, discovery, selected_candidate)
     derived_guidance = _build_derived_prompt_guidance(
+        config,
         selected_role_title=selected_role_title,
         approved_role_contract=approved_role_contract,
         discovery=discovery,
@@ -572,17 +756,17 @@ async def calibrate_request_role(
     alternate_titles = _dedupe_preserve_order(
         [title for title in candidate_titles if title.casefold() != selected_role_title.casefold()]
     )
-    scope = request_prompt_scope(assigned_client)
+    scope = prompt_scope_for_role(assigned_client, agent_role)
     now = _now_iso()
     profile = RoleTuningProfile(
         created_at=now,
         updated_at=now,
-        agent_role=REQUEST_ROLE,
+        agent_role=agent_role,
         assigned_model=scope.model_id,
         judge_model=model_identity(judge.client),
         judge_role=judge.judge_role,
-        work_summary_hash=request_work_summary_hash(repo_root),
-        prompt_version_hash=request_prompt_version_hash(repo_root),
+        work_summary_hash=role_work_summary_hash(agent_role, repo_root),
+        prompt_version_hash=role_prompt_version_hash(agent_role, repo_root),
         selected_role_title=selected_role_title,
         alternate_role_titles=alternate_titles,
         avoid_role_titles=_build_avoid_role_titles(candidate_results, selected_role_title),
@@ -593,8 +777,60 @@ async def calibrate_request_role(
         judge_warning=judge.warning,
     )
     _persist_role_tuning_profile(repo_root, scope, profile)
-    ensure_request_role_scoped_overrides(repo_root, scope, profile)
+    ensure_role_scoped_overrides(repo_root, scope, profile)
     return profile
+
+
+async def calibrate_request_role(
+    *,
+    repo_root: str,
+    assigned_client: "LLMClient",
+    primary_client: "LLMClient",
+    expert_client: "LLMClient | None" = None,
+) -> RoleTuningProfile:
+    return await calibrate_role(
+        repo_root=repo_root,
+        agent_role=REQUEST_ROLE,
+        assigned_client=assigned_client,
+        primary_client=primary_client,
+        expert_client=expert_client,
+    )
+
+
+async def ensure_role_tuning(
+    *,
+    repo_root: str | None,
+    agent_role: str,
+    assigned_client: "LLMClient",
+    primary_client: "LLMClient",
+    expert_client: "LLMClient | None" = None,
+) -> PromptScope | None:
+    """Ensure a current tuning profile and scoped prompt overrides exist."""
+    if not repo_root:
+        return None
+
+    registry.load(repo_root)
+    scope = prompt_scope_for_role(assigned_client, agent_role)
+    profile = load_role_tuning_profile(repo_root, scope)
+    if profile is not None and profile_is_current(profile, scope, repo_root=repo_root):
+        ensure_role_scoped_overrides(repo_root, scope, profile)
+        return scope
+
+    try:
+        await calibrate_role(
+            repo_root=repo_root,
+            agent_role=agent_role,
+            assigned_client=assigned_client,
+            primary_client=primary_client,
+            expert_client=expert_client,
+        )
+    except Exception:
+        logger.exception("Role tuning failed for %s (%s)", scope.agent_role, scope.model_id)
+        registry.load(repo_root)
+        return None
+
+    registry.load(repo_root)
+    return scope
 
 
 async def ensure_request_role_tuning(
@@ -604,28 +840,42 @@ async def ensure_request_role_tuning(
     primary_client: "LLMClient",
     expert_client: "LLMClient | None" = None,
 ) -> PromptScope | None:
-    """Ensure a current request-role profile and scoped prompt overrides exist."""
-    if not repo_root:
-        return None
+    return await ensure_role_tuning(
+        repo_root=repo_root,
+        agent_role=REQUEST_ROLE,
+        assigned_client=assigned_client,
+        primary_client=primary_client,
+        expert_client=expert_client,
+    )
 
-    registry.load(repo_root)
-    scope = request_prompt_scope(assigned_client)
-    profile = load_role_tuning_profile(repo_root, scope)
-    if profile is not None and profile_is_current(profile, scope, repo_root=repo_root):
-        ensure_request_role_scoped_overrides(repo_root, scope, profile)
-        return scope
 
-    try:
-        await calibrate_request_role(
-            repo_root=repo_root,
-            assigned_client=assigned_client,
-            primary_client=primary_client,
-            expert_client=expert_client,
-        )
-    except Exception:
-        logger.exception("Request role tuning failed for %s", scope.model_id)
-        registry.load(repo_root)
-        return None
+async def ensure_primary_role_tuning(
+    *,
+    repo_root: str | None,
+    assigned_client: "LLMClient",
+    primary_client: "LLMClient",
+    expert_client: "LLMClient | None" = None,
+) -> PromptScope | None:
+    return await ensure_role_tuning(
+        repo_root=repo_root,
+        agent_role=PRIMARY_ROLE,
+        assigned_client=assigned_client,
+        primary_client=primary_client,
+        expert_client=expert_client,
+    )
 
-    registry.load(repo_root)
-    return scope
+
+async def ensure_expert_role_tuning(
+    *,
+    repo_root: str | None,
+    assigned_client: "LLMClient",
+    primary_client: "LLMClient",
+    expert_client: "LLMClient | None" = None,
+) -> PromptScope | None:
+    return await ensure_role_tuning(
+        repo_root=repo_root,
+        agent_role=EXPERT_ROLE,
+        assigned_client=assigned_client,
+        primary_client=primary_client,
+        expert_client=expert_client,
+    )

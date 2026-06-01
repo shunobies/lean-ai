@@ -22,8 +22,9 @@ from lean_ai.llm.plan_schema import (
     ScopeAssumption,
     ScopeDocument,
 )
-from lean_ai.llm.prompt_registry import registry
-from lean_ai.llm.prompts import PLAN_ASSEMBLY_SYSTEM_PROMPT
+from lean_ai.llm.prompt_registry import PromptScope, registry
+from lean_ai.llm.prompts import resolve_prompt_text
+from lean_ai.llm.role_tuning import ensure_expert_role_tuning
 from lean_ai.workflow.ws_protocol import WorkflowSession
 
 if TYPE_CHECKING:
@@ -780,7 +781,9 @@ async def _revise_plan(
     llm_client: "LLMClient",
     context: str = "",
     ws: "WorkflowSession | None" = None,
+    repo_root: str = "",
     expert_llm_client: "LLMClient | None" = None,
+    primary_llm_client: "LLMClient | None" = None,
     previous_plan: ExecutionPlan | None = None,
     on_thinking: "Callable | None" = None,
     on_metrics: "Callable | None" = None,
@@ -801,7 +804,9 @@ async def _revise_plan(
         llm_client: LLM client.
         context: Project context.
         ws: Optional WebSocket for progress.
+        repo_root: Repository root for prompt resolution and role tuning.
         expert_llm_client: Optional expert LLM client for reasoning-heavy work.
+        primary_llm_client: Optional primary LLM client used as the judge fallback.
         file_summary: Formatted file summary from Phase 2 exploration.
         design_and_risks: Formatted design and risk synthesis from Phase 3.
         scope: Formatted scope document from Phase 1.
@@ -821,6 +826,12 @@ async def _revise_plan(
     plan_max_tokens = max(
         expert_max_tokens,
         int(expert_ctx * PLAN_OUTPUT_PERCENT),
+    )
+    prompt_scope: PromptScope | None = await ensure_expert_role_tuning(
+        repo_root=repo_root,
+        assigned_client=expert,
+        primary_client=primary_llm_client or llm_client,
+        expert_client=expert_llm_client or expert,
     )
     await _send_stage(
         ws,
@@ -866,7 +877,13 @@ async def _revise_plan(
     try:
         plan = await _chat_structured_with_repair(
             messages=[
-                {"role": "system", "content": PLAN_ASSEMBLY_SYSTEM_PROMPT},
+                {
+                    "role": "system",
+                    "content": resolve_prompt_text(
+                        "planning.assembly_system",
+                        scope=prompt_scope,
+                    ),
+                },
                 {
                     "role": "user",
                     "content": revision_user_content,
