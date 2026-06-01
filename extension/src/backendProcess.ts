@@ -12,6 +12,7 @@
  */
 
 import * as fs from "fs";
+import * as net from "net";
 import * as vscode from "vscode";
 import { spawn, execSync, ChildProcess } from "child_process";
 import { DEFAULT_BACKEND_URL } from "./constants";
@@ -47,6 +48,7 @@ let managedPort: string | undefined;
 let _secrets: vscode.SecretStorage | undefined;
 let _context: vscode.ExtensionContext | undefined;
 let _managedInstall: BackendInstallResult | null | undefined;
+let startBackendPromise: Promise<boolean> | undefined;
 
 // Health monitor state
 let healthMonitorInterval: NodeJS.Timeout | undefined;
@@ -237,6 +239,47 @@ async function pollHealth(url: string): Promise<boolean> {
             // Server not ready yet
         }
         await new Promise((r) => setTimeout(r, HEALTH_POLL_INTERVAL_MS));
+    }
+    return false;
+}
+
+function isPortListening(host: string, port: string, timeoutMs = 1500): Promise<boolean> {
+    return new Promise((resolve) => {
+        const socket = new net.Socket();
+        let settled = false;
+
+        const finish = (result: boolean) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            socket.destroy();
+            resolve(result);
+        };
+
+        socket.setTimeout(timeoutMs);
+        socket.once("connect", () => finish(true));
+        socket.once("timeout", () => finish(false));
+        socket.once("error", () => finish(false));
+        socket.connect(Number(port), host);
+    });
+}
+
+async function waitForHealthyBackend(url: string, attempts: number, intervalMs: number): Promise<boolean> {
+    for (let i = 0; i < attempts; i++) {
+        try {
+            const resp = await fetch(`${url}/api/health`, {
+                signal: AbortSignal.timeout(3000),
+            });
+            if (resp.ok) {
+                return true;
+            }
+        } catch {
+            // Backend not healthy yet.
+        }
+        if (i < attempts - 1) {
+            await new Promise((r) => setTimeout(r, intervalMs));
+        }
     }
     return false;
 }
@@ -436,162 +479,194 @@ export async function startBackend(
     secrets?: vscode.SecretStorage,
     context?: vscode.ExtensionContext,
 ): Promise<boolean> {
-    if (secrets) { _secrets = secrets; }
-    if (context) { _context = context; }
-    const { autoStart, pythonPath, backendUrl } = getConfig();
-    const channel = getOutputChannel();
-    const { host, port } = parseHostPort(backendUrl);
+    if (startBackendPromise) {
+        return startBackendPromise;
+    }
 
-    // Check if a server is already running and healthy.
-    // Retry up to 3 times (1 s apart) to tolerate brief startup delays from
-    // another window that may be launching the process concurrently.
-    for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-            const resp = await fetch(`${backendUrl}/api/health`, {
-                signal: AbortSignal.timeout(3000),
-            });
-            if (resp.ok) {
-                channel.appendLine("[Lean AI] Backend already running — not managed by this window.");
-                // Do NOT set managedPort: we didn't start this process, so we
-                // must not kill it when this window closes.
+    startBackendPromise = (async (): Promise<boolean> => {
+        if (secrets) { _secrets = secrets; }
+        if (context) { _context = context; }
+        const { autoStart, pythonPath, backendUrl } = getConfig();
+        const channel = getOutputChannel();
+        const { host, port } = parseHostPort(backendUrl);
+
+        // Check if a server is already running and healthy.
+        // Retry up to 3 times (1 s apart) to tolerate brief startup delays from
+        // another window that may be launching the process concurrently.
+        for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+                const resp = await fetch(`${backendUrl}/api/health`, {
+                    signal: AbortSignal.timeout(3000),
+                });
+                if (resp.ok) {
+                    channel.appendLine("[Lean AI] Backend already running — not managed by this window.");
+                    // Do NOT set managedPort: we didn't start this process, so we
+                    // must not kill it when this window closes.
+                    startHealthMonitor();
+                    return true;
+                }
+            } catch {
+                // Not responding yet — retry
+            }
+            if (attempt < 2) {
+                await new Promise((r) => setTimeout(r, 1000));
+            }
+        }
+
+        // Another Lean AI window may already be starting the backend. If the port
+        // is listening, prefer waiting for it to become healthy over spawning a
+        // competing uvicorn process that will fail with "address already in use".
+        if (await isPortListening(host, port)) {
+            channel.appendLine(
+                `[Lean AI] Port ${port} is already listening; waiting for an existing backend to finish starting...`,
+            );
+            if (await waitForHealthyBackend(backendUrl, 12, 1000)) {
+                channel.appendLine("[Lean AI] Existing backend became healthy; adopting external server.");
                 startHealthMonitor();
                 return true;
             }
-        } catch {
-            // Not responding yet — retry
-        }
-        if (attempt < 2) {
+
+            channel.appendLine(
+                `[Lean AI] Port ${port} stayed occupied without becoming healthy; cleaning it up before restart.`,
+            );
+            killProcessOnPort(port, channel);
             await new Promise((r) => setTimeout(r, 1000));
         }
-    }
 
-    if (!autoStart) {
-        channel.appendLine("[Lean AI] Auto-start disabled. Start the backend manually.");
-        return false;
-    }
+        if (!autoStart) {
+            channel.appendLine("[Lean AI] Auto-start disabled. Start the backend manually.");
+            return false;
+        }
 
-    // ── Managed install: venv in globalStorageUri ─────────────────────────
-    // Try managed installation first (if context is available). This creates
-    // a venv, pip-installs the bundled backend, and returns the venv Python.
-    // Returns null when the user has explicit settings (manual mode).
-    if (_context && _managedInstall === undefined) {
-        _managedInstall = await ensureBackendInstalled(_context);
-    }
+        // ── Managed install: venv in globalStorageUri ─────────────────────────
+        // Try managed installation first (if context is available). This creates
+        // a venv, pip-installs the bundled backend, and returns the venv Python.
+        // Returns null when the user has explicit settings (manual mode).
+        if (_context && _managedInstall === undefined) {
+            _managedInstall = await ensureBackendInstalled(_context);
+        }
 
-    let resolvedPython: string;
-    let resolvedCwd: string;
+        let resolvedPython: string;
+        let resolvedCwd: string;
 
-    if (_managedInstall) {
-        // Managed mode — use the venv Python, cwd is globalStorageUri
-        resolvedPython = _managedInstall.pythonPath;
-        resolvedCwd = _managedInstall.backendDir;
-    } else {
-        // Manual mode — resolve backend directory from settings / workspace
-        const backendDir = resolveBackendDir();
-        if (!backendDir) {
+        if (_managedInstall) {
+            // Managed mode — use the venv Python, cwd is globalStorageUri
+            resolvedPython = _managedInstall.pythonPath;
+            resolvedCwd = _managedInstall.backendDir;
+        } else {
+            // Manual mode — resolve backend directory from settings / workspace
+            const backendDir = resolveBackendDir();
+            if (!backendDir) {
+                channel.appendLine(
+                    "[Lean AI] Cannot detect backend directory. Set lean-ai.backendDir in settings.",
+                );
+                vscode.window.showWarningMessage(
+                    "Lean AI: Cannot find backend directory. Set 'lean-ai.backendDir' in settings, or start the server manually.",
+                );
+                return false;
+            }
+            resolvedPython = resolvePythonPath(pythonPath);
+            resolvedCwd = backendDir;
+        }
+
+        if (killTrackedBackendProcess(channel)) {
+            channel.appendLine(`[Lean AI] Stopped previously tracked backend process on port ${port}.`);
+            await new Promise((r) => setTimeout(r, 500));
+        } else {
+            if (managedPort === port) {
+                managedPort = undefined;
+            }
             channel.appendLine(
-                "[Lean AI] Cannot detect backend directory. Set lean-ai.backendDir in settings.",
+                `[Lean AI] Skipping port cleanup for ${port}; this window has no tracked backend process.`,
             );
+        }
+
+        channel.appendLine(`[Lean AI] Starting backend in: ${resolvedCwd}`);
+        channel.appendLine(`[Lean AI] Python: ${resolvedPython}`);
+        channel.show(true);
+
+        // Spawn uvicorn directly (no shell: true) so PID tracking works
+        serverProcess = spawn(
+            resolvedPython,
+            [
+                "-m",
+                "uvicorn",
+                "lean_ai.main:app",
+                "--host",
+                host,
+                "--port",
+                port,
+            ],
+            {
+                cwd: resolvedCwd,
+                stdio: ["ignore", "pipe", "pipe"],
+                env: _secrets
+                    ? { ...process.env, ...(await buildFullBackendEnv(_secrets)) }
+                    : { ...process.env, ...buildBackendEnv() },
+                // No shell: true — we want the actual uvicorn PID
+            },
+        );
+
+        serverProcess.stdout?.on("data", (data: Buffer) => {
+            channel.append(data.toString());
+        });
+
+        serverProcess.stderr?.on("data", (data: Buffer) => {
+            channel.append(data.toString());
+        });
+
+        serverProcess.on("exit", (code) => {
+            channel.appendLine(`[Lean AI] Backend process exited with code ${code}`);
+            serverProcess = undefined;
+        });
+
+        serverProcess.on("error", (err) => {
+            const isNotFound = (err as NodeJS.ErrnoException).code === "ENOENT";
+            if (isNotFound) {
+                channel.appendLine(
+                    `[Lean AI] Python executable not found: "${resolvedPython}". ` +
+                    `Set 'lean-ai.pythonPath' in VSCode settings to the full path of your Python interpreter.`,
+                );
+                vscode.window.showErrorMessage(
+                    `Lean AI: Python not found ("${resolvedPython}"). Set 'lean-ai.pythonPath' in settings.`,
+                    "Open Settings",
+                ).then((choice) => {
+                    if (choice === "Open Settings") {
+                        vscode.commands.executeCommand(
+                            "workbench.action.openSettings",
+                            "lean-ai.pythonPath",
+                        );
+                    }
+                });
+            } else {
+                channel.appendLine(`[Lean AI] Failed to start backend: ${err.message}`);
+            }
+            serverProcess = undefined;
+        });
+
+        // Poll health endpoint until ready
+        channel.appendLine("[Lean AI] Waiting for backend to be ready...");
+        const ready = await pollHealth(backendUrl);
+
+        if (ready) {
+            managedPort = port;
+            channel.appendLine("[Lean AI] Backend is ready.");
+            vscode.window.showInformationMessage("Lean AI backend started successfully.");
+            startHealthMonitor();
+            return true;
+        } else {
+            channel.appendLine("[Lean AI] Backend did not become ready in time.");
             vscode.window.showWarningMessage(
-                "Lean AI: Cannot find backend directory. Set 'lean-ai.backendDir' in settings, or start the server manually.",
+                "Lean AI backend did not start within 30 seconds. Check the 'Lean AI Backend' output panel for details.",
             );
             return false;
         }
-        resolvedPython = resolvePythonPath(pythonPath);
-        resolvedCwd = backendDir;
-    }
+    })();
 
-    if (killTrackedBackendProcess(channel)) {
-        channel.appendLine(`[Lean AI] Stopped previously tracked backend process on port ${port}.`);
-        await new Promise((r) => setTimeout(r, 500));
-    } else {
-        if (managedPort === port) {
-            managedPort = undefined;
-        }
-        channel.appendLine(
-            `[Lean AI] Skipping port cleanup for ${port}; this window has no tracked backend process.`,
-        );
-    }
-
-    channel.appendLine(`[Lean AI] Starting backend in: ${resolvedCwd}`);
-    channel.appendLine(`[Lean AI] Python: ${resolvedPython}`);
-    channel.show(true);
-
-    // Spawn uvicorn directly (no shell: true) so PID tracking works
-    serverProcess = spawn(
-        resolvedPython,
-        [
-            "-m",
-            "uvicorn",
-            "lean_ai.main:app",
-            "--host",
-            host,
-            "--port",
-            port,
-        ],
-        {
-            cwd: resolvedCwd,
-            stdio: ["ignore", "pipe", "pipe"],
-            env: _secrets
-                ? { ...process.env, ...(await buildFullBackendEnv(_secrets)) }
-                : { ...process.env, ...buildBackendEnv() },
-            // No shell: true — we want the actual uvicorn PID
-        },
-    );
-
-    serverProcess.stdout?.on("data", (data: Buffer) => {
-        channel.append(data.toString());
-    });
-
-    serverProcess.stderr?.on("data", (data: Buffer) => {
-        channel.append(data.toString());
-    });
-
-    serverProcess.on("exit", (code) => {
-        channel.appendLine(`[Lean AI] Backend process exited with code ${code}`);
-        serverProcess = undefined;
-    });
-
-    serverProcess.on("error", (err) => {
-        const isNotFound = (err as NodeJS.ErrnoException).code === "ENOENT";
-        if (isNotFound) {
-            channel.appendLine(
-                `[Lean AI] Python executable not found: "${resolvedPython}". ` +
-                `Set 'lean-ai.pythonPath' in VSCode settings to the full path of your Python interpreter.`,
-            );
-            vscode.window.showErrorMessage(
-                `Lean AI: Python not found ("${resolvedPython}"). Set 'lean-ai.pythonPath' in settings.`,
-                "Open Settings",
-            ).then((choice) => {
-                if (choice === "Open Settings") {
-                    vscode.commands.executeCommand(
-                        "workbench.action.openSettings",
-                        "lean-ai.pythonPath",
-                    );
-                }
-            });
-        } else {
-            channel.appendLine(`[Lean AI] Failed to start backend: ${err.message}`);
-        }
-        serverProcess = undefined;
-    });
-
-    // Poll health endpoint until ready
-    channel.appendLine("[Lean AI] Waiting for backend to be ready...");
-    const ready = await pollHealth(backendUrl);
-
-    if (ready) {
-        managedPort = port;
-        channel.appendLine("[Lean AI] Backend is ready.");
-        vscode.window.showInformationMessage("Lean AI backend started successfully.");
-        startHealthMonitor();
-        return true;
-    } else {
-        channel.appendLine("[Lean AI] Backend did not become ready in time.");
-        vscode.window.showWarningMessage(
-            "Lean AI backend did not start within 30 seconds. Check the 'Lean AI Backend' output panel for details.",
-        );
-        return false;
+    try {
+        return await startBackendPromise;
+    } finally {
+        startBackendPromise = undefined;
     }
 }
 
