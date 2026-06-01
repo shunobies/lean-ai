@@ -12,6 +12,7 @@ from lean_ai.llm.role_tuning import (
     ProbeScoreSet,
     RoleDiscoveryResult,
     RoleTuningProfile,
+    RuntimePromptSummary,
     choose_judge_client,
     ensure_expert_role_tuning,
     ensure_primary_role_tuning,
@@ -28,11 +29,12 @@ from lean_ai.workflow.prompts import build_fix_system_prompt, build_request_syst
 
 
 class FakeClient:
-    def __init__(self, provider_name: str, model_name: str, *, discovery=None, judge=None):
+    def __init__(self, provider_name: str, model_name: str, *, discovery=None, judge=None, summary=None):
         self.provider_name = provider_name
         self.model_name = model_name
         self.discovery = discovery
         self.judge = judge
+        self.summary = summary
         self.raw_calls: list[list[dict]] = []
         self.structured_calls: list[tuple[list[dict], type]] = []
 
@@ -44,6 +46,8 @@ class FakeClient:
         self.structured_calls.append((messages, schema))
         if schema is RoleDiscoveryResult:
             return self.discovery
+        if schema is RuntimePromptSummary:
+            return self.summary
         return self.judge
 
 
@@ -90,6 +94,12 @@ def _sample_profile(agent_role: str, assigned_model: str) -> RoleTuningProfile:
             avoid_behaviors=["Premature architecture choices."],
             prompt_override_guidance="Avoid implementation details.",
         ),
+        runtime_prompt_summary=RuntimePromptSummary(
+            role_title="Requirements Analyst",
+            required_behaviors=["Separate stakeholder intent from implementation preferences."],
+            avoid_behaviors=["Do not skip the prompt's required exploration loop."],
+            prompt_override_guidance="Keep the role framing compact and non-technical.",
+        ),
     )
 
 
@@ -114,6 +124,15 @@ def _sample_judge(agent_role: str, title: str) -> JudgeEvaluation:
         ),
         recommended_role_contract=["Ask focused questions."],
         recommended_prompt_override_guidance="Avoid implementation details.",
+    )
+
+
+def _sample_runtime_summary(title: str) -> RuntimePromptSummary:
+    return RuntimePromptSummary(
+        role_title=title,
+        required_behaviors=["Separate stakeholder intent from implementation preferences."],
+        avoid_behaviors=["Do not skip the prompt's required exploration loop."],
+        prompt_override_guidance="Keep the role framing compact and non-technical.",
     )
 
 
@@ -193,8 +212,9 @@ def test_request_prompt_scoped_override_preserves_placeholders(tmp_path) -> None
     )
 
     assert "MODEL-SPECIFIC REQUEST ROLE TUNING" in request_prompt
-    assert "Ask focused questions." in request_prompt
-    assert "Avoid implementation details." in request_prompt
+    assert "Separate stakeholder intent from implementation preferences." in request_prompt
+    assert "Do not skip the prompt's required exploration loop." in request_prompt
+    assert "Keep the role framing compact and non-technical." in request_prompt
     assert "9" in chat_prompt
     assert "{CHAT_MAX_TURNS}" not in chat_prompt
 
@@ -219,6 +239,12 @@ def test_primary_prompt_scoped_override_preserves_base_prompt(tmp_path) -> None:
             avoid_behaviors=["Do not invent file contents."],
             prompt_override_guidance="Keep changes small and verified.",
         ),
+        runtime_prompt_summary=RuntimePromptSummary(
+            role_title="Senior Software Engineer",
+            required_behaviors=["Verify repository facts before changing code."],
+            avoid_behaviors=["Do not broaden the task into redesign work."],
+            prompt_override_guidance="Keep changes small and verified.",
+        ),
     )
 
     role_tuning.registry.load(str(tmp_path))
@@ -228,7 +254,7 @@ def test_primary_prompt_scoped_override_preserves_base_prompt(tmp_path) -> None:
     prompt = build_fix_system_prompt("", repo_root=str(tmp_path), prompt_scope=scope)
 
     assert "MODEL-SPECIFIC PRIMARY ROLE TUNING" in prompt
-    assert "Verify signatures against the codebase." in prompt
+    assert "Verify repository facts before changing code." in prompt
     assert "call task_complete" in prompt
 
 
@@ -237,10 +263,11 @@ async def test_ensure_request_role_tuning_persists_and_reuses_profile(tmp_path) 
     role_tuning.registry.load(str(tmp_path))
     discovery = _sample_discovery("Requirements Analyst")
     judge = _sample_judge("request", "Requirements Analyst")
+    summary = _sample_runtime_summary("Requirements Analyst")
 
     assigned = FakeClient("ollama", "request-model", discovery=discovery, judge=judge)
-    primary = FakeClient("ollama", "primary-model", judge=judge)
-    expert = FakeClient("ollama", "expert-model", judge=judge)
+    primary = FakeClient("ollama", "primary-model", judge=judge, summary=summary)
+    expert = FakeClient("ollama", "expert-model", judge=judge, summary=summary)
 
     scope = await ensure_request_role_tuning(
         repo_root=str(tmp_path),
@@ -253,9 +280,11 @@ async def test_ensure_request_role_tuning_persists_and_reuses_profile(tmp_path) 
     profile = load_role_tuning_profile(str(tmp_path), scope)
     assert profile is not None
     assert profile.selected_role_title == "Requirements Analyst"
+    assert profile.runtime_prompt_summary.required_behaviors == summary.required_behaviors
     assert role_tuning.registry.get_scoped_override("chat.system", scope) is not None
     assert assigned.structured_calls, "expected discovery call"
-    assert expert.structured_calls, "expected judge call"
+    assert any(schema is JudgeEvaluation for _, schema in expert.structured_calls), "expected judge call"
+    assert any(schema is RuntimePromptSummary for _, schema in expert.structured_calls), "expected summary call"
 
     reuse_assigned = FakeClient("ollama", "request-model")
     reused_scope = await ensure_request_role_tuning(
@@ -288,10 +317,11 @@ async def test_ensure_non_request_role_tuning_persists_scoped_overrides(
     role_tuning.registry.load(str(tmp_path))
     discovery = _sample_discovery(title)
     judge = _sample_judge(agent_role, title)
+    summary = _sample_runtime_summary(title)
 
     assigned = FakeClient("ollama", f"{agent_role}-model", discovery=discovery, judge=judge)
-    primary = FakeClient("ollama", "primary-model", judge=judge)
-    expert = FakeClient("ollama", "expert-model", judge=judge)
+    primary = FakeClient("ollama", "primary-model", judge=judge, summary=summary)
+    expert = FakeClient("ollama", "expert-model", judge=judge, summary=summary)
 
     scope = await ensure_fn(
         repo_root=str(tmp_path),
@@ -305,6 +335,7 @@ async def test_ensure_non_request_role_tuning_persists_scoped_overrides(
     profile = load_role_tuning_profile(str(tmp_path), scope)
     assert profile is not None
     assert profile.selected_role_title == title
+    assert profile.runtime_prompt_summary.role_title == title
     assert role_tuning.registry.get_scoped_override(expected_prompt_key, scope) is not None
 
 
@@ -350,3 +381,128 @@ def test_profile_is_current_tracks_hash_invalidations() -> None:
 
     stale = profile.model_copy(update={"prompt_version_hash": "changed"})
     assert profile_is_current(stale, scope) is False
+
+
+@pytest.mark.asyncio
+async def test_request_runtime_summary_prompt_reviews_chat_and_request_surfaces(tmp_path) -> None:
+    role_tuning.registry.load(str(tmp_path))
+    discovery = _sample_discovery("Requirements Analyst")
+    judge = _sample_judge("request", "Requirements Analyst")
+    summary = _sample_runtime_summary("Requirements Analyst")
+
+    assigned = FakeClient("ollama", "request-model", discovery=discovery, judge=judge)
+    primary = FakeClient("ollama", "primary-model", judge=judge)
+    expert = FakeClient("ollama", "expert-model", judge=judge, summary=summary)
+
+    await ensure_request_role_tuning(
+        repo_root=str(tmp_path),
+        assigned_client=assigned,
+        primary_client=primary,
+        expert_client=expert,
+    )
+
+    summary_messages = next(messages for messages, schema in expert.structured_calls if schema is RuntimePromptSummary)
+    prompt = summary_messages[-1]["content"]
+
+    assert "Prompt key: chat.system" in prompt
+    assert "Prompt key: fix.request_system" in prompt
+    assert "one-question-at-a-time rule" in prompt
+    assert "CHAT_MAX_TURNS" in prompt
+
+
+def test_scoped_override_uses_runtime_summary_not_full_derived_guidance(tmp_path) -> None:
+    scope = prompt_scope_for_role(FakeClient("ollama", "qwen3"), "request")
+    role_tuning.registry.load(str(tmp_path))
+    profile = _sample_profile(scope.agent_role, scope.model_id).model_copy(
+        update={
+            "approved_role_contract": [
+                "Ask a small number of focused questions at a time.",
+                "Capture business goals, user workflow, constraints, edge cases, and success criteria.",
+                "Stay focused on stakeholder outcomes.",
+            ],
+            "derived_prompt_guidance": DerivedPromptGuidance(
+                role_title="Requirements Analyst",
+                required_behaviors=[
+                    "Ask a small number of focused questions at a time.",
+                    "Capture business goals, user workflow, constraints, edge cases, and success criteria.",
+                    "Stay focused on stakeholder outcomes.",
+                ],
+                avoid_behaviors=[
+                    "Premature architecture choices.",
+                    "Could drift into implementation.",
+                    "Do not jump directly into architecture or framework selection.",
+                ],
+                prompt_override_guidance="Longer legacy guidance that should not be injected anymore.",
+            ),
+            "runtime_prompt_summary": RuntimePromptSummary(
+                role_title="Requirements Analyst",
+                required_behaviors=["Ask one high-signal question at a time."],
+                avoid_behaviors=["Do not bypass the required exploration loop."],
+                prompt_override_guidance="Stay compatible with the Grill Me protocol.",
+            ),
+        }
+    )
+
+    role_tuning.ensure_role_scoped_overrides(str(tmp_path), scope, profile)
+    role_tuning.registry.load(str(tmp_path))
+    chat_prompt = role_tuning.registry.get_text("chat.system", scope=scope)
+
+    assert "Ask one high-signal question at a time." in chat_prompt
+    assert "Do not bypass the required exploration loop." in chat_prompt
+    assert "Stay compatible with the Grill Me protocol." in chat_prompt
+    assert "Longer legacy guidance that should not be injected anymore." not in chat_prompt
+
+
+def test_runtime_summary_override_is_meaningfully_smaller_than_legacy_derived_guidance(tmp_path) -> None:
+    scope = prompt_scope_for_role(FakeClient("ollama", "qwen3"), "request")
+    role_tuning.registry.load(str(tmp_path))
+    profile = _sample_profile(scope.agent_role, scope.model_id).model_copy(
+        update={
+            "derived_prompt_guidance": DerivedPromptGuidance(
+                role_title="Requirements Analyst",
+                required_behaviors=[
+                    "Ask a small number of focused questions at a time.",
+                    "Capture business goals, user workflow, constraints, edge cases, and success criteria.",
+                    "Separate user intent from implementation preferences.",
+                    "Produce a structured request document downstream agents can use.",
+                    "Use plain language with non-technical stakeholders.",
+                ],
+                avoid_behaviors=[
+                    "Premature architecture choices.",
+                    "Could drift into implementation.",
+                    "Do not jump directly into architecture or framework selection.",
+                    "Do not invent business rules or hidden requirements.",
+                    "Do not ask stakeholders to define schemas, databases, or internal implementation details.",
+                ],
+                prompt_override_guidance="Legacy guidance text repeated across multiple sections for runtime injection size comparison.",
+            ),
+            "runtime_prompt_summary": RuntimePromptSummary(
+                role_title="Requirements Analyst",
+                required_behaviors=["Separate stakeholder intent from implementation preferences."],
+                avoid_behaviors=["Do not bypass the required exploration loop."],
+                prompt_override_guidance="Stay compatible with the Grill Me protocol.",
+            ),
+        }
+    )
+
+    legacy_text = role_tuning._build_scoped_prompt_override_text(
+        role_tuning._role_config(scope.agent_role),
+        role_tuning.registry.get_text("chat.system"),
+        profile.model_copy(
+            update={
+                "runtime_prompt_summary": RuntimePromptSummary(
+                    role_title=profile.derived_prompt_guidance.role_title,
+                    required_behaviors=profile.derived_prompt_guidance.required_behaviors,
+                    avoid_behaviors=profile.derived_prompt_guidance.avoid_behaviors,
+                    prompt_override_guidance=profile.derived_prompt_guidance.prompt_override_guidance,
+                )
+            }
+        ),
+    )
+    compact_text = role_tuning._build_scoped_prompt_override_text(
+        role_tuning._role_config(scope.agent_role),
+        role_tuning.registry.get_text("chat.system"),
+        profile,
+    )
+
+    assert len(compact_text) < len(legacy_text)

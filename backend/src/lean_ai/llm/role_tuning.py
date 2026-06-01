@@ -21,8 +21,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-ROLE_TUNING_SCHEMA_VERSION = 1
-ROLE_TUNING_COMPOSITION_VERSION = "role-tuning-v2"
+ROLE_TUNING_SCHEMA_VERSION = 2
+ROLE_TUNING_COMPOSITION_VERSION = "role-tuning-v3"
 
 REQUEST_ROLE = "request"
 PRIMARY_ROLE = "primary"
@@ -78,6 +78,7 @@ class RoleCalibrationConfig:
 
     agent_role: str
     work_summary_prompt_key: str
+    summary_prompt_key: str
     prompt_keys: tuple[str, ...]
     candidate_titles: tuple[str, ...]
     probe_prompt_keys: tuple[str, str, str]
@@ -91,6 +92,7 @@ ROLE_CONFIGS: dict[str, RoleCalibrationConfig] = {
     REQUEST_ROLE: RoleCalibrationConfig(
         agent_role=REQUEST_ROLE,
         work_summary_prompt_key="role_tuning.request_work_summary",
+        summary_prompt_key="role_tuning.request.summary",
         prompt_keys=("chat.system", "fix.request_system"),
         candidate_titles=(
             "Requirements Analyst",
@@ -126,6 +128,7 @@ ROLE_CONFIGS: dict[str, RoleCalibrationConfig] = {
     PRIMARY_ROLE: RoleCalibrationConfig(
         agent_role=PRIMARY_ROLE,
         work_summary_prompt_key="role_tuning.primary_work_summary",
+        summary_prompt_key="role_tuning.primary.summary",
         prompt_keys=(
             "planning.scope_system",
             "planning.exploration_system",
@@ -168,6 +171,7 @@ ROLE_CONFIGS: dict[str, RoleCalibrationConfig] = {
     EXPERT_ROLE: RoleCalibrationConfig(
         agent_role=EXPERT_ROLE,
         work_summary_prompt_key="role_tuning.expert_work_summary",
+        summary_prompt_key="role_tuning.expert.summary",
         prompt_keys=(
             "planning.design_system",
             "planning.assembly_system",
@@ -276,6 +280,13 @@ class DerivedPromptGuidance(BaseModel):
     prompt_override_guidance: str = ""
 
 
+class RuntimePromptSummary(BaseModel):
+    role_title: str
+    required_behaviors: list[str] = []
+    avoid_behaviors: list[str] = []
+    prompt_override_guidance: str = ""
+
+
 class RoleTuningProfile(BaseModel):
     schema_version: int = ROLE_TUNING_SCHEMA_VERSION
     created_at: str
@@ -293,6 +304,7 @@ class RoleTuningProfile(BaseModel):
     candidate_results: list[CandidateResult] = []
     approved_role_contract: list[str] = []
     derived_prompt_guidance: DerivedPromptGuidance
+    runtime_prompt_summary: RuntimePromptSummary
     judge_warning: str | None = None
 
 
@@ -395,6 +407,7 @@ def role_prompt_version_hash(agent_role: str, repo_root: str | None = None) -> s
             registry.get_text(config.probe_prompt_keys[1]),
             registry.get_text(config.probe_prompt_keys[2]),
             registry.get_text("role_tuning.judge"),
+            registry.get_text(config.summary_prompt_key),
         ]
     )
     return _sha256_text(
@@ -574,7 +587,7 @@ def _build_scoped_prompt_override_text(
     base_text: str,
     profile: RoleTuningProfile,
 ) -> str:
-    guidance = profile.derived_prompt_guidance
+    guidance = profile.runtime_prompt_summary
     required = "\n".join(f"- {item}" for item in guidance.required_behaviors)
     avoid = "\n".join(f"- {item}" for item in guidance.avoid_behaviors)
     extra = guidance.prompt_override_guidance.strip()
@@ -591,6 +604,14 @@ def _build_scoped_prompt_override_text(
         f"{extra_block}\n"
     )
     return f"{tuning_block}\n{base_text}"
+
+
+def _role_prompt_surfaces(config: RoleCalibrationConfig) -> str:
+    surfaces: list[str] = []
+    for prompt_key in config.prompt_keys:
+        prompt_text = resolve_prompt_text(prompt_key)
+        surfaces.append(f"Prompt key: {prompt_key}\n{prompt_text}")
+    return "\n\n".join(surfaces)
 
 
 def ensure_role_scoped_overrides(
@@ -690,6 +711,52 @@ async def _judge_candidate(
     return await judge_client.chat_structured(messages, JudgeEvaluation)
 
 
+async def _summarize_runtime_prompt(
+    judge_client: "LLMClient",
+    *,
+    config: RoleCalibrationConfig,
+    work_summary: str,
+    discovery: RoleDiscoveryResult,
+    selected_candidate: CandidateResult,
+    approved_role_contract: list[str],
+) -> RuntimePromptSummary:
+    prompt = registry.format_text(
+        config.summary_prompt_key,
+        AGENT_ROLE=config.agent_role,
+        WORK_SUMMARY=work_summary,
+        ROLE_PROMPT_SURFACES=_role_prompt_surfaces(config),
+        SELECTED_ROLE_TITLE=selected_candidate.candidate_role_title,
+        APPROVED_ROLE_CONTRACT="\n".join(f"- {item}" for item in approved_role_contract),
+        CANDIDATE_STRENGTHS="\n".join(f"- {item}" for item in selected_candidate.major_strengths),
+        CANDIDATE_RISKS="\n".join(f"- {item}" for item in selected_candidate.major_risks),
+        CANDIDATE_PROMPT_GUIDANCE=selected_candidate.recommended_prompt_override_guidance,
+        DISCOVERY_BEST_ROLE_TITLE=discovery.best_role_title,
+        DISCOVERY_ALTERNATE_ROLE_TITLES="\n".join(f"- {item}" for item in discovery.alternate_role_titles),
+        DISCOVERY_ROLE_CONTRACT="\n".join(f"- {item}" for item in discovery.plain_language_role_contract),
+        DISCOVERY_REQUIRED_BEHAVIORS="\n".join(f"- {item}" for item in discovery.required_behaviors),
+        DISCOVERY_BEHAVIORS_TO_AVOID="\n".join(f"- {item}" for item in discovery.behaviors_to_avoid),
+        DISCOVERY_MISUNDERSTOOD_RISKS="\n".join(f"- {item}" for item in discovery.risks_if_role_is_misunderstood),
+        DEFAULT_AVOID_BEHAVIORS="\n".join(f"- {item}" for item in config.default_avoid),
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Return JSON only. Produce a compact runtime prompt summary that improves "
+                "the tuned prompt surfaces without contradicting them."
+            ),
+        },
+        {"role": "user", "content": prompt},
+    ]
+    summary = await judge_client.chat_structured(messages, RuntimePromptSummary)
+    return RuntimePromptSummary(
+        role_title=summary.role_title.strip() or selected_candidate.candidate_role_title,
+        required_behaviors=_dedupe_preserve_order(summary.required_behaviors),
+        avoid_behaviors=_dedupe_preserve_order(summary.avoid_behaviors),
+        prompt_override_guidance=summary.prompt_override_guidance.strip(),
+    )
+
+
 async def calibrate_role(
     *,
     repo_root: str,
@@ -753,6 +820,14 @@ async def calibrate_role(
         discovery=discovery,
         selected_candidate=selected_candidate,
     )
+    runtime_prompt_summary = await _summarize_runtime_prompt(
+        judge.client,
+        config=config,
+        work_summary=work_summary,
+        discovery=discovery,
+        selected_candidate=selected_candidate,
+        approved_role_contract=approved_role_contract,
+    )
     alternate_titles = _dedupe_preserve_order(
         [title for title in candidate_titles if title.casefold() != selected_role_title.casefold()]
     )
@@ -774,6 +849,7 @@ async def calibrate_role(
         candidate_results=candidate_results,
         approved_role_contract=approved_role_contract,
         derived_prompt_guidance=derived_guidance,
+        runtime_prompt_summary=runtime_prompt_summary,
         judge_warning=judge.warning,
     )
     _persist_role_tuning_profile(repo_root, scope, profile)

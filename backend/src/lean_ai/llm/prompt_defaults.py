@@ -3289,6 +3289,159 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
 
     reg.register(
         PromptEntry(
+            key="role_tuning.request.summary",
+            category="Advanced",
+            name="Request Role Runtime Summary",
+            description=(
+                "Expert-authored runtime summary for request-role tuning."
+                " Produces compact guidance that must stay compatible with"
+                " the existing request prompt surfaces."
+            ),
+            default_text=(
+                "You are writing a compact runtime prompt summary for Lean-AI's "
+                "request role.\n\n"
+                "Agent role: {AGENT_ROLE}\n"
+                "Selected role title: {SELECTED_ROLE_TITLE}\n\n"
+                "Canonical request-role work summary:\n"
+                "{WORK_SUMMARY}\n\n"
+                "Actual prompt surfaces the tuned model will receive:\n"
+                "{ROLE_PROMPT_SURFACES}\n\n"
+                "The request role must primarily remain compatible with chat.system. "
+                "That surface contains the strict Grill Me protocol, one-question-at-a-time "
+                "rule, exploration-before-questioning loop, and the CHAT_MAX_TURNS-driven "
+                "question cadence. It must also remain compatible with fix.request_system.\n\n"
+                "Selected candidate evidence:\n"
+                "Approved contract:\n{APPROVED_ROLE_CONTRACT}\n\n"
+                "Strengths:\n{CANDIDATE_STRENGTHS}\n\n"
+                "Risks:\n{CANDIDATE_RISKS}\n\n"
+                "Prompt guidance:\n{CANDIDATE_PROMPT_GUIDANCE}\n\n"
+                "Discovery evidence:\n"
+                "Best role title: {DISCOVERY_BEST_ROLE_TITLE}\n"
+                "Alternate role titles:\n{DISCOVERY_ALTERNATE_ROLE_TITLES}\n\n"
+                "Plain-language role contract:\n{DISCOVERY_ROLE_CONTRACT}\n\n"
+                "Required behaviors:\n{DISCOVERY_REQUIRED_BEHAVIORS}\n\n"
+                "Behaviors to avoid:\n{DISCOVERY_BEHAVIORS_TO_AVOID}\n\n"
+                "Risks if misunderstood:\n{DISCOVERY_MISUNDERSTOOD_RISKS}\n\n"
+                "Default avoid behaviors:\n{DEFAULT_AVOID_BEHAVIORS}\n\n"
+                "Return JSON only.\n"
+                "Write a compact runtime summary that preserves only the role-shaping guidance "
+                "that meaningfully improves the prompt surfaces above.\n"
+                "Do not restate generic stakeholder-analysis advice already enforced by chat.system.\n"
+                "Do not introduce contradictions such as asking multiple questions at once, "
+                "skipping exploration before questions, or turning request-mode into chat-mode.\n"
+                "Keep required_behaviors and avoid_behaviors short and high-signal."
+            ),
+            template_vars=[
+                "AGENT_ROLE",
+                "SELECTED_ROLE_TITLE",
+                "WORK_SUMMARY",
+                "ROLE_PROMPT_SURFACES",
+                "APPROVED_ROLE_CONTRACT",
+                "CANDIDATE_STRENGTHS",
+                "CANDIDATE_RISKS",
+                "CANDIDATE_PROMPT_GUIDANCE",
+                "DISCOVERY_BEST_ROLE_TITLE",
+                "DISCOVERY_ALTERNATE_ROLE_TITLES",
+                "DISCOVERY_ROLE_CONTRACT",
+                "DISCOVERY_REQUIRED_BEHAVIORS",
+                "DISCOVERY_BEHAVIORS_TO_AVOID",
+                "DISCOVERY_MISUNDERSTOOD_RISKS",
+                "DEFAULT_AVOID_BEHAVIORS",
+            ],
+        )
+    )
+
+    reg.register(
+        PromptEntry(
+            key="role_tuning.primary.summary",
+            category="Advanced",
+            name="Primary Role Runtime Summary",
+            description="Expert-authored runtime summary for primary-role tuning.",
+            default_text=(
+                "You are writing a compact runtime prompt summary for Lean-AI's primary role.\n\n"
+                "Agent role: {AGENT_ROLE}\n"
+                "Selected role title: {SELECTED_ROLE_TITLE}\n\n"
+                "Canonical work summary:\n"
+                "{WORK_SUMMARY}\n\n"
+                "Actual prompt surfaces the tuned model will receive:\n"
+                "{ROLE_PROMPT_SURFACES}\n\n"
+                "Selected candidate evidence:\n"
+                "Approved contract:\n{APPROVED_ROLE_CONTRACT}\n\n"
+                "Strengths:\n{CANDIDATE_STRENGTHS}\n\n"
+                "Risks:\n{CANDIDATE_RISKS}\n\n"
+                "Prompt guidance:\n{CANDIDATE_PROMPT_GUIDANCE}\n\n"
+                "Discovery role contract:\n{DISCOVERY_ROLE_CONTRACT}\n\n"
+                "Discovery required behaviors:\n{DISCOVERY_REQUIRED_BEHAVIORS}\n\n"
+                "Discovery avoid behaviors:\n{DISCOVERY_BEHAVIORS_TO_AVOID}\n\n"
+                "Default avoid behaviors:\n{DEFAULT_AVOID_BEHAVIORS}\n\n"
+                "Return JSON only.\n"
+                "Produce a concise runtime summary that only preserves role-shaping guidance "
+                "that improves these prompt surfaces. Avoid duplicating obvious instructions "
+                "already present in the base prompts."
+            ),
+            template_vars=[
+                "AGENT_ROLE",
+                "SELECTED_ROLE_TITLE",
+                "WORK_SUMMARY",
+                "ROLE_PROMPT_SURFACES",
+                "APPROVED_ROLE_CONTRACT",
+                "CANDIDATE_STRENGTHS",
+                "CANDIDATE_RISKS",
+                "CANDIDATE_PROMPT_GUIDANCE",
+                "DISCOVERY_ROLE_CONTRACT",
+                "DISCOVERY_REQUIRED_BEHAVIORS",
+                "DISCOVERY_BEHAVIORS_TO_AVOID",
+                "DEFAULT_AVOID_BEHAVIORS",
+            ],
+        )
+    )
+
+    reg.register(
+        PromptEntry(
+            key="role_tuning.expert.summary",
+            category="Advanced",
+            name="Expert Role Runtime Summary",
+            description="Expert-authored runtime summary for expert-role tuning.",
+            default_text=(
+                "You are writing a compact runtime prompt summary for Lean-AI's expert role.\n\n"
+                "Agent role: {AGENT_ROLE}\n"
+                "Selected role title: {SELECTED_ROLE_TITLE}\n\n"
+                "Canonical work summary:\n"
+                "{WORK_SUMMARY}\n\n"
+                "Actual prompt surfaces the tuned model will receive:\n"
+                "{ROLE_PROMPT_SURFACES}\n\n"
+                "Selected candidate evidence:\n"
+                "Approved contract:\n{APPROVED_ROLE_CONTRACT}\n\n"
+                "Strengths:\n{CANDIDATE_STRENGTHS}\n\n"
+                "Risks:\n{CANDIDATE_RISKS}\n\n"
+                "Prompt guidance:\n{CANDIDATE_PROMPT_GUIDANCE}\n\n"
+                "Discovery role contract:\n{DISCOVERY_ROLE_CONTRACT}\n\n"
+                "Discovery required behaviors:\n{DISCOVERY_REQUIRED_BEHAVIORS}\n\n"
+                "Discovery avoid behaviors:\n{DISCOVERY_BEHAVIORS_TO_AVOID}\n\n"
+                "Default avoid behaviors:\n{DEFAULT_AVOID_BEHAVIORS}\n\n"
+                "Return JSON only.\n"
+                "Produce a concise runtime summary that sharpens design synthesis, evidence discipline, "
+                "and risk handling without duplicating the base prompt instructions."
+            ),
+            template_vars=[
+                "AGENT_ROLE",
+                "SELECTED_ROLE_TITLE",
+                "WORK_SUMMARY",
+                "ROLE_PROMPT_SURFACES",
+                "APPROVED_ROLE_CONTRACT",
+                "CANDIDATE_STRENGTHS",
+                "CANDIDATE_RISKS",
+                "CANDIDATE_PROMPT_GUIDANCE",
+                "DISCOVERY_ROLE_CONTRACT",
+                "DISCOVERY_REQUIRED_BEHAVIORS",
+                "DISCOVERY_BEHAVIORS_TO_AVOID",
+                "DEFAULT_AVOID_BEHAVIORS",
+            ],
+        )
+    )
+
+    reg.register(
+        PromptEntry(
             key="role_tuning.discovery",
             category="Advanced",
             name="Role Tuning Discovery Prompt",
