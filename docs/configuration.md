@@ -313,7 +313,7 @@ Switch providers at any time by changing this value and restarting the server (o
 | Variable | Default | Description |
 |---|---|---|
 | `LEAN_AI_OLLAMA_URL` | `http://localhost:11434` | Ollama API endpoint |
-| `LEAN_AI_OLLAMA_MODEL` | `qwen3-coder:30b` | Primary model for chat and planning |
+| `LEAN_AI_OLLAMA_MODEL` | `qwen3-coder:30b` | Primary model for planning, execution, and fallback chat/request work when no dedicated request model is configured |
 | `LEAN_AI_OLLAMA_TEMPERATURE` | *(blank)* | Sampling temperature. Blank = omit and use the model's Ollama/Modelfile default |
 | `LEAN_AI_OLLAMA_TOP_P` | *(blank)* | Nucleus sampling threshold. Blank = omit |
 | `LEAN_AI_OLLAMA_TOP_K` | *(blank)* | Top-k sampling. Blank = omit |
@@ -323,9 +323,34 @@ Switch providers at any time by changing this value and restarting the server (o
 
 Ollama is always required, even when using cloud providers — it handles inline predictions, embeddings, and the [local refiner](reference-library.md#local-refiner).
 
+## Role Tuning
+
+Lean AI can automatically tune each configured model role to the model actually assigned to it. This currently covers:
+
+- **Request** — chat refinement and `/request`
+- **Primary** — planning phases 1-2, normal execution, and primary-path `/fix`
+- **Expert** — planning phases 3-5, expert-path `/fix`, plan revision, and final validation escalation
+
+Role tuning runs lazily on first use of a given `role + model` pair. The backend:
+
+1. Loads the active client for the role.
+2. Checks `.lean_ai/role_tuning/` for a current profile.
+3. Reuses it if its role/model/work-summary hash/prompt-version hash still match.
+4. Otherwise recalibrates and persists a new profile.
+
+Each saved profile produces model-scoped prompt overrides in `.lean_ai/prompts.yaml`. Those overrides are layered above compiled defaults and above any manual global overrides, but only for the matching `model + role + prompt key`.
+
+Tuning is automatically invalidated when one of these changes:
+
+- the role's canonical work summary
+- the relevant compiled base prompts
+- the role-tuning composition version
+
+There are no user-facing config knobs for this feature yet; it is automatic once the role is used.
+
 ## Expert Model
 
-An optional second model for reasoning-heavy tasks. When configured, the expert model handles planning phases 3–5 (design + risk synthesis, plan assembly, verification) and the final validation fix retry. Phases 1–2 and all implementation turns always use the primary model.
+An optional second model for reasoning-heavy tasks. When configured, the expert model handles planning phases 3–5 (design + risk synthesis, plan assembly, verification), expert-path `/fix`, plan revision, and the final validation fix retry. Phases 1–2 and all implementation turns always use the primary model.
 
 The expert model can be a different provider from the primary — for example, run a fast local Ollama model for exploration and implementation, then hand off to Claude or ChatGPT for planning and complex fixes.
 
@@ -428,6 +453,8 @@ An optional separate model for:
 The request model **does not** participate in the planner. Planning phases 1–2 (scope + codebase exploration) run on the primary model, and phases 3–5 (design synthesis, plan assembly, verification) run on the expert model. Routing a chatty general-purpose model through codebase exploration wastes its strengths and produces weaker `FileSummary` output, so those phases stay with the coder-tuned primary.
 
 If not configured, the primary model handles chat and `/request` mode as well.
+
+When role tuning is enabled through normal runtime use, the request model gets its own persisted role contract and scoped overrides for `chat.system` and `fix.request_system`.
 
 ### Provider Selection
 

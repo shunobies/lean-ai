@@ -227,9 +227,15 @@ Return all registered prompts with defaults, current values, override status, an
 }
 ```
 
+Prompt payloads now expose both global and scoped override metadata. A prompt can have:
+
+- a global override
+- one or more scoped overrides
+- both at once
+
 #### `PUT /api/prompts`
 
-Save prompt overrides to `.lean_ai/prompts.yaml`. Validates that required template variables are preserved.
+Save prompt overrides to `.lean_ai/prompts.yaml`. Validates that required template variables are preserved. Scoped overrides used by role tuning are stored in the same file under `_scoped_overrides`.
 
 **Request:**
 ```json

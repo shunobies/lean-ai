@@ -20,7 +20,9 @@ If initialization has not happened, chat still works but every planning phase wi
 
 ## 1. First Interaction — Chat Mode
 
-The user types something vague or exploratory: *"I want to add password-reset."* This arrives at `POST /api/chat`, not at the planning pipeline. Chat mode runs on the **request model** (chatty, higher temperature) with a dedicated tool set: `save_note`, `list_project_todos`, `list_recent_sessions`, `get_session_summary`, `search_workspace_memory`, plus the planning tools (`grep_files`, `read_file`, `list_directory`, `directory_tree`, `search_internet`, `fetch_url`, `search_reference`, `query_project_context`, …).
+The user types something vague or exploratory: *"I want to add password-reset."* This arrives at `POST /api/chat`, not at the planning pipeline. Chat mode runs on the **request model** when configured, otherwise the primary model, with a dedicated tool set: `save_note`, `list_project_todos`, `list_recent_sessions`, `get_session_summary`, `search_workspace_memory`, plus the planning tools (`grep_files`, `read_file`, `list_directory`, `directory_tree`, `search_internet`, `fetch_url`, `search_reference`, `query_project_context`, …).
+
+Before the first substantive reply for a given `request` model, Lean AI may run a one-time role-tuning calibration pass. That pass writes a profile under `.lean_ai/role_tuning/` and a scoped override for `chat.system`, so future chat turns for that exact model reuse the tuned request contract automatically.
 
 Two hard rules keep the chat grounded:
 

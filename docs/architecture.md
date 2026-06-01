@@ -56,6 +56,23 @@ Fix mode includes:
 
 Uses the same direct-execution path as fix mode, but with a neutral request-oriented prompt and, when configured, a dedicated request model. It is intended for open-ended research, drafting, and skill-driven tasks where a planning gate is unnecessary.
 
+### Role Tuning
+
+Lean AI can calibrate the active model for each major agent role:
+
+- **Request** — chat refinement and `/request`
+- **Primary** — planning phases 1-2, execution, and primary-path fix work
+- **Expert** — planning phases 3-5, expert-path fix work, plan revision, and final validation escalation
+
+The tuning flow is lazy:
+
+1. Resolve the active client for the role.
+2. Look for a persisted tuning profile under `.lean_ai/role_tuning/`.
+3. Reuse it if the role, model, work-summary hash, and prompt-version hash still match.
+4. Otherwise run discovery + judged probe evaluation, persist the winning profile, and immediately apply the result.
+
+Tuned guidance is not injected by replacing a whole prompt with freeform model output. Instead, Lean AI composes a constrained role contract into the relevant prompt surfaces and stores it as a model-scoped override in `.lean_ai/prompts.yaml`. Global manual overrides still apply as the fallback layer.
+
 ## 6-Phase Planning Pipeline
 
 The planner (`llm/planner.py`) uses decomposed LLM calls to produce high-quality plans:
@@ -84,6 +101,20 @@ Each phase uses structured JSON output from the LLM. The planner has read-only t
 | Tool output compression, web summarization, memory extraction | **Worker** model | Small, fast — runs asynchronously so it never blocks the hot path. |
 
 The **request** model participates in chat and `/request` mode only — it does not run any planner phase.
+
+### Role-tuned prompt surfaces
+
+Each role writes scoped overrides for the prompt surfaces it actually uses:
+
+- **Request** — `chat.system`, `fix.request_system`
+- **Primary** — `planning.scope_system`, `planning.exploration_system`, `execution.step_system`, `execution.implementation_system`, `fix.system`
+- **Expert** — `planning.design_system`, `planning.assembly_system`, `planning.verification_system`, `fix.system`
+
+Prompt resolution is layered in this order:
+
+1. Compiled default prompt
+2. Manual global override from `.lean_ai/prompts.yaml`
+3. Matching scoped override for `model + role + prompt key`
 
 When using cloud providers, the [Local Refiner](reference-library.md#local-refiner) can enrich tasks with reference library context and strip sensitive data before planning begins.
 
@@ -190,6 +221,11 @@ Workspace persistence uses SQLite via `aiosqlite` (`db.py`) at `.lean_ai/lean_ai
 - **`architecture_decisions`** — Durable architecture notes captured from workflows or chat
 - **`checkpoints`** — Serialized workflow state for resume/branching
 - **`prompt_versions`, `prompt_variants`, `ab_tests`** — Prompt-registry and experimentation state
+
+In addition to the SQLite workspace DB, role tuning persists:
+
+- **`.lean_ai/role_tuning/*.json`** — one durable profile per `role + provider/model`
+- **`.lean_ai/prompts.yaml` scoped entries** — composed model-specific prompt overrides derived from the saved profile
 
 No ORM. Raw SQL queries.
 

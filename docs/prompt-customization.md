@@ -4,6 +4,13 @@ Lean AI uses structured prompts to guide the LLM at every stage — planning, ex
 
 Overrides are stored in `.lean_ai/prompts.yaml` inside your project directory. Prompts you don't override continue using their compiled defaults.
 
+Lean AI now supports two override scopes:
+
+- **Global overrides** — the original behavior; apply to every model that uses a prompt
+- **Scoped overrides** — apply only when `model + role + prompt key` match
+
+Scoped overrides are what the role-tuning subsystem writes automatically for tuned `request`, `primary`, and `expert` models.
+
 ## Why Customize Prompts
 
 - **Tune agent behavior** — adjust quality rules, tool usage patterns, or completion signaling for your specific workflow
@@ -11,6 +18,37 @@ Overrides are stored in `.lean_ai/prompts.yaml` inside your project directory. P
 - **Change fix mode strategy** — customize how the agent investigates and diagnoses bugs
 - **Adjust chat personality** — modify the chat system prompt for different interaction styles
 - **Framework-specific guidance** — refine context generation prompts to produce better project summaries
+- **Keep different models in different lanes** — let a chatty request model, a coder-tuned primary, and a reasoning-heavy expert each carry a different contract without forking the whole prompt set
+
+## Override Resolution Order
+
+When Lean AI resolves a prompt, it layers text in this order:
+
+1. **Compiled default**
+2. **Manual global override** from `.lean_ai/prompts.yaml`
+3. **Scoped override** for the matching `model + role + prompt key`
+
+That means:
+
+- a manual global override still affects every model by default
+- a scoped override wins only for its exact role/model pair
+- role tuning can coexist with your global prompt edits instead of replacing them
+
+## Role Tuning and Prompt Overrides
+
+The role-tuning subsystem uses the same prompt registry and YAML file you do. On first use of a new `role + model` pair, Lean AI may:
+
+1. Calibrate the model for that role
+2. Save a profile under `.lean_ai/role_tuning/`
+3. Write scoped overrides into `.lean_ai/prompts.yaml`
+
+Those scoped overrides preserve the compiled prompt's required placeholders and base scaffolding, then prepend a constrained role contract chosen for that model.
+
+Current tuned prompt surfaces are:
+
+- **Request** — `chat.system`, `fix.request_system`
+- **Primary** — `planning.scope_system`, `planning.exploration_system`, `execution.step_system`, `execution.implementation_system`, `fix.system`
+- **Expert** — `planning.design_system`, `planning.assembly_system`, `planning.verification_system`, `fix.system`
 
 ## Opening the Editor
 
@@ -89,7 +127,7 @@ Override **policy.web_search** (Core Policy) to make the agent search more or le
 
 ### Customizing planning scope analysis (Phase 1)
 
-Override **planning.scope_system** or **planning.scope_user** (Planning) to guide how the agent analyzes tasks for your specific project architecture. Phase 1 runs on the request model with a small read-only tool budget (`LEAN_AI_PLAN_PHASE1_MAX_TURNS`, default 5) and produces an 8-section scope document. Both prompts have a `{PHASE1_MAX_TURNS}` template variable the registry fills in from the setting — **do not remove it** from an override; `registry.validate` will flag overrides missing required placeholders.
+Override **planning.scope_system** or **planning.scope_user** (Planning) to guide how the agent analyzes tasks for your specific project architecture. Phase 1 runs on the primary model with a small read-only tool budget (`LEAN_AI_PLAN_PHASE1_MAX_TURNS`, default 5) and produces an 8-section scope document. Both prompts have a `{PHASE1_MAX_TURNS}` template variable the registry fills in from the setting — **do not remove it** from an override; `registry.validate` will flag overrides missing required placeholders.
 
 ### Customizing Phase 2 exploration
 
@@ -125,23 +163,34 @@ Override **chat.system** (Chat & Refinement) to change the tone, focus, or const
 Overrides are stored in `.lean_ai/prompts.yaml` at your project root. You can edit this file directly instead of using the UI.
 
 ```yaml
-_version: 1
+_version: 2
 policy.quality: |
   - No stubs, no TODOs, no placeholder implementations.
   - Follow our team conventions for naming and structure.
   - All public functions must have type annotations.
 policy.web_search: |
   Search the internet after every error. Fetch the top 2 results.
+_scoped_overrides:
+  - prompt_key: chat.system
+    model_id: openai:gpt-4o
+    agent_role: request
+    text: |
+      MODEL-SPECIFIC REQUEST ROLE TUNING:
+      - Active role framing: Requirements Analyst
+      ...
 ```
 
 Rules:
 
 - The `_version` key is metadata — don't remove it
 - Keys use dot notation matching the prompt registry (e.g. `policy.tool`, `planning.scope_system`, `fix.system`)
+- Scoped entries live under `_scoped_overrides`
 - Use YAML literal block scalars (`|`) for multiline text to preserve newlines
 - Only include prompts you want to override — missing keys use compiled defaults
 - Unknown keys are logged as warnings and ignored
 - Template variables (`{variable_name}`) must be preserved for prompts that require them
+
+You normally do not need to hand-edit `_scoped_overrides` unless you want to author or inspect model-specific behavior directly.
 
 To find the exact key for any prompt, expand the card in the Edit Prompts UI — the key is shown in the card header.
 
@@ -161,6 +210,7 @@ Delete `.lean_ai/prompts.yaml` from your project directory to reset everything, 
 The prompt system exposes REST endpoints for programmatic access:
 
 - `GET /api/prompts?repo_root=/path` — all prompts with defaults, current values, and metadata
+- The response metadata distinguishes global overrides, scoped overrides, and prompts that have both
 - `PUT /api/prompts` — save overrides (validates template variables)
 - `POST /api/prompts/reset` — reset specific keys or all overrides
 

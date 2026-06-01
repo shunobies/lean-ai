@@ -15,6 +15,7 @@ Run it fully local with [Ollama](https://ollama.com), or connect to OpenAI and A
 - **Training archive for future fine-tuning** — every workflow decision is captured locally in an append-only archive behind a fail-closed secrets scrubber. Opt in to export via a bearer-token API when you're ready to ship a LoRA adapter for your expert model. [Training Pipeline](docs/training.md)
 - **Multi-provider flexibility** — Ollama for free local inference, OpenAI for GPT-4o, Anthropic for Claude. Switch from the dropdown without restarting. Use cheap local models for small fixes, cloud models for hard problems.
 - **Dual-model pipeline** — run a fast local model for codebase exploration and code execution, then automatically hand off to a cloud model (Claude, GPT-4o) for reasoning-heavy planning phases and complex fix attempts. Save cloud tokens for the decisions that matter.
+- **Role tuning per model** — Lean AI can calibrate the `request`, `primary`, and `expert` roles to the exact model assigned to each one, persist the winning contract under `.lean_ai/role_tuning/`, and automatically reuse it on future runs. Tuned guidance is applied as a scoped prompt override, so one model can behave differently from another without replacing your global prompt customizations.
 - **Local Refiner** — when using cloud providers, a local Ollama model pre-processes your prompts: enriches them with private reference library context, strips sensitive data, and structures vague requests into detailed specs. Your proprietary docs never leave your machine. [Learn more](docs/reference-library.md)
 - **Zero prompt engineering** — chat mode helps you refine ideas into detailed tasks. Project context and framework guides teach the LLM your codebase conventions automatically.
 - **Reference library** — drop your internal docs (PDF, EPUB, Word, Markdown) into `.lean_ai/reference/` and the agent uses them for better plans without leaking content to cloud APIs.
@@ -113,11 +114,30 @@ You: "Add user authentication with JWT tokens"
             /approve to merge, /reject to discard
 ```
 
-**Two modes:**
+**Three common modes:**
 - **`/agent`** — full planning pipeline for features and refactors
 - **`/fix`** — skip planning, let the agent explore and fix directly
+- **`/request`** — skip planning with a request-oriented role tuned for research, drafting, and open-ended tasks
 
 See [Architecture](docs/architecture.md) for the full breakdown.
+
+## Role Tuning
+
+Lean AI can tune the three main model roles independently:
+
+- **Request** — used by chat refinement and `/request`
+- **Primary** — used by planning phases 1-2, normal execution, and primary-path fix work
+- **Expert** — used by planning phases 3-5, expert-path fix work, plan revision, and final validation escalation
+
+On the first run for a given `role + model`, Lean AI performs a lightweight calibration pass, selects the best role framing for that model, stores the result in `.lean_ai/role_tuning/`, and writes a model-scoped prompt override into `.lean_ai/prompts.yaml`.
+
+That tuned result is reused until one of the inputs changes:
+
+- the role's work summary
+- the relevant compiled base prompts
+- the role-tuning composition version
+
+Manual prompt customization still works. Global overrides remain the fallback layer, and a matching model-scoped override wins only for that specific role/model pair.
 
 ## Slash Commands
 
@@ -214,7 +234,7 @@ See the [full configuration reference](docs/configuration.md) for all options.
 | [API Reference](docs/api-reference.md) | REST endpoints and WebSocket protocol |
 | [Extension Guide](docs/extension.md) | VSCode/VSCodium setup, commands, and settings |
 | [JetBrains Plugin](jetbrains-plugin/README.md) | IntelliJ, PyCharm, WebStorm, CLion, and all JetBrains IDEs |
-| [Prompt Customization](docs/prompt-customization.md) | Customizing LLM prompts per project |
+| [Prompt Customization](docs/prompt-customization.md) | Global and model-scoped prompt overrides, including role tuning |
 | [Skills Guide](docs/skills.md) | How `/skill` works and how to author high-quality skills |
 | [Modelfile Guide](docs/modelfile.md) | Customizing Ollama models with persistent rules |
 | [llama-server Guide](docs/llama-server.md) | Using llama.cpp as an alternative to Ollama |
