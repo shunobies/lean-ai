@@ -131,6 +131,8 @@ Lean AI can tune the three main model roles independently:
 
 On the first run for a given `role + model`, Lean AI performs a lightweight calibration pass, selects the best role framing for that model, stores the result in `.lean_ai/role_tuning/`, and writes a model-scoped prompt override into `.lean_ai/prompts.yaml`.
 
+If you want to prewarm those artifacts on one machine and share them with teammates, run `/tune-roles`. That command explicitly tunes the active `primary`, `request`, and `expert` role assignments (including primary fallbacks when a dedicated request/expert model is not configured), writes the same `.lean_ai/role_tuning/*.json` profiles plus `.lean_ai/prompts.yaml`, and lets you commit just those sharable files for reuse on other machines with the same provider/model IDs.
+
 That tuned result is reused until one of the inputs changes:
 
 - the role's work summary
@@ -144,6 +146,7 @@ Manual prompt customization still works. Global overrides remain the fallback la
 | Command | What it does |
 |---|---|
 | `/init` | Index workspace and generate project context |
+| `/tune-roles` | Prewarm sharable role-tuning artifacts for the active role assignments |
 | `/agent` | Send a task to the planning pipeline |
 | `/fix` | Skip planning, fix directly with full tool access |
 | `/approve` | Merge the agent's branch |

@@ -307,6 +307,28 @@ export async function resetPrompts(baseUrl: string, repoRoot: string, keys?: str
     }
 }
 
+export interface RoleTuningPrewarmResult {
+    role: string;
+    model_id: string;
+    status: "tuned" | "skipped";
+    profile_path: string;
+    prompts_path: string;
+    warning?: string | null;
+}
+
+export interface RoleTuningPrewarmResponse {
+    results: RoleTuningPrewarmResult[];
+}
+
+export async function prewarmRoleTuning(
+    postJson: PostJsonFn,
+    repoRoot: string,
+): Promise<RoleTuningPrewarmResponse> {
+    return (await postJson("/api/role-tuning/prewarm", {
+        repo_root: repoRoot,
+    })) as RoleTuningPrewarmResponse;
+}
+
 // ---------------------------------------------------------------------------
 // Notes
 // ---------------------------------------------------------------------------

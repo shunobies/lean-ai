@@ -671,6 +671,67 @@ export async function handleFixCommand(
     await ctx.handleAgentMessage(`/fix ${prompt}${diagCtx}`);
 }
 
+// ── /tune-roles — prewarm sharable role-tuning artifacts ─────────────────
+
+export async function handleTuneRolesCommand(
+    ctx: SlashCommandContext,
+    _args: string,
+): Promise<void> {
+    ctx.postMessage({ type: "thinking", show: true, text: "Checking backend..." });
+
+    const healthy = await ctx.client.healthCheck();
+    if (!healthy) {
+        ctx.postMessage({ type: "thinking", show: false });
+        ctx.postMessage({
+            type: "error",
+            text: "Backend not available. Start the server:\ncd backend && uvicorn lean_ai.main:app --reload --port 8422",
+        });
+        return;
+    }
+
+    ctx.postMessage({
+        type: "thinking",
+        show: true,
+        text: "Tuning role/model pairs and writing shared artifacts...",
+    });
+
+    try {
+        const result = await ctx.client.prewarmRoleTuning(ctx.getRepoRoot());
+        ctx.postMessage({ type: "thinking", show: false });
+
+        const tuned = result.results.filter((item) => item.status === "tuned");
+        const skipped = result.results.filter((item) => item.status === "skipped");
+        const warningLines = result.results
+            .filter((item) => item.warning)
+            .map((item) => `- \`${item.role}\` (${item.model_id}): ${item.warning}`);
+        const promptPath = result.results[0]?.prompts_path ?? ".lean_ai/prompts.yaml";
+        const profilePaths = Array.from(new Set(result.results.map((item) => item.profile_path)));
+
+        const lines = [
+            "Role tuning prewarm complete.",
+            "",
+            `- Tuned: ${tuned.length}`,
+            `- Skipped (already current): ${skipped.length}`,
+            `- Scoped overrides: \`${promptPath}\``,
+            `- Profiles: ${profilePaths.map((p) => `\`${p}\``).join(", ")}`,
+        ];
+
+        if (warningLines.length > 0) {
+            lines.push("", "Warnings:", ...warningLines);
+        }
+
+        ctx.postMessage({
+            type: "reply",
+            text: lines.join("\n"),
+            cls: "msg-system",
+        });
+    } catch (e) {
+        ctx.postMessage({ type: "thinking", show: false });
+        const error = e instanceof Error ? e.message : String(e);
+        ctx.postMessage({ type: "error", text: `Role tuning prewarm failed: ${error}` });
+    }
+}
+
 // ── /request — skip planning, neutral prompt with search ─────────────
 
 export async function handleRequestCommand(
@@ -1483,6 +1544,7 @@ export async function handleHelpCommand(
         "",
         "**Workspace setup**",
         "- `/init [--force]` — Index the workspace and generate project context.",
+        "- `/tune-roles` — Prewarm sharable role-tuning artifacts for the active primary/request/expert role assignments.",
         "- `/scaffold [name] [project] [parent]` — Bootstrap a project from a scaffold (use `/scaffold` alone to list recipes; `/scaffold jobs my-hunt` for a job-search workspace).",
         "- `/style` — Generate a style guide for the current codebase.",
         "",

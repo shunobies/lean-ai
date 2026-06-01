@@ -153,4 +153,15 @@ describe('handleUserMessage slash command dispatch', () => {
         expect(handlerCalls[0]?.command).toBe('thank-you');
         expect(ctx.postMessage).toHaveBeenCalledWith({ type: 'sendEnabled' });
     });
+
+    it('dispatches /tune-roles to the registered handler', async () => {
+        const tuneRolesHandler = jest.fn().mockResolvedValue(undefined);
+        const ctx = createMockContext({ 'tune-roles': tuneRolesHandler });
+
+        await handleUserMessage(ctx, '/tune-roles');
+
+        expect(tuneRolesHandler).toHaveBeenCalledTimes(1);
+        expect(tuneRolesHandler).toHaveBeenCalledWith('');
+        expect(handlerCalls[0]?.command).toBe('tune-roles');
+    });
 });

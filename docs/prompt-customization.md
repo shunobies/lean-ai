@@ -42,6 +42,8 @@ The role-tuning subsystem uses the same prompt registry and YAML file you do. On
 2. Save a profile under `.lean_ai/role_tuning/`
 3. Write scoped overrides into `.lean_ai/prompts.yaml`
 
+You can also generate those artifacts proactively with `/tune-roles`. That command prewarms the active `primary`, `request`, and `expert` role assignments and is useful when a team wants to tune once on a dedicated machine, commit the resulting `.lean_ai/role_tuning/*.json` profiles plus `.lean_ai/prompts.yaml`, and let other machines reuse the same tuned contracts without repeating the long calibration pass. Reuse only applies when the receiving machine has the same provider/model IDs and the saved profile still passes the normal freshness checks.
+
 Those scoped overrides preserve the compiled prompt's required placeholders and base scaffolding, then prepend a constrained role contract chosen for that model.
 
 Current tuned prompt surfaces are:

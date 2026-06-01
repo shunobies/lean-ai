@@ -254,6 +254,33 @@ Save prompt overrides to `.lean_ai/prompts.yaml`. Validates that required templa
 
 Returns 422 if required template variables are missing from any override.
 
+#### `POST /api/role-tuning/prewarm`
+
+Prewarm sharable role-tuning artifacts for the active workspace. The backend tunes the active `primary`, `request`, and `expert` role assignments (using primary fallbacks when a dedicated request or expert client is not configured), skips any current profiles, and returns per-role status plus the written artifact paths.
+
+**Request:**
+```json
+{
+  "repo_root": "/path/to/project"
+}
+```
+
+**Response:**
+```json
+{
+  "results": [
+    {
+      "role": "primary",
+      "model_id": "ollama:qwen3-coder:30b",
+      "status": "tuned",
+      "profile_path": "/path/to/project/.lean_ai/role_tuning/primary--ollama-qwen3-coder-30b.json",
+      "prompts_path": "/path/to/project/.lean_ai/prompts.yaml",
+      "warning": null
+    }
+  ]
+}
+```
+
 #### `POST /api/prompts/reset`
 
 Reset prompt overrides. Pass specific keys to reset individually, or omit `keys` to reset all.

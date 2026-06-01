@@ -19,6 +19,7 @@ from lean_ai.routers.notes import notes_router
 from lean_ai.routers.observability import observability_router
 from lean_ai.routers.prompts import prompts_router
 from lean_ai.routers.reference_endpoints import reference_router
+from lean_ai.routers.role_tuning import role_tuning_router
 from lean_ai.routers.scaffold_endpoints import scaffold_router
 from lean_ai.routers.sessions import sessions_router
 from lean_ai.routers.ui_verification import ui_verification_router
@@ -38,6 +39,7 @@ router.include_router(reference_router)
 router.include_router(notes_router)
 router.include_router(memories_router)
 router.include_router(prompts_router)
+router.include_router(role_tuning_router)
 router.include_router(voice_router)
 router.include_router(ui_verification_router)
 router.include_router(integrations_router)

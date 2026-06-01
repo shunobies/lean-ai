@@ -20,6 +20,7 @@ import {
     handleAgentCommand,
     handleFixCommand,
     handleRequestCommand,
+    handleTuneRolesCommand,
     handleImproveCodebaseArchitectureCommand,
     handleInterviewPrepCommand,
     handleThankYouCommand,
@@ -67,6 +68,7 @@ export function createSlashCommands(
     map.set("/agent",    (args) => handleAgentCommand(ctx, args));
     map.set("/fix",      (args) => handleFixCommand(ctx, args));
     map.set("/request",  (args) => handleRequestCommand(ctx, args));
+    map.set("/tune-roles", (args) => handleTuneRolesCommand(ctx, args));
     map.set("/improve-codebase-architecture", (args) => handleImproveCodebaseArchitectureCommand(ctx, args));
     map.set("/style",    (args) => handleStyleCommand(ctx, args));
     map.set("/reboot",   (args) => handleRebootCommand(ctx, args));

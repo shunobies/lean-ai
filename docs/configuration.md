@@ -340,13 +340,15 @@ Role tuning runs lazily on first use of a given `role + model` pair. The backend
 
 Each saved profile produces model-scoped prompt overrides in `.lean_ai/prompts.yaml`. Those overrides are layered above compiled defaults and above any manual global overrides, but only for the matching `model + role + prompt key`.
 
+If you want to avoid paying the calibration cost on every machine, run `/tune-roles` once on a dedicated box, then commit the resulting `.lean_ai/role_tuning/*.json` profiles and `.lean_ai/prompts.yaml`. Reuse is valid only when the receiving machine is configured with the same provider/model IDs, and current-profile checks still enforce the work-summary hash, prompt-version hash, and schema/composition version before skipping recalibration.
+
 Tuning is automatically invalidated when one of these changes:
 
 - the role's canonical work summary
 - the relevant compiled base prompts
 - the role-tuning composition version
 
-There are no user-facing config knobs for this feature yet; it is automatic once the role is used.
+There are no user-facing config knobs for the calibration logic itself; it is automatic once the role is used, and `/tune-roles` is the explicit prewarm entrypoint for generating shareable artifacts ahead of time.
 
 ## Expert Model
 
