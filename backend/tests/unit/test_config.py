@@ -87,6 +87,8 @@ class TestSettingsShorthand:
         assert s.ollama_context_window == 131072
         assert s.openai_context_window == 128000
         assert s.anthropic_context_window == 200000
+        assert s.chat_max_turns == 20
+        assert s.chat_extended_turns_max == 40
 
 
 class TestExpertConfig:

@@ -40,11 +40,12 @@ logger = logging.getLogger(__name__)
 
 chat_router = APIRouter()
 
-# Max tool-calling turns for chat exploration
-_CHAT_MAX_TURNS = 20
+# Default tool-calling turns for chat exploration. Values come from settings so
+# extension/native settings and config.yaml can tune chat depth without edits.
+_CHAT_MAX_TURNS = settings.chat_max_turns
 # Hard cap when ChatRequest.extended_turns is supplied (used by the
 # /mock-interview extension command for multi-round scored Q&A).
-_CHAT_EXTENDED_TURNS_MAX = 40
+_CHAT_EXTENDED_TURNS_MAX = max(settings.chat_extended_turns_max, _CHAT_MAX_TURNS)
 _MAX_DIRECTORY_ENTRIES = 500
 _MAX_DIRECTORY_DEPTH = 25
 

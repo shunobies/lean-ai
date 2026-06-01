@@ -1467,9 +1467,8 @@ export async function handleMockInterviewCommand(
     });
 
     // Dispatch through the chat endpoint (NOT /request). The first turn
-    // reads multiple context files; extended_turns=40 gives headroom.
-    // Subsequent user answers go through the normal chat flow with the
-    // default 20-turn budget, which is plenty for "score + ask next".
+    // reads multiple context files, so we request elevated chat turns.
+    // The effective ceiling is controlled by lean-ai.chatExtendedTurnsMax.
     await ctx.handleChatDispatch(prompt, { extendedTurns: 40 });
 }
 

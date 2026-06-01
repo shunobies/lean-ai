@@ -1,10 +1,10 @@
 """Tests for the ``ChatRequest.extended_turns`` budget override.
 
-The chat endpoint defaults to 20 tool-calling turns. Callers that need
-more (e.g. the ``/mock-interview`` extension command, which scores
-multiple rounds of Q&A) can pass ``extended_turns`` to raise the
-ceiling, capped at ``_CHAT_EXTENDED_TURNS_MAX`` so an external caller
-can't request arbitrary compute.
+The chat endpoint default and extended-turn ceiling come from settings.
+Callers that need more (e.g. the ``/mock-interview`` extension command,
+which scores multiple rounds of Q&A) can pass ``extended_turns`` to
+raise the ceiling, capped at ``_CHAT_EXTENDED_TURNS_MAX`` so an
+external caller can't request arbitrary compute.
 """
 
 from __future__ import annotations

@@ -465,6 +465,10 @@ class Settings(BaseSettings):
     loop_detection_threshold: int = 3  # Consecutive identical tool calls before warning (0 = off)
     refresh_threshold: float = 0.7  # Refresh context at this % of context window
 
+    # ── Chat ──
+    chat_max_turns: int = 20  # Default tool-calling turns for chat exploration
+    chat_extended_turns_max: int = 40  # Max allowed when a request supplies extended_turns
+
     # ── Planning Phase 1 ──
     plan_phase1_max_turns: int = 5  # Max tool-calling turns for scope analysis (0 = no tools)
 

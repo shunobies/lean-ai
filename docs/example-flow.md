@@ -26,7 +26,7 @@ Before the first substantive reply for a given `request` model, Lean AI may run 
 
 Two hard rules keep the chat grounded:
 
-1. **Always explore first.** Every substantive reply must begin with at least one grounding tool call. Pure social chatter (hi / thanks / ok) is the only exception. This is enforced by the `chat.system` prompt and by a 20-turn tool budget (`_CHAT_MAX_TURNS`).
+1. **Always explore first.** Every substantive reply must begin with at least one grounding tool call. Pure social chatter (hi / thanks / ok) is the only exception. This is enforced by the `chat.system` prompt and by the configurable chat tool budget (`LEAN_AI_CHAT_MAX_TURNS`, default 20).
 2. **Strict two-round protocol when the user asks for a prompt for the coding agent.**
    - *Round 1*: the LLM explores (reads files, greps for references), then ends with exactly 3–5 numbered clarifying questions.
    - *Round 2*: triggered when the user answers, the LLM does targeted verification and emits a single fenced block titled `## Suggested Agent Prompt`. Inside that fence, a `### References` section carries file:line citations, reference-library docs, fetched URLs, and wiki pages.
@@ -325,7 +325,7 @@ The user sees a final "Task complete" message, a list of modified files (clickab
 
 | Layer | Mechanism | Where it lives |
 |---|---|---|
-| Chat | 20-turn tool budget, two-round "Suggested Agent Prompt" protocol, always-explore rule | `chat.system` prompt + `_CHAT_MAX_TURNS` |
+| Chat | Configurable tool budget, two-round "Suggested Agent Prompt" protocol, always-explore rule | `chat.system` prompt + `LEAN_AI_CHAT_MAX_TURNS` |
 | Phase 1 | `request_clarification` opt-in tool, 5-turn cap, text-only exit, summary-before-exit | `planning.scope_system` / `planning.scope_user` |
 | Phase 1a | Pydantic validation + one retry + deterministic fallback to `_fallback_scope_document` | `planning.scope_synthesis_system` |
 | Phase 2 | ASSUMPTIONS checklist, `record_file_observation` (deterministic retention), scratchpad + journal, loop / truncation / text-only detectors, testing-environment awareness | `planning.exploration_*` |

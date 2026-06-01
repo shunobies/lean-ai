@@ -336,6 +336,8 @@ All settings are also available via VSCode's native settings UI (**Settings** > 
 | `lean-ai.searchProvider` | `duckduckgo` | Web search provider: `duckduckgo`, `searxng`, `google`, `bing` |
 | `lean-ai.searchApiUrl` | *(empty)* | SearXNG instance URL (required when `searchProvider` is `searxng`) |
 | `lean-ai.searchDelay` | `2.0` | Minimum seconds between search requests |
+| `lean-ai.chatMaxTurns` | `20` | Default tool-calling turn budget for ordinary chat exploration |
+| `lean-ai.chatExtendedTurnsMax` | `40` | Maximum tool-calling turn budget allowed when chat requests use `extended_turns` |
 | `lean-ai.enablePostValidation` | `true` | Run lint/test passes after agent changes |
 | `lean-ai.postFormatCommand` | *(empty)* | Auto-format command (e.g. `ruff format src/`) |
 | `lean-ai.postLintFixCommand` | *(empty)* | Auto-fix lint command (e.g. `ruff check --fix src/`) |

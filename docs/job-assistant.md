@@ -261,7 +261,7 @@ Run an interactive mock interview with rubric-based scoring.
 | Impact | Quantified outcomes or genuine self-awareness for failure questions |
 
 **Special behaviors:**
-- Uses the chat endpoint (not `/request`) with `extended_turns=40` so all rounds complete.
+- Uses the chat endpoint (not `/request`) with `extended_turns` so all rounds complete. The effective cap is controlled by `LEAN_AI_CHAT_EXTENDED_TURNS_MAX` / `lean-ai.chatExtendedTurnsMax` (default 40).
 - Reads `star_stories.md` at the workspace root if present for reusable evidence.
 - Offers exactly **one** improvement suggestion per answer — the highest-leverage change.
 - Calibrated to be strict: short non-answers score 1–2, platitudes cap at 4, flattery is suppressed.

@@ -77,6 +77,18 @@ def test_yaml_partial_config(tmp_path, monkeypatch):
     assert s.llm_provider == "ollama"
 
 
+def test_yaml_chat_turn_settings(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "config.yaml").write_text(
+        "chat_max_turns: 100\nchat_extended_turns_max: 120\n"
+    )
+    from lean_ai.config import Settings
+
+    s = Settings()
+    assert s.chat_max_turns == 100
+    assert s.chat_extended_turns_max == 120
+
+
 def test_plain_api_key_in_yaml(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "config.yaml").write_text('openai_api_key: "sk-plain-key"\n')

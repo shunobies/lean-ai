@@ -156,7 +156,7 @@ Override **fix.investigation** (Fix Mode) to change how the agent explores your 
 
 ### Customizing the chat assistant
 
-Override **chat.system** (Chat & Refinement) to change the tone, focus, or constraints of the chat conversation. The prompt carries a `{CHAT_MAX_TURNS}` template variable kept in sync with the backend's `_CHAT_MAX_TURNS` constant (default 20) — **do not remove it** from an override. The default prompt encodes an **always-explore** default (every substantive reply begins with at least one grounding tool call) and a **strict two-round protocol** for agent-prompt requests (Round 1: explore + ask exactly 3-5 numbered clarifying questions; Round 2: targeted verification + emit `## Suggested Agent Prompt` with a `### References` block inside the fence).
+Override **chat.system** (Chat & Refinement) to change the tone, focus, or constraints of the chat conversation. The prompt carries a `{CHAT_MAX_TURNS}` template variable kept in sync with the backend's chat turn setting (`LEAN_AI_CHAT_MAX_TURNS`, default 20) — **do not remove it** from an override. The default prompt encodes an **always-explore** default (every substantive reply begins with at least one grounding tool call) and a **strict two-round protocol** for agent-prompt requests (Round 1: explore + ask exactly 3-5 numbered clarifying questions; Round 2: targeted verification + emit `## Suggested Agent Prompt` with a `### References` block inside the fence).
 
 ## YAML File Format
 

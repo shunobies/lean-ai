@@ -337,7 +337,7 @@ const DIFFICULTY_GUIDANCE: Record<MockInterviewDifficulty, string> = {
  * first user turn via the chat endpoint (NOT /request). The chat
  * endpoint reads the context files via tools and drives an adaptive
  * Q&A. ``extended_turns`` on the chat request bumps the turn budget
- * from the default 20 so all ``questionCount`` rounds can complete.
+ * above the default chat budget so all ``questionCount`` rounds can complete.
  */
 export function mockInterviewPrompt(opts: {
     slug: string;

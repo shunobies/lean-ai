@@ -726,6 +726,20 @@
           "default": 2,
           "markdownDescription": "**Search** — Minimum seconds between search requests (with random jitter). Increase to avoid rate limiting. Default: `2.0`"
         },
+        "lean-ai.chatMaxTurns": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 500,
+          "markdownDescription": "**Advanced** — Default tool-calling turn budget for ordinary chat exploration requests. Synced to `LEAN_AI_CHAT_MAX_TURNS` / `chat_max_turns`. Default: `20`"
+        },
+        "lean-ai.chatExtendedTurnsMax": {
+          "type": "number",
+          "default": 40,
+          "minimum": 1,
+          "maximum": 500,
+          "markdownDescription": "**Advanced** — Maximum tool-calling turn budget allowed when a caller supplies `extended_turns` to the chat API. Synced to `LEAN_AI_CHAT_EXTENDED_TURNS_MAX` / `chat_extended_turns_max`. Default: `40`"
+        },
         "lean-ai.enableIntegrations": {
           "type": "boolean",
           "default": false,

@@ -1844,6 +1844,16 @@ export function getSettingsPanelHtml(): string {
             <input type="number" id="searchDelay" min="0" step="0.5" placeholder="2.0">
         </div>
         <div class="field">
+            <label>Default chat turns <span class="hint">tool-call budget for normal chat requests</span></label>
+            <input type="number" id="chatMaxTurns" min="1" max="500" step="1" placeholder="20">
+        </div>
+    </div>
+    <div class="field-row">
+        <div class="field">
+            <label>Extended chat cap <span class="hint">max allowed when a caller requests extra chat turns</span></label>
+            <input type="number" id="chatExtendedTurnsMax" min="1" max="500" step="1" placeholder="40">
+        </div>
+        <div class="field">
             <label>Max implementation turns <span class="hint">0 = unlimited</span></label>
             <input type="number" id="implementationMaxTurns" min="0" step="1" placeholder="0">
         </div>
@@ -3015,6 +3025,8 @@ export function getSettingsPanelHtml(): string {
             searchProvider:        val('searchProvider'),
             searchApiUrl:          val('searchApiUrl'),
             searchDelay:           val('searchDelay'),
+            chatMaxTurns:          val('chatMaxTurns'),
+            chatExtendedTurnsMax:  val('chatExtendedTurnsMax'),
             implementationMaxTurns:val('implementationMaxTurns'),
             refreshThreshold:      val('refreshThreshold'),
             maxThinkingTokens:     val('maxThinkingTokens'),
@@ -3312,6 +3324,8 @@ export function getSettingsPanelHtml(): string {
         setSearchProvider(v.searchProvider || 'duckduckgo');
         setVal('searchApiUrl',          v.searchApiUrl);
         setVal('searchDelay',           v.searchDelay);
+        setVal('chatMaxTurns',          v.chatMaxTurns);
+        setVal('chatExtendedTurnsMax',  v.chatExtendedTurnsMax);
         setVal('implementationMaxTurns',v.implementationMaxTurns);
         setVal('maxThinkingTokens',     v.maxThinkingTokens);
         setVal('refreshThreshold',      v.refreshThreshold);

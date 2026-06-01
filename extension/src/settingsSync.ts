@@ -208,6 +208,8 @@ export const BACKEND_SETTING_MAP: Record<string, string> = {
     "lean-ai.referenceChunkChars":       "LEAN_AI_REFERENCE_CHUNK_CHARS",
     "lean-ai.referenceNeighborWindow":   "LEAN_AI_REFERENCE_NEIGHBOR_WINDOW",
     "lean-ai.referenceSearchDefaultLimit": "LEAN_AI_REFERENCE_SEARCH_DEFAULT_LIMIT",
+    "lean-ai.chatMaxTurns":              "LEAN_AI_CHAT_MAX_TURNS",
+    "lean-ai.chatExtendedTurnsMax":      "LEAN_AI_CHAT_EXTENDED_TURNS_MAX",
     "lean-ai.numParallel":               "LEAN_AI_NUM_PARALLEL",
     "lean-ai.implementationMaxTurns":    "LEAN_AI_IMPLEMENTATION_MAX_TURNS",
     "lean-ai.refreshThreshold":          "LEAN_AI_REFRESH_THRESHOLD",

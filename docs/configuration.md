@@ -625,6 +625,13 @@ See [Reference Library & Refiner](reference-library.md) for details on document 
 
 The refiner only activates when using cloud providers (OpenAI, Anthropic, or Lean AI Serve). See [Reference Library & Refiner](reference-library.md#local-refiner) for how it works.
 
+## Chat
+
+| Variable | Default | Description |
+|---|---|---|
+| `LEAN_AI_CHAT_MAX_TURNS` | `20` | Default tool-calling turn budget for ordinary chat exploration requests. This is the budget used for the initial chat flow before work is sent to the agent pipeline. |
+| `LEAN_AI_CHAT_EXTENDED_TURNS_MAX` | `40` | Maximum chat tool-calling turn budget allowed when a caller supplies `extended_turns` to the chat API. Set this at or above `LEAN_AI_CHAT_MAX_TURNS`. |
+
 ## Implementation
 
 | Variable | Default | Description |
