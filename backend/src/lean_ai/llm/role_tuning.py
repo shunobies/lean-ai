@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 ROLE_TUNING_SCHEMA_VERSION = 2
 ROLE_TUNING_COMPOSITION_VERSION = "role-tuning-v3"
+ROLE_TUNING_RUNTIME_EVALUATION_VERSION = "role-tuning-runtime-eval-v1"
 
 REQUEST_ROLE = "request"
 PRIMARY_ROLE = "primary"
@@ -287,6 +288,121 @@ class RuntimePromptSummary(BaseModel):
     prompt_override_guidance: str = ""
 
 
+class RuntimeEvaluationScenarioSpec(BaseModel):
+    name: str
+    prompt_key: str
+    user_message: str
+
+
+class RuntimeScenarioEvaluation(BaseModel):
+    scenario_name: str
+    prompt_key: str
+    score: int = 0
+    pass_status: Literal["pass", "partial", "fail"] = "partial"
+    issues: list[str] = []
+    suggested_adjustments: list[str] = []
+    notes: str = ""
+
+
+class RuntimeEvaluationSynthesis(BaseModel):
+    reliability_score: int = 0
+    issues_found: list[str] = []
+    suggestions_available: bool = False
+    affected_prompt_keys: list[str] = []
+    suggestion_summary: list[str] = []
+    required_behaviors: list[str] = []
+    avoid_behaviors: list[str] = []
+    prompt_override_guidance: str = ""
+
+
+class RuntimePromptEvaluation(BaseModel):
+    version_hash: str
+    evaluated_at: str
+    scenarios_run: list[str] = []
+    reliability_score: int = 0
+    issues_found: list[str] = []
+    affected_prompt_keys: list[str] = []
+    scenario_results: list[RuntimeScenarioEvaluation] = []
+    suggestions_available: bool = False
+    suggestion_summary: list[str] = []
+    suggested_runtime_prompt_summary: RuntimePromptSummary | None = None
+    applied_at: str | None = None
+
+
+RUNTIME_EVAL_SCENARIOS: dict[str, tuple[RuntimeEvaluationScenarioSpec, ...]] = {
+    REQUEST_ROLE: (
+        RuntimeEvaluationScenarioSpec(
+            name="clarification_discipline",
+            prompt_key="chat.system",
+            user_message=(
+                "I need a feature where users upload receipts and the system tells them what to do next. "
+                "Please help me figure out the right requirements without jumping into implementation."
+            ),
+        ),
+        RuntimeEvaluationScenarioSpec(
+            name="anti_architecture_boundary",
+            prompt_key="fix.request_system",
+            user_message=(
+                "The stakeholder insists engineering must use PostgreSQL, Redis, and React. "
+                "Handle this as the request-role agent without accepting those implementation choices as final."
+            ),
+        ),
+    ),
+    PRIMARY_ROLE: (
+        RuntimeEvaluationScenarioSpec(
+            name="bounded_execution",
+            prompt_key="execution.step_system",
+            user_message=(
+                "You have an approved step: add server-side validation to the existing POST /api/orders handler, "
+                "update affected tests, and verify the change. Explain your execution approach."
+            ),
+        ),
+        RuntimeEvaluationScenarioSpec(
+            name="verification_discipline",
+            prompt_key="execution.implementation_system",
+            user_message=(
+                "The implementation is complete but the test command is unavailable in this environment. "
+                "Describe how you should report the result without overstating success."
+            ),
+        ),
+        RuntimeEvaluationScenarioSpec(
+            name="scope_control",
+            prompt_key="fix.system",
+            user_message=(
+                "While fixing a small approved bug, someone asks you to redesign the whole order architecture too. "
+                "Respond with the scope discipline expected from this role."
+            ),
+        ),
+    ),
+    EXPERT_ROLE: (
+        RuntimeEvaluationScenarioSpec(
+            name="evidence_discipline",
+            prompt_key="planning.design_system",
+            user_message=(
+                "The file summary suggests one integration pattern, but a key dependency detail is missing. "
+                "Describe how you would proceed without fabricating repository facts."
+            ),
+        ),
+        RuntimeEvaluationScenarioSpec(
+            name="downstream_usefulness",
+            prompt_key="planning.assembly_system",
+            user_message=(
+                "A feature request needs background document processing, status tracking, retry behavior, and "
+                "a progress indicator. Describe the design and handoff work before implementation."
+            ),
+        ),
+        RuntimeEvaluationScenarioSpec(
+            name="verification_strategy",
+            prompt_key="planning.verification_system",
+            user_message=(
+                "The plan modifies behavior across API validation and retry logic. Outline the verification focus "
+                "areas while escalating uncertainty where evidence is incomplete."
+            ),
+        ),
+    ),
+}
+
+
 class RoleTuningProfile(BaseModel):
     schema_version: int = ROLE_TUNING_SCHEMA_VERSION
     created_at: str
@@ -305,6 +421,7 @@ class RoleTuningProfile(BaseModel):
     approved_role_contract: list[str] = []
     derived_prompt_guidance: DerivedPromptGuidance
     runtime_prompt_summary: RuntimePromptSummary
+    runtime_evaluation: RuntimePromptEvaluation | None = None
     judge_warning: str | None = None
 
 
@@ -418,8 +535,50 @@ def role_prompt_version_hash(agent_role: str, repo_root: str | None = None) -> s
     )
 
 
+def role_runtime_evaluation_version_hash(
+    agent_role: str,
+    scope: PromptScope,
+    repo_root: str | None = None,
+) -> str:
+    """Return a hash that invalidates runtime evaluation when prompt surfaces change."""
+    if repo_root:
+        registry.load(repo_root)
+    config = _role_config(agent_role)
+    scenario_text = "\n".join(
+        f"{scenario.prompt_key}:{scenario.name}:{scenario.user_message}"
+        for scenario in RUNTIME_EVAL_SCENARIOS.get(agent_role, ())
+    )
+    resolved_surfaces = "\n".join(
+        f"{prompt_key}\n{resolve_prompt_text(prompt_key, scope=scope)}"
+        for prompt_key in config.prompt_keys
+    )
+    return _sha256_text(
+        ROLE_TUNING_RUNTIME_EVALUATION_VERSION,
+        agent_role,
+        scope.model_id,
+        scenario_text,
+        resolved_surfaces,
+    )
+
+
 def request_prompt_version_hash(repo_root: str | None = None) -> str:
     return role_prompt_version_hash(REQUEST_ROLE, repo_root)
+
+
+def runtime_evaluation_is_current(
+    profile: RoleTuningProfile,
+    scope: PromptScope,
+    *,
+    repo_root: str | None = None,
+) -> bool:
+    evaluation = profile.runtime_evaluation
+    if evaluation is None:
+        return False
+    return evaluation.version_hash == role_runtime_evaluation_version_hash(
+        scope.agent_role,
+        scope,
+        repo_root,
+    )
 
 
 def load_role_tuning_profile(repo_root: str, scope: PromptScope) -> RoleTuningProfile | None:
@@ -606,10 +765,10 @@ def _build_scoped_prompt_override_text(
     return f"{tuning_block}\n{base_text}"
 
 
-def _role_prompt_surfaces(config: RoleCalibrationConfig) -> str:
+def _role_prompt_surfaces(config: RoleCalibrationConfig, *, scope: PromptScope | None = None) -> str:
     surfaces: list[str] = []
     for prompt_key in config.prompt_keys:
-        prompt_text = resolve_prompt_text(prompt_key)
+        prompt_text = resolve_prompt_text(prompt_key, scope=scope)
         surfaces.append(f"Prompt key: {prompt_key}\n{prompt_text}")
     return "\n\n".join(surfaces)
 
@@ -715,6 +874,7 @@ async def _summarize_runtime_prompt(
     judge_client: "LLMClient",
     *,
     config: RoleCalibrationConfig,
+    scope: PromptScope,
     work_summary: str,
     discovery: RoleDiscoveryResult,
     selected_candidate: CandidateResult,
@@ -724,7 +884,7 @@ async def _summarize_runtime_prompt(
         config.summary_prompt_key,
         AGENT_ROLE=config.agent_role,
         WORK_SUMMARY=work_summary,
-        ROLE_PROMPT_SURFACES=_role_prompt_surfaces(config),
+        ROLE_PROMPT_SURFACES=_role_prompt_surfaces(config, scope=scope),
         SELECTED_ROLE_TITLE=selected_candidate.candidate_role_title,
         APPROVED_ROLE_CONTRACT="\n".join(f"- {item}" for item in approved_role_contract),
         CANDIDATE_STRENGTHS="\n".join(f"- {item}" for item in selected_candidate.major_strengths),
@@ -755,6 +915,222 @@ async def _summarize_runtime_prompt(
         avoid_behaviors=_dedupe_preserve_order(summary.avoid_behaviors),
         prompt_override_guidance=summary.prompt_override_guidance.strip(),
     )
+
+
+async def _run_runtime_scenario(
+    assigned_client: "LLMClient",
+    *,
+    prompt_text: str,
+    scenario: RuntimeEvaluationScenarioSpec,
+) -> str:
+    messages = [
+        {"role": "system", "content": prompt_text},
+        {"role": "user", "content": scenario.user_message},
+    ]
+    return await assigned_client.chat_raw(messages)
+
+
+async def _judge_runtime_scenario(
+    judge_client: "LLMClient",
+    *,
+    agent_role: str,
+    scope: PromptScope,
+    scenario: RuntimeEvaluationScenarioSpec,
+    prompt_text: str,
+    assistant_response: str,
+) -> RuntimeScenarioEvaluation:
+    prompt = (
+        "You are evaluating whether a runtime-tuned Lean-AI prompt causes correct role behavior.\n\n"
+        f"Agent role: {agent_role}\n"
+        f"Assigned model: {scope.model_id}\n"
+        f"Prompt key: {scenario.prompt_key}\n"
+        f"Scenario name: {scenario.name}\n\n"
+        "Resolved system prompt shown to the model:\n"
+        f"{prompt_text}\n\n"
+        "Scenario user message:\n"
+        f"{scenario.user_message}\n\n"
+        "Model response:\n"
+        f"{assistant_response}\n\n"
+        "Score the response from 0-5 for prompt reliability. Return JSON only.\n"
+        "- pass: strong adherence to role boundary and prompt contract\n"
+        "- partial: mostly correct but missing an important guardrail\n"
+        "- fail: contradicts or meaningfully weakens the prompt contract\n"
+        "Be concrete about issues and suggested adjustments."
+    )
+    messages = [
+        {"role": "system", "content": "Return JSON only."},
+        {"role": "user", "content": prompt},
+    ]
+    return await judge_client.chat_structured(messages, RuntimeScenarioEvaluation)
+
+
+async def _synthesize_runtime_evaluation(
+    judge_client: "LLMClient",
+    *,
+    config: RoleCalibrationConfig,
+    scope: PromptScope,
+    profile: RoleTuningProfile,
+    scenario_results: list[RuntimeScenarioEvaluation],
+) -> RuntimeEvaluationSynthesis:
+    scenarios_text = "\n\n".join(
+        [
+            (
+                f"Scenario: {result.scenario_name}\n"
+                f"Prompt key: {result.prompt_key}\n"
+                f"Score: {result.score}\n"
+                f"Pass status: {result.pass_status}\n"
+                f"Issues:\n" + "\n".join(f"- {item}" for item in result.issues) + "\n"
+                f"Suggested adjustments:\n"
+                + "\n".join(f"- {item}" for item in result.suggested_adjustments)
+            ).strip()
+            for result in scenario_results
+        ]
+    )
+    prompt = (
+        "You are summarizing runtime prompt evaluation results for a tuned Lean-AI role.\n\n"
+        f"Agent role: {config.agent_role}\n"
+        f"Assigned model: {scope.model_id}\n"
+        f"Selected role title: {profile.selected_role_title}\n\n"
+        "Current runtime prompt summary:\n"
+        f"Role title: {profile.runtime_prompt_summary.role_title}\n"
+        f"Required behaviors:\n{chr(10).join(f'- {item}' for item in profile.runtime_prompt_summary.required_behaviors)}\n"
+        f"Avoid behaviors:\n{chr(10).join(f'- {item}' for item in profile.runtime_prompt_summary.avoid_behaviors)}\n"
+        f"Prompt guidance:\n{profile.runtime_prompt_summary.prompt_override_guidance}\n\n"
+        "Current scoped prompt surfaces:\n"
+        f"{_role_prompt_surfaces(config, scope=scope)}\n\n"
+        "Scenario evaluation results:\n"
+        f"{scenarios_text}\n\n"
+        "Return JSON only. Produce a compact synthesis with:\n"
+        "- reliability_score from 0-100\n"
+        "- issues_found as a short de-duplicated list\n"
+        "- suggestions_available true only when meaningful runtime prompt improvements are warranted\n"
+        "- affected_prompt_keys limited to the prompt surfaces that need help\n"
+        "- suggestion_summary as concise user-facing bullets\n"
+        "- required_behaviors / avoid_behaviors / prompt_override_guidance only when suggestions are warranted\n"
+        "Keep suggestions minimal and preserve the existing product intent."
+    )
+    messages = [
+        {"role": "system", "content": "Return JSON only."},
+        {"role": "user", "content": prompt},
+    ]
+    synthesis = await judge_client.chat_structured(messages, RuntimeEvaluationSynthesis)
+    return RuntimeEvaluationSynthesis(
+        reliability_score=max(0, min(100, int(synthesis.reliability_score))),
+        issues_found=_dedupe_preserve_order(synthesis.issues_found),
+        suggestions_available=bool(synthesis.suggestions_available),
+        affected_prompt_keys=_dedupe_preserve_order(
+            [
+                key
+                for key in synthesis.affected_prompt_keys
+                if key in config.prompt_keys
+            ]
+        ),
+        suggestion_summary=_dedupe_preserve_order(synthesis.suggestion_summary),
+        required_behaviors=_dedupe_preserve_order(synthesis.required_behaviors),
+        avoid_behaviors=_dedupe_preserve_order(synthesis.avoid_behaviors),
+        prompt_override_guidance=synthesis.prompt_override_guidance.strip(),
+    )
+
+
+async def evaluate_runtime_prompt_reliability(
+    *,
+    repo_root: str,
+    scope: PromptScope,
+    profile: RoleTuningProfile,
+    assigned_client: "LLMClient",
+    judge_client: "LLMClient",
+) -> RoleTuningProfile:
+    """Evaluate the actual resolved prompt surfaces for a tuned role/model pair."""
+    registry.load(repo_root)
+    config = _role_config(scope.agent_role)
+    scenario_results: list[RuntimeScenarioEvaluation] = []
+    for scenario in RUNTIME_EVAL_SCENARIOS.get(scope.agent_role, ()):
+        prompt_text = resolve_prompt_text(scenario.prompt_key, scope=scope)
+        assistant_response = await _run_runtime_scenario(
+            assigned_client,
+            prompt_text=prompt_text,
+            scenario=scenario,
+        )
+        result = await _judge_runtime_scenario(
+            judge_client,
+            agent_role=scope.agent_role,
+            scope=scope,
+            scenario=scenario,
+            prompt_text=prompt_text,
+            assistant_response=assistant_response,
+        )
+        scenario_results.append(
+            RuntimeScenarioEvaluation(
+                scenario_name=scenario.name,
+                prompt_key=scenario.prompt_key,
+                score=max(0, min(5, int(result.score))),
+                pass_status=result.pass_status,
+                issues=_dedupe_preserve_order(result.issues),
+                suggested_adjustments=_dedupe_preserve_order(result.suggested_adjustments),
+                notes=result.notes.strip(),
+            )
+        )
+
+    synthesis = await _synthesize_runtime_evaluation(
+        judge_client,
+        config=config,
+        scope=scope,
+        profile=profile,
+        scenario_results=scenario_results,
+    )
+    suggested_summary: RuntimePromptSummary | None = None
+    if synthesis.suggestions_available:
+        suggested_summary = RuntimePromptSummary(
+            role_title=profile.runtime_prompt_summary.role_title,
+            required_behaviors=synthesis.required_behaviors or profile.runtime_prompt_summary.required_behaviors,
+            avoid_behaviors=synthesis.avoid_behaviors or profile.runtime_prompt_summary.avoid_behaviors,
+            prompt_override_guidance=(
+                synthesis.prompt_override_guidance
+                or profile.runtime_prompt_summary.prompt_override_guidance
+            ),
+        )
+
+    updated = profile.model_copy(deep=True)
+    updated.updated_at = _now_iso()
+    updated.runtime_evaluation = RuntimePromptEvaluation(
+        version_hash=role_runtime_evaluation_version_hash(scope.agent_role, scope, repo_root),
+        evaluated_at=_now_iso(),
+        scenarios_run=[result.scenario_name for result in scenario_results],
+        reliability_score=synthesis.reliability_score,
+        issues_found=synthesis.issues_found,
+        affected_prompt_keys=synthesis.affected_prompt_keys or [result.prompt_key for result in scenario_results if result.pass_status != "pass"],
+        scenario_results=scenario_results,
+        suggestions_available=synthesis.suggestions_available,
+        suggestion_summary=synthesis.suggestion_summary,
+        suggested_runtime_prompt_summary=suggested_summary,
+    )
+    _persist_role_tuning_profile(repo_root, scope, updated)
+    return updated
+
+
+def apply_runtime_tuning_suggestions(
+    repo_root: str,
+    scope: PromptScope,
+    profile: RoleTuningProfile,
+) -> RoleTuningProfile:
+    """Apply approved runtime prompt suggestions to the scoped overrides only."""
+    evaluation = profile.runtime_evaluation
+    if evaluation is None or not evaluation.suggestions_available or evaluation.suggested_runtime_prompt_summary is None:
+        return profile
+
+    updated = profile.model_copy(deep=True)
+    updated.updated_at = _now_iso()
+    updated.runtime_prompt_summary = evaluation.suggested_runtime_prompt_summary
+    updated.derived_prompt_guidance = DerivedPromptGuidance(
+        role_title=updated.runtime_prompt_summary.role_title,
+        required_behaviors=updated.runtime_prompt_summary.required_behaviors,
+        avoid_behaviors=updated.runtime_prompt_summary.avoid_behaviors,
+        prompt_override_guidance=updated.runtime_prompt_summary.prompt_override_guidance,
+    )
+    updated.runtime_evaluation.applied_at = _now_iso()
+    ensure_role_scoped_overrides(repo_root, scope, updated)
+    _persist_role_tuning_profile(repo_root, scope, updated)
+    return updated
 
 
 async def calibrate_role(
@@ -823,6 +1199,7 @@ async def calibrate_role(
     runtime_prompt_summary = await _summarize_runtime_prompt(
         judge.client,
         config=config,
+        scope=prompt_scope_for_role(assigned_client, agent_role),
         work_summary=work_summary,
         discovery=discovery,
         selected_candidate=selected_candidate,
@@ -888,18 +1265,34 @@ async def ensure_role_tuning(
     registry.load(repo_root)
     scope = prompt_scope_for_role(assigned_client, agent_role)
     profile = load_role_tuning_profile(repo_root, scope)
-    if profile is not None and profile_is_current(profile, scope, repo_root=repo_root):
-        ensure_role_scoped_overrides(repo_root, scope, profile)
-        return scope
+    judge = choose_judge_client(
+        agent_role=agent_role,
+        assigned_client=assigned_client,
+        primary_client=primary_client,
+        expert_client=expert_client,
+    )
 
     try:
-        await calibrate_role(
-            repo_root=repo_root,
-            agent_role=agent_role,
-            assigned_client=assigned_client,
-            primary_client=primary_client,
-            expert_client=expert_client,
-        )
+        if profile is None or not profile_is_current(profile, scope, repo_root=repo_root):
+            profile = await calibrate_role(
+                repo_root=repo_root,
+                agent_role=agent_role,
+                assigned_client=assigned_client,
+                primary_client=primary_client,
+                expert_client=expert_client,
+            )
+        if profile is not None and not runtime_evaluation_is_current(profile, scope, repo_root=repo_root):
+            profile = await evaluate_runtime_prompt_reliability(
+                repo_root=repo_root,
+                scope=scope,
+                profile=profile,
+                assigned_client=assigned_client,
+                judge_client=judge.client,
+            )
+        if profile is not None:
+            ensure_role_scoped_overrides(repo_root, scope, profile)
+            registry.load(repo_root)
+            return scope
     except Exception:
         logger.exception("Role tuning failed for %s (%s)", scope.agent_role, scope.model_id)
         registry.load(repo_root)

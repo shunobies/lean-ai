@@ -675,8 +675,18 @@ export async function handleFixCommand(
 
 export async function handleTuneRolesCommand(
     ctx: SlashCommandContext,
-    _args: string,
+    args: string,
 ): Promise<void> {
+    const requestedRole = args.trim();
+    const validRoles = new Set(["primary", "request", "expert"]);
+    if (requestedRole && !validRoles.has(requestedRole)) {
+        ctx.postMessage({
+            type: "error",
+            text: "Usage: `/tune-roles [primary|request|expert]`",
+        });
+        return;
+    }
+
     ctx.postMessage({ type: "thinking", show: true, text: "Checking backend..." });
 
     const healthy = await ctx.client.healthCheck();
@@ -692,15 +702,20 @@ export async function handleTuneRolesCommand(
     ctx.postMessage({
         type: "thinking",
         show: true,
-        text: "Tuning role/model pairs and writing shared artifacts...",
+        text: requestedRole
+            ? `Tuning the ${requestedRole} role and evaluating prompt reliability...`
+            : "Tuning role/model pairs and evaluating prompt reliability...",
     });
 
     try {
-        const result = await ctx.client.prewarmRoleTuning(ctx.getRepoRoot());
+        const repoRoot = ctx.getRepoRoot();
+        const result = await ctx.client.prewarmRoleTuning(repoRoot, requestedRole || undefined);
         ctx.postMessage({ type: "thinking", show: false });
 
         const tuned = result.results.filter((item) => item.status === "tuned");
         const skipped = result.results.filter((item) => item.status === "skipped");
+        const evaluated = result.results.filter((item) => item.runtime_evaluation_status === "current");
+        const suggested = result.results.filter((item) => item.suggestions_available);
         const warningLines = result.results
             .filter((item) => item.warning)
             .map((item) => `- \`${item.role}\` (${item.model_id}): ${item.warning}`);
@@ -712,9 +727,27 @@ export async function handleTuneRolesCommand(
             "",
             `- Tuned: ${tuned.length}`,
             `- Skipped (already current): ${skipped.length}`,
+            `- Evaluated: ${evaluated.length}`,
+            `- Suggestions available: ${suggested.length}`,
             `- Scoped overrides: \`${promptPath}\``,
             `- Profiles: ${profilePaths.map((p) => `\`${p}\``).join(", ")}`,
         ];
+
+        for (const item of result.results) {
+            if (item.runtime_reliability_score == null) {
+                continue;
+            }
+            lines.push(
+                "",
+                `- \`${item.role}\` (${item.model_id}) — reliability ${item.runtime_reliability_score}/100${item.selected_role_title ? `, role title: ${item.selected_role_title}` : ""}`,
+            );
+            if (item.issues_found && item.issues_found.length > 0) {
+                lines.push(`  Issues: ${item.issues_found.join("; ")}`);
+            }
+            if (item.suggestions_available && item.affected_prompt_keys && item.affected_prompt_keys.length > 0) {
+                lines.push(`  Suggested prompt keys: ${item.affected_prompt_keys.map((key) => `\`${key}\``).join(", ")}`);
+            }
+        }
 
         if (warningLines.length > 0) {
             lines.push("", "Warnings:", ...warningLines);
@@ -725,6 +758,34 @@ export async function handleTuneRolesCommand(
             text: lines.join("\n"),
             cls: "msg-system",
         });
+
+        for (const item of suggested) {
+            const issues = (item.issues_found ?? []).slice(0, 3).join("; ");
+            const promptKeys = (item.affected_prompt_keys ?? []).map((key) => `\`${key}\``).join(", ");
+            const choice = await vscode.window.showInformationMessage(
+                `Apply tuned prompt suggestions for ${item.role} (${item.model_id})?${issues ? ` Issues: ${issues}.` : ""}${promptKeys ? ` Affected prompt keys: ${promptKeys}.` : ""}`,
+                { modal: true },
+                "Apply",
+                "Skip",
+            );
+            if (choice !== "Apply") {
+                ctx.postMessage({
+                    type: "reply",
+                    text: `Skipped applying prompt suggestions for \`${item.role}\`. Existing scoped overrides remain unchanged.`,
+                    cls: "msg-system",
+                });
+                continue;
+            }
+
+            const applied = await ctx.client.applyRoleTuningSuggestions(repoRoot, item.role);
+            ctx.postMessage({
+                type: "reply",
+                text: applied.status === "applied"
+                    ? `Applied prompt suggestions for \`${item.role}\` in \`${applied.prompts_path}\`.`
+                    : `No prompt suggestions were applied for \`${item.role}\` (${applied.status}).`,
+                cls: "msg-system",
+            });
+        }
     } catch (e) {
         ctx.postMessage({ type: "thinking", show: false });
         const error = e instanceof Error ? e.message : String(e);
@@ -1544,7 +1605,7 @@ export async function handleHelpCommand(
         "",
         "**Workspace setup**",
         "- `/init [--force]` — Index the workspace and generate project context.",
-        "- `/tune-roles` — Prewarm sharable role-tuning artifacts for the active primary/request/expert role assignments.",
+        "- `/tune-roles [primary|request|expert]` — Tune role assignments, evaluate prompt reliability, and optionally apply approved scoped prompt suggestions.",
         "- `/scaffold [name] [project] [parent]` — Bootstrap a project from a scaffold (use `/scaffold` alone to list recipes; `/scaffold jobs my-hunt` for a job-search workspace).",
         "- `/style` — Generate a style guide for the current codebase.",
         "",

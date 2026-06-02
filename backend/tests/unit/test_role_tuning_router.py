@@ -37,9 +37,19 @@ def test_prewarm_role_tuning_skips_current_profiles(client, tmp_path, monkeypatc
     monkeypatch.setattr(
         router_mod,
         "load_role_tuning_profile",
-        lambda repo_root, scope: SimpleNamespace(judge_warning=f"{scope.agent_role}-warning"),
+        lambda repo_root, scope: SimpleNamespace(
+            judge_warning=f"{scope.agent_role}-warning",
+            selected_role_title=f"{scope.agent_role}-title",
+            runtime_evaluation=SimpleNamespace(
+                reliability_score=90,
+                issues_found=[],
+                suggestions_available=False,
+                affected_prompt_keys=[],
+            ),
+        ),
     )
     monkeypatch.setattr(router_mod, "profile_is_current", lambda profile, scope, repo_root=None: True)
+    monkeypatch.setattr(router_mod, "runtime_evaluation_is_current", lambda profile, scope, repo_root=None: True)
 
     ensure_calls: list[str] = []
 
@@ -58,6 +68,7 @@ def test_prewarm_role_tuning_skips_current_profiles(client, tmp_path, monkeypatc
     assert [item["status"] for item in body["results"]] == ["skipped", "skipped", "skipped"]
     assert [item["role"] for item in body["results"]] == ["primary", "request", "expert"]
     assert ensure_calls == []
+    assert all(item["runtime_evaluation_status"] == "current" for item in body["results"])
 
 
 def test_prewarm_role_tuning_tunes_missing_profiles_and_reports_paths(client, tmp_path, monkeypatch):
@@ -68,8 +79,21 @@ def test_prewarm_role_tuning_tunes_missing_profiles_and_reports_paths(client, tm
     monkeypatch.setattr(router_mod, "llm_client", primary)
     monkeypatch.setattr(router_mod, "request_llm_client", request)
     monkeypatch.setattr(router_mod, "expert_llm_client", expert)
-    monkeypatch.setattr(router_mod, "load_role_tuning_profile", lambda repo_root, scope: None)
+    def _load_profile(repo_root, scope):
+        return SimpleNamespace(
+            selected_role_title=f"{scope.agent_role}-title",
+            judge_warning=None,
+            runtime_evaluation=SimpleNamespace(
+                reliability_score=80,
+                issues_found=[],
+                suggestions_available=False,
+                affected_prompt_keys=[],
+            ),
+        )
+
+    monkeypatch.setattr(router_mod, "load_role_tuning_profile", _load_profile)
     monkeypatch.setattr(router_mod, "profile_is_current", lambda profile, scope, repo_root=None: False)
+    monkeypatch.setattr(router_mod, "runtime_evaluation_is_current", lambda profile, scope, repo_root=None: True)
 
     calls: list[str] = []
 
@@ -99,6 +123,7 @@ def test_prewarm_role_tuning_tunes_missing_profiles_and_reports_paths(client, tm
     assert body["results"][1]["profile_path"].endswith("request--openai-request-model.json")
     assert body["results"][2]["profile_path"].endswith("expert--anthropic-expert-model.json")
     assert all(item["prompts_path"].endswith(".lean_ai/prompts.yaml") for item in body["results"])
+    assert all(item["runtime_reliability_score"] == 80 for item in body["results"])
 
 
 def test_prewarm_role_tuning_uses_primary_fallback_for_unconfigured_optional_roles(
@@ -113,6 +138,7 @@ def test_prewarm_role_tuning_uses_primary_fallback_for_unconfigured_optional_rol
     monkeypatch.setattr(router_mod, "expert_llm_client", None)
     monkeypatch.setattr(router_mod, "load_role_tuning_profile", lambda repo_root, scope: None)
     monkeypatch.setattr(router_mod, "profile_is_current", lambda profile, scope, repo_root=None: False)
+    monkeypatch.setattr(router_mod, "runtime_evaluation_is_current", lambda profile, scope, repo_root=None: False)
 
     captured: list[tuple[str, str]] = []
 
@@ -156,6 +182,7 @@ def test_prewarm_role_tuning_treats_same_model_as_distinct_role_profiles(
     monkeypatch.setattr(router_mod, "expert_llm_client", expert)
     monkeypatch.setattr(router_mod, "load_role_tuning_profile", lambda repo_root, scope: None)
     monkeypatch.setattr(router_mod, "profile_is_current", lambda profile, scope, repo_root=None: False)
+    monkeypatch.setattr(router_mod, "runtime_evaluation_is_current", lambda profile, scope, repo_root=None: False)
     async def _ensure_primary(**kwargs):
         return router_mod.prompt_scope_for_role(kwargs["assigned_client"], "primary")
 
@@ -180,3 +207,67 @@ def test_prewarm_role_tuning_treats_same_model_as_distinct_role_profiles(
     ]
     assert body["results"][0]["profile_path"] != body["results"][1]["profile_path"]
     assert body["results"][1]["profile_path"] != body["results"][2]["profile_path"]
+
+
+def test_prewarm_role_tuning_can_target_one_role(client, tmp_path, monkeypatch):
+    primary = FakeClient("ollama", "primary-model")
+    monkeypatch.setattr(router_mod, "llm_client", primary)
+    monkeypatch.setattr(router_mod, "request_llm_client", None)
+    monkeypatch.setattr(router_mod, "expert_llm_client", None)
+    monkeypatch.setattr(router_mod, "load_role_tuning_profile", lambda repo_root, scope: None)
+    monkeypatch.setattr(router_mod, "profile_is_current", lambda profile, scope, repo_root=None: False)
+    monkeypatch.setattr(router_mod, "runtime_evaluation_is_current", lambda profile, scope, repo_root=None: False)
+
+    calls: list[str] = []
+
+    async def _ensure_primary(**kwargs):
+        calls.append("primary")
+        return router_mod.prompt_scope_for_role(kwargs["assigned_client"], "primary")
+
+    monkeypatch.setattr(router_mod, "ensure_primary_role_tuning", _ensure_primary)
+
+    resp = client.post("/api/role-tuning/prewarm", json={"repo_root": str(tmp_path), "role": "primary"})
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert calls == ["primary"]
+    assert [item["role"] for item in body["results"]] == ["primary"]
+
+
+def test_apply_role_tuning_suggestions_endpoint_applies_selected_role(client, tmp_path, monkeypatch):
+    primary = FakeClient("ollama", "primary-model")
+    monkeypatch.setattr(router_mod, "llm_client", primary)
+    monkeypatch.setattr(router_mod, "request_llm_client", None)
+    monkeypatch.setattr(router_mod, "expert_llm_client", None)
+
+    async def _ensure_primary(**kwargs):
+        return router_mod.prompt_scope_for_role(kwargs["assigned_client"], "primary")
+
+    monkeypatch.setattr(router_mod, "ensure_primary_role_tuning", _ensure_primary)
+    monkeypatch.setattr(
+        router_mod,
+        "load_role_tuning_profile",
+        lambda repo_root, scope: SimpleNamespace(
+            selected_role_title="Codebase Maintainer",
+            judge_warning=None,
+            runtime_evaluation=SimpleNamespace(
+                reliability_score=70,
+                issues_found=["Needs clearer verification fallback."],
+                suggestions_available=True,
+                affected_prompt_keys=["fix.system"],
+                applied_at="2026-01-01T00:00:00+00:00",
+            ),
+        ),
+    )
+    monkeypatch.setattr(router_mod, "apply_runtime_tuning_suggestions", lambda repo_root, scope, profile: profile)
+
+    resp = client.post(
+        "/api/role-tuning/apply-suggestions",
+        json={"repo_root": str(tmp_path), "role": "primary"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["role"] == "primary"
+    assert body["status"] == "applied"
+    assert body["affected_prompt_keys"] == ["fix.system"]

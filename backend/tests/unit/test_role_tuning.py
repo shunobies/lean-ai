@@ -12,7 +12,11 @@ from lean_ai.llm.role_tuning import (
     ProbeScoreSet,
     RoleDiscoveryResult,
     RoleTuningProfile,
+    RuntimeEvaluationSynthesis,
+    RuntimePromptEvaluation,
     RuntimePromptSummary,
+    RuntimeScenarioEvaluation,
+    apply_runtime_tuning_suggestions,
     choose_judge_client,
     ensure_expert_role_tuning,
     ensure_primary_role_tuning,
@@ -22,19 +26,33 @@ from lean_ai.llm.role_tuning import (
     profile_is_current,
     prompt_scope_for_role,
     role_prompt_version_hash,
+    role_runtime_evaluation_version_hash,
     role_tuning_profile_path,
     role_work_summary_hash,
+    runtime_evaluation_is_current,
 )
 from lean_ai.workflow.prompts import build_fix_system_prompt, build_request_system_prompt
 
 
 class FakeClient:
-    def __init__(self, provider_name: str, model_name: str, *, discovery=None, judge=None, summary=None):
+    def __init__(
+        self,
+        provider_name: str,
+        model_name: str,
+        *,
+        discovery=None,
+        judge=None,
+        summary=None,
+        runtime_scenario=None,
+        runtime_synthesis=None,
+    ):
         self.provider_name = provider_name
         self.model_name = model_name
         self.discovery = discovery
         self.judge = judge
         self.summary = summary
+        self.runtime_scenario = runtime_scenario
+        self.runtime_synthesis = runtime_synthesis
         self.raw_calls: list[list[dict]] = []
         self.structured_calls: list[tuple[list[dict], type]] = []
 
@@ -48,6 +66,27 @@ class FakeClient:
             return self.discovery
         if schema is RuntimePromptSummary:
             return self.summary
+        if schema is RuntimeScenarioEvaluation:
+            return self.runtime_scenario or RuntimeScenarioEvaluation(
+                scenario_name="scenario",
+                prompt_key="chat.system",
+                score=4,
+                pass_status="pass",
+                issues=[],
+                suggested_adjustments=[],
+                notes="Looks good.",
+            )
+        if schema is RuntimeEvaluationSynthesis:
+            return self.runtime_synthesis or RuntimeEvaluationSynthesis(
+                reliability_score=85,
+                issues_found=[],
+                suggestions_available=False,
+                affected_prompt_keys=[],
+                suggestion_summary=[],
+                required_behaviors=[],
+                avoid_behaviors=[],
+                prompt_override_guidance="",
+            )
         return self.judge
 
 
@@ -64,6 +103,7 @@ def _sample_discovery(best_title: str) -> RoleDiscoveryResult:
 
 
 def _sample_profile(agent_role: str, assigned_model: str) -> RoleTuningProfile:
+    scope = PromptScope(model_id=assigned_model, agent_role=agent_role)
     return RoleTuningProfile(
         created_at="2026-01-01T00:00:00+00:00",
         updated_at="2026-01-01T00:00:00+00:00",
@@ -100,6 +140,17 @@ def _sample_profile(agent_role: str, assigned_model: str) -> RoleTuningProfile:
             avoid_behaviors=["Do not skip the prompt's required exploration loop."],
             prompt_override_guidance="Keep the role framing compact and non-technical.",
         ),
+        runtime_evaluation=RuntimePromptEvaluation(
+            version_hash=role_runtime_evaluation_version_hash(agent_role, scope),
+            evaluated_at="2026-01-01T00:00:00+00:00",
+            scenarios_run=["clarification_discipline"],
+            reliability_score=88,
+            issues_found=[],
+            affected_prompt_keys=[],
+            scenario_results=[],
+            suggestions_available=False,
+            suggestion_summary=[],
+        ),
     )
 
 
@@ -133,6 +184,31 @@ def _sample_runtime_summary(title: str) -> RuntimePromptSummary:
         required_behaviors=["Separate stakeholder intent from implementation preferences."],
         avoid_behaviors=["Do not skip the prompt's required exploration loop."],
         prompt_override_guidance="Keep the role framing compact and non-technical.",
+    )
+
+
+def _sample_runtime_scenario(prompt_key: str) -> RuntimeScenarioEvaluation:
+    return RuntimeScenarioEvaluation(
+        scenario_name="scenario",
+        prompt_key=prompt_key,
+        score=4,
+        pass_status="pass",
+        issues=[],
+        suggested_adjustments=[],
+        notes="Looks good.",
+    )
+
+
+def _sample_runtime_synthesis() -> RuntimeEvaluationSynthesis:
+    return RuntimeEvaluationSynthesis(
+        reliability_score=82,
+        issues_found=["Needs clearer verification fallback."],
+        suggestions_available=True,
+        affected_prompt_keys=["fix.request_system"],
+        suggestion_summary=["Clarify the fallback when technical preferences are presented as requirements."],
+        required_behaviors=["Separate stakeholder intent from architecture choices."],
+        avoid_behaviors=["Do not accept technical preferences as settled architecture."],
+        prompt_override_guidance="Explicitly treat stakeholder stack preferences as contextual notes, not final requirements.",
     )
 
 
@@ -256,6 +332,58 @@ def test_primary_prompt_scoped_override_preserves_base_prompt(tmp_path) -> None:
     assert "MODEL-SPECIFIC PRIMARY ROLE TUNING" in prompt
     assert "Verify repository facts before changing code." in prompt
     assert "call task_complete" in prompt
+
+
+def test_runtime_evaluation_currentness_tracks_resolved_prompt_surfaces(tmp_path) -> None:
+    scope = PromptScope(model_id="ollama:qwen3", agent_role="request")
+    role_tuning.registry.load(str(tmp_path))
+    profile = _sample_profile(scope.agent_role, scope.model_id)
+    role_tuning.ensure_role_scoped_overrides(str(tmp_path), scope, profile)
+    role_tuning.registry.load(str(tmp_path))
+    assert profile.runtime_evaluation is not None
+    profile.runtime_evaluation.version_hash = role_runtime_evaluation_version_hash(
+        scope.agent_role,
+        scope,
+        str(tmp_path),
+    )
+
+    assert runtime_evaluation_is_current(profile, scope, repo_root=str(tmp_path)) is True
+
+    updated = profile.model_copy(deep=True)
+    updated.runtime_evaluation.version_hash = "stale"
+    assert runtime_evaluation_is_current(updated, scope, repo_root=str(tmp_path)) is False
+
+
+def test_apply_runtime_tuning_suggestions_updates_scoped_overrides(tmp_path) -> None:
+    scope = PromptScope(model_id="ollama:qwen3", agent_role="request")
+    profile = _sample_profile(scope.agent_role, scope.model_id)
+    profile.runtime_evaluation = RuntimePromptEvaluation(
+        version_hash=role_runtime_evaluation_version_hash(scope.agent_role, scope),
+        evaluated_at="2026-01-01T00:00:00+00:00",
+        scenarios_run=["clarification_discipline"],
+        reliability_score=72,
+        issues_found=["The model drifts into architecture choices."],
+        affected_prompt_keys=["fix.request_system"],
+        scenario_results=[_sample_runtime_scenario("fix.request_system")],
+        suggestions_available=True,
+        suggestion_summary=["Clarify the anti-architecture fallback."],
+        suggested_runtime_prompt_summary=RuntimePromptSummary(
+            role_title="Requirements Analyst",
+            required_behaviors=["Keep the conversation on stakeholder intent first."],
+            avoid_behaviors=["Do not accept framework suggestions as final architecture."],
+            prompt_override_guidance="Record technical preferences as notes, then continue discovering the underlying need.",
+        ),
+    )
+
+    role_tuning.registry.load(str(tmp_path))
+    role_tuning.ensure_role_scoped_overrides(str(tmp_path), scope, profile)
+    updated = apply_runtime_tuning_suggestions(str(tmp_path), scope, profile)
+    role_tuning.registry.load(str(tmp_path))
+
+    prompt = build_request_system_prompt("", repo_root=str(tmp_path), prompt_scope=scope)
+    assert "Record technical preferences as notes" in prompt
+    assert updated.runtime_evaluation is not None
+    assert updated.runtime_evaluation.applied_at is not None
 
 
 @pytest.mark.asyncio

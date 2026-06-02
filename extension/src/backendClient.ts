@@ -61,7 +61,9 @@ import {
     scaffold as _scaffold,
     getPrompts as _getPrompts,
     prewarmRoleTuning as _prewarmRoleTuning,
+    applyRoleTuningSuggestions as _applyRoleTuningSuggestions,
     type RoleTuningPrewarmResponse,
+    type RoleTuningPrewarmResult,
     updatePrompts as _updatePrompts,
     resetPrompts as _resetPrompts,
     createNote as _createNote,
@@ -658,8 +660,11 @@ export class BackendClient {
     }
 
     getPrompts(repoRoot: string) { return _getPrompts(this.baseUrl, repoRoot); }
-    prewarmRoleTuning(repoRoot: string): Promise<RoleTuningPrewarmResponse> {
-        return _prewarmRoleTuning(this._postJsonNoTimeout.bind(this), repoRoot);
+    prewarmRoleTuning(repoRoot: string, role?: string): Promise<RoleTuningPrewarmResponse> {
+        return _prewarmRoleTuning(this._postJsonNoTimeout.bind(this), repoRoot, role);
+    }
+    applyRoleTuningSuggestions(repoRoot: string, role: string): Promise<RoleTuningPrewarmResult> {
+        return _applyRoleTuningSuggestions(this._postJsonNoTimeout.bind(this), repoRoot, role);
     }
     updatePrompts(repoRoot: string, overrides: Record<string, string>) { return _updatePrompts(this.baseUrl, repoRoot, overrides); }
     resetPrompts(repoRoot: string, keys?: string[]) { return _resetPrompts(this.baseUrl, repoRoot, keys); }
