@@ -160,7 +160,35 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             // item is a SessionItem from the tree view with a .session property
             const sessionItem = item as { session?: { session_id: string } };
             if (sessionItem?.session?.session_id) {
-                await sidebarProvider.loadSessionConversation(sessionItem.session.session_id);
+                await sessionDetailProvider.show(sessionItem.session.session_id);
+            }
+        }),
+        vscode.commands.registerCommand("lean-ai.restoreCheckpoint", async (item: unknown) => {
+            const checkpointItem = item as {
+                checkpoint?: { id: string };
+                sessionId?: string;
+            };
+            if (!checkpointItem?.checkpoint?.id || !checkpointItem.sessionId) { return; }
+            const confirm = await vscode.window.showWarningMessage(
+                "Restore the session to this checkpoint?",
+                { modal: true },
+                "Restore",
+            );
+            if (confirm !== "Restore") { return; }
+            try {
+                const client = BackendClient.getInstance();
+                const repoRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ".";
+                await client.restoreCheckpoint(
+                    checkpointItem.sessionId,
+                    checkpointItem.checkpoint.id,
+                    repoRoot,
+                );
+                vscode.window.showInformationMessage("Session restored to checkpoint.");
+                sessionTreeProvider.refresh();
+                await sessionDetailProvider.show(checkpointItem.sessionId);
+            } catch (e) {
+                const error = e instanceof Error ? e.message : String(e);
+                vscode.window.showErrorMessage(`Restore failed: ${error}`);
             }
         }),
         vscode.commands.registerCommand("lean-ai.mergeSession", async (item: unknown) => {

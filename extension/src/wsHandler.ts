@@ -9,6 +9,7 @@ export interface WsHandlerContext {
     postMessage(msg: Record<string, unknown>): void;
     closeWebSocket(): void;
     clearSession(): void;
+    getActiveSessionId(): string | undefined;
     /** Optional TTS callback — called with finalized content to speak aloud. */
     onTtsContent?: (text: string) => void;
 }
@@ -239,6 +240,7 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
         case "complete": {
             ctx.postMessage({ type: "thinking", show: false });
             ctx.postMessage({ type: "hideApproval" });
+            const sessionId = ctx.getActiveSessionId();
             let completeText = (raw.summary as string) || "Workflow complete.";
             const filesModified = raw.files_modified as string[] | undefined;
             const planBranch = raw.plan_branch as string | undefined;
@@ -259,6 +261,7 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
                 type: "reply",
                 text: completeText,
                 cls: "msg-ai",
+                feedbackTarget: sessionId ? { session_id: sessionId } : undefined,
             });
             if (filesModified && filesModified.length > 0) {
                 ctx.postMessage({
@@ -313,23 +316,27 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
             const toolStatus = raw.status as string;
             const desc = (raw.description || raw.tool || raw.tool_name || "") as string;
             const output = (raw.output || "") as string;
+            const sessionId = ctx.getActiveSessionId();
             if (toolStatus === "running" || toolStatus === "started") {
                 ctx.postMessage({
                     type: "reply",
                     text: `${desc}...`,
                     cls: "msg-system",
+                    feedbackTarget: sessionId ? { session_id: sessionId } : undefined,
                 });
             } else if (toolStatus === "complete" || toolStatus === "completed") {
                 ctx.postMessage({
                     type: "reply",
                     text: `${desc} ✓`,
                     cls: "msg-system",
+                    feedbackTarget: sessionId ? { session_id: sessionId } : undefined,
                 });
             } else if (toolStatus === "error" || toolStatus === "failed") {
                 ctx.postMessage({
                     type: "reply",
                     text: `${desc} ✗${output ? `\n\`\`\`\n${output}\n\`\`\`` : ""}`,
                     cls: "msg-system",
+                    feedbackTarget: sessionId ? { session_id: sessionId } : undefined,
                 });
             }
             break;
@@ -339,6 +346,7 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
         case "diff": {
             const filePath = (raw.file || raw.file_path) as string;
             const diffContent = raw.diff as string;
+            const sessionId = ctx.getActiveSessionId();
             const preview = diffContent
                 .split("\n")
                 .slice(0, 10)
@@ -347,6 +355,7 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
                 type: "reply",
                 text: `**Modified:** \`${filePath}\`\n\`\`\`diff\n${preview}\n\`\`\``,
                 cls: "msg-ai",
+                feedbackTarget: sessionId ? { session_id: sessionId } : undefined,
             });
             break;
         }
@@ -355,6 +364,7 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
         case "test_result": {
             const passed = raw.passed as boolean;
             const fullOutput = (raw.output as string) || "";
+            const sessionId = ctx.getActiveSessionId();
             // Failures: show the tail where test runners print summaries and error details.
             // Passes: show the head which lists the passing classes.
             const output = passed ? fullOutput.slice(0, 300) : fullOutput.slice(-500);
@@ -362,6 +372,7 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
                 type: "reply",
                 text: `**Tests ${passed ? "PASSED" : "FAILED"}**\n\`\`\`\n${output}\n\`\`\``,
                 cls: passed ? "msg-system" : "msg-error",
+                feedbackTarget: sessionId ? { session_id: sessionId } : undefined,
             });
             break;
         }
@@ -414,9 +425,9 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
         }
 
         // --- Session History: checkpoint reached ---
-        case "checkpoint": {
-            const stepIdx = raw.step_index as number;
-            const stepDesc = raw.step_description as string;
+        case "execution_checkpoint": {
+            const stepIdx = raw.step as number;
+            const stepDesc = raw.description as string;
             const cpStatus = raw.status as string;
             // Forward all statuses to the webview for checklist updates
             ctx.postMessage({
@@ -451,12 +462,14 @@ export function handleWsMessage(msg: WSMessage, ctx: WsHandlerContext): void {
         case "assistant_content": {
             const content = (raw.content || "") as string;
             if (content) {
+                const sessionId = ctx.getActiveSessionId();
                 ctx.postMessage({
                     type: "reply",
                     text: content,
                     cls: "msg-ai",
                     streaming: raw.streaming || false,
                     done: raw.done || false,
+                    feedbackTarget: sessionId ? { session_id: sessionId } : undefined,
                 });
                 // TTS: speak finalized content
                 if (raw.done && ctx.onTtsContent) {

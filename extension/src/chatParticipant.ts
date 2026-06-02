@@ -249,10 +249,10 @@ function runWebSocketWorkflow(
                 stream.markdown(`\n🌿 Created plan branch \`${branchName}\` from \`${baseBranch}\`\n`);
             },
 
-            onCheckpoint(stepIndex, stepDescription, status, _headCommitSha) {
+            onCheckpoint(stepIndex, stepDescription, status) {
                 if (status === "completed") {
                     stream.markdown(`\n✅ Checkpoint ${stepIndex + 1}: ${stepDescription}\n`);
-                } else if (status === "started") {
+                } else if (status === "running") {
                     stream.progress(`Step ${stepIndex + 1}: ${stepDescription}`);
                 }
             },

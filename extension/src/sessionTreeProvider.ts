@@ -72,12 +72,12 @@ class CheckpointItem extends vscode.TreeItem {
     constructor(public readonly checkpoint: CheckpointSummary, public readonly sessionId: string) {
         const isHead = checkpoint.is_head ?? false;
         const statusIcon = checkpoint.status === "completed" ? "$(pass)" : checkpoint.status === "failed" ? "$(error)" : "$(watch)";
-        const label = `Step ${checkpoint.step_index + 1}: ${checkpoint.step_description || "unnamed"}${isHead ? " (active)" : ""}`;
+        const label = `${checkpoint.label || checkpoint.phase || "Checkpoint"}${isHead ? " (active)" : ""}`;
         super(label, vscode.TreeItemCollapsibleState.None);
 
         this.contextValue = "checkpoint";
         this.description = isHead ? "$(circle-filled) " + statusIcon : statusIcon;
-        this.tooltip = `Status: ${checkpoint.status}${isHead ? "\nActive branch checkpoint" : ""}\nCreated: ${checkpoint.created_at}${checkpoint.head_commit_sha ? `\nCommit: ${checkpoint.head_commit_sha.slice(0, 7)}` : ""}`;
+        this.tooltip = `Status: ${checkpoint.status}${isHead ? "\nActive branch checkpoint" : ""}\nCreated: ${checkpoint.created_at}${checkpoint.summary ? `\nSummary: ${checkpoint.summary}` : ""}`;
         this.iconPath = checkpoint.status === "completed"
             ? new vscode.ThemeIcon("pass", new vscode.ThemeColor("testing.iconPassed"))
             : checkpoint.status === "failed"
@@ -223,7 +223,7 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<TreeElement>
 
     private async getCheckpoints(sessionId: string): Promise<TreeElement[]> {
         try {
-            const checkpoints = await this.client.listCheckpoints(sessionId);
+            const checkpoints = await this.client.listCheckpoints(sessionId, this.repoRoot);
             if (checkpoints.length === 0) {
                 return [createMessageItem("No checkpoints")];
             }

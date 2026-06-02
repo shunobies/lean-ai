@@ -151,6 +151,7 @@ async def restore_checkpoint(session_id: str, request: RestoreCheckpointRequest)
 
         # Overwrite the active state file
         sm._state = checkpoint_state
+        sm._state.session_metadata["restored_checkpoint_id"] = request.checkpoint_id
         sm.save()
 
         # Log restore event to conversation_logs

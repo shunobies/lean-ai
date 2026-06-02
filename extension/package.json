@@ -77,6 +77,11 @@
         "icon": "$(open-preview)"
       },
       {
+        "command": "lean-ai.restoreCheckpoint",
+        "title": "Lean AI: Restore Session Checkpoint",
+        "icon": "$(history)"
+      },
+      {
         "command": "lean-ai.mergeSession",
         "title": "Lean AI: Merge Session Branch",
         "icon": "$(git-merge)"

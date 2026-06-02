@@ -21,7 +21,7 @@ export interface StreamCallbacks {
     onPong?: () => void;
     // Session history callbacks (FR-G1, FR-C1, FR-G5)
     onBranchCreated?: (branchName: string, baseBranch: string, baseCommitSha: string) => void;
-    onCheckpoint?: (stepIndex: number, stepDescription: string, status: string, headCommitSha: string | null) => void;
+    onCheckpoint?: (step: number, description: string, status: string) => void;
     onMergeComplete?: (mergeSha: string, branchDeleted: boolean) => void;
     onAssistantContent?: (content: string) => void;
 }
@@ -82,8 +82,8 @@ export function handleStreamMessage(msg: WSMessage, callbacks: StreamCallbacks):
         case "branch_created":
             callbacks.onBranchCreated?.(msg.branch_name, msg.base_branch, msg.base_commit_sha);
             break;
-        case "checkpoint":
-            callbacks.onCheckpoint?.(msg.step_index, msg.step_description, msg.status, msg.head_commit_sha);
+        case "execution_checkpoint":
+            callbacks.onCheckpoint?.(msg.step, msg.description, msg.status);
             break;
         case "merge_complete":
             callbacks.onMergeComplete?.(msg.merge_sha, msg.branch_deleted);

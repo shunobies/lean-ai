@@ -6,6 +6,7 @@ describe('handleWsMessage clarification payloads', () => {
             postMessage: jest.fn(),
             closeWebSocket: jest.fn(),
             clearSession: jest.fn(),
+            getActiveSessionId: jest.fn(() => 'sess-test'),
         };
     }
 

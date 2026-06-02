@@ -7,8 +7,10 @@ verify that the expected rows appear in ``training.db``.
 
 import pytest
 
+from lean_ai.llm.plan_schema import ExecutionPlan, PlanStep
 from lean_ai.training.db import get_training_db
 from lean_ai.workflow.hooks import (
+    auto_extract_session_memories,
     on_plan_decision,
     on_validation_attempt_complete,
     on_workflow_event,
@@ -19,6 +21,20 @@ class _NullLLM:
     """Stand-in for the LLM client — never actually invoked here."""
 
     model_name = "test-model"
+
+
+class _FakeSession:
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+
+    async def send(self, data: dict[str, object]) -> None:
+        self.sent.append(data)
+
+    def send_nowait(self, data: dict[str, object]) -> None:
+        self.sent.append(data)
+
+    def is_connected(self) -> bool:
+        return True
 
 
 @pytest.mark.asyncio
@@ -219,3 +235,70 @@ async def test_training_capture_disabled_skips_rows(tmp_path, monkeypatch):
         assert we == 0
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_session_end_memory_extraction_surfaces_inline_suggestion(
+    tmp_path,
+    monkeypatch,
+):
+    captured: dict[str, object] = {}
+    pending_tasks = []
+
+    def _fake_schedule_extraction(
+        _llm,
+        _repo_root,
+        _session_id,
+        _session_summary,
+        _source_task,
+        *,
+        on_memory_created=None,
+        source_phase="session_end",
+    ) -> None:
+        captured["has_notifier"] = on_memory_created is not None
+        captured["source_phase"] = source_phase
+        if on_memory_created is not None:
+            import asyncio
+
+            pending_tasks.append(asyncio.create_task(
+                on_memory_created(
+                    {
+                        "id": "mem-1",
+                        "category": "gotcha",
+                        "content": "Remember this lesson",
+                        "source_phase": source_phase,
+                        "curation_status": "auto",
+                    }
+                )
+            ))
+
+    monkeypatch.setattr(
+        "lean_ai.memory.extractor.schedule_extraction",
+        _fake_schedule_extraction,
+    )
+
+    session = _FakeSession()
+    plan = ExecutionPlan(
+        scope="scope",
+        user_summary="summary",
+        steps=[PlanStep(step_number=1, instruction="do thing", file_path="src/app.py")],
+        affected_files=[],
+        test_strategy="run tests",
+    )
+
+    await auto_extract_session_memories(
+        str(tmp_path),
+        "sess-inline-memory",
+        "implement feature",
+        plan,
+        _NullLLM(),
+        [],
+        {},
+        session,
+    )
+    if pending_tasks:
+        await pending_tasks[0]
+
+    assert captured["has_notifier"] is True
+    assert captured["source_phase"] == "session_end"
+    assert any(msg.get("type") == "memory_suggested" for msg in session.sent)

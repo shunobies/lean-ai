@@ -395,8 +395,9 @@ export class BackendClient {
         }
     }
 
-    async listCheckpoints(sessionId: string): Promise<CheckpointSummary[]> {
-        const resp = await fetch(`${this.baseUrl}/api/sessions/${sessionId}/checkpoints`);
+    async listCheckpoints(sessionId: string, repoRoot: string): Promise<CheckpointSummary[]> {
+        const params = new URLSearchParams({ repo_root: repoRoot });
+        const resp = await fetch(`${this.baseUrl}/api/sessions/${sessionId}/checkpoints?${params}`);
         if (!resp.ok) {
             throw new Error(`Failed to list checkpoints: ${resp.statusText}`);
         }
@@ -416,11 +417,11 @@ export class BackendClient {
      *
      * POSTs to /api/sessions/${sessionId}/restore with { checkpoint_id } body.
      */
-    async restoreCheckpoint(sessionId: string, checkpointId: string): Promise<void> {
+    async restoreCheckpoint(sessionId: string, checkpointId: string, repoRoot: string): Promise<void> {
         const resp = await fetch(`${this.baseUrl}/api/sessions/${sessionId}/restore`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ checkpoint_id: checkpointId }),
+            body: JSON.stringify({ checkpoint_id: checkpointId, repo_root: repoRoot }),
         });
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({ detail: resp.statusText })) as { detail?: string };

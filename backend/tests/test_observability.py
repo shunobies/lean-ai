@@ -1032,6 +1032,27 @@ async def test_post_feedback_returns_503_when_no_key_configured(tmp_path, monkey
     assert resp.status_code == 503
 
 
+@pytest.mark.asyncio
+async def test_local_feedback_write_bypasses_export_key(monkeypatch):
+    from starlette.requests import Request
+
+    from lean_ai.config import settings
+    from lean_ai.routers.observability import require_export_key_for_writes
+
+    monkeypatch.setattr(settings, "export_api_key", "")
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/observability/feedback",
+            "headers": [],
+            "client": ("127.0.0.1", 8422),
+        }
+    )
+
+    await require_export_key_for_writes(request, None)
+
+
 # ── 10. GET endpoints accessible without auth (200) ─────────────────
 
 

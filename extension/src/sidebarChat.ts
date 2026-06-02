@@ -493,6 +493,7 @@ export async function handleAgentMessage(ctx: ChatContext, text: string): Promis
     // Get or create session
     const sessionId = await ctx.ensureSession();
     ctx.setWsSessionId(sessionId);
+    ctx.postMessage({ type: "activeSession", sessionId });
 
     // Ensure WebSocket is connected
     const ws = ctx.ensureWebSocket(sessionId);

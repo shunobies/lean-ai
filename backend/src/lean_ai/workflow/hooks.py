@@ -102,6 +102,7 @@ async def auto_extract_session_memories(
     llm_client: "LLMClient",
     files_modified: list[str],
     validation_results: dict,
+    ws: WorkflowSession | None = None,
 ) -> None:
     """Extract cross-session memories from a completed session (best-effort)."""
     try:
@@ -165,6 +166,7 @@ async def auto_extract_session_memories(
             session_id,
             session_summary,
             task,
+            on_memory_created=_make_memory_notifier(ws),
         )
     except Exception:
         logger.debug(

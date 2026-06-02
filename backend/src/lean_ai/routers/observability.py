@@ -12,11 +12,12 @@ a ``Bearer`` token to prevent feedback spoofing.
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 
 from lean_ai.config import settings
 from lean_ai.db import get_db
@@ -35,6 +36,7 @@ observability_router = APIRouter(prefix="/observability", tags=["observability"]
 
 
 async def require_export_key_for_writes(
+    request: Request,
     authorization: str | None = Header(default=None),
 ) -> None:
     """FastAPI dependency: validate ``Authorization: Bearer <key>``.
@@ -46,6 +48,14 @@ async def require_export_key_for_writes(
     - 503 if no export key is configured (feature disabled)
     - 401 if the header is missing or doesn't match
     """
+    client_host = request.client.host if request.client else ""
+    try:
+        is_loopback = bool(client_host) and ipaddress.ip_address(client_host).is_loopback
+    except ValueError:
+        is_loopback = client_host in {"localhost"}
+    if is_loopback:
+        return
+
     if not settings.export_api_key:
         raise HTTPException(
             status_code=503,
@@ -224,6 +234,7 @@ async def get_trace_tree_endpoint(session_id: str, repo_root: str):
 
 @observability_router.post("/feedback")
 async def create_feedback(
+    request: Request,
     repo_root: str,
     session_id: str,
     thumbs_up: bool | None = None,
@@ -237,7 +248,7 @@ async def create_feedback(
 
     Requires Bearer token authentication to prevent feedback spoofing.
     """
-    await require_export_key_for_writes(authorization)
+    await require_export_key_for_writes(request, authorization)
 
     # Parse tags from comma-separated string to list
     tag_list: list[str] | None = None

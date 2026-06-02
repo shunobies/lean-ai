@@ -24,6 +24,7 @@ import { SettingsPanel } from "./settingsPanel";
 import { PromptsPanel } from "./promptsPanel";
 import { NotesPanel } from "./notesPanel";
 import { MemoriesPanel } from "./memoriesPanel";
+import { ObservabilityPanel } from "./observabilityPanel";
 import {
     notifyApprovalNeeded,
     notifyComplete,
@@ -377,7 +378,9 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                     "lean-ai.lastCompletedSessionId",
                     this.lastCompletedSessionId,
                 );
+                this.postMessage({ type: "activeSession", sessionId: null });
             },
+            getActiveSessionId: () => this.sessionId || this._wsSessionId,
             onTtsContent: this._ttsEnabled
                 ? (text) => speakText(this.voiceCtx(), text)
                 : undefined,
@@ -427,6 +430,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 this._wsSessionId = undefined;
                 this.lastCompletedSessionId = undefined;
                 this.context.globalState.update("lean-ai.lastCompletedSessionId", undefined);
+                this.postMessage({ type: "activeSession", sessionId: null });
             },
             chatHistory: this.chatHistory,
             conversations: this.conversations,
@@ -513,6 +517,7 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                 if (this._currentStage) {
                     this.postMessage({ type: "stage", stage: this._currentStage });
                 }
+                this.postMessage({ type: "activeSession", sessionId: this.sessionId || this._wsSessionId || null });
                 break;
             case "approve_tool":
             case "deny_tool":
@@ -567,6 +572,30 @@ export class LeanAISidebarProvider implements vscode.WebviewViewProvider {
                     MemoriesPanel.refreshIfOpen();
                 } catch (err) {
                     console.error("[Lean AI] rejectMemory failed", err);
+                }
+                break;
+            }
+            case "submitFeedback": {
+                const feedback = msg.feedback as {
+                    session_id: string;
+                    thumbs_up?: boolean;
+                    rating?: number;
+                    comment?: string;
+                    tags?: string[];
+                    trace_span_uuid?: string;
+                };
+                if (!feedback?.session_id) {
+                    break;
+                }
+                try {
+                    await this.client.submitFeedback(this.getRepoRoot(), feedback);
+                    ObservabilityPanel.refreshIfOpen();
+                } catch (err) {
+                    console.error("[Lean AI] submitFeedback failed", err);
+                    this.postMessage({
+                        type: "error",
+                        text: err instanceof Error ? err.message : String(err),
+                    });
                 }
                 break;
             }

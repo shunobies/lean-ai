@@ -24,7 +24,7 @@ from lean_ai.workflow.ws_protocol import (
     CancelMessage,
     CancelledMessage,
     TestResultMessage,
-    CheckpointMessage,
+    ExecutionCheckpointMessage,
     ClarificationNeededMessage,
     ClientMessageType,
     CompleteMessage,
@@ -135,7 +135,7 @@ async def send_tool_approval_required(
     )
 
 
-async def send_checkpoint(
+async def send_execution_checkpoint(
     session: WorkflowSession,
     *,
     step: int,
@@ -143,17 +143,19 @@ async def send_checkpoint(
     tool: str,
     file_path: str = "",
     description: str = "",
+    status: str = "running",
 ) -> None:
     data: dict = {
         "step": step,
         "total": total,
         "tool": tool,
+        "status": status,
     }
     if file_path:
         data["file_path"] = file_path
     if description:
         data["description"] = description
-    await ws_send(session, "checkpoint", data)
+    await ws_send(session, "execution_checkpoint", data)
 
 
 async def send_complete(session: WorkflowSession, **data: object) -> None:

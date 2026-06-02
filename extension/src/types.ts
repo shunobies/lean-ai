@@ -29,7 +29,7 @@ export type WSMessage =
     | PlanRejectedMessage
     | PongMessage
     | BranchCreatedMessage
-    | CheckpointMessage
+    | ExecutionCheckpointMessage
     | MergeCompleteMessage
     | AssistantContentMessage
     | MetricsUpdateMessage
@@ -141,12 +141,14 @@ export interface BranchCreatedMessage {
     base_commit_sha: string;
 }
 
-export interface CheckpointMessage {
-    type: "checkpoint";
-    step_index: number;
-    step_description: string;
+export interface ExecutionCheckpointMessage {
+    type: "execution_checkpoint";
+    step: number;
+    total: number;
+    tool: string;
+    description: string;
     status: string;
-    head_commit_sha: string | null;
+    file_path?: string;
 }
 
 export interface ExecutionChecklistMessage {
@@ -259,15 +261,15 @@ export interface SessionFilters {
 
 export interface CheckpointSummary {
     id: string;
-    step_index: number;
-    step_description: string | null;
+    label: string;
+    phase: string | null;
+    summary: string | null;
     status: string;
-    branch_name: string | null;
-    head_commit_sha: string | null;
     created_at: string;
-    completed_at: string | null;
     parent_id?: string;
     is_head?: boolean;
+    session_id?: string;
+    timestamp?: string;
 }
 
 export interface GitEventSummary {

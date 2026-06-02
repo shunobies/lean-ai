@@ -67,14 +67,13 @@ export class SessionDetailProvider {
                         break;
                     case "restore": {
                         const checkpointId = msg.checkpointId as string;
-                        await this.client.restoreCheckpoint(sessionId, checkpointId);
+                        await this.client.restoreCheckpoint(sessionId, checkpointId, this.getRepoRoot());
                         vscode.window.showInformationMessage("Session restored to checkpoint.");
                         await this.updatePanel(panel, sessionId);
                         break;
                     }
                     case "resume": {
-                        const checkpointId = msg.checkpointId as string;
-                        await this.client.resumeSession(sessionId, checkpointId);
+                        await this.client.resumeSession(sessionId, this.getRepoRoot());
                         vscode.window.showInformationMessage("Session resumed from checkpoint.");
                         await this.updatePanel(panel, sessionId);
                         break;
@@ -112,7 +111,7 @@ export class SessionDetailProvider {
             const repoRoot = this.getRepoRoot();
             const [session, checkpoints, gitEvents, conversationData] = await Promise.all([
                 this.client.getSession(sessionId),
-                this.client.listCheckpoints(sessionId).catch(() => [] as CheckpointSummary[]),
+                this.client.listCheckpoints(sessionId, repoRoot).catch(() => [] as CheckpointSummary[]),
                 this.client.listGitEvents(sessionId).catch(() => [] as GitEventSummary[]),
                 this.client.getConversationLog(sessionId, repoRoot).catch(() => ({ session_id: sessionId, entries: [] })),
             ]);
@@ -152,7 +151,7 @@ export class SessionDetailProvider {
         const title = escapeHtml(session.title || `Session ${session.session_id.slice(0, 8)}`);
         const canMerge = session.session_status === "active" && session.plan_branch && !session.merge_commit_sha;
         const canAbandon = session.session_status === "active";
-        const canResume = checkpoints.some((cp) => cp.status === "completed");
+        const canResume = checkpoints.length > 0;
 
         return /*html*/ `<!DOCTYPE html>
 <html lang="en">
@@ -432,17 +431,17 @@ export class SessionDetailProvider {
     <div id="tab-checkpoints" class="tab-content">
         ${checkpoints.length > 0 ? `
         <table>
-            <thead><tr><th>#</th><th>Description</th><th>Status</th><th>Commit</th><th>Time</th><th>Restore</th></tr></thead>
+            <thead><tr><th>Label</th><th>Phase</th><th>Status</th><th>Summary</th><th>Time</th><th>Restore</th></tr></thead>
             <tbody>
                 ${checkpoints.map((cp) => {
                     const isHead = cp.is_head ?? false;
                     const rowClass = isHead ? ' class="active-branch"' : '';
                     return `
                     <tr${rowClass}>
-                        <td>${cp.step_index + 1}</td>
-                        <td>${escapeHtml(cp.step_description || "\u2014")}</td>
+                        <td>${escapeHtml(cp.label || "\u2014")}</td>
+                        <td>${escapeHtml(cp.phase || "\u2014")}</td>
                         <td>${escapeHtml(cp.status)}</td>
-                        <td>${cp.head_commit_sha ? `<code>${escapeHtml(cp.head_commit_sha.slice(0, 7))}</code>` : "\u2014"}</td>
+                        <td>${escapeHtml(cp.summary || "\u2014")}</td>
                         <td>${escapeHtml(cp.created_at)}</td>
                         <td><button class="btn-secondary btn-restore" onclick="restoreCheckpoint('${cp.id}')">${isHead ? '&#9733; Restore' : 'Restore'}</button></td>
                     </tr>`;
@@ -475,7 +474,7 @@ export class SessionDetailProvider {
     const vscode = acquireVsCodeApi();
     const sessionTitle = ${JSON.stringify(session.title || "")};
     const lastCompletedCheckpointId = ${JSON.stringify(
-            checkpoints.filter((cp) => cp.status === "completed").pop()?.id || null,
+            checkpoints.filter((cp) => cp.status === "completed" || cp.status === "active").pop()?.id || null,
         )};
 
     // Tab switching

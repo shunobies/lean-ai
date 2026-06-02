@@ -189,6 +189,9 @@ export function getWebviewHtml(chatFontSize: number): string {
         background: var(--vscode-editor-background);
         border: 1px solid var(--vscode-panel-border);
     }
+    .msg.feedbackable {
+        padding-bottom: 6px;
+    }
     .msg-ai.interrupted-draft {
         border-style: dashed;
         border-color: var(--vscode-descriptionForeground);
@@ -222,6 +225,39 @@ export function getWebviewHtml(chatFontSize: number): string {
     }
     .msg-tool-activity .tool-done {
         color: var(--vscode-testing-iconPassed);
+    }
+    .bubble-feedback {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 8px;
+        padding-top: 6px;
+        border-top: 1px solid var(--vscode-panel-border);
+    }
+    .bubble-feedback button {
+        border: 1px solid var(--vscode-panel-border);
+        background: transparent;
+        color: var(--vscode-foreground);
+        border-radius: 999px;
+        padding: 2px 8px;
+        cursor: pointer;
+        font-size: 11px;
+    }
+    .bubble-feedback button:hover {
+        background: var(--vscode-toolbar-hoverBackground);
+    }
+    .bubble-feedback button.active {
+        background: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+        border-color: transparent;
+    }
+    .bubble-feedback button:disabled {
+        opacity: 0.7;
+        cursor: default;
+    }
+    .bubble-feedback .feedback-status {
+        font-size: 11px;
+        color: var(--vscode-descriptionForeground);
     }
 
     /* First-boot setup guide */
@@ -1298,6 +1334,7 @@ export function getWebviewHtml(chatFontSize: number): string {
     let assistantStreamSegmentationState = createInitialAssistantStreamSegmentationState();
     let activeAssistantStreamDiv = null;
     let activeAssistantStreamBuffer = '';
+    let activeAssistantStreamFeedbackTarget = null;
     let problemsActive = false;
     let debugActive = false;
     let visionAvailable = false; // Set by health check response
@@ -1723,12 +1760,62 @@ export function getWebviewHtml(chatFontSize: number): string {
         vscode.postMessage({ type: 'rejectMemory', memoryId });
     }
 
-    function addMessage(html, cls) {
+    function addFeedbackControls(div, feedbackTarget) {
+        if (!div || !feedbackTarget || !feedbackTarget.session_id) { return; }
+        if (div.querySelector('.bubble-feedback')) { return; }
+        div.classList.add('feedbackable');
+        div.dataset.feedbackSessionId = feedbackTarget.session_id;
+        if (feedbackTarget.trace_span_uuid) {
+            div.dataset.feedbackTraceSpanUuid = feedbackTarget.trace_span_uuid;
+        }
+        const bar = document.createElement('div');
+        bar.className = 'bubble-feedback';
+        bar.innerHTML =
+            '<button type="button" class="feedback-up" onclick="submitBubbleFeedback(this, true)">👍</button>' +
+            '<button type="button" class="feedback-down" onclick="submitBubbleFeedback(this, false)">👎</button>' +
+            '<span class="feedback-status"></span>';
+        div.appendChild(bar);
+    }
+
+    function submitBubbleFeedback(btn, thumbsUp) {
+        const bubble = btn.closest('.msg');
+        if (!bubble || bubble.dataset.feedbackSubmitted === 'true') { return; }
+        const sessionId = bubble.dataset.feedbackSessionId;
+        if (!sessionId) { return; }
+        const traceSpanUuid = bubble.dataset.feedbackTraceSpanUuid;
+        const upBtn = bubble.querySelector('.feedback-up');
+        const downBtn = bubble.querySelector('.feedback-down');
+        const status = bubble.querySelector('.feedback-status');
+        if (upBtn) {
+            upBtn.classList.toggle('active', !!thumbsUp);
+            upBtn.disabled = true;
+        }
+        if (downBtn) {
+            downBtn.classList.toggle('active', !thumbsUp);
+            downBtn.disabled = true;
+        }
+        bubble.dataset.feedbackSubmitted = 'true';
+        if (status) {
+            status.textContent = thumbsUp ? 'Saved as helpful' : 'Saved as unhelpful';
+        }
+        const feedback = {
+            session_id: sessionId,
+            thumbs_up: thumbsUp,
+            rating: thumbsUp ? 5 : 1,
+        };
+        if (traceSpanUuid) {
+            feedback.trace_span_uuid = traceSpanUuid;
+        }
+        vscode.postMessage({ type: 'submitFeedback', feedback });
+    }
+
+    function addMessage(html, cls, feedbackTarget) {
         addTimestampDivider(new Date());
         const div = document.createElement('div');
         div.className = 'msg ' + cls;
         div.innerHTML = html;
         addCodeBlockButtons(div);
+        addFeedbackControls(div, feedbackTarget);
         messagesEl.appendChild(div);
         scrollToBottom();
         return div;
@@ -1750,8 +1837,10 @@ export function getWebviewHtml(chatFontSize: number): string {
             : finalHtml;
         activeAssistantStreamDiv.classList.toggle('interrupted-draft', !!markInterrupted);
         addCodeBlockButtons(activeAssistantStreamDiv);
+        addFeedbackControls(activeAssistantStreamDiv, activeAssistantStreamFeedbackTarget);
         activeAssistantStreamDiv = null;
         activeAssistantStreamBuffer = '';
+        activeAssistantStreamFeedbackTarget = null;
     }
 
     function applyAssistantStreamEvent(event, options) {
@@ -1813,6 +1902,7 @@ export function getWebviewHtml(chatFontSize: number): string {
         assistantStreamSegmentationState = createInitialAssistantStreamSegmentationState();
         activeAssistantStreamDiv = null;
         activeAssistantStreamBuffer = '';
+        activeAssistantStreamFeedbackTarget = null;
     }
 
     function setStage(stage) {
@@ -2420,6 +2510,9 @@ export function getWebviewHtml(chatFontSize: number): string {
 
             case 'reply':
                 if (msg.streaming) {
+                    if (msg.feedbackTarget) {
+                        activeAssistantStreamFeedbackTarget = msg.feedbackTarget;
+                    }
                     appendAssistantStreamContent('workflow', msg.text || '');
                     if (msg.done) {
                         finalizeAssistantStream('workflow');
@@ -2436,7 +2529,7 @@ export function getWebviewHtml(chatFontSize: number): string {
                         sending = false;
                         sendBtn.disabled = false;
                         if (sendTimeout) { clearTimeout(sendTimeout); sendTimeout = null; }
-                        addMessage(formatMarkdown(msg.text), msg.cls || 'msg-ai');
+                        addMessage(formatMarkdown(msg.text), msg.cls || 'msg-ai', msg.feedbackTarget);
                     }
                 } else {
                     // Non-streaming reply (existing behavior)
@@ -2446,7 +2539,7 @@ export function getWebviewHtml(chatFontSize: number): string {
                     sending = false;
                     sendBtn.disabled = false;
                     if (sendTimeout) { clearTimeout(sendTimeout); sendTimeout = null; }
-                    addMessage(formatMarkdown(msg.text), msg.cls || 'msg-ai');
+                    addMessage(formatMarkdown(msg.text), msg.cls || 'msg-ai', msg.feedbackTarget);
                 }
                 break;
 
@@ -2569,6 +2662,9 @@ export function getWebviewHtml(chatFontSize: number): string {
             case 'streamingCleanup':
                 // Finalize any open planning streaming bubble (e.g. on stage done or error)
                 finalizeAssistantStream('workflow');
+                break;
+
+            case 'activeSession':
                 break;
 
             case 'error':

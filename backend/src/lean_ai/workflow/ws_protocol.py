@@ -159,13 +159,14 @@ class CancelledMessage(TypedDict):
     type: Literal["cancelled"]
 
 
-class CheckpointMessage(TypedDict, total=False):
-    type: Literal["checkpoint"]  # pyright: ignore[reportGeneralTypeIssues]
+class ExecutionCheckpointMessage(TypedDict, total=False):
+    type: Literal["execution_checkpoint"]  # pyright: ignore[reportGeneralTypeIssues]
     step: int
     total: int
     tool: str
     file_path: str
     description: str
+    status: str
 
 
 class ExecutionChecklistMessage(TypedDict, total=False):
@@ -290,7 +291,7 @@ ServerMessageType = Literal[
     "error",
     "complete",
     "cancelled",
-    "checkpoint",
+    "execution_checkpoint",
     "execution_checklist",
     "context_refreshed",
     "assistant_content",

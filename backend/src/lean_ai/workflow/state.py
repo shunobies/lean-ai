@@ -15,6 +15,7 @@ then writing a single .lean_ai/state/{session_id}.json file.
 
 import json
 import logging
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -121,7 +122,7 @@ class StateManager:
         self._state_dir = Path(".lean_ai") / "state"
         self._state_file = self._state_dir / f"{session_id}.json"
         self._state: WorkflowState | None = None
-        self._checkpoints_dir = Path(
+        self._checkpoints_dir_base = Path(
             checkpoints_dir if checkpoints_dir is not None else Path(".lean_ai") / "checkpoints"
         )
 
@@ -324,33 +325,27 @@ class StateManager:
 
         # Persist state_json into SQLite
         try:
-            from lean_ai.db import get_db
+            from lean_ai.db import _db_path
 
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            db = sqlite3.connect(_db_path(str(Path(".").resolve())))
             try:
-                db = loop.run_until_complete(
-                    get_db(str(Path(".").resolve()))
+                db.execute(
+                    "INSERT INTO checkpoints "
+                    "(id, session_id, parent_id, phase, state_json, timestamp, summary) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        checkpoint_id,
+                        self.session_id,
+                        parent_id,
+                        phase,
+                        json.dumps(state.model_dump(), ensure_ascii=False),
+                        now,
+                        summary,
+                    ),
                 )
-                loop.run_until_complete(
-                    db.execute(
-                        "INSERT INTO checkpoints "
-                        "(id, session_id, parent_id, phase, state_json, timestamp, summary) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                        (
-                            checkpoint_id,
-                            self.session_id,
-                            parent_id,
-                            phase,
-                            json.dumps(state.model_dump(), ensure_ascii=False),
-                            now,
-                            summary,
-                        ),
-                    )
-                )
-                loop.run_until_complete(db.commit())
+                db.commit()
             finally:
-                loop.close()
+                db.close()
         except Exception:
             logger.warning(
                 "Failed to persist checkpoint %s to SQLite for %s",
@@ -395,32 +390,25 @@ class StateManager:
 
         # Fallback: reconstruct from SQLite
         try:
-            import asyncio
+            from lean_ai.db import _db_path
 
-            from lean_ai.db import get_db
-
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            db = sqlite3.connect(_db_path(str(Path(".").resolve())))
+            db.row_factory = sqlite3.Row
             try:
-                db = loop.run_until_complete(
-                    get_db(str(Path(".").resolve()))
+                cursor = db.execute(
+                    "SELECT state_json FROM checkpoints WHERE id = ?",
+                    (checkpoint_id,),
                 )
-                cursor = loop.run_until_complete(
-                    db.execute(
-                        "SELECT state_json FROM checkpoints WHERE id = ?",
-                        (checkpoint_id,),
-                    )
-                )
-                row = loop.run_until_complete(cursor.fetchone())
+                row = cursor.fetchone()
                 if row is None:
                     raise FileNotFoundError(
                         f"Checkpoint {checkpoint_id} not found"
                     )
-                state_json = row.get("state_json") or row[0]
+                state_json = row["state_json"] or row[0]
                 data = json.loads(state_json)
                 return WorkflowState(**data)
             finally:
-                loop.close()
+                db.close()
         except Exception:
             logger.warning(
                 "Failed to load checkpoint %s from SQLite",
@@ -438,27 +426,20 @@ class StateManager:
         columns from SQLite (never loads ``state_json`` blobs).
         """
         try:
-            import asyncio
+            from lean_ai.db import _db_path
 
-            from lean_ai.db import get_db
-
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            db = sqlite3.connect(_db_path(str(Path(".").resolve())))
+            db.row_factory = sqlite3.Row
             try:
-                db = loop.run_until_complete(
-                    get_db(str(Path(".").resolve()))
+                cursor = db.execute(
+                    "SELECT id, session_id, parent_id, phase, summary, "
+                    "timestamp FROM checkpoints "
+                    "WHERE session_id = ? ORDER BY timestamp ASC",
+                    (session_id,),
                 )
-                cursor = loop.run_until_complete(
-                    db.execute(
-                        "SELECT id, session_id, parent_id, phase, summary, "
-                        "timestamp FROM checkpoints "
-                        "WHERE session_id = ? ORDER BY timestamp ASC",
-                        (session_id,),
-                    )
-                )
-                rows = loop.run_until_complete(cursor.fetchall())
+                rows = cursor.fetchall()
             finally:
-                loop.close()
+                db.close()
         except Exception:
             logger.warning(
                 "Failed to list checkpoints for session %s", session_id, exc_info=True
@@ -472,17 +453,24 @@ class StateManager:
             head_id = None
 
         result: list[dict] = []
-        for row in rows:
+        for idx, row in enumerate(rows):
             rid = row["id"] if isinstance(row, dict) else row[0]
+            phase = row["phase"] if isinstance(row, dict) else row[3]
+            summary = row["summary"] if isinstance(row, dict) else row[4]
+            created_at = row["timestamp"] if isinstance(row, dict) else row[5]
+            is_head = rid == head_id
             result.append(
                 {
                     "id": rid,
                     "session_id": row["session_id"] if isinstance(row, dict) else row[1],
                     "parent_id": row["parent_id"] if isinstance(row, dict) else row[2],
-                    "phase": row["phase"] if isinstance(row, dict) else row[3],
-                    "summary": row["summary"] if isinstance(row, dict) else row[4],
-                    "timestamp": row["timestamp"] if isinstance(row, dict) else row[5],
-                    "is_head": rid == head_id,
+                    "phase": phase,
+                    "summary": summary,
+                    "label": phase or summary or f"Checkpoint {idx + 1}",
+                    "created_at": created_at,
+                    "timestamp": created_at,
+                    "status": "active" if is_head else "completed",
+                    "is_head": is_head,
                 }
             )
         return result

@@ -618,12 +618,14 @@ async def execute_plan(
 
         await ws_send(
             ws,
-            "checkpoint",
+            "execution_checkpoint",
             {
-                "step_index": step.step_number - 1,
-                "step_description": (f"{step_label}: {(step.job or step.instruction)[:100]}"),
+                "step": step.step_number - 1,
+                "total": total_steps,
+                "tool": ",".join(sorted(_step_allowed_tool_names(step))),
+                "description": (f"{step_label}: {(step.job or step.instruction)[:100]}"),
                 "status": "running",
-                "head_commit_sha": None,
+                "file_path": step.file_path or "",
             },
         )
 
@@ -842,12 +844,14 @@ async def execute_plan(
             )
             await ws_send(
                 ws,
-                "checkpoint",
+                "execution_checkpoint",
                 {
-                    "step_index": step.step_number - 1,
-                    "step_description": (f"{step_label}: {(step.job or step.instruction)[:100]}"),
+                    "step": step.step_number - 1,
+                    "total": total_steps,
+                    "tool": ",".join(sorted(_step_allowed_tool_names(step))),
+                    "description": (f"{step_label}: {(step.job or step.instruction)[:100]}"),
                     "status": "failed",
-                    "head_commit_sha": None,
+                    "file_path": step.file_path or "",
                 },
             )
             logger.warning("%s failed validation: %s", step_label, completion_error)
@@ -911,12 +915,14 @@ async def execute_plan(
 
         await ws_send(
             ws,
-            "checkpoint",
+            "execution_checkpoint",
             {
-                "step_index": step.step_number - 1,
-                "step_description": (f"{step_label}: {(step.job or step.instruction)[:100]}"),
+                "step": step.step_number - 1,
+                "total": total_steps,
+                "tool": ",".join(sorted(_step_allowed_tool_names(step))),
+                "description": (f"{step_label}: {(step.job or step.instruction)[:100]}"),
                 "status": "completed",
-                "head_commit_sha": None,
+                "file_path": step.file_path or "",
             },
         )
         return True
@@ -1168,6 +1174,7 @@ async def execute_plan(
                 llm_client,
                 files_modified,
                 validation_results,
+                ws,
             ),
         )
 
