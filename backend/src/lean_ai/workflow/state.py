@@ -283,6 +283,14 @@ class StateManager:
             return await self.load_async()
         return self._state
 
+    def get_cached_state(self) -> WorkflowState:
+        """Return the current in-memory state without loading from disk."""
+        if self._state is None:
+            raise RuntimeError(
+                "State is not loaded — call load_async() before using cached state"
+            )
+        return self._state
+
     def refresh_state(self) -> WorkflowState:
         """Reload state from disk, overwriting any in-memory changes."""
         self._state = None

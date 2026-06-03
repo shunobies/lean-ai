@@ -134,10 +134,10 @@ def _build_state_manager_mock(captured_state_ref):
     def factory(*args, **kwargs):
         manager = MagicMock()
         state = _make_state("test-sess")
-        manager.get_state.return_value = state
+        manager.get_state_async = AsyncMock(return_value=state)
         manager.session_id = "test-sess"
         manager.save = MagicMock()
-        manager.save_checkpoint = MagicMock(return_value="cp-1")
+        manager.save_checkpoint_async = AsyncMock(return_value="cp-1")
         captured_state_ref[0] = state
         return manager
 
@@ -507,14 +507,14 @@ async def test_run_workflow_current_phase_progresses_through_phases(
     def capture_state_manager(*args, **kwargs):
         manager = MagicMock()
         state = _make_state("test-sess")
-        manager.get_state.return_value = state
+        manager.get_state_async = AsyncMock(return_value=state)
         manager.session_id = "test-sess"
 
         def save_side_effect():
             phase_history.append(state.current_phase)
 
         manager.save = MagicMock(side_effect=save_side_effect)
-        manager.save_checkpoint = MagicMock(return_value="cp-1")
+        manager.save_checkpoint_async = AsyncMock(return_value="cp-1")
         return manager
 
     mock_dispatcher = MagicMock()
@@ -537,3 +537,48 @@ async def test_run_workflow_current_phase_progresses_through_phases(
     # Phase history should include planning and approval phases
     assert "planning" in phase_history
     assert "approval" in phase_history
+
+
+async def test_run_workflow_stops_on_planning_fail_without_execution_checkpoints(
+    tmp_path, monkeypatch
+):
+    """Planning failure should not be marked as execution/validation success."""
+    monkeypatch.chdir(tmp_path)
+
+    plan = _make_plan()
+    mock_llm_client = MagicMock()
+    mock_llm_client.model_name = "test-model"
+    mock_llm_client.provider_name = "test-provider"
+
+    _setup_mock_modules(plan)
+
+    import sys
+
+    sys.modules["lean_ai.llm.planner"].create_plan = AsyncMock(
+        side_effect=RuntimeError("planner exploded")
+    )
+
+    captured = [None]
+    manager_ref = [None]
+
+    def capture_state_manager(*args, **kwargs):
+        manager = _build_state_manager_mock(captured)(*args, **kwargs)
+        manager_ref[0] = manager
+        return manager
+
+    from lean_ai.workflow import pipeline
+
+    with patch.object(pipeline, "StateManager", side_effect=capture_state_manager):
+        with pytest.raises(RuntimeError, match="planner exploded"):
+            await pipeline.run_workflow(
+                task="Test task",
+                repo_root=str(tmp_path),
+                session=None,
+                llm_client=mock_llm_client,
+                session_id="test-sess",
+                dispatcher=MagicMock(),
+            )
+
+    assert captured[0].current_phase == "failed"
+    assert captured[0].session_metadata["workflow_error"] == "planner exploded"
+    manager_ref[0].save_checkpoint_async.assert_not_awaited()

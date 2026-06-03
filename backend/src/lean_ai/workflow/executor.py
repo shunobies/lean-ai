@@ -536,6 +536,8 @@ async def execute_plan(
     implicit_modified_files: set[str] = set()
     _artifacts_lock = asyncio.Lock()
     tdd_metrics: dict[str, int | bool | str] | None = None
+    if state_manager:
+        await state_manager.get_state_async()
 
     # Send execution checklist to the extension for progress UI
     checklist_steps = []
@@ -663,8 +665,9 @@ async def execute_plan(
                 total_steps,
                 step_artifacts=step_artifacts,
             )
-            pad = state_manager.get_state().scratchpad_content if state_manager else ""
-            jrnl_entries = state_manager.get_state().journal_entries if state_manager else []
+            cached_state = state_manager.get_cached_state() if state_manager else None
+            pad = cached_state.scratchpad_content if cached_state else ""
+            jrnl_entries = cached_state.journal_entries if cached_state else []
             jrnl = "\n".join(jrnl_entries) if jrnl_entries else ""
             new_messages: list[dict] = [
                 {"role": "system", "content": fresh_sys},
@@ -901,8 +904,9 @@ async def execute_plan(
                     f"Files changed: {', '.join(sorted(p for p in changed_paths if p)) or 'none'}."
                 )
                 try:
+                    checkpoint_state = await state_manager.get_state_async()
                     await state_manager.save_checkpoint_async(
-                        state=state_manager.get_state(),
+                        state=checkpoint_state,
                         phase=f"Step {step.step_number}: {step.job or step.instruction}",
                         summary=step_summary,
                     )
@@ -952,8 +956,9 @@ async def execute_plan(
                     getattr(plan, "tdd_test_steps", None) or []
                 )
                 impl_steps = len(plan.steps)
+                checkpoint_state = await state_manager.get_state_async()
                 await state_manager.save_checkpoint_async(
-                    state=state_manager.get_state(),
+                    state=checkpoint_state,
                     phase="TDD Execution Complete",
                     summary=(
                         f"TDD execution completed. "
@@ -1022,8 +1027,9 @@ async def execute_plan(
             files_str = (
                 ", ".join(files_modified) if files_modified else "none"
             )
+            checkpoint_state = await state_manager.get_state_async()
             await state_manager.save_checkpoint_async(
-                state=state_manager.get_state(),
+                state=checkpoint_state,
                 phase="Execution Plan Complete",
                 summary=(
                     f"All steps done. "
@@ -1077,8 +1083,9 @@ async def execute_plan(
             len(validation_results) if validation_results else 0
         )
         try:
+            checkpoint_state = await state_manager.get_state_async()
             await state_manager.save_checkpoint_async(
-                state=state_manager.get_state(),
+                state=checkpoint_state,
                 phase="Validation Complete",
                 summary=(
                     f"Post-execution validation "
@@ -1139,7 +1146,11 @@ async def execute_plan(
             f"{tdd_metrics['steps_missing_test_checks']}"
         )
 
-    journal_entries = state_manager.get_state().journal_entries if state_manager else []
+    journal_entries = (
+        (await state_manager.get_state_async()).journal_entries
+        if state_manager
+        else []
+    )
     journal_content = "\n".join(journal_entries) if journal_entries else ""
     if journal_content:
         summary += f"\n\nSession Journal:\n{journal_content}"

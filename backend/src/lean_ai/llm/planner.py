@@ -64,7 +64,6 @@ from lean_ai.workflow.graph import (
     Fail,
     LLMNode,
     NodeResult,
-    SubgraphNode,
     ToolNode,
     WorkflowEngine,
     WorkflowGraph,
@@ -1453,7 +1452,7 @@ class PlanningPipeline:
         self.refiner = refiner
         self.test_command = test_command
         self.state_manager = state_manager
-        self.session_id = state_manager.get_state().session_id
+        self.session_id = state_manager.session_id
         self.expert_llm_client = expert_llm_client
         self.on_content = on_content
         self.on_thinking = on_thinking
@@ -1672,7 +1671,7 @@ class PlanningPipeline:
                 len(plan.steps),
                 len(plan.affected_files),
             )
-            state = self.state_manager.get_state()
+            state = await self.state_manager.get_state_async()
             state.current_plan = plan.model_dump()
             self.state_manager.save()
             return plan
@@ -1706,7 +1705,7 @@ class PlanningPipeline:
                 model=expert.model_name,
                 phase=4,
             )
-            state = self.state_manager.get_state()
+            state = await self.state_manager.get_state_async()
             state.current_plan = plan.model_dump()
             self.state_manager.save()
             return plan
@@ -1788,9 +1787,7 @@ async def create_plan(
     explorer = routing.get_client("scope")
     expert = expert_llm_client or llm_client
 
-    effective_session_id = (
-        state_manager.get_state().session_id if state_manager is not None else session_id
-    )
+    effective_session_id = state_manager.session_id if state_manager is not None else session_id
     if state_manager is None:
         state_manager = StateManager(effective_session_id or "planning")
 
@@ -1841,11 +1838,8 @@ async def create_plan(
     graph.add_node(design_node)
     graph.add_node(assembly_node)
 
-    # Wrap in a SubgraphNode
-    planning_subgraph = SubgraphNode("planning_subgraph", subgraph=graph)
-
     # Prepare state with metadata needed by phase nodes
-    state = state_manager.get_state()
+    state = await state_manager.get_state_async()
     state.session_metadata["task"] = task
     state.session_metadata["context"] = context
     state.session_metadata["repo_root"] = repo_root

@@ -644,7 +644,7 @@ async def run_phase2_exploration(
         # pipeline produces for "exploration → structured summary".
         if file_summary_obj is not None:
             try:
-                state = state_manager.get_state()
+                state = await state_manager.get_state_async()
                 observations = state.observations
                 scratchpad_text = state.scratchpad_content or ""
                 journal_text = "\n".join(state.journal_entries) if state.journal_entries else ""
@@ -893,7 +893,7 @@ async def _run_serial_exploration(
 
     # Inject existing scratchpad + journal (crash recovery)
     if session_id:
-        state = state_manager.get_state()
+        state = await state_manager.get_state_async()
         existing_pad = state.scratchpad_content or ""
         existing_journal = "\n".join(state.journal_entries) if state.journal_entries else ""
         if existing_journal:
@@ -918,7 +918,7 @@ async def _run_serial_exploration(
         current_messages: list[dict],
     ) -> list[dict]:
         """Rebuild Phase 2 messages for context refresh."""
-        state = state_manager.get_state()
+        state = state_manager.get_cached_state()
         pad = state.scratchpad_content or ""
         jrnl = "\n".join(state.journal_entries) if state.journal_entries else ""
         obs = state.observations
@@ -1014,6 +1014,7 @@ async def _run_serial_exploration(
         "planning.task_reminder",
         task=task,
     )
+    await state_manager.get_state_async()
 
     def _phase2_reminder() -> str:
         return (
@@ -1023,7 +1024,7 @@ async def _run_serial_exploration(
         )
 
     def _phase2_pre_context_refresh_nudge() -> str:
-        state = state_manager.get_state()
+        state = state_manager.get_cached_state()
         obs = state.observations
         recorded_paths: list[str] = []
         if isinstance(obs, list):
@@ -1068,7 +1069,7 @@ async def _run_serial_exploration(
     # written to disk, so combined turns like
     # [record_file_observation, task_complete] approve naturally.
     def _phase2_task_complete_validator() -> str | None:
-        state = state_manager.get_state()
+        state = state_manager.get_cached_state()
         obs = state.observations
         if obs:
             return None
@@ -1145,7 +1146,7 @@ async def _synthesize_file_summary(
 
     from lean_ai.llm.plan_schema import FileSummary
 
-    state = state_manager.get_state()
+    state = await state_manager.get_state_async()
     observations = state.observations
     pad = state.scratchpad_content or ""
     jrnl = "\n".join(state.journal_entries) if state.journal_entries else ""

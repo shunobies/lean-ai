@@ -23,7 +23,10 @@ class CapturingClient:
 class DummyStateManager:
     session_id = "sess-validation"
 
-    def get_state(self):
+    async def get_state_async(self):
+        return self.get_cached_state()
+
+    def get_cached_state(self):
         return type(
             "State",
             (),

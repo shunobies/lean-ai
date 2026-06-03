@@ -368,8 +368,8 @@ def test_empty_graph_has_none_entry_point():
 
 async def test_engine_calls_save_after_each_node():
     """WorkflowEngine calls state_manager.save() after each node execution."""
-    mock_manager = MagicMock(spec=["save", "get_state"])
-    mock_manager.get_state.return_value = _make_state()
+    mock_manager = MagicMock(spec=["save", "get_state_async"])
+    mock_manager.get_state_async = AsyncMock(return_value=_make_state())
 
     graph = WorkflowGraph()
     graph.add_node(_PassThroughNode("n0"))
@@ -383,7 +383,7 @@ async def test_engine_calls_save_after_each_node():
 
 async def test_engine_uses_provided_state():
     """WorkflowEngine uses the state passed explicitly, not from manager."""
-    mock_manager = MagicMock(spec=["save", "get_state"])
+    mock_manager = MagicMock(spec=["save", "get_state_async"])
 
     graph = WorkflowGraph()
     graph.add_node(_PassThroughNode("n0"))
@@ -392,14 +392,14 @@ async def test_engine_uses_provided_state():
     state = _make_state("explicit-sess")
     await engine.run(graph, state_manager=mock_manager, state=state)
 
-    # get_state should NOT be called when state is provided
-    mock_manager.get_state.assert_not_called()
+    # get_state_async should NOT be called when state is provided
+    mock_manager.get_state_async.assert_not_called()
 
 
 async def test_engine_loads_state_from_manager_when_not_provided():
-    """WorkflowEngine calls get_state() when no state is passed."""
-    mock_manager = MagicMock(spec=["save", "get_state"])
-    mock_manager.get_state.return_value = _make_state()
+    """WorkflowEngine awaits get_state_async() when no state is passed."""
+    mock_manager = MagicMock(spec=["save", "get_state_async"])
+    mock_manager.get_state_async = AsyncMock(return_value=_make_state())
 
     graph = WorkflowGraph()
     graph.add_node(_PassThroughNode("n0"))
@@ -407,7 +407,7 @@ async def test_engine_loads_state_from_manager_when_not_provided():
     engine = WorkflowEngine()
     await engine.run(graph, state_manager=mock_manager)
 
-    mock_manager.get_state.assert_called_once()
+    mock_manager.get_state_async.assert_awaited_once()
 
 
 async def test_engine_creates_default_state_when_no_manager():
@@ -423,8 +423,8 @@ async def test_engine_creates_default_state_when_no_manager():
 
 async def test_engine_handles_save_exception_gracefully():
     """WorkflowEngine catches save exceptions and continues execution."""
-    mock_manager = MagicMock(spec=["save", "get_state"])
-    mock_manager.get_state.return_value = _make_state()
+    mock_manager = MagicMock(spec=["save", "get_state_async"])
+    mock_manager.get_state_async = AsyncMock(return_value=_make_state())
     mock_manager.save.side_effect = RuntimeError("disk full")
 
     graph = WorkflowGraph()

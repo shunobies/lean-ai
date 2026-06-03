@@ -225,7 +225,7 @@ async def resume_session(session_id: str, request: ResumeSessionRequest):
         await update_session(db, session_id, status="active")
 
         sm = StateManager(session_id)
-        state = sm.get_state()
+        state = await sm.get_state_async()
         pad_exists = bool(state.scratchpad_content)
 
         return {

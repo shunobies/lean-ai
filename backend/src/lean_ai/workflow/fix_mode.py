@@ -192,7 +192,7 @@ async def _run_fix(
             {"role": "user", "content": task},
         ]
 
-        state = state_manager.get_state()
+        state = bootstrap_state
 
         if state.session_id:
             existing_journal = "\n".join(state.journal_entries) if state.journal_entries else ""
@@ -268,7 +268,7 @@ async def _run_fix(
 
         # Inject existing journal + scratchpad for session recovery
         if state_manager.session_id:
-            inv_state = state_manager.get_state()
+            inv_state = await state_manager.get_state_async()
             existing_journal = (
                 "\n".join(inv_state.journal_entries) if inv_state.journal_entries else ""
             )
@@ -300,7 +300,7 @@ async def _run_fix(
                 fresh_context,
                 test_command=commands.get("test", ""),
             )
-            refresh_state = state_manager.get_state()
+            refresh_state = state_manager.get_cached_state()
             pad = refresh_state.scratchpad_content
             jrnl = "\n".join(refresh_state.journal_entries) if refresh_state.journal_entries else ""
             refreshed: list[dict] = [
@@ -358,7 +358,7 @@ async def _run_fix(
 
     def _build_fix_reminder() -> str:
         parts = [f"REMINDER — Your task: {task}"]
-        reminder_state = state_manager.get_state()
+        reminder_state = state_manager.get_cached_state()
         jrnl = "\n".join(reminder_state.journal_entries) if reminder_state.journal_entries else ""
         if jrnl:
             parts.append(f"\nYour session journal:\n{jrnl}")
@@ -386,7 +386,7 @@ async def _run_fix(
                 repo_root=repo_root,
                 prompt_scope=prompt_scope,
             )
-        refresh_state = state_manager.get_state()
+        refresh_state = state_manager.get_cached_state()
         pad = refresh_state.scratchpad_content
         jrnl = "\n".join(refresh_state.journal_entries) if refresh_state.journal_entries else ""
 
@@ -522,7 +522,7 @@ async def _run_fix(
         else:
             summary += "\n\n✓ Post-validation passed."
 
-    final_state = state_manager.get_state()
+    final_state = await state_manager.get_state_async()
     journal_content = "\n".join(final_state.journal_entries) if final_state.journal_entries else ""
     if journal_content:
         summary += f"\n\nSession Journal:\n{journal_content}"
