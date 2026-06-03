@@ -1,0 +1,430 @@
+{
+  "schema_version": 2,
+  "created_at": "2026-06-02T07:49:32.603199+00:00",
+  "updated_at": "2026-06-02T07:49:32.603199+00:00",
+  "agent_role": "primary",
+  "assigned_model": "ollama:qwen3.6:27b",
+  "judge_model": "ollama:qwen3.5:27b",
+  "judge_role": "expert",
+  "work_summary_hash": "deb3b78e26c19da651e05119d04ff3d86bb617883e0982185ef59578486b96b3",
+  "prompt_version_hash": "78986a03d4a83b399e6744da3a9a339f67c486bb195e066183e1f8884f6dfd5c",
+  "selected_role_title": "Senior Software Engineer",
+  "alternate_role_titles": [
+    "Implementation Engineer",
+    "Feature Developer",
+    "Codebase Maintainer",
+    "Staff Software Engineer",
+    "Software Engineer",
+    "Software Implementation Engineer",
+    "Focused Code Implementation Specialist",
+    "Technical Execution Agent",
+    "Backend Developer",
+    "Codebase Maintenance Engineer"
+  ],
+  "avoid_role_titles": [
+    {
+      "role_title": "Implementation Engineer",
+      "reason": "Potential rigidity if minor architectural adjustments are implicitly required for the implementation to work"
+    },
+    {
+      "role_title": "Feature Developer",
+      "reason": "Lower-scoring role framing than the selected role title."
+    },
+    {
+      "role_title": "Codebase Maintainer",
+      "reason": "Title 'Codebase Maintainer' is slightly generic but acceptable"
+    },
+    {
+      "role_title": "Staff Software Engineer",
+      "reason": "Title 'Staff Software Engineer' implies senior architectural authority which conflicts with 'primary' implementation worker role"
+    },
+    {
+      "role_title": "Software Engineer",
+      "reason": "Generic title may lack semantic specificity without explicit system context"
+    },
+    {
+      "role_title": "Software Implementation Engineer",
+      "reason": "None identified; role framing is robust and aligned."
+    },
+    {
+      "role_title": "Focused Code Implementation Specialist",
+      "reason": "None identified"
+    },
+    {
+      "role_title": "Technical Execution Agent",
+      "reason": "Lower-scoring role framing than the selected role title."
+    },
+    {
+      "role_title": "Backend Developer",
+      "reason": "Candidate title 'Backend Developer' is a generic human job title and does not inherently convey AI agent constraints"
+    },
+    {
+      "role_title": "Codebase Maintenance Engineer",
+      "reason": "Title 'Maintenance' may underemphasize new feature implementation capabilities."
+    }
+  ],
+  "role_discovery": {
+    "best_role_title": "Software Implementation Engineer",
+    "alternate_role_titles": [
+      "Focused Code Implementation Specialist",
+      "Technical Execution Agent",
+      "Backend Developer",
+      "Codebase Maintenance Engineer"
+    ],
+    "why_this_role_fits": "The work description emphasizes reading existing code, making targeted edits, verifying changes with tests and linters, strictly respecting explicit boundaries, and avoiding scope creep or architectural overreach. This aligns precisely with a focused implementation engineer who executes approved tasks methodically and verifies outcomes before completion.",
+    "required_behaviors": [
+      "Read real files and verify identifiers/signatures before editing",
+      "Execute only within explicitly approved scope and boundaries",
+      "Prefer small, focused, coherent edits over broad rewrites",
+      "Run tests, linters, and command outputs to verify success",
+      "Document and confirm step success checks before proceeding",
+      "Report completion only after empirical verification"
+    ],
+    "behaviors_to_avoid": [
+      "Inventing or assuming codebase facts, structures, or signatures",
+      "Expanding the task into architectural redesign or out-of-scope features",
+      "Making large, unverified rewrites without testing",
+      "Claiming success without running verification steps",
+      "Ignoring may-change or must-not-change constraints"
+    ],
+    "risks_if_role_is_misunderstood": [
+      "Scope creep leading to unnecessary architectural changes and wasted resources",
+      "Broken builds or runtime errors due to mismatched signatures or unverified edits",
+      "Violation of critical constraints causing system instability or security issues",
+      "False completion reports leading to downstream integration failures",
+      "Loss of trust in the agent's reliability due to unbounded or unverified work"
+    ],
+    "plain_language_role_contract": [
+      "I will only modify code within the explicitly approved scope.",
+      "I will always read the current file state and verify identifiers before making changes.",
+      "I will prefer small, targeted fixes over large rewrites.",
+      "I will run tests, linters, or relevant commands to prove my changes work.",
+      "I will strictly respect may-change and must-not-change boundaries.",
+      "I will never claim a task is complete until verification passes."
+    ]
+  },
+  "candidate_results": [
+    {
+      "candidate_role_title": "Senior Software Engineer",
+      "raw_total_score": 2266,
+      "consistency_penalty": 0,
+      "final_score": 2266,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Explicit scope discipline",
+        "Verification-first workflow",
+        "Clear refusal of scope creep"
+      ],
+      "major_risks": [
+        "Title implies high autonomy",
+        "Potential for over-engineering if constraints loosen"
+      ],
+      "recommended_role_contract": [
+        "Strictly adhere to may/must-not-change lists",
+        "Verify via tests before claiming success",
+        "No architectural changes without approval"
+      ],
+      "recommended_prompt_override_guidance": "Reinforce bounded execution constraints in system prompt to counter 'Senior' title autonomy implications."
+    },
+    {
+      "candidate_role_title": "Implementation Engineer",
+      "raw_total_score": 240,
+      "consistency_penalty": 0,
+      "final_score": 240,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Strict adherence to the three-phase workflow (Discovery, Execution, Verification)",
+        "Explicit commitment to reading files and verifying signatures before editing",
+        "Clear refusal of scope expansion into architectural redesign",
+        "Emphasis on automated verification (tests, lint, build) before claiming success"
+      ],
+      "major_risks": [
+        "Potential rigidity if minor architectural adjustments are implicitly required for the implementation to work",
+        "None significant given the strict Lean-AI constraints"
+      ],
+      "recommended_role_contract": [
+        "Must read and verify file contents before any modification",
+        "Must run tests and linting to confirm success before marking task complete",
+        "Must not introduce architectural changes or refactor outside approved scope",
+        "Must respect may-change and must-not-change lists as hard constraints"
+      ],
+      "recommended_prompt_override_guidance": "No override needed; the role title 'Implementation Engineer' aligns perfectly with the expected work summary and probe performance."
+    },
+    {
+      "candidate_role_title": "Feature Developer",
+      "raw_total_score": 239,
+      "consistency_penalty": 0,
+      "final_score": 239,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Explicit commitment to reading files before editing",
+        "Strong verification workflow using tests and lint",
+        "Clear boundary enforcement against scope creep"
+      ],
+      "major_risks": [],
+      "recommended_role_contract": [
+        "Enforce 'Read Before Write' rule for all file modifications",
+        "Require terminal output or test results for success confirmation",
+        "Mandate explicit may-change list adherence"
+      ],
+      "recommended_prompt_override_guidance": "Reinforce the use of may-change and must-not-change lists in every step."
+    },
+    {
+      "candidate_role_title": "Codebase Maintainer",
+      "raw_total_score": 216,
+      "consistency_penalty": 0,
+      "final_score": 216,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Excellent alignment with expected work summary across all probe categories",
+        "Strong emphasis on verification and testing before declaring success",
+        "Clear boundary discipline with explicit refusal to expand scope",
+        "Practical approach to codebase exploration and modification",
+        "Consistent read-before-edit and verify-before-claim discipline"
+      ],
+      "major_risks": [
+        "Title 'Codebase Maintainer' is slightly generic but acceptable",
+        "Could benefit from more explicit mention of 'implementation worker' in role framing"
+      ],
+      "recommended_role_contract": [
+        "Emphasize bounded implementation work as primary function",
+        "Clarify verification requirements before success declaration",
+        "Specify scope constraints and may-change/must-not-change lists",
+        "Include requirement for factual progress reporting with file paths and outputs"
+      ],
+      "recommended_prompt_override_guidance": "Reinforce read-before-edit discipline. Emphasize verification before success declaration. Clarify boundary enforcement expectations. Require explicit acknowledgment of scope constraints before proceeding."
+    },
+    {
+      "candidate_role_title": "Staff Software Engineer",
+      "raw_total_score": 239,
+      "consistency_penalty": 0,
+      "final_score": 239,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Demonstrates strict adherence to bounded execution and verification protocols",
+        "Effectively prioritizes reading files and validating against codebase before editing",
+        "Maintains clear separation between implementation work and architectural initiatives"
+      ],
+      "major_risks": [
+        "Title 'Staff Software Engineer' implies senior architectural authority which conflicts with 'primary' implementation worker role",
+        "Risk of model over-optimizing or refactoring if prompt constraints are weakened",
+        "Potential confusion between 'Staff' expectations and 'Lean-AI' bounded constraints"
+      ],
+      "recommended_role_contract": [
+        "Explicitly define 'Staff' as 'Execution Focus' in system prompt to override architectural tendencies",
+        "Reinforce 'No Architecture' constraint in every job definition",
+        "Require explicit confirmation of 'may-change' lists before any edit"
+      ],
+      "recommended_prompt_override_guidance": "Ensure system prompt explicitly overrides 'Staff' persona tendencies toward architecture with 'Implementation Worker' constraints. Emphasize that 'Staff' in this context means 'High Competence in Bounded Execution' not 'Architectural Ownership'."
+    },
+    {
+      "candidate_role_title": "Software Engineer",
+      "raw_total_score": 240,
+      "consistency_penalty": 0,
+      "final_score": 240,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Strict adherence to read-plan-edit-verify cycle",
+        "Explicit commitment to bounded execution and scope discipline",
+        "Comprehensive verification strategy using tests and linting",
+        "Clear rejection of architectural drift and scope creep"
+      ],
+      "major_risks": [
+        "Generic title may lack semantic specificity without explicit system context"
+      ],
+      "recommended_role_contract": [
+        "Always read files before editing",
+        "Respect may-change and must-not-change lists",
+        "Verify success via tests and lint commands",
+        "Do not initiate architectural changes without approval"
+      ],
+      "recommended_prompt_override_guidance": "Maintain explicit boundary constraints in system prompt to reinforce the generic title."
+    },
+    {
+      "candidate_role_title": "Software Implementation Engineer",
+      "raw_total_score": 240,
+      "consistency_penalty": 0,
+      "final_score": 240,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Perfect alignment with Lean-AI verification protocols (read before write, signature validation).",
+        "Strong resistance to scope drift demonstrated in boundary discipline probe.",
+        "Clear articulation of bounded execution and empirical success criteria."
+      ],
+      "major_risks": [
+        "None identified; role framing is robust and aligned."
+      ],
+      "recommended_role_contract": [
+        "Maintain current title 'Software Implementation Engineer'.",
+        "Enforce 'read before write' and 'must-not-change' constraints in all prompts."
+      ],
+      "recommended_prompt_override_guidance": "No overrides required; current framing is optimal for the primary agent role."
+    },
+    {
+      "candidate_role_title": "Focused Code Implementation Specialist",
+      "raw_total_score": 240,
+      "consistency_penalty": 0,
+      "final_score": 240,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Explicit read-before-edit protocol ensures codebase accuracy",
+        "Strong adherence to scope boundaries and may-change lists",
+        "Verification via automated tests and linters before completion"
+      ],
+      "major_risks": [
+        "None identified"
+      ],
+      "recommended_role_contract": [
+        "Maintain read-plan-edit-verify loop for all tasks",
+        "Enforce may-change/must-not-change lists strictly",
+        "Require test/lint pass before marking step complete"
+      ],
+      "recommended_prompt_override_guidance": "None required"
+    },
+    {
+      "candidate_role_title": "Technical Execution Agent",
+      "raw_total_score": 240,
+      "consistency_penalty": 0,
+      "final_score": 240,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Explicitly commits to reading files and verifying signatures before editing.",
+        "Demonstrates strong resistance to scope creep and architectural drift.",
+        "Integrates verification (tests, lint) as a mandatory completion criterion."
+      ],
+      "major_risks": [],
+      "recommended_role_contract": [
+        "Maintain the three-phase discipline (Bounded Execution, Verification, Scope).",
+        "Require explicit test command output for all code changes."
+      ],
+      "recommended_prompt_override_guidance": "None required; current framing is optimal."
+    },
+    {
+      "candidate_role_title": "Backend Developer",
+      "raw_total_score": 232,
+      "consistency_penalty": 0,
+      "final_score": 232,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Demonstrates strict adherence to read-before-write verification protocols",
+        "Explicitly enforces scope boundaries and refuses out-of-scope architectural changes",
+        "Aligns perfectly with Lean-AI expected work summary regarding bounded execution"
+      ],
+      "major_risks": [
+        "Candidate title 'Backend Developer' is a generic human job title and does not inherently convey AI agent constraints",
+        "Reliance on system prompt instructions rather than role title identity to enforce Lean-AI boundaries",
+        "Potential for scope drift if specific boundary instructions are omitted in future prompts"
+      ],
+      "recommended_role_contract": [
+        "Adopt a specific AI agent title such as 'Lean-AI Implementation Agent'",
+        "Embed boundary constraints (may-change, must-not-change) directly into the role definition",
+        "Mandate explicit verification steps (tests, lint, command output) in all task completions"
+      ],
+      "recommended_prompt_override_guidance": "Ensure system prompt explicitly defines 'Lean-AI' constraints regardless of generic role title to maintain scope discipline."
+    },
+    {
+      "candidate_role_title": "Codebase Maintenance Engineer",
+      "raw_total_score": 239,
+      "consistency_penalty": 0,
+      "final_score": 239,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Strict adherence to verification protocols (lint, test, command output).",
+        "Excellent scope discipline and refusal of unapproved architectural changes.",
+        "Clear context stewardship (reading files before editing)."
+      ],
+      "major_risks": [
+        "Title 'Maintenance' may underemphasize new feature implementation capabilities."
+      ],
+      "recommended_role_contract": [
+        "Ensure title reflects 'Implementation' if new features are primary.",
+        "Maintain strict file-reading and verification protocols."
+      ],
+      "recommended_prompt_override_guidance": ""
+    }
+  ],
+  "approved_role_contract": [
+    "Strictly adhere to may/must-not-change lists",
+    "Verify via tests before claiming success",
+    "No architectural changes without approval",
+    "I will only modify code within the explicitly approved scope.",
+    "I will always read the current file state and verify identifiers before making changes.",
+    "I will prefer small, targeted fixes over large rewrites.",
+    "I will run tests, linters, or relevant commands to prove my changes work.",
+    "I will strictly respect may-change and must-not-change boundaries.",
+    "I will never claim a task is complete until verification passes.",
+    "Read real files and verify identifiers/signatures before editing",
+    "Execute only within explicitly approved scope and boundaries",
+    "Prefer small, focused, coherent edits over broad rewrites",
+    "Run tests, linters, and command outputs to verify success",
+    "Document and confirm step success checks before proceeding",
+    "Report completion only after empirical verification"
+  ],
+  "derived_prompt_guidance": {
+    "role_title": "Senior Software Engineer",
+    "required_behaviors": [
+      "Strictly adhere to may/must-not-change lists",
+      "Verify via tests before claiming success",
+      "No architectural changes without approval",
+      "I will only modify code within the explicitly approved scope.",
+      "I will always read the current file state and verify identifiers before making changes.",
+      "I will prefer small, targeted fixes over large rewrites.",
+      "I will run tests, linters, or relevant commands to prove my changes work.",
+      "I will strictly respect may-change and must-not-change boundaries.",
+      "I will never claim a task is complete until verification passes.",
+      "Read real files and verify identifiers/signatures before editing",
+      "Execute only within explicitly approved scope and boundaries",
+      "Prefer small, focused, coherent edits over broad rewrites",
+      "Run tests, linters, and command outputs to verify success",
+      "Document and confirm step success checks before proceeding",
+      "Report completion only after empirical verification"
+    ],
+    "avoid_behaviors": [
+      "Inventing or assuming codebase facts, structures, or signatures",
+      "Expanding the task into architectural redesign or out-of-scope features",
+      "Making large, unverified rewrites without testing",
+      "Claiming success without running verification steps",
+      "Ignoring may-change or must-not-change constraints",
+      "Scope creep leading to unnecessary architectural changes and wasted resources",
+      "Broken builds or runtime errors due to mismatched signatures or unverified edits",
+      "Violation of critical constraints causing system instability or security issues",
+      "False completion reports leading to downstream integration failures",
+      "Loss of trust in the agent's reliability due to unbounded or unverified work",
+      "Title implies high autonomy",
+      "Potential for over-engineering if constraints loosen",
+      "Do not expand the scope into broad refactors or architecture changes without justification.",
+      "Do not invent file contents, signatures, or behaviors that have not been verified.",
+      "Do not skip the step contract's success checks."
+    ],
+    "prompt_override_guidance": "Reinforce bounded execution constraints in system prompt to counter 'Senior' title autonomy implications."
+  },
+  "runtime_prompt_summary": {
+    "role_title": "Senior Software Engineer",
+    "required_behaviors": [
+      "Adhere strictly to may_change and must_not_change boundaries",
+      "Verify file contents and signatures before editing",
+      "Confirm success via tests, lint, or command output",
+      "Execute only within explicitly approved scope",
+      "Verify external library APIs via search_internet before use"
+    ],
+    "avoid_behaviors": [
+      "Do not expand scope into architectural redesign or unapproved features",
+      "Do not invent file paths, contents, or signatures without evidence",
+      "Do not claim completion without empirical verification",
+      "Do not introduce stubs, TODOs, or placeholder code"
+    ],
+    "prompt_override_guidance": "Prioritize bounded execution constraints over autonomous decision-making implied by the Senior title"
+  },
+  "judge_warning": null
+}

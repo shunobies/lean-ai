@@ -19,7 +19,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from lean_ai.config import settings
 from lean_ai.llm.plan_schema import (
@@ -250,6 +250,8 @@ class ScopePhase(PlanningPhase):
             settings.plan_phase1_max_turns,
         )
         t0 = time.monotonic()
+        scope_prose = ""
+        _phase1_tool_calls: list[Any] = []
         fast_path = _looks_like_final_suggested_agent_prompt(task)
         if fast_path:
             scope_prose = (
@@ -316,6 +318,7 @@ class ScopePhase(PlanningPhase):
                 small_ctx,
             )
 
+            phase1_exc: Exception | None = None
             async with trace_span(
                 span_type="turn",
                 span_name="scope_turn",
@@ -326,30 +329,38 @@ class ScopePhase(PlanningPhase):
                     "phase": "planning.phase1",
                 },
             ) as turn_span:
-                _phase1_tool_calls, scope_prose = await llm_client.chat_with_tools(
-                    messages=[
-                        {"role": "system", "content": phase1_system},
-                        {"role": "user", "content": phase1_user_content},
-                    ],
-                    tools=phase1_tools,
-                    tool_executor_fn=phase1_executor,
-                    max_turns=settings.plan_phase1_max_turns,
-                    max_tokens=phase_max_tokens,
-                    text_only_exit_count=1,
-                    on_tool_call=on_tool_call,
-                    on_tool_result=on_tool_result,
-                    on_content=on_content,
-                    on_thinking=on_thinking,
-                    on_metrics=on_metrics,
-                    on_metrics_reset=on_metrics_reset,
-                    dispatcher=dispatcher,
-                    telemetry_context={
-                        "repo_root": repo_root,
-                        "session_id": session_id,
-                        "phase": "planning.phase1",
-                        "role": "primary",
-                    },
-                )
+                try:
+                    _phase1_tool_calls, scope_prose = await llm_client.chat_with_tools(
+                        messages=[
+                            {"role": "system", "content": phase1_system},
+                            {"role": "user", "content": phase1_user_content},
+                        ],
+                        tools=phase1_tools,
+                        tool_executor_fn=phase1_executor,
+                        max_turns=settings.plan_phase1_max_turns,
+                        max_tokens=phase_max_tokens,
+                        text_only_exit_count=1,
+                        on_tool_call=on_tool_call,
+                        on_tool_result=on_tool_result,
+                        on_content=on_content,
+                        on_thinking=on_thinking,
+                        on_metrics=on_metrics,
+                        on_metrics_reset=on_metrics_reset,
+                        dispatcher=dispatcher,
+                        telemetry_context={
+                            "repo_root": repo_root,
+                            "session_id": session_id,
+                            "phase": "planning.phase1",
+                            "role": "primary",
+                        },
+                    )
+                except Exception as exc:
+                    phase1_exc = exc
+                    raise
+            if phase1_exc is not None:
+                raise phase1_exc
+            if not scope_prose:
+                raise RuntimeError("Phase 1 produced no scope prose")
             if on_content:
                 await _send_content_done(ws, scope_prose)
 
@@ -452,12 +463,15 @@ class ExplorationPhase(PlanningPhase):
         repo_root = kwargs.get("repo_root", "")
         session_id = kwargs.get("session_id", "")
         refiner = kwargs.get("refiner")
+        state_manager = kwargs.get("state_manager")
         on_content = kwargs.get("on_content")
         on_thinking = kwargs.get("on_thinking")
         on_tool_call = kwargs.get("on_tool_call")
         on_tool_result = kwargs.get("on_tool_result")
         on_metrics = kwargs.get("on_metrics")
         on_metrics_reset = kwargs.get("on_metrics_reset")
+        if state_manager is None:
+            raise RuntimeError("ExplorationPhase.execute requires a state_manager")
 
         phase_max_tokens = settings.ollama_max_tokens
 
@@ -469,6 +483,10 @@ class ExplorationPhase(PlanningPhase):
         )
         logger.info("Planning Phase 2: File identification and reading")
 
+        file_summary_obj: FileSummary | None = None
+        file_identification = ""
+        phase2_elapsed = 0.0
+        phase2_exc: Exception | None = None
         async with trace_span(
             span_type="turn",
             span_name="exploration_turn",
@@ -485,24 +503,33 @@ class ExplorationPhase(PlanningPhase):
                 primary_client=llm_client,
                 expert_client=kwargs.get("expert_llm_client"),
             )
-            file_summary_obj, file_identification, phase2_elapsed = await run_phase2_exploration(
-                task=task,
-                scope=scope,
-                context=context,
-                repo_root=repo_root,
-                session_id=session_id,
-                explorer=llm_client,
-                phase_max_tokens=phase_max_tokens,
-                ws=ws,
-                dispatcher=dispatcher,
-                prompt_scope=primary_prompt_scope,
-                on_content=on_content,
-                on_thinking=on_thinking,
-                on_tool_call=on_tool_call,
-                on_tool_result=on_tool_result,
-                on_metrics=on_metrics,
-                on_metrics_reset=on_metrics_reset,
-            )
+            try:
+                file_summary_obj, file_identification, phase2_elapsed = await run_phase2_exploration(
+                    task=task,
+                    scope=scope,
+                    context=context,
+                    repo_root=repo_root,
+                    session_id=session_id,
+                    explorer=llm_client,
+                    phase_max_tokens=phase_max_tokens,
+                    ws=ws,
+                    dispatcher=dispatcher,
+                    state_manager=state_manager,
+                    prompt_scope=primary_prompt_scope,
+                    on_content=on_content,
+                    on_thinking=on_thinking,
+                    on_tool_call=on_tool_call,
+                    on_tool_result=on_tool_result,
+                    on_metrics=on_metrics,
+                    on_metrics_reset=on_metrics_reset,
+                )
+            except Exception as exc:
+                phase2_exc = exc
+                raise
+        if phase2_exc is not None:
+            raise phase2_exc
+        if not file_identification:
+            raise RuntimeError("Phase 2 produced no file identification summary")
 
         _save_debug_phase(
             repo_root,
@@ -610,8 +637,7 @@ class DesignPhase(PlanningPhase):
         phase3_project_context_block = (
             f"PROJECT CONTEXT:\n{context}\n\n" if context else ""
         )
-        phase3_user_content = registry.format_text(
-            "planning.design_user",
+        phase3_user_content = registry.get_text("planning.design_user").format(
             task=task,
             scope=scope,
             project_context=phase3_project_context_block,
@@ -634,6 +660,7 @@ class DesignPhase(PlanningPhase):
             },
             {"role": "user", "content": phase3_user_content},
         ]
+        phase3_exploration_prose = ""
 
         async def _search_only_executor(name: str, arguments: dict) -> str:
             """Execute search tools for Phase 3 design verification."""
@@ -658,6 +685,7 @@ class DesignPhase(PlanningPhase):
                 return "Design synthesis marked complete."
             return f"Unknown tool: {name}"
 
+        phase3_exc: Exception | None = None
         async with trace_span(
             span_type="turn",
             span_name="design_turn",
@@ -668,27 +696,35 @@ class DesignPhase(PlanningPhase):
                 "phase": "planning.phase3",
             },
         ) as design_turn_span:
-            _phase3_tool_calls, phase3_exploration_prose = await expert.chat_with_tools(
-                messages=phase3_messages,
-                tools=build_design_tools(),
-                tool_executor_fn=_search_only_executor,
-                max_turns=15,
-                max_tokens=expert_max_tokens,
-                text_only_exit_count=1,
-                on_tool_call=on_tool_call,
-                on_tool_result=on_tool_result,
-                on_content=on_content,
-                on_thinking=on_thinking,
-                on_metrics=on_metrics,
-                on_metrics_reset=on_metrics_reset,
-                dispatcher=dispatcher,
-                telemetry_context={
-                    "repo_root": repo_root,
-                    "session_id": session_id,
-                    "phase": "planning.phase3",
-                    "role": "expert",
-                },
-            )
+            try:
+                _phase3_tool_calls, phase3_exploration_prose = await expert.chat_with_tools(
+                    messages=phase3_messages,
+                    tools=build_design_tools(),
+                    tool_executor_fn=_search_only_executor,
+                    max_turns=15,
+                    max_tokens=expert_max_tokens,
+                    text_only_exit_count=1,
+                    on_tool_call=on_tool_call,
+                    on_tool_result=on_tool_result,
+                    on_content=on_content,
+                    on_thinking=on_thinking,
+                    on_metrics=on_metrics,
+                    on_metrics_reset=on_metrics_reset,
+                    dispatcher=dispatcher,
+                    telemetry_context={
+                        "repo_root": repo_root,
+                        "session_id": session_id,
+                        "phase": "planning.phase3",
+                        "role": "expert",
+                    },
+                )
+            except Exception as exc:
+                phase3_exc = exc
+                raise
+        if phase3_exc is not None:
+            raise phase3_exc
+        if not phase3_exploration_prose:
+            raise RuntimeError("Phase 3 produced no design exploration prose")
         if on_content:
             await _send_content_done(ws, phase3_exploration_prose)
 
@@ -1019,6 +1055,10 @@ class AssemblyPhase(PlanningPhase):
                 artifact_label="structured plan",
             )
 
+        if plan is None:
+            raise RuntimeError("Phase 4 produced no execution plan")
+        if final_elapsed < 0:
+            raise RuntimeError("Phase 4 produced an invalid elapsed time")
         if settings.enable_core_functionality_tagging:
             plan.core_functionality = list(dar_obj.core_functionality)
         if tdd_verification is None:
@@ -1230,6 +1270,7 @@ class ExplorationPhaseNode(ToolNode):
                 context=state.session_metadata.get("context", ""),
                 repo_root=state.session_metadata.get("repo_root", ""),
                 session_id=state.session_metadata.get("session_id", ""),
+                state_manager=self._kwargs.get("state_manager"),
                 refiner=self._kwargs.get("refiner"),
                 on_content=self._kwargs.get("on_content"),
                 on_thinking=self._kwargs.get("on_thinking"),
@@ -1759,6 +1800,7 @@ async def create_plan(
         "test_command": test_command,
         "expert_llm_client": expert_llm_client,
         "primary_llm_client": llm_client,
+        "state_manager": state_manager,
         "on_content": on_content,
         "on_thinking": on_thinking,
         "on_tool_call": on_tool_call,
@@ -2935,7 +2977,7 @@ async def _assemble_phase4_plan(
     on_thinking: Callable | None,
     on_metrics: Callable | None,
     on_metrics_reset: Callable | None,
-    prompt_scope,
+    prompt_scope=None,
     stage_summary: str,
     done_prefix: str,
     artifact_label: str,
@@ -2958,8 +3000,7 @@ async def _assemble_phase4_plan(
             },
             {
                 "role": "user",
-                "content": registry.format_text(
-                    "planning.assembly_user",
+                "content": registry.get_text("planning.assembly_user").format(
                     task=task,
                     design_and_risks=design_and_risks,
                     file_summary=file_summary,

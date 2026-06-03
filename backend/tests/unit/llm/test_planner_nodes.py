@@ -35,6 +35,12 @@ from lean_ai.workflow.state import WorkflowState
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _disable_role_tuning(monkeypatch):
+    monkeypatch.setattr("lean_ai.llm.planner.ensure_primary_role_tuning", AsyncMock(return_value=None))
+    monkeypatch.setattr("lean_ai.llm.planner.ensure_expert_role_tuning", AsyncMock(return_value=None))
+
+
 def _make_state(session_id: str = "test-sess") -> WorkflowState:
     """Create a fresh WorkflowState pre-populated with planning metadata."""
     state = WorkflowState.from_scratch(session_id)
@@ -251,7 +257,7 @@ class TestExplorationPhaseNode:
             mock_cm.__aexit__ = AsyncMock(return_value=False)
             mock_span.return_value = mock_cm
 
-            node = ExplorationPhaseNode(client)
+            node = ExplorationPhaseNode(client, state_manager=MagicMock())
             result = await node.execute(state)
 
         assert isinstance(result, Continue)
@@ -275,7 +281,7 @@ class TestExplorationPhaseNode:
             mock_cm.__aexit__ = AsyncMock(return_value=False)
             mock_span.return_value = mock_cm
 
-            node = ExplorationPhaseNode(client)
+            node = ExplorationPhaseNode(client, state_manager=MagicMock())
             result = await node.execute(state)
 
         assert isinstance(result, Fail)
@@ -302,7 +308,7 @@ class TestExplorationPhaseNode:
             mock_cm.__aexit__ = AsyncMock(return_value=False)
             mock_span.return_value = mock_cm
 
-            node = ExplorationPhaseNode(client)
+            node = ExplorationPhaseNode(client, state_manager=MagicMock())
             await node.execute(state)
 
         assert "file_summary_obj" in state.session_metadata
@@ -317,6 +323,7 @@ class TestExplorationPhaseNode:
         state.session_metadata["scope"] = "Scope markdown"
         state.session_metadata["repo_root"] = "/repo/path"
         state.session_metadata["session_id"] = "sess-123"
+        state_manager = MagicMock()
 
         with (
             patch("lean_ai.llm.planner.run_phase2_exploration", new_callable=AsyncMock) as mock_exp,
@@ -332,7 +339,7 @@ class TestExplorationPhaseNode:
             mock_cm.__aexit__ = AsyncMock(return_value=False)
             mock_span.return_value = mock_cm
 
-            node = ExplorationPhaseNode(client)
+            node = ExplorationPhaseNode(client, state_manager=state_manager)
             await node.execute(state)
 
         # Verify the call passed the right task, scope, repo_root, session_id
@@ -342,6 +349,7 @@ class TestExplorationPhaseNode:
         assert call_kwargs["repo_root"] == "/repo/path"
         assert call_kwargs["session_id"] == "sess-123"
         assert call_kwargs["explorer"] is client
+        assert call_kwargs["state_manager"] is state_manager
 
 
 # ── 3. DesignPhaseNode ──────────────────────────────────────────────────────

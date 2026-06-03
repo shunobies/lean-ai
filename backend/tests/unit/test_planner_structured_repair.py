@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock
+
 import pytest
 
 from lean_ai.config import settings
@@ -21,6 +24,9 @@ from lean_ai.llm.plan_schema import (
     TestingInventory as InventoryModel,
 )
 from lean_ai.llm.planner import (
+    DesignPhase,
+    ExplorationPhase,
+    ScopePhase,
     _assemble_phase4_plan,
     _run_phase5_verification,
     create_plan,
@@ -79,6 +85,7 @@ class FakePlannerClient:
     def __init__(self, outputs: list[tuple[list, str]]) -> None:
         self.outputs = list(outputs)
         self.model_name = "planner-test-model"
+        self.provider = "test"
 
     async def chat_with_tools(self, *args, **kwargs):
         return self.outputs.pop(0)
@@ -129,6 +136,29 @@ def _verification_plan() -> VerificationPlan:
                 reason="Confirm the suite passes.",
             ),
         ]
+    )
+
+
+@asynccontextmanager
+async def _swallowing_trace_span(*args, **kwargs):
+    try:
+        yield None
+    except Exception:
+        pass
+
+
+class DummyStateManager:
+    def get_state(self):
+        return None
+
+
+@pytest.fixture(autouse=True)
+def _disable_role_tuning(monkeypatch):
+    monkeypatch.setattr("lean_ai.llm.planner.ensure_primary_role_tuning", AsyncMock(return_value=None))
+    monkeypatch.setattr("lean_ai.llm.planner.ensure_expert_role_tuning", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "lean_ai.llm.planner_helpers.ensure_expert_role_tuning",
+        AsyncMock(return_value=None),
     )
 
 
@@ -573,3 +603,133 @@ async def test_create_plan_non_tdd_mode_stays_single_pass(monkeypatch, tmp_path)
     assert plan.tdd_mode is False
     assert plan.tdd_test_steps == []
     assert len(expert.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_create_plan_subgraph_forwards_state_manager_to_phase2(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+
+    async def _fake_scope(**kwargs):
+        scope = ScopeDocument(
+            problem="Update the handler.",
+            deliverables=["Handler change"],
+            in_scope=["src/app.py"],
+            out_of_scope=[],
+            downstream_consumers=[],
+            assumptions=[],
+            success_criteria=["Handler behavior is covered by tests."],
+            risks=[],
+        )
+        return scope, "PROBLEM / PURPOSE:\nUpdate the handler.\n", True
+
+    async def _fake_phase2(**kwargs):
+        captured["state_manager"] = kwargs.get("state_manager")
+        return (
+            FileSummary(
+                files_to_modify=[
+                    FileObservation(
+                        file_path="src/app.py",
+                        role="modify",
+                        reason="Handler implementation lives here.",
+                    )
+                ]
+            ),
+            "FILES TO MODIFY:\n1. src/app.py — Handler implementation lives here.\n",
+            0.01,
+        )
+
+    async def _fake_design(**kwargs):
+        return DesignAndRisks(
+            change_designs=[
+                ChangeDesign(
+                    file_path="src/app.py",
+                    decisions="Update the handler logic without changing the public API.",
+                )
+            ]
+        )
+
+    async def _fake_phase4a(*args, **kwargs):
+        return ""
+
+    monkeypatch.setattr("lean_ai.llm.planner._retrieve_session_memories", AsyncMock(return_value=""))
+    monkeypatch.setattr("lean_ai.llm.planner._synthesize_scope", _fake_scope)
+    monkeypatch.setattr("lean_ai.llm.planner.run_phase2_exploration", _fake_phase2)
+    monkeypatch.setattr("lean_ai.llm.planner._synthesize_design_and_risks", _fake_design)
+    monkeypatch.setattr("lean_ai.llm.planner._run_phase_4a", _fake_phase4a)
+    monkeypatch.setattr(settings, "enable_strict_test_contract", False)
+
+    expert = FakeExpert([_execution_plan()])
+    await create_plan(
+        task="Fix the handler",
+        repo_root=str(tmp_path),
+        llm_client=FakePlannerClient(
+            outputs=[
+                ([], "phase 1 prose"),
+                ([], "phase 3 prose"),
+            ]
+        ),
+        context="repo context",
+        ws=None,
+        expert_llm_client=expert,
+    )
+
+    assert captured["state_manager"] is not None
+
+
+@pytest.mark.asyncio
+async def test_scope_phase_reraises_original_error_when_trace_span_swallows(monkeypatch, tmp_path):
+    client = FakePlannerClient(outputs=[])
+    client.chat_with_tools = AsyncMock(side_effect=RuntimeError("phase 1 boom"))
+
+    monkeypatch.setattr("lean_ai.llm.planner.trace_span", _swallowing_trace_span)
+    monkeypatch.setattr("lean_ai.llm.planner.ensure_primary_role_tuning", AsyncMock(return_value=None))
+    monkeypatch.setattr("lean_ai.llm.planner._make_read_only_executor", lambda *args, **kwargs: None)
+
+    with pytest.raises(RuntimeError, match="phase 1 boom"):
+        await ScopePhase().execute(
+            task="Fix the handler",
+            llm_client=client,
+            repo_root=str(tmp_path),
+            session_id="s1",
+        )
+
+
+@pytest.mark.asyncio
+async def test_exploration_phase_reraises_original_error_when_trace_span_swallows(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr("lean_ai.llm.planner.trace_span", _swallowing_trace_span)
+    monkeypatch.setattr("lean_ai.llm.planner.ensure_primary_role_tuning", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "lean_ai.llm.planner.run_phase2_exploration",
+        AsyncMock(side_effect=RuntimeError("phase 2 boom")),
+    )
+
+    with pytest.raises(RuntimeError, match="phase 2 boom"):
+        await ExplorationPhase().execute(
+            task="Fix the handler",
+            scope="scope text",
+            llm_client=FakePlannerClient(outputs=[]),
+            repo_root=str(tmp_path),
+            session_id="s1",
+            state_manager=DummyStateManager(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_design_phase_reraises_original_error_when_trace_span_swallows(monkeypatch, tmp_path):
+    client = FakePlannerClient(outputs=[])
+    client.chat_with_tools = AsyncMock(side_effect=RuntimeError("phase 3 boom"))
+
+    monkeypatch.setattr("lean_ai.llm.planner.trace_span", _swallowing_trace_span)
+    monkeypatch.setattr("lean_ai.llm.planner.ensure_expert_role_tuning", AsyncMock(return_value=None))
+
+    with pytest.raises(RuntimeError, match="phase 3 boom"):
+        await DesignPhase().execute(
+            task="Fix the handler",
+            scope="scope text",
+            file_summary="summary",
+            llm_client=client,
+            repo_root=str(tmp_path),
+            session_id="s1",
+        )

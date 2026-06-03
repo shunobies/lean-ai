@@ -846,8 +846,7 @@ async def _revise_plan(
     project_context_block = (
         f"PROJECT CONTEXT:\n{context}\n\n" if context else ""
     )
-    assembly_prompt = registry.format_text(
-        "planning.assembly_user",
+    assembly_prompt = registry.get_text("planning.assembly_user").format(
         task=task,
         design_and_risks=design_and_risks,
         file_summary=file_summary,
@@ -862,6 +861,8 @@ async def _revise_plan(
         dependency_order="",
         naming_conventions="",
         risk_assessment="",
+        tdd_guidance="",
+        planned_tdd_tests="",
     )
     revision_user_content = (
         f"{assembly_prompt}\n\n"
