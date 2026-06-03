@@ -36,6 +36,16 @@ def _make_registry() -> PromptRegistry:
             ],
         )
     )
+    registry.register(
+        PromptEntry(
+            key="planning.exploration_user",
+            category="Planning",
+            name="Exploration",
+            description="exploration prompt",
+            default_text="TASK={task}\nSCOPE={scope}\nCONTEXT={context}",
+            template_vars=["task", "scope", "context"],
+        )
+    )
     return registry
 
 
@@ -60,7 +70,14 @@ def test_scoped_override_wins_for_matching_model(tmp_path) -> None:
     reloaded.load(str(tmp_path))
 
     assert reloaded.format_text("chat.system", CHAT_MAX_TURNS="5") == "global 5"
-    assert reloaded.format_text("chat.system", scope=scope, CHAT_MAX_TURNS="5") == "scoped 5"
+    assert (
+        reloaded.format_text(
+            "chat.system",
+            prompt_scope=scope,
+            CHAT_MAX_TURNS="5",
+        )
+        == "scoped 5"
+    )
 
 
 def test_non_matching_model_falls_back_to_global_override(tmp_path) -> None:
@@ -82,7 +99,28 @@ def test_non_matching_model_falls_back_to_global_override(tmp_path) -> None:
     reloaded.load(str(tmp_path))
 
     other_scope = PromptScope(model_id="openai:gpt-4o", agent_role="request")
-    assert reloaded.format_text("chat.system", scope=other_scope, CHAT_MAX_TURNS="7") == "global 7"
+    assert (
+        reloaded.format_text(
+            "chat.system",
+            prompt_scope=other_scope,
+            CHAT_MAX_TURNS="7",
+        )
+        == "global 7"
+    )
+
+
+def test_scope_keyword_formats_template_variable_not_prompt_scope() -> None:
+    registry = _make_registry()
+
+    assert (
+        registry.format_text(
+            "planning.exploration_user",
+            task="Build it",
+            scope="Scope markdown",
+            context="Repo context",
+        )
+        == "TASK=Build it\nSCOPE=Scope markdown\nCONTEXT=Repo context"
+    )
 
 
 def test_get_all_reports_global_and_scoped_override_metadata(tmp_path) -> None:

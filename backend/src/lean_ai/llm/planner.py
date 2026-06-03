@@ -276,7 +276,7 @@ class ScopePhase(PlanningPhase):
             )
             phase1_system = registry.format_text(
                 "planning.scope_system",
-                scope=primary_prompt_scope,
+                prompt_scope=primary_prompt_scope,
                 PHASE1_MAX_TURNS=phase1_turns_str,
             )
             phase1_user_content = registry.format_text(

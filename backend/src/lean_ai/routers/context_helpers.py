@@ -538,7 +538,7 @@ def build_chat_system_prompt(
     return _build_contextual_system_prompt(
         base_prompt=registry.format_text(
             "chat.system",
-            scope=effective_scope,
+            prompt_scope=effective_scope,
             CHAT_MAX_TURNS=str(max_turns),
         ),
         workspace=workspace,

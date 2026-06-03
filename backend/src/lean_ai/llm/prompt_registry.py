@@ -182,6 +182,11 @@ class PromptRegistry:
     def _resolve_text(self, key: str, scope: PromptScope | None = None) -> str:
         """Return the current text for *key* (internal helper)."""
         if scope is not None:
+            if not isinstance(scope, PromptScope):
+                raise TypeError(
+                    "PromptRegistry prompt scope must be a PromptScope, "
+                    f"got {type(scope).__name__}"
+                )
             scoped_text = self._scoped_overrides.get(self._scoped_key(key, scope))
             if scoped_text is not None:
                 return scoped_text
@@ -204,11 +209,11 @@ class PromptRegistry:
         self,
         key: str,
         *,
-        scope: PromptScope | None = None,
-        **kwargs: str,
+        prompt_scope: PromptScope | None = None,
+        **kwargs: Any,
     ) -> str:
         """Synchronously format prompt text for non-versioned call sites."""
-        text = self._resolve_text(key, scope=scope)
+        text = self._resolve_text(key, scope=prompt_scope)
         return text.format_map(defaultdict(str, **kwargs)) if kwargs else text
 
     def format_with_version(self, key: str, **kwargs: str) -> tuple[str, int]:
@@ -497,8 +502,8 @@ class PromptRegistry:
         key: str | None = None,
         session_id: str | None = None,
         *,
-        scope: PromptScope | None = None,
-        **kwargs: str,
+        prompt_scope: PromptScope | None = None,
+        **kwargs: Any,
     ) -> PromptVersionResult | SyncPromptText | Any:
         """Get a prompt, apply template substitution, preserving async compatibility."""
         if isinstance(db, str):
@@ -506,7 +511,7 @@ class PromptRegistry:
         if key is None:
             raise TypeError("PromptRegistry.format() missing required argument: 'key'")
 
-        result = self.get(db, key, session_id=session_id, scope=scope)
+        result = self.get(db, key, session_id=session_id, scope=prompt_scope)
         if isinstance(result, SyncPromptText):
             text = str(result)
             if kwargs:

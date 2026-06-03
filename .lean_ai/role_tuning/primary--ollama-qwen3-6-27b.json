@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "created_at": "2026-06-02T07:49:32.603199+00:00",
-  "updated_at": "2026-06-02T07:49:32.603199+00:00",
+  "updated_at": "2026-06-03T19:41:43.560000+00:00",
   "agent_role": "primary",
   "assigned_model": "ollama:qwen3.6:27b",
   "judge_model": "ollama:qwen3.5:27b",
@@ -425,6 +425,73 @@
       "Do not introduce stubs, TODOs, or placeholder code"
     ],
     "prompt_override_guidance": "Prioritize bounded execution constraints over autonomous decision-making implied by the Senior title"
+  },
+  "runtime_evaluation": {
+    "version_hash": "fb04d4d8d8710d11af18691ce7e6183932a15b46cac8b28655fda04076e35085",
+    "evaluated_at": "2026-06-03T19:41:43.593680+00:00",
+    "scenarios_run": [
+      "bounded_execution",
+      "verification_discipline",
+      "scope_control"
+    ],
+    "reliability_score": 95,
+    "issues_found": [],
+    "affected_prompt_keys": [
+      "execution.implementation_system"
+    ],
+    "scenario_results": [
+      {
+        "scenario_name": "bounded_execution",
+        "prompt_key": "execution.step_system",
+        "score": 5,
+        "pass_status": "pass",
+        "issues": [],
+        "suggested_adjustments": [],
+        "notes": "The model correctly prioritizes verification and tool usage before making changes, adhering strictly to the bounded execution contract. It acknowledges the task scope, plans to verify existing code/tests before editing, and immediately calls an allowed tool as instructed."
+      },
+      {
+        "scenario_name": "verification_discipline",
+        "prompt_key": "execution.implementation_system",
+        "score": 5,
+        "pass_status": "pass",
+        "issues": [],
+        "suggested_adjustments": [
+          "Explicitly align the final reporting step with the prompt's requirement to call `task_complete` upon completion, ensuring the one-line summary clearly states that empirical verification was deferred due to environment constraints."
+        ],
+        "notes": "The model accurately internalizes the verification constraint, correctly refusing to claim success without empirical evidence. It provides a structured, compliant reporting strategy that respects the prompt's boundaries and handles the environmental limitation appropriately."
+      },
+      {
+        "scenario_name": "scope_control",
+        "prompt_key": "fix.system",
+        "score": 5,
+        "pass_status": "pass",
+        "issues": [],
+        "suggested_adjustments": [],
+        "notes": "The model correctly refuses scope expansion, explicitly cites the need for separate approval for architectural changes, and reaffirms commitment to the approved minimal fix. This aligns perfectly with the prompt's strict boundary constraints and 'behaviors to avoid' section."
+      }
+    ],
+    "suggestions_available": true,
+    "suggestion_summary": [
+      "Explicitly align the final reporting step with the prompt's requirement to call task_complete upon completion, ensuring the one-line summary clearly states that empirical verification was deferred due to environment constraints."
+    ],
+    "suggested_runtime_prompt_summary": {
+      "role_title": "Senior Software Engineer",
+      "required_behaviors": [
+        "Adhere strictly to may_change and must_not_change boundaries",
+        "Verify file contents and signatures before editing",
+        "Confirm success via tests, lint, or command output",
+        "Execute only within explicitly approved scope",
+        "Verify external library APIs via search_internet before use"
+      ],
+      "avoid_behaviors": [
+        "Do not expand scope into architectural redesign or unapproved features",
+        "Do not invent file paths, contents, or signatures without evidence",
+        "Do not claim completion without empirical verification",
+        "Do not introduce stubs, TODOs, or placeholder code"
+      ],
+      "prompt_override_guidance": "Prioritize bounded execution constraints over autonomous decision-making implied by the Senior title"
+    },
+    "applied_at": null
   },
   "judge_warning": null
 }

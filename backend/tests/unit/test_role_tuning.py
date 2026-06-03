@@ -283,7 +283,7 @@ def test_request_prompt_scoped_override_preserves_placeholders(tmp_path) -> None
     )
     chat_prompt = role_tuning.registry.format_text(
         "chat.system",
-        scope=scope,
+        prompt_scope=scope,
         CHAT_MAX_TURNS="9",
     )
 
