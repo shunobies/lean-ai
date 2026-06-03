@@ -6,8 +6,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from lean_ai.llm.plan_schema import FileSummary
-from lean_ai.llm.planner_exploration import run_phase2_exploration
+from lean_ai.llm.planner_exploration import _make_read_only_executor, run_phase2_exploration
 from lean_ai.llm.prompt_registry import PromptScope, ScopedPromptOverride, registry
+from lean_ai.workflow.state import WorkflowState
 
 
 class DummyExplorer:
@@ -20,6 +21,18 @@ class DummyExplorer:
     async def chat_with_tools(self, *, messages, **kwargs):
         self.messages = messages
         return [], "No file paths identified."
+
+
+class DummyStateManager:
+    def __init__(self) -> None:
+        self.state = WorkflowState.from_scratch("sess")
+        self.save_count = 0
+
+    async def get_state_async(self) -> WorkflowState:
+        return self.state
+
+    def save(self) -> None:
+        self.save_count += 1
 
 
 @pytest.mark.asyncio
@@ -112,3 +125,41 @@ async def test_phase2_parallel_scan_formats_scope_text_without_prompt_scope_coll
     assert "PHASE 2a" in scan_user_content
     assert "TASK: Build the feature" in scan_user_content
     assert "Scope markdown handoff" in scan_user_content
+
+
+@pytest.mark.asyncio
+async def test_phase2_record_observation_tool_updates_workflow_state(tmp_path):
+    state_manager = DummyStateManager()
+    executor = _make_read_only_executor(
+        DummyExplorer(),
+        str(tmp_path),
+        "sess",
+        ws=None,
+        dispatcher=None,
+        small_ctx=False,
+        state_manager=state_manager,
+    )
+
+    result = await executor(
+        "record_file_observation",
+        {
+            "file_path": "backend/src/example.py",
+            "role": "modify",
+            "reason": "contains the behavior to change",
+            "relevant_sections": "L1-L20",
+            "key_snippets": ["def example(): pass"],
+        },
+    )
+
+    assert "1 observation(s) recorded" in result
+    assert state_manager.state.observations == [
+        {
+            "file_path": "backend/src/example.py",
+            "role": "modify",
+            "reason": "contains the behavior to change",
+            "relevant_sections": "L1-L20",
+            "key_snippets": ["def example(): pass"],
+        }
+    ]
+    assert state_manager.save_count == 1
+    assert not (tmp_path / ".lean_ai" / "observations" / "sess.json").exists()

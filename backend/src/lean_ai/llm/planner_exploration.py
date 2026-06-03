@@ -45,6 +45,7 @@ class ToolContext:
     repo_root: str
     session_id: str
     explorer: "LLMClient"
+    state_manager: StateManager | None = None
     small_ctx: bool = False
     ws: Optional["WorkflowSession"] = None
     dispatcher: Optional["WSMessageDispatcher"] = None
@@ -319,7 +320,12 @@ class UpdateScratchpadHandler:
             content=args.get("content", ""),
             repo_root=context.repo_root,
             session_id=context.session_id,
+            state=await context.state_manager.get_state_async()
+            if context.state_manager is not None
+            else None,
         )
+        if result.success and context.state_manager is not None:
+            context.state_manager.save()
         return result.output if result.success else result.error or "Error"
 
 
@@ -335,7 +341,12 @@ class AddJournalEntryHandler:
             content=args.get("content", ""),
             repo_root=context.repo_root,
             session_id=context.session_id,
+            state=await context.state_manager.get_state_async()
+            if context.state_manager is not None
+            else None,
         )
+        if result.success and context.state_manager is not None:
+            context.state_manager.save()
         return result.output if result.success else result.error or "Error"
 
 
@@ -384,7 +395,12 @@ class RecordFileObservationHandler:
             key_snippets=args.get("key_snippets") or [],
             repo_root=context.repo_root,
             session_id=context.session_id,
+            state=await context.state_manager.get_state_async()
+            if context.state_manager is not None
+            else None,
         )
+        if result.success and context.state_manager is not None:
+            context.state_manager.save()
         return result.output if result.success else result.error or "Error"
 
 
@@ -493,6 +509,7 @@ def _make_read_only_executor(
     ws: "WorkflowSession | None",
     dispatcher: WSMessageDispatcher | None,
     small_ctx: bool,
+    state_manager: StateManager | None = None,
 ) -> Callable:
     """Create a tool executor for read-only planning tools.
 
@@ -509,6 +526,7 @@ def _make_read_only_executor(
             repo_root=repo_root,
             session_id=session_id,
             explorer=explorer,
+            state_manager=state_manager,
             small_ctx=small_ctx,
             ws=ws,
             dispatcher=dispatcher,
@@ -557,6 +575,7 @@ async def run_phase2_exploration(
         ws,
         dispatcher,
         small_ctx,
+        state_manager,
     )
 
     phase2_system_prompt = resolve_prompt_text("planning.exploration_system", scope=prompt_scope)

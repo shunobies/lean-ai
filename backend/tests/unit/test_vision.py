@@ -1,7 +1,7 @@
 """Tests for the vision service module."""
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -48,7 +48,7 @@ class TestDescribeImage:
             mock_settings.vision_max_tokens = 1024
             mock_settings.vision_timeout = 60.0
 
-            mock_client = AsyncMock()
+            mock_client = MagicMock()
             mock_client.chat = AsyncMock(return_value=mock_response)
             mock_ollama.AsyncClient.return_value = mock_client
 
@@ -71,7 +71,7 @@ class TestDescribeImage:
             mock_settings.vision_max_tokens = 1024
             mock_settings.vision_timeout = 0.001  # Very short timeout
 
-            mock_client = AsyncMock()
+            mock_client = MagicMock()
             mock_client.chat = AsyncMock(
                 side_effect=asyncio.TimeoutError(),
             )
@@ -95,7 +95,7 @@ class TestDescribeImage:
             mock_settings.vision_max_tokens = 1024
             mock_settings.vision_timeout = 60.0
 
-            mock_client = AsyncMock()
+            mock_client = MagicMock()
             mock_client.chat = AsyncMock(side_effect=ConnectionError("refused"))
             mock_ollama.AsyncClient.return_value = mock_client
 
@@ -123,7 +123,7 @@ class TestDescribeImage:
             mock_settings.vision_max_tokens = 1024
             mock_settings.vision_timeout = 60.0
 
-            mock_client = AsyncMock()
+            mock_client = MagicMock()
             mock_client.chat = AsyncMock(
                 side_effect=[empty_response, good_response],
             )
@@ -148,7 +148,7 @@ class TestDescribeImage:
             mock_settings.vision_max_tokens = 1024
             mock_settings.vision_timeout = 60.0
 
-            mock_client = AsyncMock()
+            mock_client = MagicMock()
             mock_client.chat = AsyncMock(return_value=empty_response)
             mock_ollama.AsyncClient.return_value = mock_client
 
@@ -171,7 +171,7 @@ class TestDescribeImage:
             mock_settings.vision_max_tokens = 1024
             mock_settings.vision_timeout = 60.0
 
-            mock_client = AsyncMock()
+            mock_client = MagicMock()
             mock_client.chat = AsyncMock(return_value=whitespace_response)
             mock_ollama.AsyncClient.return_value = mock_client
 
@@ -193,7 +193,7 @@ class TestDescribeImage:
             mock_settings.vision_max_tokens = 1024
             mock_settings.vision_timeout = 60.0
 
-            mock_client = AsyncMock()
+            mock_client = MagicMock()
             mock_client.chat = AsyncMock(return_value=mock_response)
             mock_ollama.AsyncClient.return_value = mock_client
 
@@ -234,7 +234,7 @@ class TestDescribeImages:
             mock_settings.vision_max_tokens = 1024
             mock_settings.vision_timeout = 60.0
 
-            mock_client = AsyncMock()
+            mock_client = MagicMock()
             mock_client.chat = AsyncMock(return_value=mock_response)
             mock_ollama.AsyncClient.return_value = mock_client
 

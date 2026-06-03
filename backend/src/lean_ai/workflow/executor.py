@@ -1216,9 +1216,9 @@ async def execute_plan(
     try:
         from lean_ai.training.maintenance import run_retention_pass
 
-        asyncio.create_task(run_retention_pass(repo_root))
+        await run_retention_pass(repo_root)
     except Exception:
-        logger.debug("retention pass scheduling failed (non-fatal)", exc_info=True)
+        logger.debug("retention pass failed (non-fatal)", exc_info=True)
 
     complete_data: dict = {
         "summary": summary,

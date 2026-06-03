@@ -18,6 +18,7 @@ import pytest
 from lean_ai.llm.plan_schema import (
     DesignAndRisks,
     ExecutionPlan,
+    FileObservation,
     FileSummary,
     PlanStep,
     ScopeDocument,
@@ -27,8 +28,9 @@ from lean_ai.llm.planner import (
     DesignPhaseNode,
     ExplorationPhaseNode,
     ScopePhaseNode,
+    create_plan,
 )
-from lean_ai.workflow.graph import Continue, Fail, NodeResult
+from lean_ai.workflow.graph import Continue, Fail, NodeResult, WorkflowEngine
 from lean_ai.workflow.state import WorkflowState
 
 
@@ -68,6 +70,35 @@ def _make_scope_document() -> ScopeDocument:
 def _make_file_summary() -> FileSummary:
     """Return a minimal valid FileSummary for test fixtures."""
     return FileSummary()
+
+
+def _make_rich_file_summary() -> FileSummary:
+    """Return a FileSummary with all primary file buckets populated."""
+    return FileSummary(
+        files_to_modify=[
+            FileObservation(
+                file_path="src/api.py",
+                role="modify",
+                reason="Add the new endpoint here.",
+                relevant_sections="L10-L40",
+                key_snippets=["def existing_endpoint(): ..."],
+            )
+        ],
+        files_to_create=[
+            FileObservation(
+                file_path="tests/test_api.py",
+                role="create",
+                reason="Regression coverage for the new endpoint.",
+            )
+        ],
+        files_read_for_context=[
+            FileObservation(
+                file_path="src/routes.py",
+                role="reference",
+                reason="Shows route registration pattern.",
+            )
+        ],
+    )
 
 
 def _make_design_and_risks() -> DesignAndRisks:
@@ -116,6 +147,21 @@ class MockLLMClient:
         return _make_scope_document()
 
 
+class DummyStateManager:
+    """Tiny StateManager stand-in for graph-level planning tests."""
+
+    def __init__(self, session_id: str = "sess-graph") -> None:
+        self.session_id = session_id
+        self.state = _make_state(session_id)
+        self.save_count = 0
+
+    async def get_state_async(self) -> WorkflowState:
+        return self.state
+
+    def save(self) -> None:
+        self.save_count += 1
+
+
 # ── 1. ScopePhaseNode ───────────────────────────────────────────────────────
 
 
@@ -145,7 +191,7 @@ class TestScopePhaseNode:
             patch("lean_ai.llm.planner._synthesize_scope", new_callable=AsyncMock) as mock_syn,
             patch("lean_ai.llm.planner._send_stage", new_callable=AsyncMock),
             patch("lean_ai.llm.planner._send_stage_done", new_callable=AsyncMock),
-            patch("lean_ai.llm.planner._save_debug_phase", new_callable=AsyncMock),
+            patch("lean_ai.llm.planner._save_debug_phase", new_callable=MagicMock),
             patch("lean_ai.training.span_context.trace_span") as mock_span,
         ):
             mock_tools.return_value = ([], "scope prose")
@@ -199,7 +245,7 @@ class TestScopePhaseNode:
             patch("lean_ai.llm.planner._synthesize_scope", new_callable=AsyncMock) as mock_syn,
             patch("lean_ai.llm.planner._send_stage", new_callable=AsyncMock),
             patch("lean_ai.llm.planner._send_stage_done", new_callable=AsyncMock),
-            patch("lean_ai.llm.planner._save_debug_phase", new_callable=AsyncMock),
+            patch("lean_ai.llm.planner._save_debug_phase", new_callable=MagicMock),
             patch("lean_ai.training.span_context.trace_span") as mock_span,
         ):
             mock_tools.return_value = ([], "scope prose")
@@ -246,7 +292,7 @@ class TestExplorationPhaseNode:
             patch("lean_ai.llm.planner.run_phase2_exploration", new_callable=AsyncMock) as mock_exp,
             patch("lean_ai.llm.planner._send_stage", new_callable=AsyncMock),
             patch("lean_ai.llm.planner._send_stage_done", new_callable=AsyncMock),
-            patch("lean_ai.llm.planner._save_debug_phase", new_callable=AsyncMock),
+            patch("lean_ai.llm.planner._save_debug_phase", new_callable=MagicMock),
             patch("lean_ai.training.span_context.trace_span") as mock_span,
         ):
             file_summary = _make_file_summary()
@@ -297,7 +343,7 @@ class TestExplorationPhaseNode:
             patch("lean_ai.llm.planner.run_phase2_exploration", new_callable=AsyncMock) as mock_exp,
             patch("lean_ai.llm.planner._send_stage", new_callable=AsyncMock),
             patch("lean_ai.llm.planner._send_stage_done", new_callable=AsyncMock),
-            patch("lean_ai.llm.planner._save_debug_phase", new_callable=AsyncMock),
+            patch("lean_ai.llm.planner._save_debug_phase", new_callable=MagicMock),
             patch("lean_ai.training.span_context.trace_span") as mock_span,
         ):
             file_summary = _make_file_summary()
@@ -329,7 +375,7 @@ class TestExplorationPhaseNode:
             patch("lean_ai.llm.planner.run_phase2_exploration", new_callable=AsyncMock) as mock_exp,
             patch("lean_ai.llm.planner._send_stage", new_callable=AsyncMock),
             patch("lean_ai.llm.planner._send_stage_done", new_callable=AsyncMock),
-            patch("lean_ai.llm.planner._save_debug_phase", new_callable=AsyncMock),
+            patch("lean_ai.llm.planner._save_debug_phase", new_callable=MagicMock),
             patch("lean_ai.training.span_context.trace_span") as mock_span,
         ):
             mock_exp.return_value = (_make_file_summary(), "text", 1.0)
@@ -383,7 +429,7 @@ class TestDesignPhaseNode:
             patch("lean_ai.llm.planner._synthesize_design_and_risks", new_callable=AsyncMock) as mock_syn,
             patch("lean_ai.llm.planner._send_stage", new_callable=AsyncMock),
             patch("lean_ai.llm.planner._send_stage_done", new_callable=AsyncMock),
-            patch("lean_ai.llm.planner._save_debug_phase", new_callable=AsyncMock),
+            patch("lean_ai.llm.planner._save_debug_phase", new_callable=MagicMock),
             patch("lean_ai.llm.planner._format_design_and_risks", return_value="formatted"),
             patch("lean_ai.training.span_context.trace_span") as mock_span,
         ):
@@ -439,7 +485,7 @@ class TestDesignPhaseNode:
             patch("lean_ai.llm.planner._synthesize_design_and_risks", new_callable=AsyncMock) as mock_syn,
             patch("lean_ai.llm.planner._send_stage", new_callable=AsyncMock),
             patch("lean_ai.llm.planner._send_stage_done", new_callable=AsyncMock),
-            patch("lean_ai.llm.planner._save_debug_phase", new_callable=AsyncMock),
+            patch("lean_ai.llm.planner._save_debug_phase", new_callable=MagicMock),
             patch("lean_ai.llm.planner._format_design_and_risks", return_value="formatted"),
             patch("lean_ai.training.span_context.trace_span") as mock_span,
         ):
@@ -578,3 +624,310 @@ class TestPhaseNodePrompts:
         client = MockLLMClient()
         node = ExplorationPhaseNode(client)
         assert isinstance(node, ToolNode)
+
+
+# ── 6. Four-phase planning tree contracts ───────────────────────────────────
+
+
+class TestPlanningTreeContracts:
+    """High-signal contract tests for all four planning tree phases.
+
+    These tests intentionally patch the concrete phase implementations at the
+    graph-node boundary. They verify the planning tree's durable contracts:
+    each phase receives the upstream metadata it depends on, writes the
+    downstream metadata the next phase consumes, and forwards callbacks/model
+    dependencies without requiring live LLM calls.
+    """
+
+    @pytest.mark.asyncio
+    async def test_phase1_scope_node_forwards_inputs_callbacks_and_writes_scope(self) -> None:
+        client = MockLLMClient("scope-model")
+        state = _make_state("sess-phase1")
+        state.session_metadata.update(
+            {
+                "task": "Add endpoint",
+                "context": "Context block",
+                "repo_root": "/repo/root",
+                "session_id": "sess-phase1",
+            }
+        )
+        callbacks = {
+            "on_content": MagicMock(name="on_content"),
+            "on_thinking": MagicMock(name="on_thinking"),
+            "on_tool_call": MagicMock(name="on_tool_call"),
+            "on_tool_result": MagicMock(name="on_tool_result"),
+            "on_metrics": MagicMock(name="on_metrics"),
+            "on_metrics_reset": MagicMock(name="on_metrics_reset"),
+        }
+        scope_doc = _make_scope_document()
+
+        with patch("lean_ai.llm.planner.ScopePhase", new_callable=MagicMock) as phase_cls:
+            phase = phase_cls.return_value
+            phase.execute = AsyncMock(return_value=scope_doc)
+
+            node = ScopePhaseNode(client, ws="ws", dispatcher="dispatcher", **callbacks)
+            result = await node.execute(state)
+
+        assert isinstance(result, Continue)
+        assert result.payload["scope"] == scope_doc.to_markdown()
+        assert state.session_metadata["scope_obj"] is scope_doc
+        assert state.session_metadata["scope"] == scope_doc.to_markdown()
+        phase.execute.assert_awaited_once()
+        call = phase.execute.call_args.kwargs
+        assert call["task"] == "Add endpoint"
+        assert call["llm_client"] is client
+        assert call["ws"] == "ws"
+        assert call["dispatcher"] == "dispatcher"
+        assert call["context"] == "Context block"
+        assert call["repo_root"] == "/repo/root"
+        assert call["session_id"] == "sess-phase1"
+        for name, cb in callbacks.items():
+            assert call[name] is cb
+
+    @pytest.mark.asyncio
+    async def test_phase2_exploration_node_requires_scope_and_writes_file_summary(self) -> None:
+        client = MockLLMClient("explorer-model")
+        state = _make_state("sess-phase2")
+        state.session_metadata.update(
+            {
+                "task": "Add endpoint",
+                "scope": "Scope markdown from Phase 1",
+                "context": "Context block",
+                "repo_root": "/repo/root",
+                "session_id": "sess-phase2",
+            }
+        )
+        state_manager = DummyStateManager("sess-phase2")
+        refiner = object()
+        file_summary = _make_rich_file_summary()
+
+        with patch("lean_ai.llm.planner.ExplorationPhase", new_callable=MagicMock) as phase_cls:
+            phase = phase_cls.return_value
+            phase.execute = AsyncMock(return_value=file_summary)
+
+            node = ExplorationPhaseNode(
+                client,
+                ws="ws",
+                dispatcher="dispatcher",
+                state_manager=state_manager,
+                refiner=refiner,
+            )
+            result = await node.execute(state)
+
+        assert isinstance(result, Continue)
+        assert "FILES TO MODIFY" in result.payload["file_summary"]
+        assert "src/api.py" in result.payload["file_summary"]
+        assert state.session_metadata["file_summary_obj"] is file_summary
+        assert state.session_metadata["file_summary"] == file_summary.to_markdown()
+        phase.execute.assert_awaited_once()
+        call = phase.execute.call_args.kwargs
+        assert call["task"] == "Add endpoint"
+        assert call["scope"] == "Scope markdown from Phase 1"
+        assert call["llm_client"] is client
+        assert call["state_manager"] is state_manager
+        assert call["refiner"] is refiner
+        assert call["repo_root"] == "/repo/root"
+        assert call["session_id"] == "sess-phase2"
+
+    @pytest.mark.asyncio
+    async def test_phase3_design_node_requires_phase1_and_phase2_outputs(self) -> None:
+        client = MockLLMClient("design-model")
+        state = _make_state("sess-phase3")
+        state.session_metadata.update(
+            {
+                "task": "Add endpoint",
+                "scope": "Scope markdown from Phase 1",
+                "file_summary": "File summary markdown from Phase 2",
+                "context": "Context block",
+                "repo_root": "/repo/root",
+                "session_id": "sess-phase3",
+            }
+        )
+        design = _make_design_and_risks()
+
+        with patch("lean_ai.llm.planner.DesignPhase", new_callable=MagicMock) as phase_cls:
+            phase = phase_cls.return_value
+            phase.execute = AsyncMock(return_value=design)
+
+            node = DesignPhaseNode(client, ws="ws", dispatcher="dispatcher")
+            result = await node.execute(state)
+
+        assert isinstance(result, Continue)
+        assert result.payload["design_and_risks"] is design
+        assert state.session_metadata["design_and_risks_obj"] is design
+        phase.execute.assert_awaited_once()
+        call = phase.execute.call_args.kwargs
+        assert call["task"] == "Add endpoint"
+        assert call["scope"] == "Scope markdown from Phase 1"
+        assert call["file_summary"] == "File summary markdown from Phase 2"
+        assert call["llm_client"] is client
+        assert call["context"] == "Context block"
+        assert call["repo_root"] == "/repo/root"
+        assert call["session_id"] == "sess-phase3"
+
+    @pytest.mark.asyncio
+    async def test_phase4_assembly_node_requires_all_prior_phase_outputs(self) -> None:
+        client = MockLLMClient("assembly-model")
+        state = _make_state("sess-phase4")
+        file_summary = _make_rich_file_summary()
+        design = _make_design_and_risks()
+        state.session_metadata.update(
+            {
+                "task": "Add endpoint",
+                "scope": "Scope markdown from Phase 1",
+                "file_summary": file_summary.to_markdown(),
+                "file_summary_obj": file_summary,
+                "design_and_risks_obj": design,
+                "context": "Context block",
+                "repo_root": "/repo/root",
+                "session_id": "sess-phase4",
+            }
+        )
+        plan = _make_execution_plan()
+        refiner = object()
+        expert = MockLLMClient("expert-model")
+
+        with patch("lean_ai.llm.planner.AssemblyPhase", new_callable=MagicMock) as phase_cls:
+            phase = phase_cls.return_value
+            phase.execute = AsyncMock(return_value=plan)
+
+            node = AssemblyPhaseNode(
+                client,
+                ws="ws",
+                dispatcher="dispatcher",
+                refiner=refiner,
+                test_command="pytest",
+                expert_llm_client=expert,
+            )
+            result = await node.execute(state)
+
+        assert isinstance(result, Continue)
+        assert result.payload["plan"] is plan
+        assert state.session_metadata["plan"] is plan
+        phase.execute.assert_awaited_once()
+        call = phase.execute.call_args.kwargs
+        assert call["task"] == "Add endpoint"
+        assert call["scope"] == "Scope markdown from Phase 1"
+        assert call["file_summary"] == file_summary.to_markdown()
+        assert call["design_and_risks"] is design
+        assert call["file_summary_obj"] is file_summary
+        assert call["test_command"] == "pytest"
+        assert call["refiner"] is refiner
+        assert call["expert_llm_client"] is expert
+        assert call["llm_client"] is client
+
+    @pytest.mark.asyncio
+    async def test_create_plan_runs_four_phase_tree_in_order_and_persists_handoffs(
+        self,
+        monkeypatch,
+    ) -> None:
+        primary = MockLLMClient("primary-model")
+        expert = MockLLMClient("expert-model")
+        state_manager = DummyStateManager("sess-tree")
+        state_manager.state.session_metadata.clear()
+        order: list[str] = []
+        scope_doc = _make_scope_document()
+        file_summary = _make_rich_file_summary()
+        design = _make_design_and_risks()
+        plan = _make_execution_plan()
+
+        class FakeScopePhase:
+            async def execute(self, **kwargs):
+                order.append("phase1")
+                assert kwargs["task"] == "Add endpoint"
+                assert kwargs["llm_client"] is primary
+                assert kwargs["context"] == "Project context"
+                assert kwargs["repo_root"] == "/repo/root"
+                assert kwargs["session_id"] == "sess-tree"
+                return scope_doc
+
+        class FakeExplorationPhase:
+            async def execute(self, **kwargs):
+                order.append("phase2")
+                assert kwargs["scope"] == scope_doc.to_markdown()
+                assert kwargs["llm_client"] is primary
+                assert kwargs["state_manager"] is state_manager
+                return file_summary
+
+        class FakeDesignPhase:
+            async def execute(self, **kwargs):
+                order.append("phase3")
+                assert kwargs["scope"] == scope_doc.to_markdown()
+                assert kwargs["file_summary"] == file_summary.to_markdown()
+                assert kwargs["llm_client"] is expert
+                return design
+
+        class FakeAssemblyPhase:
+            async def execute(self, **kwargs):
+                order.append("phase4")
+                assert kwargs["scope"] == scope_doc.to_markdown()
+                assert kwargs["file_summary"] == file_summary.to_markdown()
+                assert kwargs["file_summary_obj"] is file_summary
+                assert kwargs["design_and_risks"] is design
+                assert kwargs["llm_client"] is expert
+                assert kwargs["expert_llm_client"] is expert
+                assert kwargs["test_command"] == "pytest"
+                return plan
+
+        monkeypatch.setattr("lean_ai.llm.planner.ScopePhase", FakeScopePhase)
+        monkeypatch.setattr("lean_ai.llm.planner.ExplorationPhase", FakeExplorationPhase)
+        monkeypatch.setattr("lean_ai.llm.planner.DesignPhase", FakeDesignPhase)
+        monkeypatch.setattr("lean_ai.llm.planner.AssemblyPhase", FakeAssemblyPhase)
+
+        result = await create_plan(
+            task="Add endpoint",
+            repo_root="/repo/root",
+            llm_client=primary,
+            context="Project context",
+            session_id="sess-tree",
+            state_manager=state_manager,
+            expert_llm_client=expert,
+            test_command="pytest",
+        )
+
+        assert result is plan
+        assert order == ["phase1", "phase2", "phase3", "phase4"]
+        assert state_manager.state.session_metadata["task"] == "Add endpoint"
+        assert state_manager.state.session_metadata["context"] == "Project context"
+        assert state_manager.state.session_metadata["scope_obj"] is scope_doc
+        assert state_manager.state.session_metadata["scope"] == scope_doc.to_markdown()
+        assert state_manager.state.session_metadata["file_summary_obj"] is file_summary
+        assert state_manager.state.session_metadata["file_summary"] == file_summary.to_markdown()
+        assert state_manager.state.session_metadata["design_and_risks_obj"] is design
+        assert state_manager.state.session_metadata["plan"] is plan
+        assert state_manager.state.current_plan == plan.model_dump()
+        # Four saves from WorkflowEngine, plus the final current_plan save.
+        assert state_manager.save_count >= 5
+
+    @pytest.mark.asyncio
+    async def test_workflow_engine_stops_tree_on_phase_failure(self) -> None:
+        state = _make_state("sess-fail-tree")
+        order: list[str] = []
+
+        class FirstPhase(ScopePhaseNode):
+            async def execute(self, state):  # type: ignore[override]
+                order.append("phase1")
+                return Continue()
+
+        class FailingSecondPhase(ExplorationPhaseNode):
+            async def execute(self, state):  # type: ignore[override]
+                order.append("phase2")
+                return Fail(error="phase2 broke")
+
+        class ThirdPhase(DesignPhaseNode):
+            async def execute(self, state):  # type: ignore[override]
+                order.append("phase3")
+                return Continue()
+
+        from lean_ai.workflow.graph import WorkflowGraph
+
+        graph = WorkflowGraph()
+        graph.add_node(FirstPhase(MockLLMClient()))
+        graph.add_node(FailingSecondPhase(MockLLMClient()))
+        graph.add_node(ThirdPhase(MockLLMClient()))
+
+        result = await WorkflowEngine().run(graph, state=state)
+
+        assert isinstance(result, Fail)
+        assert result.error == "phase2 broke"
+        assert order == ["phase1", "phase2"]

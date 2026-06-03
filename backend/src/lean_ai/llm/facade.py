@@ -978,17 +978,19 @@ class LLMClient:
                 _ws_session = _telemetry.get("session_id")
                 if _repo_root:
                     _ws_db = await get_db(_repo_root)
-                    _budget_result = await registry.get(
-                        _ws_db,
-                        "nudge.reasoning_budget_exceeded",
-                        session_id=_ws_session,
-                    )
-                    if isinstance(_budget_result, PromptVersionResult):
-                        budget_nudge = _budget_result.text
-                        _telemetry["prompt_version_id"] = _budget_result.version
-                    else:
-                        budget_nudge = _budget_result
-                    await _ws_db.close()
+                    try:
+                        _budget_result = await registry.get(
+                            _ws_db,
+                            "nudge.reasoning_budget_exceeded",
+                            session_id=_ws_session,
+                        )
+                        if isinstance(_budget_result, PromptVersionResult):
+                            budget_nudge = _budget_result.text
+                            _telemetry["prompt_version_id"] = _budget_result.version
+                        else:
+                            budget_nudge = _budget_result
+                    finally:
+                        await _ws_db.close()
                 else:
                     _budget_result = await registry.get(
                         None,

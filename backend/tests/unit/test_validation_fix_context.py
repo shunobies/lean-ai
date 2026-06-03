@@ -56,6 +56,10 @@ async def test_validation_fix_prompt_includes_phase4_plan_context(monkeypatch, t
     monkeypatch.setattr(workflow_validation, "load_condensed_context", lambda _repo_root: "")
     monkeypatch.setattr(workflow_validation, "make_tool_executor", lambda *a, **k: _noop_executor)
     monkeypatch.setattr(workflow_validation, "_run_post_validation", _fake_post_validation)
+    monkeypatch.setattr(
+        "lean_ai.workflow.hooks.fire_validation_attempt_hook",
+        lambda **_kwargs: None,
+    )
 
     result = await _run_validation_fix_loop(
         repo_root=str(tmp_path),

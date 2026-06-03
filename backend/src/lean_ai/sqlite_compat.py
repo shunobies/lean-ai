@@ -19,6 +19,7 @@ import logging
 import os
 import sqlite3
 import time
+import weakref
 from threading import Thread
 from typing import Any
 
@@ -55,6 +56,8 @@ class SyncConnection:
 
     def __init__(self, connection: sqlite3.Connection):
         self._connection = connection
+        self._closed = False
+        self._finalizer = weakref.finalize(self, connection.close)
 
     async def execute(self, sql: str, parameters: Any = None) -> SyncCursor:
         if parameters is None:
@@ -74,7 +77,14 @@ class SyncConnection:
         self._connection.rollback()
 
     async def close(self) -> None:
-        self._connection.close()
+        if not self._closed:
+            self._finalizer()
+            self._closed = True
+
+    def __del__(self) -> None:
+        finalizer = getattr(self, "_finalizer", None)
+        if finalizer is not None and finalizer.alive:
+            finalizer()
 
     @property
     def row_factory(self):

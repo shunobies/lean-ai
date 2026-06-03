@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 import pytest
 
 from lean_ai.config import settings
@@ -73,6 +75,19 @@ async def _noop_executor(_name: str, _args: dict) -> str:
     return "OK"
 
 
+async def _noop_async(*_args, **_kwargs):
+    return None
+
+
+async def _noop_retention_pass(*_args, **_kwargs) -> dict:
+    return {}
+
+
+@asynccontextmanager
+async def _noop_trace_span(*_args, **_kwargs):
+    yield None
+
+
 def _noop_factory(*_args, **_kwargs):
     return _noop_executor
 
@@ -91,6 +106,21 @@ def _const_step_prompt(*_args, **_kwargs) -> str:
 
 def _noop_side_effect(*_args, **_kwargs) -> None:
     return None
+
+
+@pytest.fixture(autouse=True)
+def _disable_unit_test_side_effects(monkeypatch):
+    monkeypatch.setattr(workflow_executor, "ensure_primary_role_tuning", _noop_async)
+    monkeypatch.setattr(workflow_executor, "ensure_expert_role_tuning", _noop_async)
+    monkeypatch.setattr(workflow_executor, "trace_span", _noop_trace_span)
+    monkeypatch.setattr(
+        "lean_ai.training.maintenance.run_retention_pass",
+        _noop_retention_pass,
+    )
+    monkeypatch.setattr(
+        "lean_ai.workflow.hooks.fire_workflow_event",
+        lambda **_kwargs: None,
+    )
 
 
 @pytest.mark.asyncio

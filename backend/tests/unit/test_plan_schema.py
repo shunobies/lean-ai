@@ -15,7 +15,7 @@ from lean_ai.llm.plan_schema import (
     PlanStep,
     ScopeAssumption,
     ScopeDocument,
-    TestingInventory,
+    TestingInventory as InventoryModel,
     VerifiedReference,
     plan_to_markdown,
 )
@@ -224,7 +224,7 @@ def test_file_summary_to_markdown():
                 evidence="User model only has password field, not hashed",
             ),
         ],
-        testing_inventory=TestingInventory(
+        testing_inventory=InventoryModel(
             test_framework="pytest",
             test_directory="tests/",
             test_file_pattern="test_*.py",

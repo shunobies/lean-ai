@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
@@ -24,6 +24,14 @@ from lean_ai.workflow.state import StateManager, WorkflowState
 
 
 # ── WorkflowState Tests ─────────────────────────────────────────────────────
+
+
+class FakeAsyncDb:
+    def __init__(self) -> None:
+        self.close_count = 0
+
+    async def close(self) -> None:
+        self.close_count += 1
 
 
 def test_from_scratch_creates_empty_state():
@@ -312,11 +320,13 @@ def test_load_legacy_conversation_from_db(tmp_path, monkeypatch):
     inside _load_legacy. Verify conversation history is populated from the mock return value."""
     monkeypatch.chdir(tmp_path)
     mock_conv = [{"role": "user", "content": "test"}]
-    with patch("lean_ai.db.get_db", return_value=AsyncMock()):
+    db = FakeAsyncDb()
+    with patch("lean_ai.db.get_db", return_value=db):
         with patch("lean_ai.db.get_conversation_log", return_value=mock_conv):
             manager = StateManager("sess-1")
             loaded = manager.load()
             assert loaded.conversation_history == mock_conv
+            assert db.close_count == 1
 
 
 @pytest.mark.asyncio
@@ -324,13 +334,13 @@ async def test_load_async_legacy_conversation_from_db(tmp_path, monkeypatch):
     """Verify load_async() populates conversation history from the DB path."""
     monkeypatch.chdir(tmp_path)
     mock_conv = [{"role": "user", "content": "async test"}]
-    db = AsyncMock()
+    db = FakeAsyncDb()
     with patch("lean_ai.db.get_db", return_value=db):
         with patch("lean_ai.db.get_conversation_log", return_value=mock_conv):
             manager = StateManager("sess-1")
             loaded = await manager.load_async()
             assert loaded.conversation_history == mock_conv
-            db.close.assert_awaited_once()
+            assert db.close_count == 1
 
 
 def test_load_legacy_empty_when_no_sources(tmp_path, monkeypatch):

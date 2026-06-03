@@ -13,6 +13,7 @@ Covers:
 from __future__ import annotations
 
 import sys
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, ModuleType, patch
 
 import pytest
@@ -89,10 +90,12 @@ def _setup_mock_modules(plan, execute_plan_return=None):
 
     # Mock span_context module
     mock_span_context = ModuleType("lean_ai.training.span_context")
-    mock_span = AsyncMock()
-    mock_span.__aenter__ = AsyncMock(return_value=None)
-    mock_span.__aexit__ = AsyncMock(return_value=None)
-    mock_span_context.trace_span = MagicMock(return_value=mock_span)
+
+    @asynccontextmanager
+    async def trace_span(*args, **kwargs):
+        yield None
+
+    mock_span_context.trace_span = trace_span
     sys.modules["lean_ai.training.span_context"] = mock_span_context
 
     # Mock routers module
