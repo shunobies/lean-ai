@@ -1302,6 +1302,38 @@ async def ensure_role_tuning(
     return scope
 
 
+def get_current_role_tuning_scope(
+    *,
+    repo_root: str | None,
+    agent_role: str,
+    assigned_client: "LLMClient",
+    require_current_runtime_evaluation: bool = False,
+) -> PromptScope | None:
+    """Return an already-current role tuning scope without doing tuning work.
+
+    This helper is intentionally read-only: it does not calibrate, evaluate,
+    synthesize, persist scoped overrides, or mutate prompt files. Hot-path
+    callers such as normal chat can use it to benefit from a current profile
+    without blocking startup on role-tuning maintenance.
+    """
+    if not repo_root:
+        return None
+
+    registry.load(repo_root)
+    scope = prompt_scope_for_role(assigned_client, agent_role)
+    profile = load_role_tuning_profile(repo_root, scope)
+    if profile is None:
+        return None
+    if not profile_is_current(profile, scope, repo_root=repo_root):
+        return None
+    if require_current_runtime_evaluation:
+        if profile.runtime_evaluation is None:
+            return None
+        if not runtime_evaluation_is_current(profile, scope, repo_root=repo_root):
+            return None
+    return scope
+
+
 async def ensure_request_role_tuning(
     *,
     repo_root: str | None,

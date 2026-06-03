@@ -15,6 +15,11 @@ logger = logging.getLogger(__name__)
 EXECUTION_CONTEXT_PERCENT = 0.05  # 5% of context window for execution prompts
 PLANNING_CONTEXT_PERCENT = 0.15  # 15% of context window for planning prompts
 CUSTOM_DOCS_SHARE = 0.4  # 40% of budget reserved for custom steering docs
+UNSAFE_CHAT_SCOPED_OVERRIDE_MARKERS = (
+    "## Suggested Agent Prompt",
+    "Grill Me Protocol",
+    "AVAILABLE TOOLS:",
+)
 
 
 def _read_text_file(path: Path, max_chars: int | None = None) -> str | None:
@@ -518,10 +523,22 @@ def build_chat_system_prompt(
     """Build the standard chat system prompt."""
     if repo_root:
         registry.load(repo_root)
+    effective_scope = prompt_scope
+    if prompt_scope is not None:
+        scoped_override = registry.get_scoped_override("chat.system", prompt_scope)
+        if scoped_override and any(
+            marker in scoped_override for marker in UNSAFE_CHAT_SCOPED_OVERRIDE_MARKERS
+        ):
+            logger.warning(
+                "Ignoring unsafe scoped chat.system override for %s/%s",
+                prompt_scope.agent_role,
+                prompt_scope.model_id,
+            )
+            effective_scope = None
     return _build_contextual_system_prompt(
         base_prompt=registry.format_text(
             "chat.system",
-            scope=prompt_scope,
+            scope=effective_scope,
             CHAT_MAX_TURNS=str(max_turns),
         ),
         workspace=workspace,
