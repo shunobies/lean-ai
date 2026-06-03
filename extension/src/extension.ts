@@ -15,7 +15,13 @@ import { LeanAIInlineProvider } from "./inlineProvider";
 import { SessionTreeProvider } from "./sessionTreeProvider";
 import { SessionDetailProvider } from "./sessionDetailProvider";
 import { BackendClient } from "./backendClient";
-import { startBackend, stopBackend, restartBackend, clearManagedInstallCache } from "./backendProcess";
+import {
+    startBackend,
+    stopBackend,
+    restartBackend,
+    clearManagedInstallCache,
+    consumePendingManagedInstallReboot,
+} from "./backendProcess";
 import { resetBackend } from "./backendInstaller";
 import { SettingsPanel } from "./settingsPanel";
 import { NotesPanel } from "./notesPanel";
@@ -33,7 +39,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     console.log("Lean AI extension activating...");
 
     // Start backend server (managed install + auto-start)
-    await startBackend(context.secrets, context);
+    const backendStarted = await startBackend(context.secrets, context);
+    if (backendStarted && consumePendingManagedInstallReboot()) {
+        await restartBackend();
+    }
 
     // Register Sidebar Webview Provider (Activity Bar chat panel)
     const sidebarProvider = new LeanAISidebarProvider(context.extensionUri, context);

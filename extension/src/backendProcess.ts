@@ -49,6 +49,7 @@ let _secrets: vscode.SecretStorage | undefined;
 let _context: vscode.ExtensionContext | undefined;
 let _managedInstall: BackendInstallResult | null | undefined;
 let startBackendPromise: Promise<boolean> | undefined;
+let pendingManagedInstallReboot = false;
 
 // Health monitor state
 let healthMonitorInterval: NodeJS.Timeout | undefined;
@@ -544,6 +545,9 @@ export async function startBackend(
         // Returns null when the user has explicit settings (manual mode).
         if (_context && _managedInstall === undefined) {
             _managedInstall = await ensureBackendInstalled(_context);
+            if (_managedInstall?.pythonPathUpdated) {
+                pendingManagedInstallReboot = true;
+            }
         }
 
         let resolvedPython: string;
@@ -722,4 +726,16 @@ export function clearManagedInstallCache(): void {
  */
 export function isBackendManaged(): boolean {
     return serverProcess !== undefined || managedPort !== undefined;
+}
+
+/**
+ * Consume the one-shot reboot request raised after managed setup updates the
+ * persisted Python path. Activation calls restartBackend after startBackend has
+ * fully settled, which avoids recursively restarting while installation is in
+ * progress.
+ */
+export function consumePendingManagedInstallReboot(): boolean {
+    const pending = pendingManagedInstallReboot;
+    pendingManagedInstallReboot = false;
+    return pending;
 }

@@ -12,9 +12,12 @@ import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.CapturingProcessHandler
 import com.leanai.plugin.settings.LeanAiSettings
 import com.leanai.plugin.util.PythonDetector
+import java.net.JarURLConnection
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
+import java.util.jar.JarFile
 
 /**
  * Manages backend installation: venv creation, pip install, version tracking, upgrades.
@@ -26,11 +29,14 @@ class BackendInstaller {
 
     companion object {
         private const val VERSION_KEY = "leanai.installedBackendVersion"
+        private const val BACKEND_DIR_KEY = "leanai.managedBackendDir"
         private const val CURRENT_VERSION = "0.1.0"
 
-        /** Standard venv location for managed installs. */
-        val VENV_DIR: Path = Paths.get(
-            System.getProperty("user.home"), ".cache", "JetBrains", "lean-ai", "backend-venv"
+        private const val VENV_DIR_NAME = ".venv"
+
+        /** Standard fallback location for managed installs. */
+        private val CACHE_ROOT: Path = Paths.get(
+            System.getProperty("user.home"), ".cache", "JetBrains", "lean-ai"
         )
 
         fun getInstance(): BackendInstaller =
@@ -50,10 +56,11 @@ class BackendInstaller {
 
         // Managed mode: use venv python
         val isWindows = System.getProperty("os.name").lowercase().contains("win")
+        val venvDir = getVenvDir()
         val venvPython = if (isWindows) {
-            VENV_DIR.resolve("Scripts").resolve("python.exe")
+            venvDir.resolve("Scripts").resolve("python.exe")
         } else {
-            VENV_DIR.resolve("bin").resolve("python3")
+            venvDir.resolve("bin").resolve("python")
         }
         return venvPython.toString()
     }
@@ -63,9 +70,7 @@ class BackendInstaller {
         val settings = LeanAiSettings.getInstance().state
         if (settings.backendDir.isNotEmpty()) return settings.backendDir
 
-        // Managed mode: extract bundled backend to cache dir
-        val backendDir = VENV_DIR.parent.resolve("backend")
-        return backendDir.toString()
+        return getManagedBackendDir().toString()
     }
 
     /**
@@ -101,20 +106,24 @@ class BackendInstaller {
                         "Python 3 not found. Please install Python 3.10+ and ensure it's on your PATH."
                     )
 
-                // Step 2: Create venv
-                indicator.text = "Creating virtual environment..."
-                indicator.fraction = 0.2
-                createVenv(systemPython)
-
-                // Step 3: Extract bundled backend
+                // Step 2: Resolve/extract backend source
                 indicator.text = "Extracting backend source..."
-                indicator.fraction = 0.3
+                indicator.fraction = 0.2
                 extractBundledBackend()
+
+                // Step 3: Create venv
+                indicator.text = "Creating virtual environment..."
+                indicator.fraction = 0.3
+                createVenv(systemPython)
 
                 // Step 4: pip install
                 indicator.text = "Installing Python dependencies..."
                 indicator.fraction = 0.4
                 pipInstall()
+
+                indicator.text = "Upgrading Python packaging tools..."
+                indicator.fraction = 0.75
+                upgradePackagingTools()
 
                 // Step 5: Verify imports
                 indicator.text = "Verifying installation..."
@@ -130,27 +139,25 @@ class BackendInstaller {
     }
 
     private fun createVenv(systemPython: String) {
-        if (Files.exists(VENV_DIR.resolve("pyvenv.cfg"))) {
-            log.info("Venv already exists at $VENV_DIR")
+        val venvDir = getVenvDir()
+        if (Files.exists(venvDir.resolve("pyvenv.cfg"))) {
+            log.info("Venv already exists at $venvDir")
             return
         }
 
-        Files.createDirectories(VENV_DIR.parent)
-        val cmd = GeneralCommandLine(systemPython, "-m", "venv", VENV_DIR.toString())
+        Files.createDirectories(venvDir.parent)
+        val cmd = GeneralCommandLine(systemPython, "-m", "venv", venvDir.toString())
         val handler = CapturingProcessHandler(cmd)
         val result = handler.runProcess(120_000)
 
         if (result.exitCode != 0) {
             throw RuntimeException("Failed to create venv: ${result.stderr}")
         }
-        log.info("Created venv at $VENV_DIR")
+        log.info("Created venv at $venvDir")
     }
 
     private fun extractBundledBackend() {
-        val backendDir = Paths.get(getBackendDir())
-        // The backend source is bundled in plugin resources at /backend/
-        // For managed mode, we extract it to the cache directory.
-        // In development, the backend/ dir already exists at the repo root.
+        val backendDir = getManagedBackendDir()
         if (Files.exists(backendDir.resolve("pyproject.toml"))) {
             log.info("Backend source already present at $backendDir")
             return
@@ -162,29 +169,38 @@ class BackendInstaller {
         if (resourceUrl != null) {
             log.info("Extracting bundled backend to $backendDir")
             Files.createDirectories(backendDir)
-            // Resource extraction handled by the plugin classloader
-            // For JAR-based distribution, we copy the resource tree
             extractResourceDirectory(resourcePath, backendDir)
         } else {
-            log.warn("No bundled backend found in plugin resources — using repo-local backend")
+            throw RuntimeException("No bundled backend found in plugin resources.")
         }
     }
 
     private fun extractResourceDirectory(resourcePath: String, targetDir: Path) {
-        // Walk the resource tree and copy files
-        // This handles both development (filesystem) and production (JAR) modes
         val url = javaClass.getResource(resourcePath) ?: return
 
         if (url.protocol == "file") {
-            // Development mode: resource is on filesystem
             val sourceDir = Paths.get(url.toURI())
             sourceDir.toFile().copyRecursively(targetDir.toFile(), overwrite = true)
+            return
+        }
+
+        if (url.protocol == "jar") {
+            val connection = url.openConnection() as JarURLConnection
+            val jarFile: JarFile = connection.jarFile
+            val prefix = connection.entryName.trimEnd('/') + "/"
+            jarFile.entries().asSequence()
+                .filter { !it.isDirectory && it.name.startsWith(prefix) }
+                .forEach { entry ->
+                    val relative = entry.name.removePrefix(prefix)
+                    if (shouldExclude(relative)) return@forEach
+                    val out = targetDir.resolve(relative)
+                    Files.createDirectories(out.parent)
+                    jarFile.getInputStream(entry).use { input ->
+                        Files.copy(input, out, StandardCopyOption.REPLACE_EXISTING)
+                    }
+                }
         } else {
-            // JAR mode: extract from JAR
-            // For production, the backend is a full directory tree in the JAR
-            // We use a manifest file listing all paths to extract
-            log.info("JAR-based backend extraction — will extract on first run")
-            // This is a simplified version; production would use a manifest
+            throw RuntimeException("Unsupported backend resource protocol: ${url.protocol}")
         }
     }
 
@@ -194,7 +210,7 @@ class BackendInstaller {
 
         val cmd = GeneralCommandLine(
             pythonPath, "-m", "pip", "install", "-e", "$backendDir[dev]",
-            "--quiet", "--disable-pip-version-check"
+            "--disable-pip-version-check"
         )
         val handler = CapturingProcessHandler(cmd)
         val result = handler.runProcess(600_000) // 10 min timeout for pip
@@ -203,6 +219,21 @@ class BackendInstaller {
             throw RuntimeException("pip install failed:\n${result.stderr}")
         }
         log.info("pip install completed successfully")
+    }
+
+    private fun upgradePackagingTools() {
+        val pythonPath = getPythonPath()
+        val cmd = GeneralCommandLine(
+            pythonPath, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel",
+            "--disable-pip-version-check"
+        )
+        val handler = CapturingProcessHandler(cmd)
+        val result = handler.runProcess(300_000)
+
+        if (result.exitCode != 0) {
+            throw RuntimeException("pip packaging tool upgrade failed:\n${result.stderr}")
+        }
+        log.info("Python packaging tools upgraded successfully")
     }
 
     private fun verifyImports() {
@@ -218,5 +249,55 @@ class BackendInstaller {
             throw RuntimeException("Import verification failed:\n${result.stderr}")
         }
         log.info("Import verification passed")
+    }
+
+    private fun getVenvDir(): Path = getManagedBackendDir().resolve(VENV_DIR_NAME)
+
+    private fun getManagedBackendDir(): Path {
+        val props = PropertiesComponent.getInstance()
+        props.getValue(BACKEND_DIR_KEY)?.let { return Paths.get(it) }
+
+        val resourcePath = "/backend"
+        val resourceUrl = javaClass.getResource(resourcePath)
+        val backendDir = if (resourceUrl?.protocol == "file") {
+            val sourceDir = Paths.get(resourceUrl.toURI())
+            if (Files.exists(sourceDir.resolve("pyproject.toml")) && isWritableDirectory(sourceDir)) {
+                sourceDir
+            } else {
+                CACHE_ROOT.resolve("backend")
+            }
+        } else {
+            CACHE_ROOT.resolve("backend")
+        }
+
+        props.setValue(BACKEND_DIR_KEY, backendDir.toString())
+        return backendDir
+    }
+
+    private fun isWritableDirectory(dir: Path): Boolean {
+        return try {
+            Files.createDirectories(dir)
+            val probe = dir.resolve(".lean-ai-write-test-${System.nanoTime()}")
+            Files.writeString(probe, "")
+            Files.deleteIfExists(probe)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun shouldExclude(relativePath: String): Boolean {
+        val parts = relativePath.split('/', '\\')
+        val excludedNames = setOf(".env", ".git", ".venv", "venv")
+        if (parts.any { it in excludedNames }) return true
+        val excludedPatterns = listOf(
+            "__pycache__",
+            ".egg-info",
+            ".mypy_cache",
+            ".pytest_cache",
+            ".ruff_cache",
+            "node_modules",
+        )
+        return parts.any { part -> excludedPatterns.any { pattern -> part.contains(pattern) } }
     }
 }

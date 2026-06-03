@@ -1,31 +1,50 @@
 /**
- * Managed backend installation — creates a venv in globalStorageUri,
+ * Managed backend installation — creates a .venv beside the backend source,
  * pip-installs the bundled Python backend, verifies core imports, and
  * offers optional extras (openai, anthropic, reference).
  *
- * Manual mode: when the user explicitly sets `lean-ai.backendDir` or
- * `lean-ai.pythonPath` (non-default), all auto-install logic is skipped.
+ * Manual mode: when the user explicitly sets `lean-ai.backendDir` or a
+ * non-managed `lean-ai.pythonPath`, all auto-install logic is skipped.
  */
 
 import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
-import { execSync, execFile } from "child_process";
+import { execFile, execFileSync, execSync } from "child_process";
 import { SECRET_KEYS } from "./settingsSync";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const VENV_DIR = "backend-venv";
+const VENV_DIR = ".venv";
 const VERSION_KEY = "lean-ai.installedBackendVersion";
 const EXTRAS_KEY = "lean-ai.installedExtras";
 const EXTRAS_PROMPTED_KEY = "lean-ai.extrasPrompted";
+const MANAGED_PYTHON_PATH_KEY = "lean-ai.managedPythonPath";
+const MANAGED_BACKEND_DIR_KEY = "lean-ai.managedBackendDir";
+const LEGACY_VENV_DIR = "backend-venv";
 const MIN_PYTHON: [number, number] = [3, 10];
 const VERIFY_IMPORTS = ["lean_ai", "tree_sitter", "fastapi", "uvicorn", "ollama"];
+const BACKEND_COPY_EXCLUDE_NAMES = new Set([
+    ".env",
+    ".git",
+    ".venv",
+    "venv",
+    "tests",
+]);
+const BACKEND_COPY_EXCLUDE_PATTERNS = [
+    "__pycache__",
+    ".egg-info",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "node_modules",
+];
 
 export interface BackendInstallResult {
     pythonPath: string;
-    backendDir: string; // globalStorageUri path — used for .env placement
+    backendDir: string;
     freshInstall: boolean;
+    pythonPathUpdated: boolean;
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -43,25 +62,44 @@ export async function ensureBackendInstalled(
     const config = vscode.workspace.getConfiguration("lean-ai");
     const explicitBackendDir = config.get<string>("backendDir", "");
     const explicitPythonPath = config.get<string>("pythonPath", "python");
+    const previousManagedPython = context.globalState.get<string>(MANAGED_PYTHON_PATH_KEY, "");
 
-    if (explicitBackendDir || explicitPythonPath !== "python") {
+    if (
+        explicitBackendDir ||
+        (explicitPythonPath !== "python" &&
+            !isManagedPythonPath(explicitPythonPath, previousManagedPython, context))
+    ) {
         // User has made explicit choices — skip managed installation
         return null;
     }
 
     const channel = getOutputChannel();
-    const globalDir = context.globalStorageUri.fsPath;
-    const venvPath = path.join(globalDir, VENV_DIR);
+    const target = resolveManagedBackendTarget(context, channel);
+    const venvPath = path.join(target.backendDir, VENV_DIR);
     const venvPython = getVenvPythonPath(venvPath);
     const extensionVersion = context.extension.packageJSON.version as string;
     const installedVersion = context.globalState.get<string>(VERSION_KEY);
+    const installedBackendDir = context.globalState.get<string>(MANAGED_BACKEND_DIR_KEY);
 
     // ── Already installed and up-to-date ─────────────────────────────────
     if (
         installedVersion === extensionVersion &&
+        installedBackendDir === target.backendDir &&
         fs.existsSync(venvPython)
     ) {
-        return { pythonPath: venvPython, backendDir: globalDir, freshInstall: false };
+        const pythonPathUpdated = await updateManagedPythonSetting(
+            config,
+            explicitPythonPath,
+            previousManagedPython,
+            venvPython,
+            channel,
+        );
+        return {
+            pythonPath: venvPython,
+            backendDir: target.backendDir,
+            freshInstall: false,
+            pythonPathUpdated,
+        };
     }
 
     // ── Install or upgrade ───────────────────────────────────────────────
@@ -78,6 +116,11 @@ export async function ensureBackendInstalled(
         },
         async (progress) => {
             try {
+                if (target.copiedFrom) {
+                    progress.report({ message: "Preparing bundled backend..." });
+                    copyBackendSource(target.copiedFrom, target.backendDir, channel);
+                }
+
                 // Step 1: Resolve system Python (for venv creation)
                 if (!fs.existsSync(venvPython)) {
                     progress.report({ message: "Locating Python..." });
@@ -97,15 +140,17 @@ export async function ensureBackendInstalled(
 
                     // Step 2: Create venv
                     progress.report({ message: "Creating virtual environment..." });
-                    fs.mkdirSync(globalDir, { recursive: true });
+                    fs.mkdirSync(target.backendDir, { recursive: true });
                     await createVenv(systemPython, venvPath, channel);
                 }
 
                 // Step 3: Install / upgrade backend
                 progress.report({ message: isUpgrade ? "Upgrading backend..." : "Installing backend (this may take a minute)..." });
-                const bundledBackend = getBundledBackendPath(context);
                 const extras = await detectExtras(context);
-                await installBackend(venvPython, bundledBackend, extras, isUpgrade, channel);
+                await installBackend(venvPython, target.backendDir, extras, isUpgrade, channel);
+
+                progress.report({ message: "Upgrading Python packaging tools..." });
+                await upgradePackagingTools(venvPython, channel);
 
                 // Step 4: Verify core imports
                 progress.report({ message: "Verifying installation..." });
@@ -131,6 +176,15 @@ export async function ensureBackendInstalled(
 
                 // Step 5: Store version
                 await context.globalState.update(VERSION_KEY, extensionVersion);
+                await context.globalState.update(MANAGED_PYTHON_PATH_KEY, venvPython);
+                await context.globalState.update(MANAGED_BACKEND_DIR_KEY, target.backendDir);
+                const pythonPathUpdated = await updateManagedPythonSetting(
+                    config,
+                    explicitPythonPath,
+                    previousManagedPython,
+                    venvPython,
+                    channel,
+                );
                 channel.appendLine(`[Lean AI] Backend v${extensionVersion} installed successfully.`);
 
                 // Step 6: Prompt for optional extras (only on first install, non-blocking)
@@ -141,8 +195,9 @@ export async function ensureBackendInstalled(
 
                 return {
                     pythonPath: venvPython,
-                    backendDir: globalDir,
+                    backendDir: target.backendDir,
                     freshInstall: !isUpgrade,
+                    pythonPathUpdated,
                 };
             } catch (err) {
                 const message = err instanceof Error ? err.message : String(err);
@@ -172,12 +227,23 @@ export async function ensureBackendInstalled(
  * Used by the "Reinstall Backend" command.
  */
 export async function resetBackend(context: vscode.ExtensionContext): Promise<void> {
-    const venvPath = path.join(context.globalStorageUri.fsPath, VENV_DIR);
     const channel = getOutputChannel();
-    await deleteVenv(venvPath, channel);
+    const managedBackendDir = context.globalState.get<string>(MANAGED_BACKEND_DIR_KEY);
+    const venvs = new Set<string>();
+    if (managedBackendDir) {
+        venvs.add(path.join(managedBackendDir, VENV_DIR));
+    }
+    venvs.add(path.join(getBundledBackendPath(context), VENV_DIR));
+    venvs.add(path.join(context.globalStorageUri.fsPath, "backend", VENV_DIR));
+    venvs.add(path.join(context.globalStorageUri.fsPath, LEGACY_VENV_DIR));
+    for (const venvPath of venvs) {
+        await deleteVenv(venvPath, channel);
+    }
     await context.globalState.update(VERSION_KEY, undefined);
     await context.globalState.update(EXTRAS_KEY, undefined);
     await context.globalState.update(EXTRAS_PROMPTED_KEY, undefined);
+    await context.globalState.update(MANAGED_PYTHON_PATH_KEY, undefined);
+    await context.globalState.update(MANAGED_BACKEND_DIR_KEY, undefined);
     channel.appendLine("[Lean AI] Backend reset complete. Will reinstall on next activation.");
 }
 
@@ -192,14 +258,13 @@ export async function addExtras(
 ): Promise<boolean> {
     if (extras.length === 0) { return true; }
 
-    const globalDir = context.globalStorageUri.fsPath;
-    const venvPath = path.join(globalDir, VENV_DIR);
+    const channel = getOutputChannel();
+    const backendDir = context.globalState.get<string>(MANAGED_BACKEND_DIR_KEY)
+        || resolveManagedBackendTarget(context, channel).backendDir;
+    const venvPath = path.join(backendDir, VENV_DIR);
     const venvPython = getVenvPythonPath(venvPath);
 
     if (!fs.existsSync(venvPython)) { return false; }
-
-    const bundledBackend = getBundledBackendPath(context);
-    const channel = getOutputChannel();
 
     try {
         await vscode.window.withProgress(
@@ -208,7 +273,7 @@ export async function addExtras(
                 title: `Installing ${extras.join(", ")} extras...`,
                 cancellable: false,
             },
-            () => installBackend(venvPython, bundledBackend, extras, false, channel),
+            () => installBackend(venvPython, backendDir, extras, false, channel),
         );
         // Update stored extras
         const prev = context.globalState.get<string[]>(EXTRAS_KEY, []);
@@ -244,6 +309,129 @@ function getBundledBackendPath(context: vscode.ExtensionContext): string {
     return path.join(context.extensionPath, "backend");
 }
 
+interface ManagedBackendTarget {
+    backendDir: string;
+    copiedFrom?: string;
+}
+
+function resolveManagedBackendTarget(
+    context: vscode.ExtensionContext,
+    channel: vscode.OutputChannel,
+): ManagedBackendTarget {
+    const bundledBackend = getBundledBackendPath(context);
+    if (isUsableBackendDir(bundledBackend) && canWriteDirectory(bundledBackend)) {
+        return { backendDir: bundledBackend };
+    }
+
+    const fallbackBackend = path.join(context.globalStorageUri.fsPath, "backend");
+    channel.appendLine(
+        `[Lean AI] Bundled backend is not writable; using managed backend copy at ${fallbackBackend}`,
+    );
+    return {
+        backendDir: fallbackBackend,
+        copiedFrom: isUsableBackendDir(bundledBackend) ? bundledBackend : undefined,
+    };
+}
+
+function isUsableBackendDir(dir: string): boolean {
+    try {
+        return fs.statSync(dir).isDirectory()
+            && fs.existsSync(path.join(dir, "pyproject.toml"));
+    } catch {
+        return false;
+    }
+}
+
+function canWriteDirectory(dir: string): boolean {
+    try {
+        fs.mkdirSync(dir, { recursive: true });
+        const probe = path.join(dir, `.lean-ai-write-test-${process.pid}-${Date.now()}`);
+        fs.writeFileSync(probe, "");
+        fs.rmSync(probe, { force: true });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function isManagedPythonPath(
+    value: string,
+    previousManagedPython: string,
+    context?: vscode.ExtensionContext,
+): boolean {
+    if (!value) {
+        return true;
+    }
+    const normalized = path.normalize(value);
+    if (previousManagedPython && normalized === path.normalize(previousManagedPython)) {
+        return true;
+    }
+    if (!context) {
+        return false;
+    }
+
+    const managedCandidates = [
+        getVenvPythonPath(path.join(getBundledBackendPath(context), VENV_DIR)),
+        getVenvPythonPath(path.join(context.globalStorageUri.fsPath, "backend", VENV_DIR)),
+        getVenvPythonPath(path.join(context.globalStorageUri.fsPath, LEGACY_VENV_DIR)),
+    ];
+    return managedCandidates.some((candidate) => normalized === path.normalize(candidate));
+}
+
+async function updateManagedPythonSetting(
+    config: vscode.WorkspaceConfiguration,
+    currentPythonPath: string,
+    previousManagedPython: string,
+    venvPython: string,
+    channel: vscode.OutputChannel,
+): Promise<boolean> {
+    if (
+        currentPythonPath !== "python" &&
+        path.normalize(currentPythonPath) === path.normalize(venvPython)
+    ) {
+        return false;
+    }
+    if (currentPythonPath !== "python" && !isManagedPythonPath(currentPythonPath, previousManagedPython)) {
+        return false;
+    }
+
+    await config.update("pythonPath", venvPython, vscode.ConfigurationTarget.Global);
+    channel.appendLine(`[Lean AI] Updated lean-ai.pythonPath to managed venv: ${venvPython}`);
+    return true;
+}
+
+function shouldExcludeBackendCopyEntry(name: string): boolean {
+    if (BACKEND_COPY_EXCLUDE_NAMES.has(name)) {
+        return true;
+    }
+    return BACKEND_COPY_EXCLUDE_PATTERNS.some((pattern) => name.includes(pattern));
+}
+
+function copyBackendSource(src: string, dst: string, channel: vscode.OutputChannel): void {
+    if (!isUsableBackendDir(src)) {
+        throw new Error(`Bundled backend source not found at ${src}`);
+    }
+
+    channel.appendLine(`[Lean AI] Copying bundled backend from ${src} to ${dst}`);
+    fs.mkdirSync(dst, { recursive: true });
+    copyRecursive(src, dst);
+}
+
+function copyRecursive(src: string, dst: string): void {
+    const stat = fs.statSync(src);
+    if (stat.isDirectory()) {
+        fs.mkdirSync(dst, { recursive: true });
+        for (const entry of fs.readdirSync(src)) {
+            if (shouldExcludeBackendCopyEntry(entry)) {
+                continue;
+            }
+            copyRecursive(path.join(src, entry), path.join(dst, entry));
+        }
+        return;
+    }
+    fs.copyFileSync(src, dst);
+}
+
 /**
  * Probe PATH for a working Python interpreter.
  * Preference order: python3 → python (Unix), python → py → python3 (Windows).
@@ -272,7 +460,7 @@ function resolveSystemPython(): string | null {
 /** Run `python --version` and parse the output. */
 function checkPythonVersion(pythonPath: string): { ok: boolean; version: string } {
     try {
-        const output = execSync(`${pythonPath} --version`, {
+        const output = execFileSync(pythonPath, ["--version"], {
             timeout: 5000,
             stdio: "pipe",
             encoding: "utf-8",
@@ -335,8 +523,9 @@ function installBackend(
     upgrade: boolean,
     channel: vscode.OutputChannel,
 ): Promise<void> {
-    const target = extras.length > 0
-        ? `${backendPath}[${extras.join(",")}]`
+    const allExtras = [...new Set(["dev", ...extras])];
+    const target = allExtras.length > 0
+        ? `${backendPath}[${allExtras.join(",")}]`
         : backendPath;
 
     const args = ["-m", "pip", "install"];
@@ -367,6 +556,33 @@ function installBackend(
     });
 }
 
+function upgradePackagingTools(
+    venvPython: string,
+    channel: vscode.OutputChannel,
+): Promise<void> {
+    const args = ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"];
+    channel.appendLine(`[Lean AI] Running: ${venvPython} ${args.join(" ")}`);
+
+    return new Promise((resolve, reject) => {
+        const proc = execFile(
+            venvPython,
+            args,
+            { timeout: 300_000 },
+            (err) => {
+                if (err) {
+                    channel.appendLine(`[Lean AI] packaging tool upgrade failed: ${err.message}`);
+                    reject(err);
+                    return;
+                }
+                channel.appendLine("[Lean AI] Python packaging tools upgraded.");
+                resolve();
+            },
+        );
+        proc.stdout?.on("data", (d: Buffer) => channel.append(d.toString()));
+        proc.stderr?.on("data", (d: Buffer) => channel.append(d.toString()));
+    });
+}
+
 /** Verify core packages are importable. */
 function verifyInstallation(
     venvPython: string,
@@ -375,7 +591,7 @@ function verifyInstallation(
     const missing: string[] = [];
     for (const mod of VERIFY_IMPORTS) {
         try {
-            execSync(`${venvPython} -c "import ${mod}"`, {
+            execFileSync(venvPython, ["-c", `import ${mod}`], {
                 timeout: 10_000,
                 stdio: "pipe",
             });
@@ -491,9 +707,10 @@ async function promptOptionalExtras(context: vscode.ExtensionContext): Promise<v
     }
 
     const extras = selected.map((s) => s.label);
-    const venvPath = path.join(context.globalStorageUri.fsPath, VENV_DIR);
+    const backendDir = context.globalState.get<string>(MANAGED_BACKEND_DIR_KEY)
+        || resolveManagedBackendTarget(context, getOutputChannel()).backendDir;
+    const venvPath = path.join(backendDir, VENV_DIR);
     const venvPython = getVenvPythonPath(venvPath);
-    const bundledBackend = getBundledBackendPath(context);
 
     await vscode.window.withProgress(
         {
@@ -504,7 +721,7 @@ async function promptOptionalExtras(context: vscode.ExtensionContext): Promise<v
         async () => {
             const channel = getOutputChannel();
             try {
-                await installBackend(venvPython, bundledBackend, extras, false, channel);
+                await installBackend(venvPython, backendDir, extras, false, channel);
                 await context.globalState.update(EXTRAS_KEY, extras);
                 vscode.window.showInformationMessage(
                     `Lean AI: Installed extras: ${extras.join(", ")}. Restart the backend to use them.`,
