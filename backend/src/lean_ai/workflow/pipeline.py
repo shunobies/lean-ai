@@ -65,7 +65,7 @@ async def _detect_branching_and_request_feedback(
         session_span_uuid: The trace span UUID for the current session.
         repo_root: The repository root path (for resolving the training DB).
     """
-    state = state_manager.get_state()
+    state = await state_manager.get_state_async()
     restored_id = state.session_metadata.get("restored_checkpoint_id")
     if restored_id is None:
         return
@@ -602,8 +602,28 @@ async def run_workflow(
         engine = WorkflowEngine()
         result_node = await engine.run(graph, state_manager=state_manager, state=state)
 
+        if isinstance(result_node, Fail):
+            state.current_phase = "failed"
+            state.session_metadata["workflow_error"] = result_node.error
+            state_manager.save()
+            await ws_send(
+                session,
+                "error",
+                {
+                    "message": result_node.error,
+                    "recoverable": False,
+                },
+            )
+            raise RuntimeError(result_node.error)
+
+        if isinstance(result_node, Suspend):
+            state.current_phase = "suspended"
+            state.session_metadata["suspend_reason"] = result_node.reason
+            state_manager.save()
+            raise WorkflowSessionClosedError()
+
         # Extract the execution result from state
-        state = state_manager.get_state()
+        state = await state_manager.get_state_async()
         result = state.session_metadata.get("execution_result", "")
 
         # Save checkpoint after execution phase

@@ -148,7 +148,12 @@ async def _swallowing_trace_span(*args, **kwargs):
 
 
 class DummyStateManager:
-    def get_state(self):
+    session_id = "dummy-session"
+
+    async def get_state_async(self):
+        return None
+
+    def save(self):
         return None
 
 

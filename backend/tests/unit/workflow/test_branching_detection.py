@@ -41,7 +41,7 @@ def _make_state_manager(
 ) -> MagicMock:
     """Build a mock StateManager with configurable restored_checkpoint_id.
 
-    The mock exposes get_state() returning a WorkflowState whose
+    The mock exposes get_state_async() returning a WorkflowState whose
     session_metadata contains the restored_checkpoint_id key.
     """
     state = WorkflowState.from_scratch(session_id)
@@ -50,7 +50,7 @@ def _make_state_manager(
 
     manager = MagicMock()
     manager.session_id = session_id
-    manager.get_state.return_value = state
+    manager.get_state_async = AsyncMock(return_value=state)
     return manager
 
 

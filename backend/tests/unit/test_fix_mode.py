@@ -43,7 +43,7 @@ async def test_fix_mode_implementation_starts_from_fresh_prompt_root(monkeypatch
     monkeypatch.setattr(
         fix_mode,
         "build_fix_system_prompt",
-        lambda _ctx, test_command="", task="": "implementation-system",
+        lambda _ctx, test_command="", task="", **kwargs: "implementation-system",
     )
     monkeypatch.setattr(fix_mode, "make_tool_executor", lambda *args, **kwargs: _noop_executor)
     monkeypatch.setattr(fix_mode, "_effective_post_commands", lambda _repo_root: {})

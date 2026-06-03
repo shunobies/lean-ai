@@ -417,7 +417,7 @@ async def _run_validation_fix_loop(
 
         # Inject execution-phase state so the fix LLM has context
         if state_manager:
-            state = state_manager.get_state()
+            state = await state_manager.get_state_async()
             jrnl = "\n".join(state.journal_entries) if state.journal_entries else ""
             if jrnl:
                 messages.append(
@@ -444,7 +444,7 @@ async def _run_validation_fix_loop(
                 load_condensed_context(repo_root),
                 task=task,
             )
-            state = state_manager.get_state() if state_manager else None
+            state = state_manager.get_cached_state() if state_manager else None
             pad = state.scratchpad_content if state else ""
             jrnl = "\n".join(state.journal_entries) if state and state.journal_entries else ""
             refreshed: list[dict] = [

@@ -245,7 +245,14 @@ async def test_execute_plan_validation_fix_gets_state_manager_and_plan_context(
     class DummyStateManager:
         session_id = "sess-5"
 
-        def get_state(self):
+        async def get_state_async(self):
+            return type(
+                "State",
+                (),
+                {"journal_entries": [], "scratchpad_content": ""},
+            )()
+
+        def get_cached_state(self):
             return type(
                 "State",
                 (),
@@ -255,7 +262,7 @@ async def test_execute_plan_validation_fix_gets_state_manager_and_plan_context(
         def save(self):
             return None
 
-        def save_checkpoint(self, **kwargs):
+        async def save_checkpoint_async(self, **kwargs):
             return "checkpoint"
 
     async def _fake_post_validation(repo_root, ws_arg):
