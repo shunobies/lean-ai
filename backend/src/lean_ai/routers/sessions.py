@@ -119,7 +119,7 @@ async def list_checkpoints(session_id: str, repo_root: str):
         await db.close()
 
     sm = StateManager(session_id)
-    checkpoints = sm.list_checkpoints(session_id)
+    checkpoints = await sm.list_checkpoints_async(session_id)
     return checkpoints
 
 
@@ -136,7 +136,7 @@ async def restore_checkpoint(session_id: str, request: RestoreCheckpointRequest)
         # Load the checkpoint and validate it belongs to this session
         sm = StateManager(session_id)
         try:
-            checkpoint_state = sm.get_checkpoint(request.checkpoint_id)
+            checkpoint_state = await sm.get_checkpoint_async(request.checkpoint_id)
         except FileNotFoundError:
             raise HTTPException(
                 status_code=404, detail=f"Checkpoint {request.checkpoint_id} not found"

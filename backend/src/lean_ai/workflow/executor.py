@@ -901,7 +901,7 @@ async def execute_plan(
                     f"Files changed: {', '.join(sorted(p for p in changed_paths if p)) or 'none'}."
                 )
                 try:
-                    state_manager.save_checkpoint(
+                    await state_manager.save_checkpoint_async(
                         state=state_manager.get_state(),
                         phase=f"Step {step.step_number}: {step.job or step.instruction}",
                         summary=step_summary,
@@ -952,7 +952,7 @@ async def execute_plan(
                     getattr(plan, "tdd_test_steps", None) or []
                 )
                 impl_steps = len(plan.steps)
-                state_manager.save_checkpoint(
+                await state_manager.save_checkpoint_async(
                     state=state_manager.get_state(),
                     phase="TDD Execution Complete",
                     summary=(
@@ -1022,7 +1022,7 @@ async def execute_plan(
             files_str = (
                 ", ".join(files_modified) if files_modified else "none"
             )
-            state_manager.save_checkpoint(
+            await state_manager.save_checkpoint_async(
                 state=state_manager.get_state(),
                 phase="Execution Plan Complete",
                 summary=(
@@ -1077,7 +1077,7 @@ async def execute_plan(
             len(validation_results) if validation_results else 0
         )
         try:
-            state_manager.save_checkpoint(
+            await state_manager.save_checkpoint_async(
                 state=state_manager.get_state(),
                 phase="Validation Complete",
                 summary=(

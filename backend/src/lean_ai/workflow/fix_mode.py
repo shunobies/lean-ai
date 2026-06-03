@@ -92,7 +92,7 @@ async def _run_fix(
     """
     if state_manager is None:
         state_manager = StateManager(session_id or "fix")
-    bootstrap_state = state_manager.get_state()
+    bootstrap_state = await state_manager.get_state_async()
     if bootstrap_state.session_id:
         if not bootstrap_state.scratchpad_content:
             bootstrap_state.scratchpad_content = scratchpad.read_scratchpad(

@@ -549,7 +549,7 @@ async def run_workflow(
         plan_commands = _effective_post_commands(repo_root)
 
         # Load or create initial state
-        state = state_manager.get_state()
+        state = await state_manager.get_state_async()
 
         # Build the workflow graph with planning, approval, and execution nodes
         graph = WorkflowGraph()
@@ -609,7 +609,7 @@ async def run_workflow(
         # Save checkpoint after execution phase
         state.current_phase = "execution_complete"
         state_manager.save()
-        _execution_checkpoint_id = state_manager.save_checkpoint(
+        _execution_checkpoint_id = await state_manager.save_checkpoint_async(
             state=state,
             phase="Phase 3: Execution Complete",
             summary="Execution completed successfully",
@@ -629,7 +629,7 @@ async def run_workflow(
         # Save checkpoint after final validation phase
         state.current_phase = "validation"
         state_manager.save()
-        _validation_checkpoint_id = state_manager.save_checkpoint(
+        _validation_checkpoint_id = await state_manager.save_checkpoint_async(
             state=state,
             phase="Phase 4: Validation",
             summary="Final validation completed",

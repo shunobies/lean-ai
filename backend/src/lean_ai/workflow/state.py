@@ -15,7 +15,8 @@ then writing a single .lean_ai/state/{session_id}.json file.
 
 import json
 import logging
-import sqlite3
+import asyncio
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -131,6 +132,13 @@ class StateManager:
         return self._state_file
 
     def load(self) -> WorkflowState:
+        """Load state from sync code.
+
+        Raises a clear error when called from an active event loop.
+        """
+        return self._run_async_helper(self.load_async(), "load_async()")
+
+    async def load_async(self) -> WorkflowState:
         """Load state from the consolidated JSON file.
 
         Falls back to legacy sources if the consolidated file does not exist.
@@ -149,9 +157,13 @@ class StateManager:
                 )
 
         # Fall back to legacy sources
-        return self._load_legacy()
+        return await self._load_legacy_async()
 
     def _load_legacy(self) -> WorkflowState:
+        """Read state from legacy sources from sync code."""
+        return self._run_async_helper(self._load_legacy_async(), "_load_legacy_async()")
+
+    async def _load_legacy_async(self) -> WorkflowState:
         """Read state from legacy scratchpad/journal/observations files and DB.
 
         Returns a WorkflowState populated from whatever legacy sources exist.
@@ -198,15 +210,9 @@ class StateManager:
         try:
             from lean_ai.db import get_conversation_log, get_db  # noqa: I001
 
-            import asyncio
-
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            db = await get_db(str(Path(".").resolve()))
             try:
-                db = loop.run_until_complete(get_db(str(Path(".").resolve())))
-                conv_entries = loop.run_until_complete(
-                    get_conversation_log(db, self.session_id)
-                )
+                conv_entries = await get_conversation_log(db, self.session_id)
                 state.conversation_history = conv_entries
                 logger.info(
                     "Loaded %d conversation entries for %s",
@@ -214,7 +220,7 @@ class StateManager:
                     self.session_id,
                 )
             finally:
-                loop.close()
+                await db.close()
         except Exception:
             logger.warning(
                 "Failed to load conversation log from DB for %s",
@@ -271,6 +277,12 @@ class StateManager:
             return self.load()
         return self._state
 
+    async def get_state_async(self) -> WorkflowState:
+        """Return the current in-memory state, loading if necessary."""
+        if self._state is None:
+            return await self.load_async()
+        return self._state
+
     def refresh_state(self) -> WorkflowState:
         """Reload state from disk, overwriting any in-memory changes."""
         self._state = None
@@ -298,6 +310,24 @@ class StateManager:
         summary: str,
         parent_id: str | None = None,
     ) -> str:
+        """Save a checkpoint from sync code."""
+        return self._run_async_helper(
+            self.save_checkpoint_async(
+                state=state,
+                phase=phase,
+                summary=summary,
+                parent_id=parent_id,
+            ),
+            "save_checkpoint_async()",
+        )
+
+    async def save_checkpoint_async(
+        self,
+        state: WorkflowState,
+        phase: str,
+        summary: str,
+        parent_id: str | None = None,
+    ) -> str:
         """Save a checkpoint of the given state.
 
         Serialises *state* to JSON, writes the JSON file to the
@@ -306,9 +336,6 @@ class StateManager:
 
         Returns the checkpoint ID (a hex string).
         """
-        import asyncio
-        import uuid
-
         checkpoint_id = uuid.uuid4().hex[:12]
         now = datetime.now(timezone.utc).isoformat()
 
@@ -325,11 +352,11 @@ class StateManager:
 
         # Persist state_json into SQLite
         try:
-            from lean_ai.db import _db_path
+            from lean_ai.db import get_db
 
-            db = sqlite3.connect(_db_path(str(Path(".").resolve())))
+            db = await get_db(str(Path(".").resolve()))
             try:
-                db.execute(
+                await db.execute(
                     "INSERT INTO checkpoints "
                     "(id, session_id, parent_id, phase, state_json, timestamp, summary) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -343,9 +370,9 @@ class StateManager:
                         summary,
                     ),
                 )
-                db.commit()
+                await db.commit()
             finally:
-                db.close()
+                await db.close()
         except Exception:
             logger.warning(
                 "Failed to persist checkpoint %s to SQLite for %s",
@@ -367,6 +394,13 @@ class StateManager:
         return checkpoint_id
 
     def get_checkpoint(self, checkpoint_id: str) -> WorkflowState:
+        """Load a checkpoint from sync code."""
+        return self._run_async_helper(
+            self.get_checkpoint_async(checkpoint_id),
+            "get_checkpoint_async()",
+        )
+
+    async def get_checkpoint_async(self, checkpoint_id: str) -> WorkflowState:
         """Load a checkpoint by ID.
 
         Attempts to read the JSON cache file first; on ``FileNotFoundError``
@@ -390,16 +424,15 @@ class StateManager:
 
         # Fallback: reconstruct from SQLite
         try:
-            from lean_ai.db import _db_path
+            from lean_ai.db import get_db
 
-            db = sqlite3.connect(_db_path(str(Path(".").resolve())))
-            db.row_factory = sqlite3.Row
+            db = await get_db(str(Path(".").resolve()))
             try:
-                cursor = db.execute(
+                cursor = await db.execute(
                     "SELECT state_json FROM checkpoints WHERE id = ?",
                     (checkpoint_id,),
                 )
-                row = cursor.fetchone()
+                row = await cursor.fetchone()
                 if row is None:
                     raise FileNotFoundError(
                         f"Checkpoint {checkpoint_id} not found"
@@ -408,7 +441,7 @@ class StateManager:
                 data = json.loads(state_json)
                 return WorkflowState(**data)
             finally:
-                db.close()
+                await db.close()
         except Exception:
             logger.warning(
                 "Failed to load checkpoint %s from SQLite",
@@ -420,26 +453,32 @@ class StateManager:
             ) from None
 
     def list_checkpoints(self, session_id: str) -> list[dict]:
+        """List checkpoints from sync code."""
+        return self._run_async_helper(
+            self.list_checkpoints_async(session_id),
+            "list_checkpoints_async()",
+        )
+
+    async def list_checkpoints_async(self, session_id: str) -> list[dict]:
         """Return metadata-only checkpoint tree for *session_id*.
 
         Queries only ``id, session_id, parent_id, phase, summary, timestamp``
         columns from SQLite (never loads ``state_json`` blobs).
         """
         try:
-            from lean_ai.db import _db_path
+            from lean_ai.db import get_db
 
-            db = sqlite3.connect(_db_path(str(Path(".").resolve())))
-            db.row_factory = sqlite3.Row
+            db = await get_db(str(Path(".").resolve()))
             try:
-                cursor = db.execute(
+                cursor = await db.execute(
                     "SELECT id, session_id, parent_id, phase, summary, "
                     "timestamp FROM checkpoints "
                     "WHERE session_id = ? ORDER BY timestamp ASC",
                     (session_id,),
                 )
-                rows = cursor.fetchall()
+                rows = await cursor.fetchall()
             finally:
-                db.close()
+                await db.close()
         except Exception:
             logger.warning(
                 "Failed to list checkpoints for session %s", session_id, exc_info=True
@@ -495,3 +534,15 @@ class StateManager:
                     logger.info("Removed stale checkpoint file: %s", f)
                 except Exception:
                     logger.warning("Failed to remove checkpoint file: %s", f, exc_info=True)
+
+    def _run_async_helper(self, coro: Any, async_name: str) -> Any:
+        """Run an async state helper from sync code when no loop is active."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro)
+
+        coro.close()
+        raise RuntimeError(
+            f"StateManager.{async_name} must be awaited when called from async code"
+        )

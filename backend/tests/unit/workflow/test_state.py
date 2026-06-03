@@ -319,6 +319,20 @@ def test_load_legacy_conversation_from_db(tmp_path, monkeypatch):
             assert loaded.conversation_history == mock_conv
 
 
+@pytest.mark.asyncio
+async def test_load_async_legacy_conversation_from_db(tmp_path, monkeypatch):
+    """Verify load_async() populates conversation history from the DB path."""
+    monkeypatch.chdir(tmp_path)
+    mock_conv = [{"role": "user", "content": "async test"}]
+    db = AsyncMock()
+    with patch("lean_ai.db.get_db", return_value=db):
+        with patch("lean_ai.db.get_conversation_log", return_value=mock_conv):
+            manager = StateManager("sess-1")
+            loaded = await manager.load_async()
+            assert loaded.conversation_history == mock_conv
+            db.close.assert_awaited_once()
+
+
 def test_load_legacy_empty_when_no_sources(tmp_path, monkeypatch):
     """Do not create any legacy files and do not create a consolidated file.
     Verify load() returns an empty state (from from_scratch)."""
@@ -423,3 +437,103 @@ def test_state_manager_creates_state_directory(tmp_path, monkeypatch):
     manager.save()
     state_dir = tmp_path / ".lean_ai" / "state"
     assert state_dir.is_dir()
+
+
+@pytest.mark.asyncio
+async def test_save_checkpoint_async_persists_and_loads_from_db(tmp_path, monkeypatch):
+    """Verify save_checkpoint_async writes a checkpoint retrievable by async helpers."""
+    monkeypatch.chdir(tmp_path)
+    manager = StateManager("sess-1")
+    state = WorkflowState.from_scratch("sess-1")
+    checkpoint_id = await manager.save_checkpoint_async(
+        state=state,
+        phase="Phase 1",
+        summary="Async checkpoint",
+    )
+
+    loaded = await manager.get_checkpoint_async(checkpoint_id)
+    checkpoints = await manager.list_checkpoints_async("sess-1")
+
+    assert loaded.session_id == "sess-1"
+    assert len(checkpoints) == 1
+    assert checkpoints[0]["id"] == checkpoint_id
+    assert checkpoints[0]["is_head"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_checkpoint_async_reads_json_cache_first(tmp_path, monkeypatch):
+    """Verify get_checkpoint_async prefers the JSON cache when present."""
+    monkeypatch.chdir(tmp_path)
+    manager = StateManager("sess-1")
+    checkpoint_id = "checkpoint123"
+    cp_dir = tmp_path / ".lean_ai" / "checkpoints" / "sess-1"
+    cp_dir.mkdir(parents=True, exist_ok=True)
+    cached_state = WorkflowState.from_scratch("sess-1")
+    cached_state.add_journal_entry("from cache")
+    (cp_dir / f"{checkpoint_id}.json").write_text(
+        json.dumps(cached_state.model_dump(), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    loaded = await manager.get_checkpoint_async(checkpoint_id)
+
+    assert loaded.journal_entries == ["from cache"]
+
+
+@pytest.mark.asyncio
+async def test_list_checkpoints_async_returns_head_and_status(tmp_path, monkeypatch):
+    """Verify list_checkpoints_async normalizes rows and head status."""
+    monkeypatch.chdir(tmp_path)
+    manager = StateManager("sess-1")
+    state = WorkflowState.from_scratch("sess-1")
+
+    first_id = await manager.save_checkpoint_async(
+        state=state,
+        phase="Phase 1",
+        summary="First",
+    )
+    second_id = await manager.save_checkpoint_async(
+        state=state,
+        phase="Phase 2",
+        summary="Second",
+        parent_id=first_id,
+    )
+
+    checkpoints = await manager.list_checkpoints_async("sess-1")
+
+    assert [cp["id"] for cp in checkpoints] == [first_id, second_id]
+    assert checkpoints[0]["status"] == "completed"
+    assert checkpoints[0]["is_head"] is False
+    assert checkpoints[1]["status"] == "active"
+    assert checkpoints[1]["is_head"] is True
+
+
+@pytest.mark.asyncio
+async def test_load_raises_clear_error_when_called_in_async_context(tmp_path, monkeypatch):
+    """Verify sync load fails fast inside an active event loop."""
+    monkeypatch.chdir(tmp_path)
+    manager = StateManager("sess-1")
+
+    with pytest.raises(RuntimeError, match="load_async\\(\\) must be awaited"):
+        manager.load()
+
+
+@pytest.mark.asyncio
+async def test_save_checkpoint_raises_clear_error_when_called_in_async_context(
+    tmp_path,
+    monkeypatch,
+):
+    """Verify sync checkpoint save fails fast inside an active event loop."""
+    monkeypatch.chdir(tmp_path)
+    manager = StateManager("sess-1")
+    state = WorkflowState.from_scratch("sess-1")
+
+    with pytest.raises(
+        RuntimeError,
+        match="save_checkpoint_async\\(\\) must be awaited",
+    ):
+        manager.save_checkpoint(
+            state=state,
+            phase="Phase 1",
+            summary="sync wrapper should fail in async context",
+        )

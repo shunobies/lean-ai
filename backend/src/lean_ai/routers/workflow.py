@@ -514,7 +514,7 @@ async def session_stream(websocket: WebSocket, session_id: str):
 
                         # Build resume task from original task + journal + scratchpad
                         sm = StateManager(session_id)
-                        state = sm.load()
+                        state = await sm.load_async()
 
                         original_task = session.get("task", "")
                         pad_content = state.scratchpad_content
@@ -674,7 +674,7 @@ async def merge_session(session_id: str, repo_root: str):
         # Clean up per-session scratchpad, journal, and observations
         sm = StateManager(session_id)
         try:
-            sm.load()
+            await sm.load_async()
             sm.save()
         except Exception:
             logger.debug("State cleanup failed (non-fatal)", exc_info=True)
@@ -736,7 +736,7 @@ async def abandon_session(session_id: str, repo_root: str):
         # Clean up per-session scratchpad, journal, and observations
         sm = StateManager(session_id)
         try:
-            sm.load()
+            await sm.load_async()
             sm.save()
         except Exception:
             logger.debug("State cleanup failed (non-fatal)", exc_info=True)

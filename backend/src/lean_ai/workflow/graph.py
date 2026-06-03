@@ -387,7 +387,7 @@ class WorkflowEngine:
         """
         # Load or use provided state
         if state is None and state_manager is not None:
-            state = state_manager.get_state()
+            state = await state_manager.get_state_async()
         elif state is None:
             state = WorkflowState.from_scratch(session_id="")
 
