@@ -11,6 +11,7 @@ import WebSocket from "ws";
 import { SlashCommandContext } from "./slashCommands";
 import { DocxOutputExistsError } from "./backendClient";
 import { slugify } from "./slugify";
+import { buildDocumentPrepMasterPrompt } from "./documentPrepPrompts";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -1070,6 +1071,130 @@ export async function handleInterviewPrepCommand(
     await ctx.handleAgentMessage(`/request ${prompt}`);
 }
 
+// ── /document-prep — long-form document preparation workflow ───────────
+
+/**
+ * Pure async helper that collects the three intake inputs for document
+ * preparation. Accepts an optional resolver override so tests can mock
+ * `vscode.window.showInputBox` without touching global state.
+ */
+export async function collectDocumentIntakeInputs(
+    resolver?: (options: vscode.InputBoxOptions) => Promise<string | undefined>,
+): Promise<{ topic: string; documentType: string; targetLength: string } | null> {
+    const show = resolver ?? vscode.window.showInputBox;
+
+    const topic = await show({
+        title: "Document Prep — Working Topic",
+        prompt: "Working topic or subject area",
+        placeHolder: "e.g. The Future of Renewable Energy in Europe",
+        ignoreFocusOut: true,
+        validateInput: (v) => (v && v.trim() ? null : "Topic is required."),
+    });
+    if (!topic) return null;
+
+    const documentType = await show({
+        title: "Document Prep — Document Type",
+        prompt: "Document type or format",
+        placeHolder: "e.g. Research Report, White Paper, Blog Post",
+        ignoreFocusOut: true,
+        validateInput: (v) => (v && v.trim() ? null : "Document type is required."),
+    });
+    if (!documentType) return null;
+
+    const targetLength = await show({
+        title: "Document Prep — Target Length / Scope",
+        prompt: "Target length or scope description",
+        placeHolder: "e.g. 3000 words, ~15 pages",
+        ignoreFocusOut: true,
+        validateInput: (v) => (v && v.trim() ? null : "Target length is required."),
+    });
+    if (!targetLength) return null;
+
+    return { topic, documentType, targetLength };
+}
+
+/**
+ * Handle the `/document-prep` slash command.
+ *
+ * Collects intake inputs via input boxes, generates a slug-safe directory name,
+ * creates `documents/${slug}/`, then dispatches the agent with the master
+ * orchestration prompt built by {@link buildDocumentPrepMasterPrompt}.
+ */
+export async function handleDocumentPrepCommand(
+    ctx: SlashCommandContext,
+    _args: string,
+): Promise<void> {
+    const ws = ctx.getWs();
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ctx.postMessage({
+            type: "error",
+            text: "An agent workflow is already running. Wait for it to complete, or start a new chat first.",
+        });
+        return;
+    }
+
+    const healthy = await ctx.client.healthCheck();
+    if (!healthy) {
+        ctx.postMessage({
+            type: "error",
+            text: "Backend not available. Start the server:\ncd backend && uvicorn lean_ai.main:app --reload --port 8422",
+        });
+        return;
+    }
+
+    // Collect intake inputs via showInputBox (three sequential prompts).
+    const inputs = await collectDocumentIntakeInputs();
+    if (!inputs) {
+        return;
+    }
+
+    const slug = slugify(inputs.topic);
+    if (!slug) {
+        ctx.postMessage({
+            type: "error",
+            text: "Topic must contain at least one alphanumeric character.",
+        });
+        return;
+    }
+
+    // Create the isolated documents directory (best-effort; failures are non-fatal).
+    const repoRoot = ctx.getRepoRoot();
+    const docDir = path.join(repoRoot, "documents", slug);
+    try {
+        if (!fs.existsSync(docDir)) {
+            fs.mkdirSync(docDir, { recursive: true });
+        }
+    } catch {
+        // Directory creation may fail in test environments or when the repo root is inaccessible.
+        // This is non-fatal — the agent will create files as needed.
+    }
+
+    ctx.postMessage({
+        type: "thinking",
+        show: true,
+        text: `Preparing document workspace: documents/${slug}/...`,
+    });
+
+    const masterPrompt = buildDocumentPrepMasterPrompt(
+        inputs.topic.trim(),
+        inputs.documentType.trim(),
+        inputs.targetLength.trim(),
+    );
+
+    ctx.postMessage({ type: "thinking", show: false });
+    ctx.postMessage({
+        type: "reply",
+        text: (
+            `Starting document preparation for **${inputs.topic.trim()}** — ` +
+            `${inputs.documentType.trim()}, ${inputs.targetLength.trim()}. ` +
+            `Workspace: \`documents/${slug}/\`. Watch this chat for progress.`
+        ),
+        cls: "msg-system",
+    });
+
+    await ctx.handleAgentMessage(`/request ${masterPrompt}`);
+}
+
 // ── Shared guards for the job-search command family ──────────────────
 
 async function ensureAgentIdleAndBackendHealthy(
@@ -1628,6 +1753,9 @@ export async function handleHelpCommand(
         "- `/analyse-rejection [slug]` — Post-mortem a rejection with concrete takeaways for the next application.",
         "- `/log-applied [slug]` — Append a tracker row and commit the application folder to git.",
         "- `/mock-interview [slug]` — Interactive Q&A practice with 5-dimension rubric scoring (1-10 each, composite).",
+        "",
+        "**Document preparation**",
+        "- `/document-prep` — Guided intake for long-form documents: topic, type, and scope; creates `documents/{slug}/`.",
         "",
         "**Notes + system**",
         "- `/note <text>` — Save a quick note.",

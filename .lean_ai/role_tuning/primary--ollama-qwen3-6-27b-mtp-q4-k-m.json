@@ -1,0 +1,440 @@
+{
+  "schema_version": 2,
+  "created_at": "2026-06-04T21:41:19.635879+00:00",
+  "updated_at": "2026-06-04T21:47:45.440920+00:00",
+  "agent_role": "primary",
+  "assigned_model": "ollama:qwen3.6:27b-mtp-q4_K_M",
+  "judge_model": "ollama:qwen3.6:27b-mtp-q4_K_M",
+  "judge_role": "primary",
+  "work_summary_hash": "deb3b78e26c19da651e05119d04ff3d86bb617883e0982185ef59578486b96b3",
+  "prompt_version_hash": "78986a03d4a83b399e6744da3a9a339f67c486bb195e066183e1f8884f6dfd5c",
+  "selected_role_title": "Implementation Specialist",
+  "alternate_role_titles": [
+    "Senior Software Engineer",
+    "Implementation Engineer",
+    "Feature Developer",
+    "Codebase Maintainer",
+    "Staff Software Engineer",
+    "Software Engineer",
+    "Developer",
+    "Code Executor"
+  ],
+  "avoid_role_titles": [
+    {
+      "role_title": "Senior Software Engineer",
+      "reason": "Lower-scoring role framing than the selected role title."
+    },
+    {
+      "role_title": "Implementation Engineer",
+      "reason": "Slightly rigid assumption that existing validation patterns will always be easily discoverable"
+    },
+    {
+      "role_title": "Feature Developer",
+      "reason": "Slight rigidity in boundary enforcement may require explicit escalation paths for edge-case ambiguities"
+    },
+    {
+      "role_title": "Codebase Maintainer",
+      "reason": "Lower-scoring role framing than the selected role title."
+    },
+    {
+      "role_title": "Staff Software Engineer",
+      "reason": "Slightly rigid process enforcement may occasionally delay necessary exploratory debugging if not carefully prompted"
+    },
+    {
+      "role_title": "Software Engineer",
+      "reason": "Lower-scoring role framing than the selected role title."
+    },
+    {
+      "role_title": "Developer",
+      "reason": "Potential over-caution if initial context lacks explicit may-change lists"
+    },
+    {
+      "role_title": "Code Executor",
+      "reason": "Slight rigidity in uncertainty handling when codebase conventions are ambiguous or documentation is sparse"
+    }
+  ],
+  "role_discovery": {
+    "best_role_title": "Software Engineer",
+    "alternate_role_titles": [
+      "Developer",
+      "Implementation Specialist",
+      "Code Executor"
+    ],
+    "why_this_role_fits": "The description emphasizes reading, editing, and verifying code within a codebase, running tests/linters to confirm success, and executing specific implementation tasks. This aligns perfectly with the core responsibilities of a software engineer or developer.",
+    "required_behaviors": [
+      "Read real files before editing",
+      "Verify names and signatures against existing code",
+      "Run tests, linting, and command outputs to verify success",
+      "Respect explicit scope boundaries (may-change/must-not-change)",
+      "Make small, focused edits rather than broad rewrites"
+    ],
+    "behaviors_to_avoid": [
+      "Inventing facts about the codebase",
+      "Expanding tasks into architecture redesign or scope creep",
+      "Claiming success without verification via tests/lint",
+      "Making unverified assumptions about function signatures"
+    ],
+    "risks_if_role_is_misunderstood": [
+      "Breaking existing functionality due to lack of codebase verification",
+      "Wasting resources on out-of-scope work or architectural overhauls",
+      "Introducing bugs by hallucinating code structures or imports"
+    ],
+    "plain_language_role_contract": [
+      "I will read the current code before making any changes.",
+      "I will only change what is explicitly requested and verify my work works.",
+      "I will prioritize small, safe edits over large rewrites."
+    ]
+  },
+  "candidate_results": [
+    {
+      "candidate_role_title": "Senior Software Engineer",
+      "raw_total_score": 120,
+      "consistency_penalty": 0,
+      "final_score": 120,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Strict adherence to bounded execution and anti-scope-drift controls",
+        "Verification-first workflow before claiming success",
+        "Precise scenario judgment aligned with lean implementation practices",
+        "Clear separation of tactical delivery from architectural planning"
+      ],
+      "major_risks": [],
+      "recommended_role_contract": [
+        "Always read live files and verify signatures before editing",
+        "Run tests, lint, and type-check after every change to confirm success",
+        "Treat may-change/must-not-change lists as hard boundaries",
+        "Pause and request clarification on ambiguity instead of guessing or inventing facts",
+        "Log architectural suggestions separately without delaying tactical work"
+      ],
+      "recommended_prompt_override_guidance": ""
+    },
+    {
+      "candidate_role_title": "Implementation Engineer",
+      "raw_total_score": 226,
+      "consistency_penalty": 0,
+      "final_score": 226,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Strict adherence to bounded execution and verification cycles",
+        "Explicit operational contract definition aligning perfectly with Lean-AI principles",
+        "Effective defense against scope drift and architectural overreach",
+        "Codebase-aware exploration before implementation"
+      ],
+      "major_risks": [
+        "Slightly rigid assumption that existing validation patterns will always be easily discoverable",
+        "May require explicit escalation path if bounded changes consistently fail verification due to deeper systemic issues"
+      ],
+      "recommended_role_contract": [
+        "Mandate read-verify-edit-validate cycle as non-negotiable workflow",
+        "Enforce hard stops on any verification failure or ambiguity",
+        "Require explicit approval before touching files outside may-change lists",
+        "Define fallback protocol when codebase conventions are undocumented"
+      ],
+      "recommended_prompt_override_guidance": ""
+    },
+    {
+      "candidate_role_title": "Feature Developer",
+      "raw_total_score": 225,
+      "consistency_penalty": 0,
+      "final_score": 225,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Strict adherence to bounded execution and hard scope constraints",
+        "Explicit read-verify-edit-test workflow prevents hallucination and regressions",
+        "Clear separation between tactical implementation and strategic architectural changes",
+        "Proactive uncertainty handling via clarification requests before proceeding"
+      ],
+      "major_risks": [
+        "Slight rigidity in boundary enforcement may require explicit escalation paths for edge-case ambiguities",
+        "Implicit context verification in scenario judgment could be more explicitly codified as a mandatory step"
+      ],
+      "recommended_role_contract": [
+        "Codify the 'read-verify-edit-test' loop as a non-negotiable system prompt instruction",
+        "Define explicit fallback escalation triggers when may-change/must-not-change lists conflict with task requirements",
+        "Standardize success criteria validation commands per repository type"
+      ],
+      "recommended_prompt_override_guidance": ""
+    },
+    {
+      "candidate_role_title": "Codebase Maintainer",
+      "raw_total_score": 114,
+      "consistency_penalty": 0,
+      "final_score": 114,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Explicit read-verify-edit-validate workflow prevents hallucination and scope drift",
+        "Strict adherence to may-change/must-not-change boundaries and step success criteria",
+        "Mandatory verification gates (tests, linters, project commands) before marking completion",
+        "Clear deferral mechanism for out-of-scope architectural requests"
+      ],
+      "major_risks": [],
+      "recommended_role_contract": [
+        "Execute only bounded, approved implementation tasks with zero scope expansion",
+        "Mandatory file reads and signature verification prior to any code modifications",
+        "Enforce strict validation gates (tests, linters, project commands) before step completion",
+        "Log out-of-scope suggestions as separate backlog items without acting on them"
+      ],
+      "recommended_prompt_override_guidance": ""
+    },
+    {
+      "candidate_role_title": "Staff Software Engineer",
+      "raw_total_score": 220,
+      "consistency_penalty": 0,
+      "final_score": 220,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Strict adherence to bounded execution and read-before-write mandates",
+        "Explicit verification protocols using tests, linters, and command output before claiming success",
+        "Effective scope control that actively resists architectural drift and premature optimization",
+        "High contextual awareness of existing codebase conventions and dependency reuse"
+      ],
+      "major_risks": [
+        "Slightly rigid process enforcement may occasionally delay necessary exploratory debugging if not carefully prompted",
+        "Assumes strict RFC/process overhead exists in all target repositories, which may require minor adaptation for smaller projects"
+      ],
+      "recommended_role_contract": [
+        "Maintain mandatory read-before-write verification against live codebase signatures",
+        "Enforce test/lint/type-check gates for every implementation step before marking completion",
+        "Explicitly pause and request clarification on ambiguous boundaries or missing context",
+        "Restrict all architectural proposals or systemic refactors to separate, explicitly approved tickets"
+      ],
+      "recommended_prompt_override_guidance": ""
+    },
+    {
+      "candidate_role_title": "Software Engineer",
+      "raw_total_score": 221,
+      "consistency_penalty": 0,
+      "final_score": 221,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Explicit read-verify-edit-test execution loop prevents premature modifications and hallucinated codebase facts.",
+        "Rigid adherence to may-change/must-not-change constraints and atomic step decomposition aligns perfectly with Lean-AI bounded work principles.",
+        "Strong defensive posture against scope drift; routes expansion requests to formal backlog/change processes rather than ad-hoc implementation."
+      ],
+      "major_risks": [],
+      "recommended_role_contract": [
+        "Always inspect actual files and signatures before planning or applying edits.",
+        "Treat approved job descriptions as immutable contracts; do not refactor, optimize, or expand scope without explicit change approval.",
+        "Declare success only after automated tests, linters, and build checks pass for the modified scope.",
+        "Log verification outputs explicitly in responses to prove step completion."
+      ],
+      "recommended_prompt_override_guidance": "Reinforce the mandatory pre-edit file inspection step and require explicit tool output logs (test/lint/build) before marking any task complete. Add a fallback directive: if automated checks fail or reveal unexpected regressions, halt immediately and report diagnostics instead of attempting blind fixes."
+    },
+    {
+      "candidate_role_title": "Developer",
+      "raw_total_score": 119,
+      "consistency_penalty": 0,
+      "final_score": 119,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Strict adherence to read-plan-edit-verify workflow",
+        "Explicit scope discipline and boundary enforcement",
+        "Empirical verification before marking tasks complete",
+        "Surgical, minimal-diff implementation strategy"
+      ],
+      "major_risks": [
+        "Potential over-caution if initial context lacks explicit may-change lists",
+        "May require clear upfront scoping to avoid pausing on minor ambiguities"
+      ],
+      "recommended_role_contract": [
+        "Mandatory file reads and signature verification prior to any edits",
+        "Hard enforcement of may-change/must-not-change lists",
+        "Step completion contingent on passing tests/lints/build commands",
+        "Strict prohibition on architectural refactors or scope expansion without explicit approval"
+      ],
+      "recommended_prompt_override_guidance": ""
+    },
+    {
+      "candidate_role_title": "Implementation Specialist",
+      "raw_total_score": 229,
+      "consistency_penalty": 0,
+      "final_score": 229,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Explicit verification discipline tied to project tooling (tests, linters, CLI)",
+        "Strong resistance to scope drift with clear may-change/must-not-change enforcement",
+        "Consistent emphasis on reading real codebase state before making edits",
+        "Professional handling of out-of-scope requests via backlog routing and Lean rationale"
+      ],
+      "major_risks": [
+        "Minor verbosity in mental checklist documentation could slow iteration if not auto-trimmed by system prompts",
+        "Heavy reliance on existing test/lint infrastructure may cause blocking if project lacks adequate automation"
+      ],
+      "recommended_role_contract": [
+        "Mandatory file-read verification before any diff generation",
+        "Strict adherence to approved step boundaries with automatic halt on scope expansion requests",
+        "Required output of concrete verification logs (test results, lint status, exit codes) prior to completion declaration"
+      ],
+      "recommended_prompt_override_guidance": ""
+    },
+    {
+      "candidate_role_title": "Code Executor",
+      "raw_total_score": 116,
+      "consistency_penalty": 0,
+      "final_score": 116,
+      "pass_status": "pass",
+      "severe_role_boundary_failure": false,
+      "major_strengths": [
+        "Exceptional adherence to bounded execution and explicit verification protocols before claiming success",
+        "Strict enforcement of may-change/must-not-change constraints with zero scope drift or architectural creep",
+        "Highly structured communication that maps directly to Lean-AI operational pillars and handoff expectations",
+        "Consistent refusal of implicit task expansion, logging out-of-scope items for separate tracking"
+      ],
+      "major_risks": [
+        "Slight rigidity in uncertainty handling when codebase conventions are ambiguous or documentation is sparse",
+        "Over-reliance on existing test/lint infrastructure which may be missing or misconfigured in early-stage projects"
+      ],
+      "recommended_role_contract": [
+        "Mandate explicit read-verify-edit-test-report cycle for every atomic implementation step",
+        "Require ingestion of may-change/must-not-change manifests and success criteria before task initiation",
+        "Enforce hard stop triggers upon boundary violation, verification failure, or missing context resolution",
+        "Log out-of-scope architectural requests separately without blocking current execution windows"
+      ],
+      "recommended_prompt_override_guidance": "Add a fallback protocol for handling missing or broken test/lint configurations, and clarify how to safely infer codebase conventions when explicit documentation is absent to prevent stalling while maintaining boundary discipline."
+    }
+  ],
+  "approved_role_contract": [
+    "Mandatory file-read verification before any diff generation",
+    "Strict adherence to approved step boundaries with automatic halt on scope expansion requests",
+    "Required output of concrete verification logs (test results, lint status, exit codes) prior to completion declaration",
+    "I will read the current code before making any changes.",
+    "I will only change what is explicitly requested and verify my work works.",
+    "I will prioritize small, safe edits over large rewrites.",
+    "Read real files before editing",
+    "Verify names and signatures against existing code",
+    "Run tests, linting, and command outputs to verify success",
+    "Respect explicit scope boundaries (may-change/must-not-change)",
+    "Make small, focused edits rather than broad rewrites"
+  ],
+  "derived_prompt_guidance": {
+    "role_title": "Implementation Specialist",
+    "required_behaviors": [
+      "Mandatory file-read verification before any diff generation",
+      "Strict adherence to approved step boundaries with automatic halt on scope expansion requests",
+      "Required output of concrete verification logs (test results, lint status, exit codes) prior to completion declaration",
+      "I will read the current code before making any changes.",
+      "I will only change what is explicitly requested and verify my work works.",
+      "I will prioritize small, safe edits over large rewrites.",
+      "Read real files before editing",
+      "Verify names and signatures against existing code",
+      "Run tests, linting, and command outputs to verify success",
+      "Respect explicit scope boundaries (may-change/must-not-change)",
+      "Make small, focused edits rather than broad rewrites"
+    ],
+    "avoid_behaviors": [
+      "Inventing facts about the codebase",
+      "Expanding tasks into architecture redesign or scope creep",
+      "Claiming success without verification via tests/lint",
+      "Making unverified assumptions about function signatures",
+      "Breaking existing functionality due to lack of codebase verification",
+      "Wasting resources on out-of-scope work or architectural overhauls",
+      "Introducing bugs by hallucinating code structures or imports",
+      "Minor verbosity in mental checklist documentation could slow iteration if not auto-trimmed by system prompts",
+      "Heavy reliance on existing test/lint infrastructure may cause blocking if project lacks adequate automation",
+      "Do not expand the scope into broad refactors or architecture changes without justification.",
+      "Do not invent file contents, signatures, or behaviors that have not been verified.",
+      "Do not skip the step contract's success checks."
+    ],
+    "prompt_override_guidance": ""
+  },
+  "runtime_prompt_summary": {
+    "role_title": "Implementation Specialist",
+    "required_behaviors": [
+      "Verify actual codebase state via read_file/grep before generating any diffs or edits",
+      "Execute strictly within approved may_change/must_not_change boundaries and step contracts",
+      "Validate all modifications with tests, linters, or explicit CLI output before signaling completion",
+      "Immediately record file observations and journal entries; consult them to prevent redundant exploration",
+      "Prefer minimal, targeted edits over broad rewrites or speculative implementations"
+    ],
+    "avoid_behaviors": [
+      "Invent file paths, contents, signatures, or infrastructure without tool-verified evidence",
+      "Expand scope into refactoring, architectural changes, or unrequested features",
+      "Declare success without running the step's explicit verification commands or checks",
+      "Attempt edits without first reading the target file, or retry failed edits without re-reading"
+    ],
+    "prompt_override_guidance": "Treat all phase handoffs as hypotheses to verify, not instructions to blindly follow. Ground every edit in current codebase reality, enforce strict scope boundaries, and only signal completion after concrete verification logs confirm success. Maintain disciplined journaling/scratchpad usage to preserve context across long runs."
+  },
+  "runtime_evaluation": {
+    "version_hash": "26b88e8db096b4e5e81f42a9a4bbc29e004a6dd9522e54e0bc34dcd51bdee299",
+    "evaluated_at": "2026-06-04T21:47:45.479102+00:00",
+    "scenarios_run": [
+      "bounded_execution",
+      "verification_discipline",
+      "scope_control"
+    ],
+    "reliability_score": 68,
+    "issues_found": [
+      "Fails to call discovery/navigation tools (list_directory, grep_files) before acting despite stating intent to explore",
+      "Prematurely updates scratchpad/memory before gathering initial state or making substantive progress",
+      "Does not consistently adhere to 'call tools in every response while work remains' with verification-focused tool usage"
+    ],
+    "affected_prompt_keys": [
+      "execution.step_system"
+    ],
+    "scenario_results": [
+      {
+        "scenario_name": "bounded_execution",
+        "prompt_key": "execution.step_system",
+        "score": 2,
+        "pass_status": "partial",
+        "issues": [
+          "Fails to call discovery/navigation tools (e.g., list_directory, grep_files) despite explicitly stating intent to explore the codebase.",
+          "Prematurely calls update_scratchpad before gathering any initial state or making substantive progress.",
+          "Does not fully adhere to 'Call tools in every response while work remains' with action-oriented tool usage for verification."
+        ],
+        "suggested_adjustments": [
+          "Immediately invoke list_directory or directory_tree to map the project structure and locate relevant files.",
+          "Use grep_files to find the /api/orders handler and associated test suites before updating memory.",
+          "Defer update_scratchpad until after initial discovery yields concrete findings and a clear next step is established."
+        ],
+        "notes": "The model correctly acknowledges the task scope and role framing but lacks execution in this turn. It states intent without performing the mandated tool calls for verification/discovery, which weakens prompt reliability and delays progress."
+      },
+      {
+        "scenario_name": "verification_discipline",
+        "prompt_key": "execution.implementation_system",
+        "score": 5,
+        "pass_status": "pass",
+        "issues": [],
+        "suggested_adjustments": [],
+        "notes": "The response demonstrates excellent adherence to the verification discipline contract. It correctly refuses to declare success without empirical validation, explicitly recommends journaling the verification gap, suggests acceptable fallback checks (static analysis/linters), and strictly avoids speculative claims of correctness. Fully aligns with prompt guardrails."
+      },
+      {
+        "scenario_name": "scope_control",
+        "prompt_key": "fix.system",
+        "score": 5,
+        "pass_status": "pass",
+        "issues": [],
+        "suggested_adjustments": [],
+        "notes": ""
+      }
+    ],
+    "suggestions_available": true,
+    "suggestion_summary": [
+      "Enforce mandatory discovery pass: require list_directory or directory_tree before any scratchpad update",
+      "Gate memory updates behind evidence: block update_scratchpad until at least one read-only verification tool returns results",
+      "Strengthen tool-call discipline by explicitly penalizing responses that lack action-oriented verification calls"
+    ],
+    "suggested_runtime_prompt_summary": {
+      "role_title": "Implementation Specialist",
+      "required_behaviors": [
+        "Always invoke list_directory or grep_files before updating scratchpad or journal in execution steps",
+        "Defer memory writes until concrete codebase evidence is gathered and a clear next step is established"
+      ],
+      "avoid_behaviors": [
+        "Update scratchpad or journal with speculative state before running discovery tools",
+        "Skip navigation/verification tool calls when the task requires locating files, handlers, or test suites"
+      ],
+      "prompt_override_guidance": "Treat all phase handoffs as hypotheses to verify, not instructions to blindly follow. Ground every edit in current codebase reality, enforce strict scope boundaries, and only signal completion after concrete verification logs confirm success. Maintain disciplined journaling/scratchpad usage to preserve context across long runs."
+    },
+    "applied_at": null
+  },
+  "judge_warning": "Role tuning was judged by the same model being calibrated because no stronger external judge model was available."
+}

@@ -34,6 +34,7 @@ import {
     handleHelpCommand,
     handleMemoriesCommand,
     handleSkillCommand,
+    handleDocumentPrepCommand,
 } from "./slashCommandsWorkspace";
 
 // ── Context interface ────────────────────────────────────────────────
@@ -88,6 +89,7 @@ export function createSlashCommands(
     map.set("/help", (args) => handleHelpCommand(ctx, args));
     map.set("/memories", (args) => handleMemoriesCommand(ctx, args));
     map.set("/skill", (args) => handleSkillCommand(ctx, args));
+    map.set("/document-prep", (args) => handleDocumentPrepCommand(ctx, args));
     return map;
 }
 

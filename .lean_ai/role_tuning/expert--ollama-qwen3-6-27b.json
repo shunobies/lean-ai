@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "created_at": "2026-06-01T11:17:14.089851+00:00",
-  "updated_at": "2026-06-01T11:17:14.089851+00:00",
+  "updated_at": "2026-06-04T22:31:11.434267+00:00",
   "agent_role": "expert",
   "assigned_model": "ollama:qwen3.6:27b",
   "judge_model": "ollama:qwen3.6:35b",
@@ -344,6 +344,98 @@
       "Generate empty or unverified test/verification plans when behavioral code is present."
     ],
     "prompt_override_guidance": "No override needed. 'Design Reviewer' accurately captures the required scope. Consider adding 'Architectural Synthesizer' as a secondary descriptor to reinforce evidence-backed, non-speculative framing."
+  },
+  "runtime_evaluation": {
+    "version_hash": "fc23ce9a2e7f53415f1bda69ea21fcbc3367e59b80530da48ee896e44a39e87c",
+    "evaluated_at": "2026-06-04T22:31:11.473709+00:00",
+    "scenarios_run": [
+      "evidence_discipline",
+      "downstream_usefulness",
+      "verification_strategy"
+    ],
+    "reliability_score": 75,
+    "issues_found": [
+      "Markdown headers and numbered sections contradict free-form prose instructions for downstream parsing.",
+      "Implementation job contracts lack mandated fields (blocked_protocol, inputs, may_change, must_not_change, output_shape).",
+      "Testability seams are not explicitly embedded within step instructions interacting with external state or I/O.",
+      "Verification steps fabricate import paths and function names instead of using placeholders or authoritative summaries.",
+      "External API verifications and uncertainty escalations lack explicit pre-flight blocking structures."
+    ],
+    "affected_prompt_keys": [
+      "planning.assembly_system",
+      "planning.verification_system"
+    ],
+    "scenario_results": [
+      {
+        "scenario_name": "evidence_discipline",
+        "prompt_key": "planning.design_system",
+        "score": 5,
+        "pass_status": "pass",
+        "issues": [
+          "Uses markdown headers and numbered sections, which slightly contradicts the explicit instruction to 'Do NOT try to structure into fixed sections' for downstream schema coercion."
+        ],
+        "suggested_adjustments": [
+          "When responding to actual FileSummary inputs, output strictly as continuous free-form prose or bullet points without hierarchical headings to ensure seamless downstream parsing.",
+          "Explicitly state readiness to invoke `task_complete` when verification steps are satisfied, aligning with the prompt's exit condition guidance."
+        ],
+        "notes": "Demonstrates exceptional adherence to anti-fabrication guardrails and role contract. Correctly treats missing dependency details as hard stops, accurately describes tool-based external verification with required citation fields (URL, version, signature), and perfectly mirrors the requested load-bearing entity tagging schema without inventing non-existent codebase artifacts. Handles the meta-scenario prompt appropriately."
+      },
+      {
+        "scenario_name": "downstream_usefulness",
+        "prompt_key": "planning.assembly_system",
+        "score": 3,
+        "pass_status": "partial",
+        "issues": [
+          "Missing `blocked_protocol` field in all implementation job contracts. The prompt explicitly requires this to instruct the executor on how to handle missing context, failed edits, or dependencies.",
+          "The final JSON execution plan omits several mandated fields (`inputs`, `may_change`, `must_not_change`, `output_shape`). This weakens the strict bounding contract required for each step.",
+          "Testability seams are discussed in the design prose but not explicitly embedded within each relevant step's `instruction` field as strictly mandated by the prompt."
+        ],
+        "suggested_adjustments": [
+          "Add a `blocked_protocol` key to every job step detailing exact fallback actions (e.g., halt and request stack clarification if migration tooling is unknown).",
+          "Ensure the structured execution plan includes all required fields (`job`, `inputs`, `may_change`, `must_not_change`, `allowed_tools`, `output_shape`, `success_checks`, `blocked_protocol`) for each step to maintain tight executor bounds.",
+          "Explicitly state the test seam (dependency injection, env flag, or pure-function core) inside the `instruction` field of any step that introduces code interacting with external state, time, or I/O."
+        ],
+        "notes": "The response strongly adopts the requested role and effectively identifies architectural hard stops. It avoids fabricating file paths and correctly structures naming conventions. However, it falls short on strict contract compliance by omitting required per-step fields and not embedding testability seams directly into step instructions as mandated."
+      },
+      {
+        "scenario_name": "verification_strategy",
+        "prompt_key": "planning.verification_system",
+        "score": 4,
+        "pass_status": "partial",
+        "issues": [
+          "Uses guessed import paths and function names (e.g., `my_module.client.httpx.Client`, `validate_and_fetch`) in test context blocks, which slightly violates the 'Do NOT fabricate repository details' guardrail despite disclaimers.",
+          "External API verification requirement is acknowledged but not structured as an explicit pre-flight step; hard stops are listed separately rather than bound directly to plan execution gates."
+        ],
+        "suggested_adjustments": [
+          "Replace guessed signatures with explicit `[TBD: resolve from authoritative summary]` placeholders and add a mandatory dependency-resolution step that blocks test generation until exact paths/frameworks are confirmed.",
+          "Convert hard stop escalations into explicit pre-condition steps (e.g., `type: verify_external_contract`) within the plan to strictly enforce the 'hard stops before design commitments' requirement."
+        ],
+        "notes": "Strong structural alignment with verification principles, regression separation, and executor awareness. Correctly handles missing context by escalating gaps as hard stops rather than speculating. Minor deductions for placeholder usage in code excerpts that could confuse downstream execution without explicit TBD markers."
+      }
+    ],
+    "suggestions_available": true,
+    "suggestion_summary": [
+      "Enforce continuous free-form prose or bullet points without hierarchical headings for design synthesis.",
+      "Mandate all required contract fields in every implementation step to strictly bound executor scope.",
+      "Explicitly define testability seams (dependency injection, env flags, pure functions) inside instructions for I/O-bound code.",
+      "Replace speculative signatures with [TBD] placeholders and add a mandatory dependency-resolution pre-flight step before generating tests.",
+      "Convert uncertainty escalations into explicit blocking conditions within the verification plan structure."
+    ],
+    "suggested_runtime_prompt_summary": {
+      "role_title": "Design Reviewer & Architectural Synthesizer",
+      "required_behaviors": [
+        "Include all mandated contract fields in execution plan steps to strictly bound executor scope.",
+        "Explicitly declare testability seams inside instructions for any code interacting with external state or I/O.",
+        "Add mandatory pre-flight dependency resolution steps that block downstream generation until authoritative paths are confirmed."
+      ],
+      "avoid_behaviors": [
+        "Do not use markdown headers or numbered sections when free-form prose is requested for schema coercion.",
+        "Avoid fabricating import paths, function names, or API signatures; rely strictly on placeholders until verified via tools.",
+        "Prevent implicit hard stops by failing to structure them as explicit blocking conditions in the plan."
+      ],
+      "prompt_override_guidance": "No override needed. 'Design Reviewer' accurately captures the required scope. Consider adding 'Architectural Synthesizer' as a secondary descriptor to reinforce evidence-backed, non-speculative framing."
+    },
+    "applied_at": null
   },
   "judge_warning": null
 }
