@@ -1,0 +1,1720 @@
+{
+  "session_id": "f801ebbc79dc",
+  "current_phase": "approval",
+  "conversation_history": [],
+  "scratchpad_content": "",
+  "journal_entries": [],
+  "observations": [],
+  "current_plan": {
+    "scope": "Implement a new `/document-prep` slash command that mirrors the architecture of `/interview-prep`, guiding users through a strict 14-step rhetorical writing workflow with staged approvals, source verification rules, and explicit output formats to prevent local LLM drift or hallucination during long-form document creation.",
+    "user_summary": "",
+    "naming_conventions": [],
+    "name_registry": [],
+    "steps": [
+      {
+        "step_number": 6,
+        "job": "Create the Master Orchestration Prompt file containing the complete 14-step workflow instructions optimized for local model execution with explicit phase markers, source verification rules, and approval gate constraints",
+        "inputs": [
+          {
+            "source": "extension/src/jobSearchPrompts.ts (reference pattern)",
+            "details": "Reference pattern for prompt builder function exports"
+          },
+          {
+            "source": "Design synthesis: 14-step sequence",
+            "details": "Phase 1-14 specifications including intake grill, rhetorical profile, research branching, source verification, approval gates"
+          }
+        ],
+        "may_change": [
+          {
+            "path": "extension/src/documentPrepPrompts.ts",
+            "change": "Create new file with buildDocumentPrepPrompt function exporting the complete orchestration prompt string"
+          }
+        ],
+        "must_not_change": [
+          "Existing prompt files, shared utilities"
+        ],
+        "allowed_tools": [
+          "create_file",
+          "read_file",
+          "list_directory",
+          "directory_tree",
+          "grep_files",
+          "task_complete",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url"
+        ],
+        "output_shape": "Module exports async buildDocumentPrepPrompt(topic: string, docType: string, targetLength: string, outputDir: string): Promise<string> returning the full 14-step orchestration prompt with all phase markers (Phase 1-14), source verification statuses (user_provided_verified, web_verified, candidate_unverified, etc.), Phase 9 approval gate with negative constraints ('DO NOT generate draft.md until approved'), and conditional Research Question Builder trigger for academic document types. Test seam: function accepts parameters and returns string; pure transformation logic.",
+        "success_checks": [
+          {
+            "description": "File contains buildDocumentPrepPrompt async function export",
+            "tool": "read_file",
+            "command": "",
+            "expected": "Function signature visible with 4 parameters (topic, docType, targetLength, outputDir)"
+          },
+          {
+            "description": "All 14 phases are present in the prompt string",
+            "tool": "run_tests",
+            "command": "cd extension && npx jest --testPathPattern=documentPrepPrompts.test.ts --passWithNoTests",
+            "expected": "Test exits with code 0 and verifies Phase 1-14 markers appear in generated prompt"
+          }
+        ],
+        "blocked_protocol": "If jobSearchPrompts.ts pattern differs from expected, read the file first to adapt. If required utilities (slugify) are missing, escalate.",
+        "tool": "create_file",
+        "file_path": "extension/src/documentPrepPrompts.ts",
+        "instruction": "Create documentPrepPrompts.ts with buildDocumentPrepPrompt function implementing the 14-step orchestration prompt. Include: (1) Intake Grill with concrete examples for audience/voice, (2) Rhetorical Profile output spec, (3) Research Paper Branch conditional logic, (4) Source Verification hard rules and status definitions, (5) Source Matrix table format, (6) Research Integrity Check questions, (7-8) Blueprint and Structure Preview specs, (9) Approval Gate with explicit pause instruction and forbidden phrases for premature drafting, (10-13) Drafting, Review, Editor, Final Output phases, (14) Closing. Test seam: function accepts parameters and returns string; pure transformation logic.",
+        "reason": "The Master Orchestration Prompt is the foundational artifact that drives agent behavior through all 14 workflow steps. Without this file, the handler cannot dispatch meaningful instructions to the LLM."
+      },
+      {
+        "step_number": 7,
+        "job": "Implement handleDocumentPrepCommand handler following the Launcher pattern: collect three inputs via showInputBox, create documents/slug directory, and dispatch master prompt to agent",
+        "inputs": [
+          {
+            "source": "extension/src/slashCommandsWorkspace.ts lines 885-1071",
+            "details": "handleInterviewPrepCommand showing the Launcher pattern with input collection"
+          },
+          {
+            "source": "extension/src/slashCommandsWorkspace.ts line 1075+",
+            "details": "ensureAgentIdleAndBackendHealthy shared guard"
+          },
+          {
+            "source": "Design synthesis: handler signature and directory creation",
+            "details": "Handler must use slugify for directory naming, fs.mkdirSync with recursive flag"
+          }
+        ],
+        "may_change": [
+          {
+            "path": "extension/src/slashCommandsWorkspace.ts",
+            "change": "Add handleDocumentPrepCommand function following the Launcher pattern; import buildDocumentPrepPrompt from './documentPrepPrompts'"
+          }
+        ],
+        "must_not_change": [
+          "handleInterviewPrepCommand, ensureAgentIdleAndBackendHealthy, other existing handlers"
+        ],
+        "allowed_tools": [
+          "edit_file",
+          "read_file",
+          "grep_files",
+          "list_directory",
+          "directory_tree",
+          "task_complete",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url"
+        ],
+        "output_shape": "New async function handleDocumentPrepCommand(ctx: SlashCommandContext, _args: string): Promise<void> that: (1) calls ensureAgentIdleAndBackendHealthy guard, (2) collects topic/docType/length via three sequential showInputBox calls, (3) generates slug using existing slugify utility, (4) creates documents/${slug}/ directory with fs.mkdirSync recursive, (5) dispatches master prompt via ctx.handleAgentMessage. Test seam: handler accepts mock context; all VSCode APIs and file ops can be mocked.",
+        "success_checks": [
+          {
+            "description": "Handler collects three inputs sequentially",
+            "tool": "run_tests",
+            "command": "cd extension && npx jest --testPathPattern=regression_handleDocumentPrepCommand.test.ts --passWithNoTests",
+            "expected": "Test exits with code 0 and verifies showInputBox called 3 times"
+          },
+          {
+            "description": "Directory creation with correct path structure",
+            "tool": "run_tests",
+            "command": "cd extension && npx jest --testPathPattern=regression_handleDocumentPrepCommand.test.ts --passWithNoTests",
+            "expected": "Test exits with code 0 and verifies mkdirSync called with documents/${slug}/ path"
+          }
+        ],
+        "blocked_protocol": "If ensureAgentIdleAndBackendHealthy signature differs, read the function first. If slugify import location varies, search for it and adapt.",
+        "tool": "edit_file",
+        "file_path": "extension/src/slashCommandsWorkspace.ts",
+        "instruction": "Add handleDocumentPrepCommand following handleInterviewPrepCommand pattern: (1) Add import for buildDocumentPrepPrompt at top of file, (2) Implement handler with three showInputBox calls for topic/docType/length, (3) Use slugify to generate directory name from topic, (4) Create documents/${slug}/ via fs.mkdirSync({recursive:true}), (5) Call ctx.handleAgentMessage with generated prompt. Do not modify existing handlers or shared guards.",
+        "reason": "The handler is the entry point for /document-prep and must follow the established Launcher pattern to ensure consistent user experience and proper agent dispatch."
+      },
+      {
+        "step_number": 8,
+        "job": "Register /document-prep command in createSlashCommands factory map so it appears in the slash command menu",
+        "inputs": [
+          {
+            "source": "extension/src/slashCommands.ts lines 16-37",
+            "details": "Import statements for handlers from slashCommandsWorkspace"
+          },
+          {
+            "source": "extension/src/slashCommands.ts lines 62-92",
+            "details": "createSlashCommands factory that builds the command map with pattern like 'interview-prep': handleInterviewPrepCommand"
+          }
+        ],
+        "may_change": [
+          {
+            "path": "extension/src/slashCommands.ts",
+            "change": "Add import for handleDocumentPrepCommand; add 'document-prep' entry to createSlashCommands return object"
+          }
+        ],
+        "must_not_change": [
+          "Existing command registrations, handler imports not related to document-prep"
+        ],
+        "allowed_tools": [
+          "edit_file",
+          "read_file",
+          "list_directory",
+          "directory_tree",
+          "grep_files",
+          "task_complete",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url"
+        ],
+        "output_shape": "slashCommands.ts exports handleDocumentPrepCommand from slashCommandsWorkspace and includes 'document-prep': handleDocumentPrepCommand in the createSlashCommands return object. The command must match kebab-case pattern used by other commands.",
+        "success_checks": [
+          {
+            "description": "Command registration appears in map",
+            "tool": "run_tests",
+            "command": "cd extension && npx jest --testPathPattern=regression_documentPrepRegistration.test.ts --passWithNoTests",
+            "expected": "Test exits with code 0 and verifies handler is dispatched when /document-prep is invoked"
+          }
+        ],
+        "blocked_protocol": "If createSlashCommands structure differs, read the file first to understand exact map format. If imports are organized differently, adapt accordingly.",
+        "tool": "edit_file",
+        "file_path": "extension/src/slashCommands.ts",
+        "instruction": "(1) Add import line for handleDocumentPrepCommand from './slashCommandsWorkspace' in the existing handler import block, (2) Add 'document-prep': handleDocumentPrepCommand entry to the object returned by createSlashCommands following the same pattern as 'interview-prep'.",
+        "reason": "Without registration in the command map, /document-prep will not be discoverable or dispatchable from the slash command menu."
+      },
+      {
+        "step_number": 9,
+        "job": "Update handleHelpCommand to include documentation for /document-prep so users can discover it through built-in help",
+        "inputs": [
+          {
+            "source": "extension/src/slashCommandsWorkspace.ts lines 1603-1645",
+            "details": "handleHelpCommand with existing help text listing commands"
+          }
+        ],
+        "may_change": [
+          {
+            "path": "extension/src/slashCommandsWorkspace.ts",
+            "change": "Add /document-prep entry to help text describing the 14-step rhetorical writing workflow"
+          }
+        ],
+        "must_not_change": [
+          "Other command documentation in help text, handler logic unrelated to help"
+        ],
+        "allowed_tools": [
+          "edit_file",
+          "read_file",
+          "list_directory",
+          "directory_tree",
+          "grep_files",
+          "task_complete",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url"
+        ],
+        "output_shape": "handleHelpCommand output string includes '/document-prep' with brief description mentioning '14-step rhetorical writing workflow' or similar identifying phrase.",
+        "success_checks": [
+          {
+            "description": "Help text mentions /document-prep",
+            "tool": "run_tests",
+            "command": "cd extension && npx jest --testPathPattern=slashCommandsWorkspace.test.ts --passWithNoTests",
+            "expected": "Test exits with code 0 and verifies help message contains '/document-prep' and workflow description"
+          }
+        ],
+        "blocked_protocol": "If handleHelpCommand uses a different format (e.g., array of entries vs string), read the file first to understand structure before editing.",
+        "tool": "edit_file",
+        "file_path": "extension/src/slashCommandsWorkspace.ts",
+        "instruction": "Add /document-prep documentation entry to handleHelpCommand's help text. Include command name and brief description like '/document-prep - 14-step rhetorical writing workflow for long-form document creation'. Follow existing formatting style.",
+        "reason": "Users need discoverability through built-in help; without this, the new command may go unnoticed."
+      }
+    ],
+    "tdd_mode": true,
+    "tdd_test_steps": [
+      {
+        "step_number": 1,
+        "job": "Create regression test for /document-prep command registration in slashCommands.ts",
+        "inputs": [
+          {
+            "source": "TESTING INVENTORY (Phase 2)",
+            "details": "Framework: jest. Directory: extension/src/__tests__/. File pattern: *.test.ts. Pattern from regression_handleUserMessage.test.ts shows command dispatch testing via createMockContext helper"
+          },
+          {
+            "source": "CORE FUNCTIONALITY REQUIRING REGRESSION COVERAGE",
+            "details": "'document-prep' map key in extension/src/slashCommands.ts [downstream_consumer, confidence=high] — Command registration required for the slash menu to expose the new command"
+          },
+          {
+            "source": "NAMING CONVENTIONS (Phase 3/4)",
+            "details": "routes: kebab-case for slash command identifiers prefixed with '/' (e.g., /interview-prep, /document-prep)"
+          }
+        ],
+        "may_change": [
+          {
+            "path": "extension/src/__tests__/regression_documentPrepRegistration.test.ts",
+            "change": "Create new regression test file verifying command registration"
+          }
+        ],
+        "must_not_change": [
+          "Any existing regression files in extension/src/__tests__/"
+        ],
+        "allowed_tools": [
+          "create_file",
+          "read_file",
+          "list_directory",
+          "directory_tree",
+          "grep_files",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url",
+          "task_complete"
+        ],
+        "output_shape": "Jest test file with at least one it() block that imports handleUserMessage from slashCommands, creates mock context via createMockContext helper, dispatches '/document-prep' message, and asserts the handler is called exactly once",
+        "success_checks": [
+          {
+            "description": "Test file exists with valid Jest syntax importing handleUserMessage and using createMockContext pattern",
+            "tool": "",
+            "command": "",
+            "expected": ""
+          },
+          {
+            "description": "Test verifies 'document-prep' key maps to handleDocumentPrepCommand function via mock context dispatch",
+            "tool": "",
+            "command": "",
+            "expected": ""
+          }
+        ],
+        "blocked_protocol": "If regression_handleUserMessage.test.ts cannot be read for the createMockContext helper signature, use standard Jest mock pattern with explicit handler map object. Do not proceed if slashCommands.ts exports do not follow expected handleUserMessage(ctx, message) signature.",
+        "tool": "create_file",
+        "file_path": "extension/src/__tests__/regression_documentPrepRegistration.test.ts",
+        "instruction": "Create a Jest regression test file at extension/src/__tests__/regression_documentPrepRegistration.test.ts that verifies the /document-prep command is properly registered in the slashCommands map. The test must: (1) import handleUserMessage from '../slashCommands', (2) use the createMockContext helper pattern matching existing tests to set up a mock handler for 'document-prep' key, (3) call await handleUserMessage(ctx, '/document-prep'), (4) assert that the mocked handler function was called exactly once using expect(handler).toHaveBeenCalledTimes(1), (5) include module-level JSDoc comment explaining this is a regression test preventing removal of command registration. The test name should be 'dispatches /document-prep to handleDocumentPrepCommand' following existing convention.",
+        "reason": "REGRESSION: Verifies the 'document-prep' map key in extension/src/slashCommands.ts [downstream_consumer, confidence=high] — Command registration is load-bearing; removing this entry breaks slash command discovery. This test prevents regression by ensuring the command remains dispatchable."
+      },
+      {
+        "step_number": 2,
+        "job": "Create unit tests for buildDocumentPrepPrompt in documentPrepPrompts.ts",
+        "inputs": [
+          {
+            "source": "CORE FUNCTIONALITY REQUIRING REGRESSION COVERAGE",
+            "details": "buildDocumentPrepPrompt in extension/src/documentPrepPrompts.ts [phase1_deliverable, confidence=high] — Generates the Master Orchestration Prompt; failure here results in no workflow instructions for the agent"
+          },
+          {
+            "source": "IMPLEMENTATION PLAN Steps",
+            "details": "Step 1 defines buildDocumentPrepPrompt(topic: string, docType: string, targetLength: string, outputDir: string): Promise<string> returning complete 14-step prompt with explicit phase markers, concrete option banks, negative constraints at Phase 9"
+          },
+          {
+            "source": "SECURITY CONCERNS FROM PHASE 3",
+            "details": "[high] Local LLM skipping Phase 9 Approval Gate — mitigation: Explicitly instruct model to call request_clarification and wait for specific approval phrases; include negative constraint 'DO NOT generate draft.md until approved'"
+          },
+          {
+            "source": "SECURITY CONCERNS FROM PHASE 3",
+            "details": "[medium] Source Verification Hallucination — mitigation: Prompt must define strict status criteria (user_provided_verified, web_verified, etc.) and require citation_ready='No' for model memory"
+          }
+        ],
+        "may_change": [
+          {
+            "path": "extension/src/__tests__/documentPrepPrompts.test.ts",
+            "change": "Create new test file with unit tests for buildDocumentPrepPrompt function"
+          }
+        ],
+        "must_not_change": [
+          "Any existing regression files in extension/src/__tests__/"
+        ],
+        "allowed_tools": [
+          "create_file",
+          "read_file",
+          "list_directory",
+          "directory_tree",
+          "grep_files",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url",
+          "task_complete"
+        ],
+        "output_shape": "Jest test file with tests verifying: (1) function returns string containing all 14 phase markers, (2) Phase 9 contains approval gate language with 'request_clarification' and negative constraint about not drafting before approval, (3) source verification statuses are defined (user_provided_verified, web_verified, candidate_unverified), (4) citation_ready='No' appears for model memory sources",
+        "success_checks": [
+          {
+            "description": "Test file exists with valid Jest syntax importing buildDocumentPrepPrompt from '../documentPrepPrompts'",
+            "tool": "",
+            "command": "",
+            "expected": ""
+          },
+          {
+            "description": "Tests assert prompt string contains all 14 phases via substring matching",
+            "tool": "",
+            "command": "",
+            "expected": ""
+          },
+          {
+            "description": "Security tests verify Phase 9 approval gate constraints and source verification rules are present in output",
+            "tool": "",
+            "command": "",
+            "expected": ""
+          }
+        ],
+        "blocked_protocol": "If documentPrepPrompts.ts cannot be created or buildDocumentPrepPrompt signature differs from expected (topic, docType, targetLength, outputDir), stop and report. Do not assume the function exists.",
+        "tool": "create_file",
+        "file_path": "extension/src/__tests__/documentPrepPrompts.test.ts",
+        "instruction": "Create a Jest test file at extension/src/__tests__/documentPrepPrompts.test.ts with unit tests for buildDocumentPrepPrompt function. The tests must: (1) import buildDocumentPrepPrompt from '../documentPrepPrompts', (2) call the async function with sample inputs like 'My Research Topic', 'White Paper', '5000 words', '/tmp/test-docs' and await the result, (3) assert the returned string contains all 14 phase markers using expect(prompt).toContain('Phase N:') or similar pattern for phases 1-14, (4) specifically verify Phase 9 approval gate by asserting prompt includes 'request_clarification' AND negative constraint phrase like 'DO NOT generate draft.md until approved' OR 'wait for explicit approval', (5) verify source verification statuses appear: expect(prompt).toContain('user_provided_verified'), expect(prompt).toContain('web_verified'), expect(prompt).toContain('candidate_unverified'), (6) verify citation_ready='No' or equivalent appears when discussing model memory sources, (7) include module-level comment explaining this tests the Master Orchestration Prompt generation. Test names should describe behavior: 'includes all 14 phases in output', 'enforces Phase 9 approval gate with negative constraint', 'defines source verification statuses', 'marks model memory as not citation ready'.",
+        "reason": "REGRESSION: Verifies buildDocumentPrepPrompt in extension/src/documentPrepPrompts.ts [phase1_deliverable, confidence=high]. Also addresses SECURITY CONCERNs: [high] Local LLM skipping Phase 9 Approval Gate and [medium] Source Verification Hallucination by asserting prompt contains explicit constraints preventing these failures."
+      },
+      {
+        "step_number": 3,
+        "job": "Create regression test for handleDocumentPrepCommand handler signature and input collection",
+        "inputs": [
+          {
+            "source": "CORE FUNCTIONALITY REQUIRING REGRESSION COVERAGE",
+            "details": "handleDocumentPrepCommand in extension/src/slashCommandsWorkspace.ts [phase1_deliverable, confidence=high] — Primary entry point for the /document-prep workflow; handles user input and agent dispatch"
+          },
+          {
+            "source": "IMPLEMENTATION PLAN Steps",
+            "details": "Step 2 defines handler: (1) calls ensureAgentIdleAndBackendHealthy guard, (2) collects three inputs via vscode.window.showInputBox for topic, docType, targetLength with validation, (3) generates slug using slugify utility, (4) creates documents/${slug}/ directory using fs.mkdirSync, (5) imports and calls buildDocumentPrepPrompt, (6) dispatches via ctx.handleAgentMessage"
+          },
+          {
+            "source": "SECURITY CONCERNS FROM PHASE 3",
+            "details": "[high] Regression to existing /interview-prep functionality via shared guard modification — mitigation: Strictly isolate changes to new handler function; do not modify ensureAgentIdleAndBackendHealthy or other shared imports"
+          },
+          {
+            "source": "TESTING INVENTORY (Phase 2)",
+            "details": "Tests heavily mock VSCode APIs (vscode.window, WebSocket contexts) and command dispatchers. Mocked showInputBox should return Promise resolving to input values."
+          }
+        ],
+        "may_change": [
+          {
+            "path": "extension/src/__tests__/regression_handleDocumentPrepCommand.test.ts",
+            "change": "Create new regression test file verifying handler behavior"
+          }
+        ],
+        "must_not_change": [
+          "Any existing regression files in extension/src/__tests__/"
+        ],
+        "allowed_tools": [
+          "create_file",
+          "read_file",
+          "list_directory",
+          "directory_tree",
+          "grep_files",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url",
+          "task_complete"
+        ],
+        "output_shape": "Jest test file with tests verifying: (1) handler exists and is async function, (2) showInputBox is called exactly 3 times for topic/docType/targetLength inputs, (3) fs.mkdirSync mock verifies directory creation at documents/${slug}/ path, (4) buildDocumentPrepPrompt is imported and called with correct arguments, (5) ctx.handleAgentMessage dispatches the generated prompt",
+        "success_checks": [
+          {
+            "description": "Test file exists with valid Jest syntax importing handleDocumentPrepCommand from '../slashCommandsWorkspace'",
+            "tool": "",
+            "command": "",
+            "expected": ""
+          },
+          {
+            "description": "Tests mock vscode.window.showInputBox to return resolved Promises for three sequential inputs",
+            "tool": "",
+            "command": "",
+            "expected": ""
+          },
+          {
+            "description": "Tests verify directory creation and prompt dispatch without modifying shared guards",
+            "tool": "",
+            "command": "",
+            "expected": ""
+          }
+        ],
+        "blocked_protocol": "If handleDocumentPrepCommand cannot be found or imported, stop and report. If vscode.window.showInputBox mocking pattern differs from existing tests, read regression_handleUserMessage.test.ts first to understand the actual mock setup.",
+        "tool": "create_file",
+        "file_path": "extension/src/__tests__/regression_handleDocumentPrepCommand.test.ts",
+        "instruction": "Create a Jest regression test file at extension/src/__tests__/regression_handleDocumentPrepCommand.test.ts that verifies the handleDocumentPrepCommand handler correctly implements the Launcher pattern. The tests must: (1) import handleDocumentPrepCommand from '../slashCommandsWorkspace', (2) mock vscode.window.showInputBox to return sequential Promises resolving to 'Test Topic', 'White Paper', '3000 words' using jest.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce(...) chained three times, (3) mock fs.mkdirSync to track directory creation calls, (4) create a minimal SlashCommandContext mock with handleAgentMessage as jest.fn(), (5) call await handleDocumentPrepCommand(ctx, ''), (6) assert showInputBox was called exactly 3 times using expect(showInputBoxMock).toHaveBeenCalledTimes(3), (7) assert mkdirSync was called with path containing 'documents/' and slugified topic name, (8) assert ctx.handleAgentMessage was called with a string argument (the generated prompt). Include module-level JSDoc explaining this is a regression test for the /document-prep handler. Test names should be: 'collects three inputs via showInputBox', 'creates documents/slug directory', 'dispatches master prompt to agent'.",
+        "reason": "REGRESSION: Verifies handleDocumentPrepCommand in extension/src/slashCommandsWorkspace.ts [phase1_deliverable, confidence=high]. Also addresses SECURITY CONCERN [high] Regression to existing /interview-prep functionality by ensuring the new handler is properly isolated and follows the Launcher pattern without modifying shared guards."
+      },
+      {
+        "step_number": 4,
+        "job": "Create test for Phase 3 Research Paper Branch conditional logic in prompt",
+        "inputs": [
+          {
+            "source": "IMPLEMENTATION PLAN Steps",
+            "details": "Phase 3: Research Paper Branch (Conditional) — Trigger: If doc is research paper, research essay, literature review, or source-supported academic report. Action: Execute 'Research Question Builder' before source gathering."
+          },
+          {
+            "source": "FILES NEEDING TEST COVERAGE",
+            "details": "extension/src/documentPrepPrompts.ts requires test coverage for conditional branching logic"
+          }
+        ],
+        "may_change": [
+          {
+            "path": "extension/src/__tests__/documentPrepPrompts.test.ts",
+            "change": "Add additional tests to existing file (or create if step 2 was skipped)"
+          }
+        ],
+        "must_not_change": [
+          "Any existing regression files in extension/src/__tests__/"
+        ],
+        "allowed_tools": [
+          "create_file",
+          "read_file",
+          "list_directory",
+          "directory_tree",
+          "grep_files",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url",
+          "task_complete"
+        ],
+        "output_shape": "Jest test assertions verifying the prompt contains conditional logic for research paper types, including 'Research Question Builder' trigger conditions and quality gate requirements",
+        "success_checks": [
+          {
+            "description": "Test verifies prompt mentions research paper/essay/literature review as triggers",
+            "tool": "",
+            "command": "",
+            "expected": ""
+          },
+          {
+            "description": "Test verifies Research Question Builder steps are included in the phase description",
+            "tool": "",
+            "command": "",
+            "expected": ""
+          }
+        ],
+        "blocked_protocol": "If documentPrepPrompts.test.ts already exists from step 2, append tests to that file. If it does not exist, create it with this test plus the core functionality tests from step 2.",
+        "tool": "create_file",
+        "file_path": "extension/src/__tests__/documentPrepPrompts.test.ts",
+        "instruction": "Add or verify Jest tests in extension/src/__tests__/documentPrepPrompts.test.ts for Phase 3 Research Paper Branch conditional logic. The test must: (1) call buildDocumentPrepPrompt with docType='Research Paper' as input, (2) assert the returned prompt string contains trigger conditions like 'research paper', 'literature review', or 'source-supported academic report', (3) assert the prompt includes 'Research Question Builder' phase instructions, (4) verify quality gate requirements appear: questions must be focused, researchable, not answerable with yes/no. If this file was created in step 2, add a new describe block named 'Phase 3 Research Paper Branch' with it() tests for these assertions. Test name should be 'includes Research Question Builder trigger conditions for academic document types'.",
+        "reason": "Verifies conditional branching behavior from IMPLEMENTATION PLAN Phase 3: Research Paper Branch (Conditional). Ensures the prompt correctly triggers specialized research workflow only when document type matches criteria, preventing unnecessary complexity in non-research documents."
+      },
+      {
+        "step_number": 5,
+        "job": "Create test for handleHelpCommand documentation update",
+        "inputs": [
+          {
+            "source": "IMPLEMENTATION PLAN Steps",
+            "details": "Step 4: Update handleHelpCommand help text to include /document-prep documentation. Entry should describe it as 'Guided 14-step rhetorical writing workflow for long-form document creation with source verification and approval gates'"
+          },
+          {
+            "source": "TESTING INVENTORY (Phase 2)",
+            "details": "Existing tests in extension/src/__tests__/ verify help command behavior"
+          }
+        ],
+        "may_change": [
+          {
+            "path": "extension/src/__tests__/slashCommandsWorkspace.test.ts",
+            "change": "Create or update test file verifying handleHelpCommand includes /document-prep"
+          }
+        ],
+        "must_not_change": [
+          "Any existing regression files in extension/src/__tests__/"
+        ],
+        "allowed_tools": [
+          "create_file",
+          "read_file",
+          "list_directory",
+          "directory_tree",
+          "grep_files",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url",
+          "task_complete"
+        ],
+        "output_shape": "Jest test file with test verifying handleHelpCommand output contains '/document-prep' string and description mentioning '14-step' or 'rhetorical writing'",
+        "success_checks": [
+          {
+            "description": "Test imports handleHelpCommand from '../slashCommandsWorkspace'",
+            "tool": "",
+            "command": "",
+            "expected": ""
+          },
+          {
+            "description": "Test captures help output (via mock vscode.window.showInformationMessage or similar) and asserts it contains /document-prep documentation",
+            "tool": "",
+            "command": "",
+            "expected": ""
+          }
+        ],
+        "blocked_protocol": "If handleHelpCommand does not exist or uses different UI mechanism than expected, read the actual file first. Do not assume showInformationMessage is used.",
+        "tool": "create_file",
+        "file_path": "extension/src/__tests__/slashCommandsWorkspace.test.ts",
+        "instruction": "Create a Jest test file at extension/src/__tests__/slashCommandsWorkspace.test.ts that verifies handleHelpCommand includes documentation for /document-prep. The test must: (1) import handleHelpCommand from '../slashCommandsWorkspace', (2) mock vscode.window.showInformationMessage or the actual UI mechanism used by help command using jest.spyOn, (3) call await handleHelpCommand(ctx, ''), (4) assert the mocked show function was called with a string containing '/document-prep' and either '14-step' or 'rhetorical writing workflow'. Include module-level comment explaining this tests user-facing documentation. Test name should be 'includes /document-prep in help text'.",
+        "reason": "Verifies IMPLEMENTATION PLAN Step 4: handleHelpCommand update ensures users can discover the new command through built-in help. This is a usability regression test preventing accidental removal of feature documentation."
+      }
+    ],
+    "affected_files": [
+      "extension/src/documentPrepPrompts.ts",
+      "extension/src/slashCommandsWorkspace.ts",
+      "extension/src/slashCommands.ts",
+      "extension/src/__tests__/regression_documentPrepRegistration.test.ts",
+      "extension/src/__tests__/documentPrepPrompts.test.ts",
+      "extension/src/__tests__/regression_handleDocumentPrepCommand.test.ts",
+      "extension/src/__tests__/slashCommandsWorkspace.test.ts"
+    ],
+    "test_strategy": "TDD mode: Create regression tests first (tdd_test_steps) covering command registration, prompt generation with all 14 phases and source verification rules, handler input collection and directory creation, conditional branching for research papers, and help text discovery. Tests mock VSCode APIs (showInputBox), file system operations (mkdirSync), and agent message handlers to isolate behavior without requiring live backend. All tests run via Jest from the extension directory.",
+    "plan_validation_warnings": [
+      "strict test contract requires a project test command for final full-suite validation; add test setup and record `.lean_ai/commands.json`"
+    ],
+    "core_functionality": [
+      {
+        "entity": "handleDocumentPrepCommand",
+        "file_path": "extension/src/slashCommandsWorkspace.ts",
+        "reason": "Primary entry point for the /document-prep workflow; handles user input and agent dispatch.",
+        "source_signal": "phase1_deliverable",
+        "confidence": "high"
+      },
+      {
+        "entity": "'document-prep' map key",
+        "file_path": "extension/src/slashCommands.ts",
+        "reason": "Command registration required for the slash menu to expose the new command.",
+        "source_signal": "downstream_consumer",
+        "confidence": "high"
+      },
+      {
+        "entity": "buildDocumentPrepPrompt",
+        "file_path": "extension/src/documentPrepPrompts.ts",
+        "reason": "Generates the Master Orchestration Prompt; failure here results in no workflow instructions for the agent.",
+        "source_signal": "phase1_deliverable",
+        "confidence": "high"
+      },
+      {
+        "entity": "Phase 9 Approval Gate Logic",
+        "file_path": "extension/src/documentPrepPrompts.ts",
+        "reason": "Critical pause mechanism preventing unauthorized drafting; enforced via prompt constraints.",
+        "source_signal": "critical_risk_adjacent",
+        "confidence": "medium"
+      }
+    ]
+  },
+  "session_metadata": {
+    "plan": {
+      "scope": "Implement a new `/document-prep` slash command that mirrors the architecture of `/interview-prep`, guiding users through a strict 14-step rhetorical writing workflow with staged approvals, source verification rules, and explicit output formats to prevent local LLM drift or hallucination during long-form document creation.",
+      "user_summary": "",
+      "naming_conventions": [],
+      "name_registry": [],
+      "steps": [
+        {
+          "step_number": 6,
+          "job": "Create the Master Orchestration Prompt file containing the complete 14-step workflow instructions optimized for local model execution with explicit phase markers, source verification rules, and approval gate constraints",
+          "inputs": [
+            {
+              "source": "extension/src/jobSearchPrompts.ts (reference pattern)",
+              "details": "Reference pattern for prompt builder function exports"
+            },
+            {
+              "source": "Design synthesis: 14-step sequence",
+              "details": "Phase 1-14 specifications including intake grill, rhetorical profile, research branching, source verification, approval gates"
+            }
+          ],
+          "may_change": [
+            {
+              "path": "extension/src/documentPrepPrompts.ts",
+              "change": "Create new file with buildDocumentPrepPrompt function exporting the complete orchestration prompt string"
+            }
+          ],
+          "must_not_change": [
+            "Existing prompt files, shared utilities"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "task_complete",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url"
+          ],
+          "output_shape": "Module exports async buildDocumentPrepPrompt(topic: string, docType: string, targetLength: string, outputDir: string): Promise<string> returning the full 14-step orchestration prompt with all phase markers (Phase 1-14), source verification statuses (user_provided_verified, web_verified, candidate_unverified, etc.), Phase 9 approval gate with negative constraints ('DO NOT generate draft.md until approved'), and conditional Research Question Builder trigger for academic document types. Test seam: function accepts parameters and returns string; pure transformation logic.",
+          "success_checks": [
+            {
+              "description": "File contains buildDocumentPrepPrompt async function export",
+              "tool": "read_file",
+              "command": "",
+              "expected": "Function signature visible with 4 parameters (topic, docType, targetLength, outputDir)"
+            },
+            {
+              "description": "All 14 phases are present in the prompt string",
+              "tool": "run_tests",
+              "command": "cd extension && npx jest --testPathPattern=documentPrepPrompts.test.ts --passWithNoTests",
+              "expected": "Test exits with code 0 and verifies Phase 1-14 markers appear in generated prompt"
+            }
+          ],
+          "blocked_protocol": "If jobSearchPrompts.ts pattern differs from expected, read the file first to adapt. If required utilities (slugify) are missing, escalate.",
+          "tool": "create_file",
+          "file_path": "extension/src/documentPrepPrompts.ts",
+          "instruction": "Create documentPrepPrompts.ts with buildDocumentPrepPrompt function implementing the 14-step orchestration prompt. Include: (1) Intake Grill with concrete examples for audience/voice, (2) Rhetorical Profile output spec, (3) Research Paper Branch conditional logic, (4) Source Verification hard rules and status definitions, (5) Source Matrix table format, (6) Research Integrity Check questions, (7-8) Blueprint and Structure Preview specs, (9) Approval Gate with explicit pause instruction and forbidden phrases for premature drafting, (10-13) Drafting, Review, Editor, Final Output phases, (14) Closing. Test seam: function accepts parameters and returns string; pure transformation logic.",
+          "reason": "The Master Orchestration Prompt is the foundational artifact that drives agent behavior through all 14 workflow steps. Without this file, the handler cannot dispatch meaningful instructions to the LLM."
+        },
+        {
+          "step_number": 7,
+          "job": "Implement handleDocumentPrepCommand handler following the Launcher pattern: collect three inputs via showInputBox, create documents/slug directory, and dispatch master prompt to agent",
+          "inputs": [
+            {
+              "source": "extension/src/slashCommandsWorkspace.ts lines 885-1071",
+              "details": "handleInterviewPrepCommand showing the Launcher pattern with input collection"
+            },
+            {
+              "source": "extension/src/slashCommandsWorkspace.ts line 1075+",
+              "details": "ensureAgentIdleAndBackendHealthy shared guard"
+            },
+            {
+              "source": "Design synthesis: handler signature and directory creation",
+              "details": "Handler must use slugify for directory naming, fs.mkdirSync with recursive flag"
+            }
+          ],
+          "may_change": [
+            {
+              "path": "extension/src/slashCommandsWorkspace.ts",
+              "change": "Add handleDocumentPrepCommand function following the Launcher pattern; import buildDocumentPrepPrompt from './documentPrepPrompts'"
+            }
+          ],
+          "must_not_change": [
+            "handleInterviewPrepCommand, ensureAgentIdleAndBackendHealthy, other existing handlers"
+          ],
+          "allowed_tools": [
+            "edit_file",
+            "read_file",
+            "grep_files",
+            "list_directory",
+            "directory_tree",
+            "task_complete",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url"
+          ],
+          "output_shape": "New async function handleDocumentPrepCommand(ctx: SlashCommandContext, _args: string): Promise<void> that: (1) calls ensureAgentIdleAndBackendHealthy guard, (2) collects topic/docType/length via three sequential showInputBox calls, (3) generates slug using existing slugify utility, (4) creates documents/${slug}/ directory with fs.mkdirSync recursive, (5) dispatches master prompt via ctx.handleAgentMessage. Test seam: handler accepts mock context; all VSCode APIs and file ops can be mocked.",
+          "success_checks": [
+            {
+              "description": "Handler collects three inputs sequentially",
+              "tool": "run_tests",
+              "command": "cd extension && npx jest --testPathPattern=regression_handleDocumentPrepCommand.test.ts --passWithNoTests",
+              "expected": "Test exits with code 0 and verifies showInputBox called 3 times"
+            },
+            {
+              "description": "Directory creation with correct path structure",
+              "tool": "run_tests",
+              "command": "cd extension && npx jest --testPathPattern=regression_handleDocumentPrepCommand.test.ts --passWithNoTests",
+              "expected": "Test exits with code 0 and verifies mkdirSync called with documents/${slug}/ path"
+            }
+          ],
+          "blocked_protocol": "If ensureAgentIdleAndBackendHealthy signature differs, read the function first. If slugify import location varies, search for it and adapt.",
+          "tool": "edit_file",
+          "file_path": "extension/src/slashCommandsWorkspace.ts",
+          "instruction": "Add handleDocumentPrepCommand following handleInterviewPrepCommand pattern: (1) Add import for buildDocumentPrepPrompt at top of file, (2) Implement handler with three showInputBox calls for topic/docType/length, (3) Use slugify to generate directory name from topic, (4) Create documents/${slug}/ via fs.mkdirSync({recursive:true}), (5) Call ctx.handleAgentMessage with generated prompt. Do not modify existing handlers or shared guards.",
+          "reason": "The handler is the entry point for /document-prep and must follow the established Launcher pattern to ensure consistent user experience and proper agent dispatch."
+        },
+        {
+          "step_number": 8,
+          "job": "Register /document-prep command in createSlashCommands factory map so it appears in the slash command menu",
+          "inputs": [
+            {
+              "source": "extension/src/slashCommands.ts lines 16-37",
+              "details": "Import statements for handlers from slashCommandsWorkspace"
+            },
+            {
+              "source": "extension/src/slashCommands.ts lines 62-92",
+              "details": "createSlashCommands factory that builds the command map with pattern like 'interview-prep': handleInterviewPrepCommand"
+            }
+          ],
+          "may_change": [
+            {
+              "path": "extension/src/slashCommands.ts",
+              "change": "Add import for handleDocumentPrepCommand; add 'document-prep' entry to createSlashCommands return object"
+            }
+          ],
+          "must_not_change": [
+            "Existing command registrations, handler imports not related to document-prep"
+          ],
+          "allowed_tools": [
+            "edit_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "task_complete",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url"
+          ],
+          "output_shape": "slashCommands.ts exports handleDocumentPrepCommand from slashCommandsWorkspace and includes 'document-prep': handleDocumentPrepCommand in the createSlashCommands return object. The command must match kebab-case pattern used by other commands.",
+          "success_checks": [
+            {
+              "description": "Command registration appears in map",
+              "tool": "run_tests",
+              "command": "cd extension && npx jest --testPathPattern=regression_documentPrepRegistration.test.ts --passWithNoTests",
+              "expected": "Test exits with code 0 and verifies handler is dispatched when /document-prep is invoked"
+            }
+          ],
+          "blocked_protocol": "If createSlashCommands structure differs, read the file first to understand exact map format. If imports are organized differently, adapt accordingly.",
+          "tool": "edit_file",
+          "file_path": "extension/src/slashCommands.ts",
+          "instruction": "(1) Add import line for handleDocumentPrepCommand from './slashCommandsWorkspace' in the existing handler import block, (2) Add 'document-prep': handleDocumentPrepCommand entry to the object returned by createSlashCommands following the same pattern as 'interview-prep'.",
+          "reason": "Without registration in the command map, /document-prep will not be discoverable or dispatchable from the slash command menu."
+        },
+        {
+          "step_number": 9,
+          "job": "Update handleHelpCommand to include documentation for /document-prep so users can discover it through built-in help",
+          "inputs": [
+            {
+              "source": "extension/src/slashCommandsWorkspace.ts lines 1603-1645",
+              "details": "handleHelpCommand with existing help text listing commands"
+            }
+          ],
+          "may_change": [
+            {
+              "path": "extension/src/slashCommandsWorkspace.ts",
+              "change": "Add /document-prep entry to help text describing the 14-step rhetorical writing workflow"
+            }
+          ],
+          "must_not_change": [
+            "Other command documentation in help text, handler logic unrelated to help"
+          ],
+          "allowed_tools": [
+            "edit_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "task_complete",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url"
+          ],
+          "output_shape": "handleHelpCommand output string includes '/document-prep' with brief description mentioning '14-step rhetorical writing workflow' or similar identifying phrase.",
+          "success_checks": [
+            {
+              "description": "Help text mentions /document-prep",
+              "tool": "run_tests",
+              "command": "cd extension && npx jest --testPathPattern=slashCommandsWorkspace.test.ts --passWithNoTests",
+              "expected": "Test exits with code 0 and verifies help message contains '/document-prep' and workflow description"
+            }
+          ],
+          "blocked_protocol": "If handleHelpCommand uses a different format (e.g., array of entries vs string), read the file first to understand structure before editing.",
+          "tool": "edit_file",
+          "file_path": "extension/src/slashCommandsWorkspace.ts",
+          "instruction": "Add /document-prep documentation entry to handleHelpCommand's help text. Include command name and brief description like '/document-prep - 14-step rhetorical writing workflow for long-form document creation'. Follow existing formatting style.",
+          "reason": "Users need discoverability through built-in help; without this, the new command may go unnoticed."
+        }
+      ],
+      "tdd_mode": true,
+      "tdd_test_steps": [
+        {
+          "step_number": 1,
+          "job": "Create regression test for /document-prep command registration in slashCommands.ts",
+          "inputs": [
+            {
+              "source": "TESTING INVENTORY (Phase 2)",
+              "details": "Framework: jest. Directory: extension/src/__tests__/. File pattern: *.test.ts. Pattern from regression_handleUserMessage.test.ts shows command dispatch testing via createMockContext helper"
+            },
+            {
+              "source": "CORE FUNCTIONALITY REQUIRING REGRESSION COVERAGE",
+              "details": "'document-prep' map key in extension/src/slashCommands.ts [downstream_consumer, confidence=high] — Command registration required for the slash menu to expose the new command"
+            },
+            {
+              "source": "NAMING CONVENTIONS (Phase 3/4)",
+              "details": "routes: kebab-case for slash command identifiers prefixed with '/' (e.g., /interview-prep, /document-prep)"
+            }
+          ],
+          "may_change": [
+            {
+              "path": "extension/src/__tests__/regression_documentPrepRegistration.test.ts",
+              "change": "Create new regression test file verifying command registration"
+            }
+          ],
+          "must_not_change": [
+            "Any existing regression files in extension/src/__tests__/"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Jest test file with at least one it() block that imports handleUserMessage from slashCommands, creates mock context via createMockContext helper, dispatches '/document-prep' message, and asserts the handler is called exactly once",
+          "success_checks": [
+            {
+              "description": "Test file exists with valid Jest syntax importing handleUserMessage and using createMockContext pattern",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            },
+            {
+              "description": "Test verifies 'document-prep' key maps to handleDocumentPrepCommand function via mock context dispatch",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            }
+          ],
+          "blocked_protocol": "If regression_handleUserMessage.test.ts cannot be read for the createMockContext helper signature, use standard Jest mock pattern with explicit handler map object. Do not proceed if slashCommands.ts exports do not follow expected handleUserMessage(ctx, message) signature.",
+          "tool": "create_file",
+          "file_path": "extension/src/__tests__/regression_documentPrepRegistration.test.ts",
+          "instruction": "Create a Jest regression test file at extension/src/__tests__/regression_documentPrepRegistration.test.ts that verifies the /document-prep command is properly registered in the slashCommands map. The test must: (1) import handleUserMessage from '../slashCommands', (2) use the createMockContext helper pattern matching existing tests to set up a mock handler for 'document-prep' key, (3) call await handleUserMessage(ctx, '/document-prep'), (4) assert that the mocked handler function was called exactly once using expect(handler).toHaveBeenCalledTimes(1), (5) include module-level JSDoc comment explaining this is a regression test preventing removal of command registration. The test name should be 'dispatches /document-prep to handleDocumentPrepCommand' following existing convention.",
+          "reason": "REGRESSION: Verifies the 'document-prep' map key in extension/src/slashCommands.ts [downstream_consumer, confidence=high] — Command registration is load-bearing; removing this entry breaks slash command discovery. This test prevents regression by ensuring the command remains dispatchable."
+        },
+        {
+          "step_number": 2,
+          "job": "Create unit tests for buildDocumentPrepPrompt in documentPrepPrompts.ts",
+          "inputs": [
+            {
+              "source": "CORE FUNCTIONALITY REQUIRING REGRESSION COVERAGE",
+              "details": "buildDocumentPrepPrompt in extension/src/documentPrepPrompts.ts [phase1_deliverable, confidence=high] — Generates the Master Orchestration Prompt; failure here results in no workflow instructions for the agent"
+            },
+            {
+              "source": "IMPLEMENTATION PLAN Steps",
+              "details": "Step 1 defines buildDocumentPrepPrompt(topic: string, docType: string, targetLength: string, outputDir: string): Promise<string> returning complete 14-step prompt with explicit phase markers, concrete option banks, negative constraints at Phase 9"
+            },
+            {
+              "source": "SECURITY CONCERNS FROM PHASE 3",
+              "details": "[high] Local LLM skipping Phase 9 Approval Gate — mitigation: Explicitly instruct model to call request_clarification and wait for specific approval phrases; include negative constraint 'DO NOT generate draft.md until approved'"
+            },
+            {
+              "source": "SECURITY CONCERNS FROM PHASE 3",
+              "details": "[medium] Source Verification Hallucination — mitigation: Prompt must define strict status criteria (user_provided_verified, web_verified, etc.) and require citation_ready='No' for model memory"
+            }
+          ],
+          "may_change": [
+            {
+              "path": "extension/src/__tests__/documentPrepPrompts.test.ts",
+              "change": "Create new test file with unit tests for buildDocumentPrepPrompt function"
+            }
+          ],
+          "must_not_change": [
+            "Any existing regression files in extension/src/__tests__/"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Jest test file with tests verifying: (1) function returns string containing all 14 phase markers, (2) Phase 9 contains approval gate language with 'request_clarification' and negative constraint about not drafting before approval, (3) source verification statuses are defined (user_provided_verified, web_verified, candidate_unverified), (4) citation_ready='No' appears for model memory sources",
+          "success_checks": [
+            {
+              "description": "Test file exists with valid Jest syntax importing buildDocumentPrepPrompt from '../documentPrepPrompts'",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            },
+            {
+              "description": "Tests assert prompt string contains all 14 phases via substring matching",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            },
+            {
+              "description": "Security tests verify Phase 9 approval gate constraints and source verification rules are present in output",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            }
+          ],
+          "blocked_protocol": "If documentPrepPrompts.ts cannot be created or buildDocumentPrepPrompt signature differs from expected (topic, docType, targetLength, outputDir), stop and report. Do not assume the function exists.",
+          "tool": "create_file",
+          "file_path": "extension/src/__tests__/documentPrepPrompts.test.ts",
+          "instruction": "Create a Jest test file at extension/src/__tests__/documentPrepPrompts.test.ts with unit tests for buildDocumentPrepPrompt function. The tests must: (1) import buildDocumentPrepPrompt from '../documentPrepPrompts', (2) call the async function with sample inputs like 'My Research Topic', 'White Paper', '5000 words', '/tmp/test-docs' and await the result, (3) assert the returned string contains all 14 phase markers using expect(prompt).toContain('Phase N:') or similar pattern for phases 1-14, (4) specifically verify Phase 9 approval gate by asserting prompt includes 'request_clarification' AND negative constraint phrase like 'DO NOT generate draft.md until approved' OR 'wait for explicit approval', (5) verify source verification statuses appear: expect(prompt).toContain('user_provided_verified'), expect(prompt).toContain('web_verified'), expect(prompt).toContain('candidate_unverified'), (6) verify citation_ready='No' or equivalent appears when discussing model memory sources, (7) include module-level comment explaining this tests the Master Orchestration Prompt generation. Test names should describe behavior: 'includes all 14 phases in output', 'enforces Phase 9 approval gate with negative constraint', 'defines source verification statuses', 'marks model memory as not citation ready'.",
+          "reason": "REGRESSION: Verifies buildDocumentPrepPrompt in extension/src/documentPrepPrompts.ts [phase1_deliverable, confidence=high]. Also addresses SECURITY CONCERNs: [high] Local LLM skipping Phase 9 Approval Gate and [medium] Source Verification Hallucination by asserting prompt contains explicit constraints preventing these failures."
+        },
+        {
+          "step_number": 3,
+          "job": "Create regression test for handleDocumentPrepCommand handler signature and input collection",
+          "inputs": [
+            {
+              "source": "CORE FUNCTIONALITY REQUIRING REGRESSION COVERAGE",
+              "details": "handleDocumentPrepCommand in extension/src/slashCommandsWorkspace.ts [phase1_deliverable, confidence=high] — Primary entry point for the /document-prep workflow; handles user input and agent dispatch"
+            },
+            {
+              "source": "IMPLEMENTATION PLAN Steps",
+              "details": "Step 2 defines handler: (1) calls ensureAgentIdleAndBackendHealthy guard, (2) collects three inputs via vscode.window.showInputBox for topic, docType, targetLength with validation, (3) generates slug using slugify utility, (4) creates documents/${slug}/ directory using fs.mkdirSync, (5) imports and calls buildDocumentPrepPrompt, (6) dispatches via ctx.handleAgentMessage"
+            },
+            {
+              "source": "SECURITY CONCERNS FROM PHASE 3",
+              "details": "[high] Regression to existing /interview-prep functionality via shared guard modification — mitigation: Strictly isolate changes to new handler function; do not modify ensureAgentIdleAndBackendHealthy or other shared imports"
+            },
+            {
+              "source": "TESTING INVENTORY (Phase 2)",
+              "details": "Tests heavily mock VSCode APIs (vscode.window, WebSocket contexts) and command dispatchers. Mocked showInputBox should return Promise resolving to input values."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "extension/src/__tests__/regression_handleDocumentPrepCommand.test.ts",
+              "change": "Create new regression test file verifying handler behavior"
+            }
+          ],
+          "must_not_change": [
+            "Any existing regression files in extension/src/__tests__/"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Jest test file with tests verifying: (1) handler exists and is async function, (2) showInputBox is called exactly 3 times for topic/docType/targetLength inputs, (3) fs.mkdirSync mock verifies directory creation at documents/${slug}/ path, (4) buildDocumentPrepPrompt is imported and called with correct arguments, (5) ctx.handleAgentMessage dispatches the generated prompt",
+          "success_checks": [
+            {
+              "description": "Test file exists with valid Jest syntax importing handleDocumentPrepCommand from '../slashCommandsWorkspace'",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            },
+            {
+              "description": "Tests mock vscode.window.showInputBox to return resolved Promises for three sequential inputs",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            },
+            {
+              "description": "Tests verify directory creation and prompt dispatch without modifying shared guards",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            }
+          ],
+          "blocked_protocol": "If handleDocumentPrepCommand cannot be found or imported, stop and report. If vscode.window.showInputBox mocking pattern differs from existing tests, read regression_handleUserMessage.test.ts first to understand the actual mock setup.",
+          "tool": "create_file",
+          "file_path": "extension/src/__tests__/regression_handleDocumentPrepCommand.test.ts",
+          "instruction": "Create a Jest regression test file at extension/src/__tests__/regression_handleDocumentPrepCommand.test.ts that verifies the handleDocumentPrepCommand handler correctly implements the Launcher pattern. The tests must: (1) import handleDocumentPrepCommand from '../slashCommandsWorkspace', (2) mock vscode.window.showInputBox to return sequential Promises resolving to 'Test Topic', 'White Paper', '3000 words' using jest.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce(...) chained three times, (3) mock fs.mkdirSync to track directory creation calls, (4) create a minimal SlashCommandContext mock with handleAgentMessage as jest.fn(), (5) call await handleDocumentPrepCommand(ctx, ''), (6) assert showInputBox was called exactly 3 times using expect(showInputBoxMock).toHaveBeenCalledTimes(3), (7) assert mkdirSync was called with path containing 'documents/' and slugified topic name, (8) assert ctx.handleAgentMessage was called with a string argument (the generated prompt). Include module-level JSDoc explaining this is a regression test for the /document-prep handler. Test names should be: 'collects three inputs via showInputBox', 'creates documents/slug directory', 'dispatches master prompt to agent'.",
+          "reason": "REGRESSION: Verifies handleDocumentPrepCommand in extension/src/slashCommandsWorkspace.ts [phase1_deliverable, confidence=high]. Also addresses SECURITY CONCERN [high] Regression to existing /interview-prep functionality by ensuring the new handler is properly isolated and follows the Launcher pattern without modifying shared guards."
+        },
+        {
+          "step_number": 4,
+          "job": "Create test for Phase 3 Research Paper Branch conditional logic in prompt",
+          "inputs": [
+            {
+              "source": "IMPLEMENTATION PLAN Steps",
+              "details": "Phase 3: Research Paper Branch (Conditional) — Trigger: If doc is research paper, research essay, literature review, or source-supported academic report. Action: Execute 'Research Question Builder' before source gathering."
+            },
+            {
+              "source": "FILES NEEDING TEST COVERAGE",
+              "details": "extension/src/documentPrepPrompts.ts requires test coverage for conditional branching logic"
+            }
+          ],
+          "may_change": [
+            {
+              "path": "extension/src/__tests__/documentPrepPrompts.test.ts",
+              "change": "Add additional tests to existing file (or create if step 2 was skipped)"
+            }
+          ],
+          "must_not_change": [
+            "Any existing regression files in extension/src/__tests__/"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Jest test assertions verifying the prompt contains conditional logic for research paper types, including 'Research Question Builder' trigger conditions and quality gate requirements",
+          "success_checks": [
+            {
+              "description": "Test verifies prompt mentions research paper/essay/literature review as triggers",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            },
+            {
+              "description": "Test verifies Research Question Builder steps are included in the phase description",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            }
+          ],
+          "blocked_protocol": "If documentPrepPrompts.test.ts already exists from step 2, append tests to that file. If it does not exist, create it with this test plus the core functionality tests from step 2.",
+          "tool": "create_file",
+          "file_path": "extension/src/__tests__/documentPrepPrompts.test.ts",
+          "instruction": "Add or verify Jest tests in extension/src/__tests__/documentPrepPrompts.test.ts for Phase 3 Research Paper Branch conditional logic. The test must: (1) call buildDocumentPrepPrompt with docType='Research Paper' as input, (2) assert the returned prompt string contains trigger conditions like 'research paper', 'literature review', or 'source-supported academic report', (3) assert the prompt includes 'Research Question Builder' phase instructions, (4) verify quality gate requirements appear: questions must be focused, researchable, not answerable with yes/no. If this file was created in step 2, add a new describe block named 'Phase 3 Research Paper Branch' with it() tests for these assertions. Test name should be 'includes Research Question Builder trigger conditions for academic document types'.",
+          "reason": "Verifies conditional branching behavior from IMPLEMENTATION PLAN Phase 3: Research Paper Branch (Conditional). Ensures the prompt correctly triggers specialized research workflow only when document type matches criteria, preventing unnecessary complexity in non-research documents."
+        },
+        {
+          "step_number": 5,
+          "job": "Create test for handleHelpCommand documentation update",
+          "inputs": [
+            {
+              "source": "IMPLEMENTATION PLAN Steps",
+              "details": "Step 4: Update handleHelpCommand help text to include /document-prep documentation. Entry should describe it as 'Guided 14-step rhetorical writing workflow for long-form document creation with source verification and approval gates'"
+            },
+            {
+              "source": "TESTING INVENTORY (Phase 2)",
+              "details": "Existing tests in extension/src/__tests__/ verify help command behavior"
+            }
+          ],
+          "may_change": [
+            {
+              "path": "extension/src/__tests__/slashCommandsWorkspace.test.ts",
+              "change": "Create or update test file verifying handleHelpCommand includes /document-prep"
+            }
+          ],
+          "must_not_change": [
+            "Any existing regression files in extension/src/__tests__/"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Jest test file with test verifying handleHelpCommand output contains '/document-prep' string and description mentioning '14-step' or 'rhetorical writing'",
+          "success_checks": [
+            {
+              "description": "Test imports handleHelpCommand from '../slashCommandsWorkspace'",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            },
+            {
+              "description": "Test captures help output (via mock vscode.window.showInformationMessage or similar) and asserts it contains /document-prep documentation",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            }
+          ],
+          "blocked_protocol": "If handleHelpCommand does not exist or uses different UI mechanism than expected, read the actual file first. Do not assume showInformationMessage is used.",
+          "tool": "create_file",
+          "file_path": "extension/src/__tests__/slashCommandsWorkspace.test.ts",
+          "instruction": "Create a Jest test file at extension/src/__tests__/slashCommandsWorkspace.test.ts that verifies handleHelpCommand includes documentation for /document-prep. The test must: (1) import handleHelpCommand from '../slashCommandsWorkspace', (2) mock vscode.window.showInformationMessage or the actual UI mechanism used by help command using jest.spyOn, (3) call await handleHelpCommand(ctx, ''), (4) assert the mocked show function was called with a string containing '/document-prep' and either '14-step' or 'rhetorical writing workflow'. Include module-level comment explaining this tests user-facing documentation. Test name should be 'includes /document-prep in help text'.",
+          "reason": "Verifies IMPLEMENTATION PLAN Step 4: handleHelpCommand update ensures users can discover the new command through built-in help. This is a usability regression test preventing accidental removal of feature documentation."
+        }
+      ],
+      "affected_files": [
+        "extension/src/documentPrepPrompts.ts",
+        "extension/src/slashCommandsWorkspace.ts",
+        "extension/src/slashCommands.ts",
+        "extension/src/__tests__/regression_documentPrepRegistration.test.ts",
+        "extension/src/__tests__/documentPrepPrompts.test.ts",
+        "extension/src/__tests__/regression_handleDocumentPrepCommand.test.ts",
+        "extension/src/__tests__/slashCommandsWorkspace.test.ts"
+      ],
+      "test_strategy": "TDD mode: Create regression tests first (tdd_test_steps) covering command registration, prompt generation with all 14 phases and source verification rules, handler input collection and directory creation, conditional branching for research papers, and help text discovery. Tests mock VSCode APIs (showInputBox), file system operations (mkdirSync), and agent message handlers to isolate behavior without requiring live backend. All tests run via Jest from the extension directory.",
+      "plan_validation_warnings": [
+        "strict test contract requires a project test command for final full-suite validation; add test setup and record `.lean_ai/commands.json`"
+      ],
+      "core_functionality": [
+        {
+          "entity": "handleDocumentPrepCommand",
+          "file_path": "extension/src/slashCommandsWorkspace.ts",
+          "reason": "Primary entry point for the /document-prep workflow; handles user input and agent dispatch.",
+          "source_signal": "phase1_deliverable",
+          "confidence": "high"
+        },
+        {
+          "entity": "'document-prep' map key",
+          "file_path": "extension/src/slashCommands.ts",
+          "reason": "Command registration required for the slash menu to expose the new command.",
+          "source_signal": "downstream_consumer",
+          "confidence": "high"
+        },
+        {
+          "entity": "buildDocumentPrepPrompt",
+          "file_path": "extension/src/documentPrepPrompts.ts",
+          "reason": "Generates the Master Orchestration Prompt; failure here results in no workflow instructions for the agent.",
+          "source_signal": "phase1_deliverable",
+          "confidence": "high"
+        },
+        {
+          "entity": "Phase 9 Approval Gate Logic",
+          "file_path": "extension/src/documentPrepPrompts.ts",
+          "reason": "Critical pause mechanism preventing unauthorized drafting; enforced via prompt constraints.",
+          "source_signal": "critical_risk_adjacent",
+          "confidence": "medium"
+        }
+      ]
+    },
+    "planning_checkpoint_id": null,
+    "approved_plan": {
+      "scope": "Implement a new `/document-prep` slash command that mirrors the architecture of `/interview-prep`, guiding users through a strict 14-step rhetorical writing workflow with staged approvals, source verification rules, and explicit output formats to prevent local LLM drift or hallucination during long-form document creation.",
+      "user_summary": "",
+      "naming_conventions": [],
+      "name_registry": [],
+      "steps": [
+        {
+          "step_number": 6,
+          "job": "Create the Master Orchestration Prompt file containing the complete 14-step workflow instructions optimized for local model execution with explicit phase markers, source verification rules, and approval gate constraints",
+          "inputs": [
+            {
+              "source": "extension/src/jobSearchPrompts.ts (reference pattern)",
+              "details": "Reference pattern for prompt builder function exports"
+            },
+            {
+              "source": "Design synthesis: 14-step sequence",
+              "details": "Phase 1-14 specifications including intake grill, rhetorical profile, research branching, source verification, approval gates"
+            }
+          ],
+          "may_change": [
+            {
+              "path": "extension/src/documentPrepPrompts.ts",
+              "change": "Create new file with buildDocumentPrepPrompt function exporting the complete orchestration prompt string"
+            }
+          ],
+          "must_not_change": [
+            "Existing prompt files, shared utilities"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "task_complete",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url"
+          ],
+          "output_shape": "Module exports async buildDocumentPrepPrompt(topic: string, docType: string, targetLength: string, outputDir: string): Promise<string> returning the full 14-step orchestration prompt with all phase markers (Phase 1-14), source verification statuses (user_provided_verified, web_verified, candidate_unverified, etc.), Phase 9 approval gate with negative constraints ('DO NOT generate draft.md until approved'), and conditional Research Question Builder trigger for academic document types. Test seam: function accepts parameters and returns string; pure transformation logic.",
+          "success_checks": [
+            {
+              "description": "File contains buildDocumentPrepPrompt async function export",
+              "tool": "read_file",
+              "command": "",
+              "expected": "Function signature visible with 4 parameters (topic, docType, targetLength, outputDir)"
+            },
+            {
+              "description": "All 14 phases are present in the prompt string",
+              "tool": "run_tests",
+              "command": "cd extension && npx jest --testPathPattern=documentPrepPrompts.test.ts --passWithNoTests",
+              "expected": "Test exits with code 0 and verifies Phase 1-14 markers appear in generated prompt"
+            }
+          ],
+          "blocked_protocol": "If jobSearchPrompts.ts pattern differs from expected, read the file first to adapt. If required utilities (slugify) are missing, escalate.",
+          "tool": "create_file",
+          "file_path": "extension/src/documentPrepPrompts.ts",
+          "instruction": "Create documentPrepPrompts.ts with buildDocumentPrepPrompt function implementing the 14-step orchestration prompt. Include: (1) Intake Grill with concrete examples for audience/voice, (2) Rhetorical Profile output spec, (3) Research Paper Branch conditional logic, (4) Source Verification hard rules and status definitions, (5) Source Matrix table format, (6) Research Integrity Check questions, (7-8) Blueprint and Structure Preview specs, (9) Approval Gate with explicit pause instruction and forbidden phrases for premature drafting, (10-13) Drafting, Review, Editor, Final Output phases, (14) Closing. Test seam: function accepts parameters and returns string; pure transformation logic.",
+          "reason": "The Master Orchestration Prompt is the foundational artifact that drives agent behavior through all 14 workflow steps. Without this file, the handler cannot dispatch meaningful instructions to the LLM."
+        },
+        {
+          "step_number": 7,
+          "job": "Implement handleDocumentPrepCommand handler following the Launcher pattern: collect three inputs via showInputBox, create documents/slug directory, and dispatch master prompt to agent",
+          "inputs": [
+            {
+              "source": "extension/src/slashCommandsWorkspace.ts lines 885-1071",
+              "details": "handleInterviewPrepCommand showing the Launcher pattern with input collection"
+            },
+            {
+              "source": "extension/src/slashCommandsWorkspace.ts line 1075+",
+              "details": "ensureAgentIdleAndBackendHealthy shared guard"
+            },
+            {
+              "source": "Design synthesis: handler signature and directory creation",
+              "details": "Handler must use slugify for directory naming, fs.mkdirSync with recursive flag"
+            }
+          ],
+          "may_change": [
+            {
+              "path": "extension/src/slashCommandsWorkspace.ts",
+              "change": "Add handleDocumentPrepCommand function following the Launcher pattern; import buildDocumentPrepPrompt from './documentPrepPrompts'"
+            }
+          ],
+          "must_not_change": [
+            "handleInterviewPrepCommand, ensureAgentIdleAndBackendHealthy, other existing handlers"
+          ],
+          "allowed_tools": [
+            "edit_file",
+            "read_file",
+            "grep_files",
+            "list_directory",
+            "directory_tree",
+            "task_complete",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url"
+          ],
+          "output_shape": "New async function handleDocumentPrepCommand(ctx: SlashCommandContext, _args: string): Promise<void> that: (1) calls ensureAgentIdleAndBackendHealthy guard, (2) collects topic/docType/length via three sequential showInputBox calls, (3) generates slug using existing slugify utility, (4) creates documents/${slug}/ directory with fs.mkdirSync recursive, (5) dispatches master prompt via ctx.handleAgentMessage. Test seam: handler accepts mock context; all VSCode APIs and file ops can be mocked.",
+          "success_checks": [
+            {
+              "description": "Handler collects three inputs sequentially",
+              "tool": "run_tests",
+              "command": "cd extension && npx jest --testPathPattern=regression_handleDocumentPrepCommand.test.ts --passWithNoTests",
+              "expected": "Test exits with code 0 and verifies showInputBox called 3 times"
+            },
+            {
+              "description": "Directory creation with correct path structure",
+              "tool": "run_tests",
+              "command": "cd extension && npx jest --testPathPattern=regression_handleDocumentPrepCommand.test.ts --passWithNoTests",
+              "expected": "Test exits with code 0 and verifies mkdirSync called with documents/${slug}/ path"
+            }
+          ],
+          "blocked_protocol": "If ensureAgentIdleAndBackendHealthy signature differs, read the function first. If slugify import location varies, search for it and adapt.",
+          "tool": "edit_file",
+          "file_path": "extension/src/slashCommandsWorkspace.ts",
+          "instruction": "Add handleDocumentPrepCommand following handleInterviewPrepCommand pattern: (1) Add import for buildDocumentPrepPrompt at top of file, (2) Implement handler with three showInputBox calls for topic/docType/length, (3) Use slugify to generate directory name from topic, (4) Create documents/${slug}/ via fs.mkdirSync({recursive:true}), (5) Call ctx.handleAgentMessage with generated prompt. Do not modify existing handlers or shared guards.",
+          "reason": "The handler is the entry point for /document-prep and must follow the established Launcher pattern to ensure consistent user experience and proper agent dispatch."
+        },
+        {
+          "step_number": 8,
+          "job": "Register /document-prep command in createSlashCommands factory map so it appears in the slash command menu",
+          "inputs": [
+            {
+              "source": "extension/src/slashCommands.ts lines 16-37",
+              "details": "Import statements for handlers from slashCommandsWorkspace"
+            },
+            {
+              "source": "extension/src/slashCommands.ts lines 62-92",
+              "details": "createSlashCommands factory that builds the command map with pattern like 'interview-prep': handleInterviewPrepCommand"
+            }
+          ],
+          "may_change": [
+            {
+              "path": "extension/src/slashCommands.ts",
+              "change": "Add import for handleDocumentPrepCommand; add 'document-prep' entry to createSlashCommands return object"
+            }
+          ],
+          "must_not_change": [
+            "Existing command registrations, handler imports not related to document-prep"
+          ],
+          "allowed_tools": [
+            "edit_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "task_complete",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url"
+          ],
+          "output_shape": "slashCommands.ts exports handleDocumentPrepCommand from slashCommandsWorkspace and includes 'document-prep': handleDocumentPrepCommand in the createSlashCommands return object. The command must match kebab-case pattern used by other commands.",
+          "success_checks": [
+            {
+              "description": "Command registration appears in map",
+              "tool": "run_tests",
+              "command": "cd extension && npx jest --testPathPattern=regression_documentPrepRegistration.test.ts --passWithNoTests",
+              "expected": "Test exits with code 0 and verifies handler is dispatched when /document-prep is invoked"
+            }
+          ],
+          "blocked_protocol": "If createSlashCommands structure differs, read the file first to understand exact map format. If imports are organized differently, adapt accordingly.",
+          "tool": "edit_file",
+          "file_path": "extension/src/slashCommands.ts",
+          "instruction": "(1) Add import line for handleDocumentPrepCommand from './slashCommandsWorkspace' in the existing handler import block, (2) Add 'document-prep': handleDocumentPrepCommand entry to the object returned by createSlashCommands following the same pattern as 'interview-prep'.",
+          "reason": "Without registration in the command map, /document-prep will not be discoverable or dispatchable from the slash command menu."
+        },
+        {
+          "step_number": 9,
+          "job": "Update handleHelpCommand to include documentation for /document-prep so users can discover it through built-in help",
+          "inputs": [
+            {
+              "source": "extension/src/slashCommandsWorkspace.ts lines 1603-1645",
+              "details": "handleHelpCommand with existing help text listing commands"
+            }
+          ],
+          "may_change": [
+            {
+              "path": "extension/src/slashCommandsWorkspace.ts",
+              "change": "Add /document-prep entry to help text describing the 14-step rhetorical writing workflow"
+            }
+          ],
+          "must_not_change": [
+            "Other command documentation in help text, handler logic unrelated to help"
+          ],
+          "allowed_tools": [
+            "edit_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "task_complete",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url"
+          ],
+          "output_shape": "handleHelpCommand output string includes '/document-prep' with brief description mentioning '14-step rhetorical writing workflow' or similar identifying phrase.",
+          "success_checks": [
+            {
+              "description": "Help text mentions /document-prep",
+              "tool": "run_tests",
+              "command": "cd extension && npx jest --testPathPattern=slashCommandsWorkspace.test.ts --passWithNoTests",
+              "expected": "Test exits with code 0 and verifies help message contains '/document-prep' and workflow description"
+            }
+          ],
+          "blocked_protocol": "If handleHelpCommand uses a different format (e.g., array of entries vs string), read the file first to understand structure before editing.",
+          "tool": "edit_file",
+          "file_path": "extension/src/slashCommandsWorkspace.ts",
+          "instruction": "Add /document-prep documentation entry to handleHelpCommand's help text. Include command name and brief description like '/document-prep - 14-step rhetorical writing workflow for long-form document creation'. Follow existing formatting style.",
+          "reason": "Users need discoverability through built-in help; without this, the new command may go unnoticed."
+        }
+      ],
+      "tdd_mode": true,
+      "tdd_test_steps": [
+        {
+          "step_number": 1,
+          "job": "Create regression test for /document-prep command registration in slashCommands.ts",
+          "inputs": [
+            {
+              "source": "TESTING INVENTORY (Phase 2)",
+              "details": "Framework: jest. Directory: extension/src/__tests__/. File pattern: *.test.ts. Pattern from regression_handleUserMessage.test.ts shows command dispatch testing via createMockContext helper"
+            },
+            {
+              "source": "CORE FUNCTIONALITY REQUIRING REGRESSION COVERAGE",
+              "details": "'document-prep' map key in extension/src/slashCommands.ts [downstream_consumer, confidence=high] — Command registration required for the slash menu to expose the new command"
+            },
+            {
+              "source": "NAMING CONVENTIONS (Phase 3/4)",
+              "details": "routes: kebab-case for slash command identifiers prefixed with '/' (e.g., /interview-prep, /document-prep)"
+            }
+          ],
+          "may_change": [
+            {
+              "path": "extension/src/__tests__/regression_documentPrepRegistration.test.ts",
+              "change": "Create new regression test file verifying command registration"
+            }
+          ],
+          "must_not_change": [
+            "Any existing regression files in extension/src/__tests__/"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Jest test file with at least one it() block that imports handleUserMessage from slashCommands, creates mock context via createMockContext helper, dispatches '/document-prep' message, and asserts the handler is called exactly once",
+          "success_checks": [
+            {
+              "description": "Test file exists with valid Jest syntax importing handleUserMessage and using createMockContext pattern",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            },
+            {
+              "description": "Test verifies 'document-prep' key maps to handleDocumentPrepCommand function via mock context dispatch",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            }
+          ],
+          "blocked_protocol": "If regression_handleUserMessage.test.ts cannot be read for the createMockContext helper signature, use standard Jest mock pattern with explicit handler map object. Do not proceed if slashCommands.ts exports do not follow expected handleUserMessage(ctx, message) signature.",
+          "tool": "create_file",
+          "file_path": "extension/src/__tests__/regression_documentPrepRegistration.test.ts",
+          "instruction": "Create a Jest regression test file at extension/src/__tests__/regression_documentPrepRegistration.test.ts that verifies the /document-prep command is properly registered in the slashCommands map. The test must: (1) import handleUserMessage from '../slashCommands', (2) use the createMockContext helper pattern matching existing tests to set up a mock handler for 'document-prep' key, (3) call await handleUserMessage(ctx, '/document-prep'), (4) assert that the mocked handler function was called exactly once using expect(handler).toHaveBeenCalledTimes(1), (5) include module-level JSDoc comment explaining this is a regression test preventing removal of command registration. The test name should be 'dispatches /document-prep to handleDocumentPrepCommand' following existing convention.",
+          "reason": "REGRESSION: Verifies the 'document-prep' map key in extension/src/slashCommands.ts [downstream_consumer, confidence=high] — Command registration is load-bearing; removing this entry breaks slash command discovery. This test prevents regression by ensuring the command remains dispatchable."
+        },
+        {
+          "step_number": 2,
+          "job": "Create unit tests for buildDocumentPrepPrompt in documentPrepPrompts.ts",
+          "inputs": [
+            {
+              "source": "CORE FUNCTIONALITY REQUIRING REGRESSION COVERAGE",
+              "details": "buildDocumentPrepPrompt in extension/src/documentPrepPrompts.ts [phase1_deliverable, confidence=high] — Generates the Master Orchestration Prompt; failure here results in no workflow instructions for the agent"
+            },
+            {
+              "source": "IMPLEMENTATION PLAN Steps",
+              "details": "Step 1 defines buildDocumentPrepPrompt(topic: string, docType: string, targetLength: string, outputDir: string): Promise<string> returning complete 14-step prompt with explicit phase markers, concrete option banks, negative constraints at Phase 9"
+            },
+            {
+              "source": "SECURITY CONCERNS FROM PHASE 3",
+              "details": "[high] Local LLM skipping Phase 9 Approval Gate — mitigation: Explicitly instruct model to call request_clarification and wait for specific approval phrases; include negative constraint 'DO NOT generate draft.md until approved'"
+            },
+            {
+              "source": "SECURITY CONCERNS FROM PHASE 3",
+              "details": "[medium] Source Verification Hallucination — mitigation: Prompt must define strict status criteria (user_provided_verified, web_verified, etc.) and require citation_ready='No' for model memory"
+            }
+          ],
+          "may_change": [
+            {
+              "path": "extension/src/__tests__/documentPrepPrompts.test.ts",
+              "change": "Create new test file with unit tests for buildDocumentPrepPrompt function"
+            }
+          ],
+          "must_not_change": [
+            "Any existing regression files in extension/src/__tests__/"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Jest test file with tests verifying: (1) function returns string containing all 14 phase markers, (2) Phase 9 contains approval gate language with 'request_clarification' and negative constraint about not drafting before approval, (3) source verification statuses are defined (user_provided_verified, web_verified, candidate_unverified), (4) citation_ready='No' appears for model memory sources",
+          "success_checks": [
+            {
+              "description": "Test file exists with valid Jest syntax importing buildDocumentPrepPrompt from '../documentPrepPrompts'",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            },
+            {
+              "description": "Tests assert prompt string contains all 14 phases via substring matching",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            },
+            {
+              "description": "Security tests verify Phase 9 approval gate constraints and source verification rules are present in output",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            }
+          ],
+          "blocked_protocol": "If documentPrepPrompts.ts cannot be created or buildDocumentPrepPrompt signature differs from expected (topic, docType, targetLength, outputDir), stop and report. Do not assume the function exists.",
+          "tool": "create_file",
+          "file_path": "extension/src/__tests__/documentPrepPrompts.test.ts",
+          "instruction": "Create a Jest test file at extension/src/__tests__/documentPrepPrompts.test.ts with unit tests for buildDocumentPrepPrompt function. The tests must: (1) import buildDocumentPrepPrompt from '../documentPrepPrompts', (2) call the async function with sample inputs like 'My Research Topic', 'White Paper', '5000 words', '/tmp/test-docs' and await the result, (3) assert the returned string contains all 14 phase markers using expect(prompt).toContain('Phase N:') or similar pattern for phases 1-14, (4) specifically verify Phase 9 approval gate by asserting prompt includes 'request_clarification' AND negative constraint phrase like 'DO NOT generate draft.md until approved' OR 'wait for explicit approval', (5) verify source verification statuses appear: expect(prompt).toContain('user_provided_verified'), expect(prompt).toContain('web_verified'), expect(prompt).toContain('candidate_unverified'), (6) verify citation_ready='No' or equivalent appears when discussing model memory sources, (7) include module-level comment explaining this tests the Master Orchestration Prompt generation. Test names should describe behavior: 'includes all 14 phases in output', 'enforces Phase 9 approval gate with negative constraint', 'defines source verification statuses', 'marks model memory as not citation ready'.",
+          "reason": "REGRESSION: Verifies buildDocumentPrepPrompt in extension/src/documentPrepPrompts.ts [phase1_deliverable, confidence=high]. Also addresses SECURITY CONCERNs: [high] Local LLM skipping Phase 9 Approval Gate and [medium] Source Verification Hallucination by asserting prompt contains explicit constraints preventing these failures."
+        },
+        {
+          "step_number": 3,
+          "job": "Create regression test for handleDocumentPrepCommand handler signature and input collection",
+          "inputs": [
+            {
+              "source": "CORE FUNCTIONALITY REQUIRING REGRESSION COVERAGE",
+              "details": "handleDocumentPrepCommand in extension/src/slashCommandsWorkspace.ts [phase1_deliverable, confidence=high] — Primary entry point for the /document-prep workflow; handles user input and agent dispatch"
+            },
+            {
+              "source": "IMPLEMENTATION PLAN Steps",
+              "details": "Step 2 defines handler: (1) calls ensureAgentIdleAndBackendHealthy guard, (2) collects three inputs via vscode.window.showInputBox for topic, docType, targetLength with validation, (3) generates slug using slugify utility, (4) creates documents/${slug}/ directory using fs.mkdirSync, (5) imports and calls buildDocumentPrepPrompt, (6) dispatches via ctx.handleAgentMessage"
+            },
+            {
+              "source": "SECURITY CONCERNS FROM PHASE 3",
+              "details": "[high] Regression to existing /interview-prep functionality via shared guard modification — mitigation: Strictly isolate changes to new handler function; do not modify ensureAgentIdleAndBackendHealthy or other shared imports"
+            },
+            {
+              "source": "TESTING INVENTORY (Phase 2)",
+              "details": "Tests heavily mock VSCode APIs (vscode.window, WebSocket contexts) and command dispatchers. Mocked showInputBox should return Promise resolving to input values."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "extension/src/__tests__/regression_handleDocumentPrepCommand.test.ts",
+              "change": "Create new regression test file verifying handler behavior"
+            }
+          ],
+          "must_not_change": [
+            "Any existing regression files in extension/src/__tests__/"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Jest test file with tests verifying: (1) handler exists and is async function, (2) showInputBox is called exactly 3 times for topic/docType/targetLength inputs, (3) fs.mkdirSync mock verifies directory creation at documents/${slug}/ path, (4) buildDocumentPrepPrompt is imported and called with correct arguments, (5) ctx.handleAgentMessage dispatches the generated prompt",
+          "success_checks": [
+            {
+              "description": "Test file exists with valid Jest syntax importing handleDocumentPrepCommand from '../slashCommandsWorkspace'",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            },
+            {
+              "description": "Tests mock vscode.window.showInputBox to return resolved Promises for three sequential inputs",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            },
+            {
+              "description": "Tests verify directory creation and prompt dispatch without modifying shared guards",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            }
+          ],
+          "blocked_protocol": "If handleDocumentPrepCommand cannot be found or imported, stop and report. If vscode.window.showInputBox mocking pattern differs from existing tests, read regression_handleUserMessage.test.ts first to understand the actual mock setup.",
+          "tool": "create_file",
+          "file_path": "extension/src/__tests__/regression_handleDocumentPrepCommand.test.ts",
+          "instruction": "Create a Jest regression test file at extension/src/__tests__/regression_handleDocumentPrepCommand.test.ts that verifies the handleDocumentPrepCommand handler correctly implements the Launcher pattern. The tests must: (1) import handleDocumentPrepCommand from '../slashCommandsWorkspace', (2) mock vscode.window.showInputBox to return sequential Promises resolving to 'Test Topic', 'White Paper', '3000 words' using jest.spyOn(vscode.window, 'showInputBox').mockResolvedValueOnce(...) chained three times, (3) mock fs.mkdirSync to track directory creation calls, (4) create a minimal SlashCommandContext mock with handleAgentMessage as jest.fn(), (5) call await handleDocumentPrepCommand(ctx, ''), (6) assert showInputBox was called exactly 3 times using expect(showInputBoxMock).toHaveBeenCalledTimes(3), (7) assert mkdirSync was called with path containing 'documents/' and slugified topic name, (8) assert ctx.handleAgentMessage was called with a string argument (the generated prompt). Include module-level JSDoc explaining this is a regression test for the /document-prep handler. Test names should be: 'collects three inputs via showInputBox', 'creates documents/slug directory', 'dispatches master prompt to agent'.",
+          "reason": "REGRESSION: Verifies handleDocumentPrepCommand in extension/src/slashCommandsWorkspace.ts [phase1_deliverable, confidence=high]. Also addresses SECURITY CONCERN [high] Regression to existing /interview-prep functionality by ensuring the new handler is properly isolated and follows the Launcher pattern without modifying shared guards."
+        },
+        {
+          "step_number": 4,
+          "job": "Create test for Phase 3 Research Paper Branch conditional logic in prompt",
+          "inputs": [
+            {
+              "source": "IMPLEMENTATION PLAN Steps",
+              "details": "Phase 3: Research Paper Branch (Conditional) — Trigger: If doc is research paper, research essay, literature review, or source-supported academic report. Action: Execute 'Research Question Builder' before source gathering."
+            },
+            {
+              "source": "FILES NEEDING TEST COVERAGE",
+              "details": "extension/src/documentPrepPrompts.ts requires test coverage for conditional branching logic"
+            }
+          ],
+          "may_change": [
+            {
+              "path": "extension/src/__tests__/documentPrepPrompts.test.ts",
+              "change": "Add additional tests to existing file (or create if step 2 was skipped)"
+            }
+          ],
+          "must_not_change": [
+            "Any existing regression files in extension/src/__tests__/"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Jest test assertions verifying the prompt contains conditional logic for research paper types, including 'Research Question Builder' trigger conditions and quality gate requirements",
+          "success_checks": [
+            {
+              "description": "Test verifies prompt mentions research paper/essay/literature review as triggers",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            },
+            {
+              "description": "Test verifies Research Question Builder steps are included in the phase description",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            }
+          ],
+          "blocked_protocol": "If documentPrepPrompts.test.ts already exists from step 2, append tests to that file. If it does not exist, create it with this test plus the core functionality tests from step 2.",
+          "tool": "create_file",
+          "file_path": "extension/src/__tests__/documentPrepPrompts.test.ts",
+          "instruction": "Add or verify Jest tests in extension/src/__tests__/documentPrepPrompts.test.ts for Phase 3 Research Paper Branch conditional logic. The test must: (1) call buildDocumentPrepPrompt with docType='Research Paper' as input, (2) assert the returned prompt string contains trigger conditions like 'research paper', 'literature review', or 'source-supported academic report', (3) assert the prompt includes 'Research Question Builder' phase instructions, (4) verify quality gate requirements appear: questions must be focused, researchable, not answerable with yes/no. If this file was created in step 2, add a new describe block named 'Phase 3 Research Paper Branch' with it() tests for these assertions. Test name should be 'includes Research Question Builder trigger conditions for academic document types'.",
+          "reason": "Verifies conditional branching behavior from IMPLEMENTATION PLAN Phase 3: Research Paper Branch (Conditional). Ensures the prompt correctly triggers specialized research workflow only when document type matches criteria, preventing unnecessary complexity in non-research documents."
+        },
+        {
+          "step_number": 5,
+          "job": "Create test for handleHelpCommand documentation update",
+          "inputs": [
+            {
+              "source": "IMPLEMENTATION PLAN Steps",
+              "details": "Step 4: Update handleHelpCommand help text to include /document-prep documentation. Entry should describe it as 'Guided 14-step rhetorical writing workflow for long-form document creation with source verification and approval gates'"
+            },
+            {
+              "source": "TESTING INVENTORY (Phase 2)",
+              "details": "Existing tests in extension/src/__tests__/ verify help command behavior"
+            }
+          ],
+          "may_change": [
+            {
+              "path": "extension/src/__tests__/slashCommandsWorkspace.test.ts",
+              "change": "Create or update test file verifying handleHelpCommand includes /document-prep"
+            }
+          ],
+          "must_not_change": [
+            "Any existing regression files in extension/src/__tests__/"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Jest test file with test verifying handleHelpCommand output contains '/document-prep' string and description mentioning '14-step' or 'rhetorical writing'",
+          "success_checks": [
+            {
+              "description": "Test imports handleHelpCommand from '../slashCommandsWorkspace'",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            },
+            {
+              "description": "Test captures help output (via mock vscode.window.showInformationMessage or similar) and asserts it contains /document-prep documentation",
+              "tool": "",
+              "command": "",
+              "expected": ""
+            }
+          ],
+          "blocked_protocol": "If handleHelpCommand does not exist or uses different UI mechanism than expected, read the actual file first. Do not assume showInformationMessage is used.",
+          "tool": "create_file",
+          "file_path": "extension/src/__tests__/slashCommandsWorkspace.test.ts",
+          "instruction": "Create a Jest test file at extension/src/__tests__/slashCommandsWorkspace.test.ts that verifies handleHelpCommand includes documentation for /document-prep. The test must: (1) import handleHelpCommand from '../slashCommandsWorkspace', (2) mock vscode.window.showInformationMessage or the actual UI mechanism used by help command using jest.spyOn, (3) call await handleHelpCommand(ctx, ''), (4) assert the mocked show function was called with a string containing '/document-prep' and either '14-step' or 'rhetorical writing workflow'. Include module-level comment explaining this tests user-facing documentation. Test name should be 'includes /document-prep in help text'.",
+          "reason": "Verifies IMPLEMENTATION PLAN Step 4: handleHelpCommand update ensures users can discover the new command through built-in help. This is a usability regression test preventing accidental removal of feature documentation."
+        }
+      ],
+      "affected_files": [
+        "extension/src/documentPrepPrompts.ts",
+        "extension/src/slashCommandsWorkspace.ts",
+        "extension/src/slashCommands.ts",
+        "extension/src/__tests__/regression_documentPrepRegistration.test.ts",
+        "extension/src/__tests__/documentPrepPrompts.test.ts",
+        "extension/src/__tests__/regression_handleDocumentPrepCommand.test.ts",
+        "extension/src/__tests__/slashCommandsWorkspace.test.ts"
+      ],
+      "test_strategy": "TDD mode: Create regression tests first (tdd_test_steps) covering command registration, prompt generation with all 14 phases and source verification rules, handler input collection and directory creation, conditional branching for research papers, and help text discovery. Tests mock VSCode APIs (showInputBox), file system operations (mkdirSync), and agent message handlers to isolate behavior without requiring live backend. All tests run via Jest from the extension directory.",
+      "plan_validation_warnings": [
+        "strict test contract requires a project test command for final full-suite validation; add test setup and record `.lean_ai/commands.json`"
+      ],
+      "core_functionality": [
+        {
+          "entity": "handleDocumentPrepCommand",
+          "file_path": "extension/src/slashCommandsWorkspace.ts",
+          "reason": "Primary entry point for the /document-prep workflow; handles user input and agent dispatch.",
+          "source_signal": "phase1_deliverable",
+          "confidence": "high"
+        },
+        {
+          "entity": "'document-prep' map key",
+          "file_path": "extension/src/slashCommands.ts",
+          "reason": "Command registration required for the slash menu to expose the new command.",
+          "source_signal": "downstream_consumer",
+          "confidence": "high"
+        },
+        {
+          "entity": "buildDocumentPrepPrompt",
+          "file_path": "extension/src/documentPrepPrompts.ts",
+          "reason": "Generates the Master Orchestration Prompt; failure here results in no workflow instructions for the agent.",
+          "source_signal": "phase1_deliverable",
+          "confidence": "high"
+        },
+        {
+          "entity": "Phase 9 Approval Gate Logic",
+          "file_path": "extension/src/documentPrepPrompts.ts",
+          "reason": "Critical pause mechanism preventing unauthorized drafting; enforced via prompt constraints.",
+          "source_signal": "critical_risk_adjacent",
+          "confidence": "medium"
+        }
+      ]
+    }
+  },
+  "created_at": "2026-06-04T04:24:38.840968+00:00",
+  "updated_at": "2026-06-04T12:26:19.663284+00:00"
+}

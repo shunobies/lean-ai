@@ -1234,5 +1234,5 @@
     "execution_result": "lean-ai: Implement a new slash command `/document-prep` that mirrors the architec\n\nFiles modified: .lean_ai/commands.json, extension/src/__tests__/regression_documentPrepPrompts.test.ts, extension/src/__tests__/regression_handleDocumentPrepCommand.test.ts, extension/src/__tests__/regression_slashCommandsRegistration.test.ts, extension/src/documentPrepPrompts.ts, extension/src/slashCommands.ts, extension/src/slashCommandsWorkspace.ts"
   },
   "created_at": "2026-06-04T20:45:19.038488+00:00",
-  "updated_at": "2026-06-05T01:37:43.292482+00:00"
+  "updated_at": "2026-06-05T03:25:15.510845+00:00"
 }

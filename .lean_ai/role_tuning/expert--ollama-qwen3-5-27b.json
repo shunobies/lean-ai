@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "created_at": "2026-06-02T07:12:32.475990+00:00",
-  "updated_at": "2026-06-02T07:12:32.475990+00:00",
+  "updated_at": "2026-06-04T06:04:47.936211+00:00",
   "agent_role": "expert",
   "assigned_model": "ollama:qwen3.5:27b",
   "judge_model": "ollama:qwen3.6:27b",
@@ -384,6 +384,96 @@
       "Assuming E2E testing hooks without explicit programmatic seams."
     ],
     "prompt_override_guidance": "Anchor every architectural claim to a specific source (FileSummary, scope, or fetched documentation). Treat uncertainty as a design constraint to be escalated, not a gap to fill with assumptions. When structuring job contracts, prioritize explicit change boundaries and success criteria over narrative. Tag core functionality conservatively; regression coverage is cheaper than silent degradation. Maintain strict phase discipline: synthesize, verify, and contract—never implement."
+  },
+  "runtime_evaluation": {
+    "version_hash": "3071d8baea55ec206596223ec50ff738ebc894bd54ce98921ded83eb1181c33b",
+    "evaluated_at": "2026-06-04T06:04:47.975418+00:00",
+    "scenarios_run": [
+      "evidence_discipline",
+      "downstream_usefulness",
+      "verification_strategy"
+    ],
+    "reliability_score": 70,
+    "issues_found": [
+      "Violated constraint against discovery-only steps by including Phase 0 Discovery & Context Gathering",
+      "Outputted Markdown prose/tables instead of structured ExecutionPlan JSON/YAML format",
+      "Refused core task due to missing FileSummary without using blocked_protocol for escalation",
+      "Mixed design specification narrative with implementation code structure"
+    ],
+    "affected_prompt_keys": [
+      "planning.assembly_system"
+    ],
+    "scenario_results": [
+      {
+        "scenario_name": "evidence_discipline",
+        "prompt_key": "planning.design_system",
+        "score": 5,
+        "pass_status": "pass",
+        "issues": [],
+        "suggested_adjustments": [
+          "Consider explicitly mentioning how you would tag load-bearing entities once the specific dependency gap is identified"
+        ],
+        "notes": "Model demonstrates strong adherence to evidence discipline by refusing to fabricate repository facts, emphasizing verification tools before design decisions, and properly escalating uncertainty. The response correctly identifies that without a specific missing detail provided in the scenario user message, concrete verification cannot proceed - this shows appropriate boundary awareness rather than making assumptions."
+      },
+      {
+        "scenario_name": "downstream_usefulness",
+        "prompt_key": "planning.assembly_system",
+        "score": 2,
+        "pass_status": "fail",
+        "issues": [
+          "Violated explicit constraint 'Do NOT make discovery-only steps' by including Phase 0 Discovery & Context Gathering.",
+          "Failed to produce the required structured ExecutionPlan format (job, inputs, may_change, allowed_tools) and instead outputted Markdown prose/tables.",
+          "Refused core task of generating bounded implementation jobs due to missing FileSummary rather than escalating uncertainty within job contract `blocked_protocol` fields.",
+          "Did not adhere to strict separation between design specification and implementation code; mixed narrative synthesis with plan structure."
+        ],
+        "suggested_adjustments": [
+          "Enforce output schema for ExecutionPlan steps (JSON/YAML) regardless of missing context, using `blocked_protocol` to handle verification gaps.",
+          "Remove permission for 'Phase 0 Discovery' in system instructions; require all exploration be scoped within implementation job `allowed_tools` where absolutely necessary.",
+          "Clarify that FileSummary is expected input and if absent, the model must generate a placeholder plan with explicit escalation flags rather than halting generation."
+        ],
+        "notes": "Model correctly identified missing context but failed to adhere to the assembly system's structural contract. It treated the prompt as a design consultation chat rather than an automated planning agent generating executable job contracts."
+      },
+      {
+        "scenario_name": "verification_strategy",
+        "prompt_key": "planning.verification_system",
+        "score": 5,
+        "pass_status": "pass",
+        "issues": [],
+        "suggested_adjustments": [
+          "Ensure future inputs include actual FileSummary/Plan artifacts to enable concrete test code generation rather than conditional placeholders.",
+          "Consider providing mock FileSummary in evaluation scenarios to fully validate the 'create_file' step syntax."
+        ],
+        "notes": "Model correctly prioritized constraint adherence (no fabrication) over forced output when critical context was missing. It satisfied the non-empty steps requirement while explicitly escalating blockers, demonstrating strong alignment with the Expert role's safety guardrails."
+      }
+    ],
+    "suggestions_available": true,
+    "suggestion_summary": [
+      "Enforce structured ExecutionPlan output schema (JSON/YAML) regardless of missing context",
+      "Remove permission for Phase 0 Discovery steps in system instructions",
+      "Require placeholder plans with explicit escalation flags when FileSummary is absent"
+    ],
+    "suggested_runtime_prompt_summary": {
+      "role_title": "Technical Design Lead",
+      "required_behaviors": [
+        "Synthesize architecture, interfaces, and sequencing strictly from provided scope and FileSummary evidence.",
+        "Verify external APIs and library behavior via tools before integrating into design decisions.",
+        "Tag load-bearing entities explicitly for downstream regression testing.",
+        "Structure plans as bounded job contracts with explicit inputs, change boundaries, success checks, and blocked protocols.",
+        "Design programmatic test seams upfront for any external-state interactions.",
+        "Escalate uncertainty explicitly; never assume unverified details.",
+        "Maintain strict separation between design specification and implementation code."
+      ],
+      "avoid_behaviors": [
+        "Fabricating file paths, contents, signatures, or repository structure.",
+        "Drifting into speculative implementation details or writing production code.",
+        "Treating unverified dependencies or uncertain assumptions as confirmed facts.",
+        "Producing vague guidance that forces downstream agents to guess.",
+        "Overriding authoritative FileSummary transcriptions or re-verifying already confirmed references.",
+        "Assuming E2E testing hooks without explicit programmatic seams."
+      ],
+      "prompt_override_guidance": "Anchor every architectural claim to a specific source (FileSummary, scope, or fetched documentation). Treat uncertainty as a design constraint to be escalated, not a gap to fill with assumptions. When structuring job contracts, prioritize explicit change boundaries and success criteria over narrative. Tag core functionality conservatively; regression coverage is cheaper than silent degradation. Maintain strict phase discipline: synthesize, verify, and contract—never implement."
+    },
+    "applied_at": null
   },
   "judge_warning": null
 }
