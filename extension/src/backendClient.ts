@@ -860,7 +860,7 @@ export class BackendClient {
         const params = new URLSearchParams({ repo_root: repoRoot });
         if (filters?.session_id) { params.set("session_id", filters.session_id); }
         const qs = params.toString();
-        const resp = await fetch(`${this.baseUrl}/observability/sessions?${qs}`);
+        const resp = await fetch(`${this.baseUrl}/api/observability/sessions?${qs}`);
         if (!resp.ok) {
             throw new Error(`Failed to list observability sessions: ${resp.statusText}`);
         }
@@ -873,7 +873,7 @@ export class BackendClient {
     ): Promise<SessionDetail> {
         const params = new URLSearchParams({ repo_root: repoRoot });
         const qs = params.toString();
-        const resp = await fetch(`${this.baseUrl}/observability/sessions/${sessionId}?${qs}`);
+        const resp = await fetch(`${this.baseUrl}/api/observability/sessions/${sessionId}?${qs}`);
         if (!resp.ok) {
             throw new Error(`Failed to get session detail: ${resp.statusText}`);
         }
@@ -886,7 +886,7 @@ export class BackendClient {
     ): Promise<{ session_id: string; tree: TraceTreeNode[] }> {
         const params = new URLSearchParams({ repo_root: repoRoot, session_id: sessionId });
         const qs = params.toString();
-        const resp = await fetch(`${this.baseUrl}/observability/traces/tree?${qs}`);
+        const resp = await fetch(`${this.baseUrl}/api/observability/traces/tree?${qs}`);
         if (!resp.ok) {
             throw new Error(`Failed to get trace tree: ${resp.statusText}`);
         }
@@ -900,7 +900,7 @@ export class BackendClient {
         const params = new URLSearchParams({ repo_root: repoRoot });
         if (filters?.session_id) { params.set("session_id", filters.session_id); }
         const qs = params.toString();
-        const resp = await fetch(`${this.baseUrl}/observability/feedback?${qs}`);
+        const resp = await fetch(`${this.baseUrl}/api/observability/feedback?${qs}`);
         if (!resp.ok) {
             throw new Error(`Failed to list feedback entries: ${resp.statusText}`);
         }
@@ -918,7 +918,7 @@ export class BackendClient {
         if (feedback.tags && feedback.tags.length > 0) { params.set("tags", feedback.tags.join(",")); }
         if (feedback.trace_span_uuid) { params.set("trace_span_uuid", feedback.trace_span_uuid); }
         const qs = params.toString();
-        const resp = await fetch(`${this.baseUrl}/observability/feedback?${qs}`, {
+        const resp = await fetch(`${this.baseUrl}/api/observability/feedback?${qs}`, {
             method: "POST",
         });
         if (!resp.ok) {
@@ -930,7 +930,7 @@ export class BackendClient {
     async getMetricsSummary(repoRoot: string): Promise<MetricsSummary> {
         const params = new URLSearchParams({ repo_root: repoRoot });
         const qs = params.toString();
-        const resp = await fetch(`${this.baseUrl}/observability/metrics/summary?${qs}`);
+        const resp = await fetch(`${this.baseUrl}/api/observability/metrics/summary?${qs}`);
         if (!resp.ok) {
             throw new Error(`Failed to get metrics summary: ${resp.statusText}`);
         }
