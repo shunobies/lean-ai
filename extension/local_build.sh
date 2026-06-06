@@ -53,4 +53,5 @@ echo "==> Installing ${VSIX} into VSCodium..."
 
 echo
 echo "Installed Lean AI ${NEW_VERSION} into VSCodium."
-echo "Reload VSCodium if it is already running."
+echo "IMPORTANT: Reload every open VSCodium window before testing."
+echo "The Extensions view updates immediately, but an existing Extension Host keeps running the previous JavaScript build until reload."

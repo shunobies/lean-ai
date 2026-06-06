@@ -52,6 +52,22 @@ if (!pyproject.includes('requires-python = ">=3.10,<3.14"')) {
     throw new Error("Bundled backend must require Python >=3.10,<3.14");
 }
 
+const extensionBundle = execFileSync(
+    "unzip",
+    ["-p", vsixPath, "extension/dist/extension.js"],
+    { encoding: "utf-8" },
+);
+for (const expectedInstallerBehavior of [
+    "Using managed backend at",
+    "checking managed backend setup",
+]) {
+    if (!extensionBundle.includes(expectedInstallerBehavior)) {
+        throw new Error(
+            `Bundled extension is missing installer behavior: ${expectedInstallerBehavior}`,
+        );
+    }
+}
+
 console.log(
     `Verified ${path.basename(vsixPath)}: ${entries.length} files, ` +
     `${(size / 1024 / 1024).toFixed(1)} MB`,

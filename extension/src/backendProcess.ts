@@ -13,6 +13,7 @@
 
 import * as fs from "fs";
 import * as net from "net";
+import * as path from "path";
 import * as vscode from "vscode";
 import { spawn, execSync, ChildProcess } from "child_process";
 import { DEFAULT_BACKEND_URL } from "./constants";
@@ -151,6 +152,32 @@ function resolvePythonPath(configured: string): string {
     }
 
     return configured; // Nothing found — fall back and let spawn surface the error
+}
+
+function isFilesystemPythonPath(pythonPath: string): boolean {
+    return path.isAbsolute(pythonPath) || pythonPath.includes("/") || pythonPath.includes("\\");
+}
+
+async function repairMissingManagedPython(
+    resolvedPython: string,
+    channel: vscode.OutputChannel,
+): Promise<BackendInstallResult | null> {
+    if (!_context || !isFilesystemPythonPath(resolvedPython) || fs.existsSync(resolvedPython)) {
+        return null;
+    }
+
+    channel.appendLine(
+        `[Lean AI] Python is missing at ${resolvedPython}; checking managed backend setup...`,
+    );
+    _managedInstall = undefined;
+    const repairedInstall = await ensureBackendInstalled(_context);
+    if (repairedInstall) {
+        _managedInstall = repairedInstall;
+        if (repairedInstall.pythonPathUpdated) {
+            pendingManagedInstallReboot = true;
+        }
+    }
+    return repairedInstall;
 }
 
 /**
@@ -571,6 +598,12 @@ export async function startBackend(
             }
             resolvedPython = resolvePythonPath(pythonPath);
             resolvedCwd = backendDir;
+        }
+
+        const repairedInstall = await repairMissingManagedPython(resolvedPython, channel);
+        if (repairedInstall) {
+            resolvedPython = repairedInstall.pythonPath;
+            resolvedCwd = repairedInstall.backendDir;
         }
 
         if (killTrackedBackendProcess(channel)) {

@@ -1165,5 +1165,5 @@
     "execution_result": "lean-ai: Implement a \"Semantic Diff Review Gate\" as a post-implementation verific\n\nFiles modified: backend/CHANGELOG.md, backend/src/lean_ai/workflow/pipeline.py, backend/src/lean_ai/workflow/validation.py, backend/tests/regression/workflow/regression_semantic_review_core.py, backend/tests/unit/workflow/test_pipeline_semantic_gate.py, backend/tests/unit/workflow/test_semantic_review.py"
   },
   "created_at": "2026-06-05T12:21:56.663605+00:00",
-  "updated_at": "2026-06-06T02:30:21.114351+00:00"
+  "updated_at": "2026-06-06T02:50:50.837745+00:00"
 }
