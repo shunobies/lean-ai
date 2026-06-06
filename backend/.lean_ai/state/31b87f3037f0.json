@@ -1,0 +1,1128 @@
+{
+  "session_id": "31b87f3037f0",
+  "current_phase": "suspended",
+  "conversation_history": [],
+  "scratchpad_content": "",
+  "journal_entries": [],
+  "observations": [],
+  "current_plan": {
+    "scope": "Implement SecurityReviewNode for OWASP LLM Top 10 audit, silent correction loop capped at 2 iterations, pipeline integration between PlanningNode and ApprovalNodeExtended, and security_warning_flag attachment on exhaustion.",
+    "user_summary": "",
+    "naming_conventions": [],
+    "name_registry": [],
+    "steps": [
+      {
+        "step_number": 5,
+        "job": "Create SecurityReviewNode module with OWASP audit rubric and silent correction loop logic.",
+        "inputs": [
+          {
+            "source": "backend/src/lean_ai/workflow/graph.py",
+            "details": "Node base class, Continue/Fail/Suspend result types, execute signature."
+          },
+          {
+            "source": "backend/src/lean_ai/workflow/validation.py",
+            "details": "_run_semantic_review lifecycle, _SEMANTIC_MAX_ITERATIONS=2 pattern, structured audit via chat_structured."
+          },
+          {
+            "source": "backend/src/lean_ai/llm/planner.py",
+            "details": "create_plan(revision_context=...) signature and delegation to _revise_plan."
+          }
+        ],
+        "may_change": [
+          {
+            "path": "backend/src/lean_ai/workflow/security_review.py",
+            "change": "Create file implementing SecurityReviewNode, OWASP system prompt, iteration cap, silent loop, and metadata flag attachment."
+          }
+        ],
+        "must_not_change": [
+          "Existing workflow nodes, base graph classes, planner implementation details outside revision_context handling"
+        ],
+        "allowed_tools": [
+          "create_file",
+          "read_file",
+          "list_directory",
+          "directory_tree",
+          "grep_files",
+          "task_complete",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url"
+        ],
+        "output_shape": "Module exports SecurityReviewNode class inheriting Node. Contains _SECURITY_AUDIT_SYSTEM_PROMPT embedding OWASP LLM08/LLM07/LLM06/LLM02/LLM05 rubric, MAX_SECURITY_REVISIONS=2 constant, and execute method implementing silent correction loop via create_plan(revision_context=findings). Includes dependency injection seam for LLM client to enable test mocking. Attach security_warning_flag to state.session_metadata on exhaustion.",
+        "success_checks": [
+          {
+            "description": "Module defines SecurityReviewNode class inheriting from Node.",
+            "tool": "read_file",
+            "command": "grep -n 'class SecurityReviewNode' backend/src/lean_ai/workflow/security_review.py",
+            "expected": "Matches expected class definition."
+          },
+          {
+            "description": "OWASP rubric categories are present in system prompt.",
+            "tool": "read_file",
+            "command": "grep -E 'LLM0[25678]' backend/src/lean_ai/workflow/security_review.py",
+            "expected": "Contains all five OWASP category identifiers."
+          },
+          {
+            "description": "Iteration cap constant is defined as 2.",
+            "tool": "read_file",
+            "command": "grep -n 'MAX_SECURITY_REVISIONS' backend/src/lean_ai/workflow/security_review.py",
+            "expected": "Constant equals integer 2."
+          }
+        ],
+        "blocked_protocol": "If validation.py pattern differs significantly, adapt iteration cap logic but preserve max 2 attempts. Stop if planner revision_context signature mismatches exploration evidence.",
+        "tool": "create_file",
+        "file_path": "backend/src/lean_ai/workflow/security_review.py",
+        "instruction": "Create SecurityReviewNode module with OWASP audit rubric and silent correction loop logic.",
+        "reason": "Core deliverable implementing automated security audit and silent correction loop per OWASP guidelines. Establishes the behavioral contract tested in Phase 4b."
+      },
+      {
+        "step_number": 6,
+        "job": "Wire SecurityReviewNode into workflow graph between PlanningNode and ApprovalNodeExtended.",
+        "inputs": [
+          {
+            "source": "backend/src/lean_ai/workflow/pipeline.py",
+            "details": "Lines 107-330: PlanningNode and ApprovalNodeExtended patterns, existing graph builder usage."
+          },
+          {
+            "source": "backend/src/lean_ai/workflow/graph.py",
+            "details": "_find_node_index sequential execution pattern, add_node fluent builder."
+          }
+        ],
+        "may_change": [
+          {
+            "path": "backend/src/lean_ai/workflow/pipeline.py",
+            "change": "Import SecurityReviewNode and insert into graph wiring block after PlanningNode registration."
+          }
+        ],
+        "must_not_change": [
+          "Existing node routing logic, conditional branches unrelated to security gate, state persistence mechanisms"
+        ],
+        "allowed_tools": [
+          "edit_file",
+          "read_file",
+          "list_directory",
+          "directory_tree",
+          "grep_files",
+          "task_complete",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url"
+        ],
+        "output_shape": "Imports SecurityReviewNode and registers it in the graph builder immediately after PlanningNode using _find_node_index or equivalent fluent pattern. Preserves deterministic execution order without disrupting existing approval or execution flows.",
+        "success_checks": [
+          {
+            "description": "SecurityReviewNode is imported in pipeline.py.",
+            "tool": "read_file",
+            "command": "grep -n 'from lean_ai.workflow.security_review import SecurityReviewNode' backend/src/lean_ai/workflow/pipeline.py",
+            "expected": "Import statement present."
+          },
+          {
+            "description": "Node is registered between Planning and Approval nodes.",
+            "tool": "read_file",
+            "command": "grep -A 5 'SecurityReviewNode' backend/src/lean_ai/workflow/pipeline.py",
+            "expected": "Registration call appears after PlanningNode setup and before ApprovalNodeExtended."
+          }
+        ],
+        "blocked_protocol": "If _find_node_index lookup fails due to ID conflicts, generate a unique node ID matching project conventions. Stop if graph builder API changes unexpectedly or imports cannot resolve.",
+        "tool": "edit_file",
+        "file_path": "backend/src/lean_ai/workflow/pipeline.py",
+        "instruction": "Wire SecurityReviewNode into workflow graph between PlanningNode and ApprovalNodeExtended.",
+        "reason": "Pipeline integration requirement mandates placing the security gate between planning and approval stages without breaking existing routing or state propagation."
+      }
+    ],
+    "tdd_mode": true,
+    "tdd_test_steps": [
+      {
+        "step_number": 1,
+        "job": "Create unit tests for SecurityReviewNode audit logic and revision triggering",
+        "inputs": [
+          {
+            "source": "backend/src/lean_ai/workflow/security_review.py",
+            "details": "Target module implementing SecurityReviewNode, _SECURITY_AUDIT_SYSTEM_PROMPT, MAX_SECURITY_REVISIONS, and structured Pydantic audit schema."
+          },
+          {
+            "source": "backend/tests/unit/workflow/test_graph.py",
+            "details": "Reference for NodeResult assertions, Continue/Fail types, and pytest-asyncio patterns."
+          }
+        ],
+        "may_change": [
+          {
+            "path": "backend/tests/unit/workflow/test_security_review_node.py",
+            "change": ""
+          }
+        ],
+        "must_not_change": [
+          "backend/src/lean_ai/workflow/graph.py",
+          "backend/src/lean_ai/workflow/state.py"
+        ],
+        "allowed_tools": [
+          "create_file",
+          "read_file",
+          "list_directory",
+          "directory_tree",
+          "grep_files",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url",
+          "task_complete"
+        ],
+        "output_shape": "Python test file using pytest and pytest-asyncio. Contains async test functions mocking LLM audit calls, asserting revision signals with structured findings, and validating over-blocking mitigation for user-requested admin tasks.",
+        "success_checks": [
+          {
+            "description": "Test module imports without errors.",
+            "tool": "",
+            "command": "cd backend && python -m pytest tests/unit/workflow/test_security_review_node.py --collect-only",
+            "expected": "Exit code 0"
+          }
+        ],
+        "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+        "tool": "create_file",
+        "file_path": "backend/tests/unit/workflow/test_security_review_node.py",
+        "instruction": "Create a pytest-asyncio test suite named `test_security_review_node.py` in `backend/tests/unit/workflow/`. Implement three async test functions: 1) `test_sensitive_info_disclosure_triggers_revision`: Scenario where WorkflowState contains an ExecutionPlan with code `print(os.environ['API_KEY'])`. Mock the internal LLM audit client to return a verdict flagging LLM06 sensitive data disclosure. Assert that `node.execute(state)` returns a revision signal (not Continue) and that the result carries structured findings containing prescriptive replacement patterns, verifying mitigation against planner misinterpretation. 2) `test_over_blocking_mitigation_allows_intended_admin`: Scenario where plan performs intentional `chmod 754 config` explicitly requested by user. Mock auditor to recognize scope/user intent and return safe verdict. Assert result is Continue with no revision signal. 3) `test_audit_schema_contains_actionable_findings`: Verify that any flagged audit response includes a structured findings field mapping vulnerability codes to specific code replacements, ensuring the planner receives actionable feedback. Use AsyncMock for LLM client injection via WorkflowState or constructor parameters. Add module docstring and per-test comments explaining scenarios and assertion rationale.",
+        "reason": "Verifies Phase 3 change_designs for SecurityReviewNode audit logic, silent revision triggering, structured findings schema to prevent planner misinterpretation, and over-blocking mitigation for legitimate admin tasks. Uses pytest-asyncio matching repo conventions."
+      },
+      {
+        "step_number": 2,
+        "job": "Create regression tests for core SecurityReviewNode functionality",
+        "inputs": [
+          {
+            "source": "backend/src/lean_ai/workflow/security_review.py",
+            "details": "Contains _SECURITY_AUDIT_SYSTEM_PROMPT, MAX_SECURITY_REVISIONS constant, and session_metadata flagging logic."
+          }
+        ],
+        "may_change": [
+          {
+            "path": "backend/tests/regression/test_regression_security_review_node.py",
+            "change": ""
+          }
+        ],
+        "must_not_change": [
+          "backend/src/lean_ai/workflow/security_review.py"
+        ],
+        "allowed_tools": [
+          "create_file",
+          "read_file",
+          "list_directory",
+          "directory_tree",
+          "grep_files",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url",
+          "task_complete"
+        ],
+        "output_shape": "Python regression test file under tests/regression/. Asserts OWASP rubric completeness, iteration cap value of 2, and security_warning_flag attachment on cap exhaustion via deterministic AsyncMock loops.",
+        "success_checks": [
+          {
+            "description": "Regression tests collect successfully.",
+            "tool": "",
+            "command": "cd backend && python -m pytest tests/regression/test_regression_security_review_node.py --collect-only",
+            "expected": "Exit code 0"
+          }
+        ],
+        "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+        "tool": "create_file",
+        "file_path": "backend/tests/regression/test_regression_security_review_node.py",
+        "instruction": "Create a regression test suite named `test_regression_security_review_node.py` in `backend/tests/regression/`. Implement three tests targeting load-bearing core entities: 1) `test_audit_prompt_contains_full_owasp_rubric`: Assert that `_SECURITY_AUDIT_SYSTEM_PROMPT` string explicitly contains OWASP category identifiers LLM08, LLM07, LLM06, LLM02, and LLM05. Fail if any are missing. 2) `test_max_security_revisions_cap_equals_two`: Assert the module constant `MAX_SECURITY_REVISIONS` equals exactly integer 2 to enforce silent loop bounds. 3) `test_flag_attachment_on_iteration_exhaustion`: Mock the auditor to repeatedly flag risks across three consecutive calls. Simulate the node's internal revision loop exceeding the cap. Assert that `state.session_metadata` is updated with a `security_warning_flag` key set to True (or equivalent marker), ensuring downstream UI components receive the warning. Use deterministic mocks for all LLM interactions. Include regression docstrings detailing invariants.",
+        "reason": "REGRESSION: Pins down Phase 3 core functionality tags for _SECURITY_AUDIT_SYSTEM_PROMPT completeness, MAX_SECURITY_REVISIONS iteration cap, and security_warning_flag metadata attachment logic to prevent future regressions in audit enforcement and UI warning propagation."
+      },
+      {
+        "step_number": 3,
+        "job": "Create unit tests for pipeline graph wiring and dependency resolution",
+        "inputs": [
+          {
+            "source": "backend/src/lean_ai/workflow/pipeline.py",
+            "details": "Contains run_workflow, graph.add_node wiring, and node sequencing logic."
+          },
+          {
+            "source": "backend/tests/unit/workflow/test_pipeline_integration.py",
+            "details": "Reference for _setup_mock_modules() and async workflow execution patterns."
+          }
+        ],
+        "may_change": [
+          {
+            "path": "backend/tests/unit/workflow/test_pipeline_security_wiring.py",
+            "change": ""
+          }
+        ],
+        "must_not_change": [
+          "backend/src/lean_ai/workflow/pipeline.py"
+        ],
+        "allowed_tools": [
+          "create_file",
+          "read_file",
+          "grep_files",
+          "list_directory",
+          "directory_tree",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url",
+          "task_complete"
+        ],
+        "output_shape": "Python test file using pytest-asyncio. Mocks graph builder to verify SecurityReviewNode insertion order, validates LLMClient injection via WorkflowState/constructor, and confirms deterministic execution preservation.",
+        "success_checks": [
+          {
+            "description": "Pipeline wiring tests collect successfully.",
+            "tool": "",
+            "command": "cd backend && python -m pytest tests/unit/workflow/test_pipeline_security_wiring.py --collect-only",
+            "expected": "Exit code 0"
+          }
+        ],
+        "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+        "tool": "create_file",
+        "file_path": "backend/tests/unit/workflow/test_pipeline_security_wiring.py",
+        "instruction": "Create a pytest-asyncio test suite named `test_pipeline_security_wiring.py` in `backend/tests/unit/workflow/`. Implement three async tests: 1) `test_node_insertion_preserves_deterministic_order`: Mock the workflow graph builder to capture node registration calls. Assert that SecurityReviewNode is registered immediately after PlanningNode and before ApprovalNodeExtended, preserving existing routing logic without insertion index collisions. 2) `test_llm_client_dependency_resolution_via_state`: Instantiate SecurityReviewNode by passing a mocked LLMClient through WorkflowState injection or constructor parameters matching the validation.py pattern. Assert successful instantiation without signature breakage against the base Node.execute contract. 3) `test_sequential_execution_no_breakage_on_mock_traversal`: Drive a mock workflow traversal using _find_node_index patterns to verify deterministic execution flow proceeds Planning -> SecurityReview -> Approval without raising routing errors or skipping nodes. Add module docstring and assertion comments specifying expected graph order.",
+        "reason": "Validates Phase 3 change_designs for pipeline.py graph wiring block, verifies mitigation of graph disruption risk by preserving deterministic sequencing, and confirms LLMClient injection seam matches validation.py patterns without breaking Node base contract."
+      },
+      {
+        "step_number": 4,
+        "job": "Create regression test for pipeline graph wiring core functionality",
+        "inputs": [
+          {
+            "source": "backend/src/lean_ai/workflow/pipeline.py",
+            "details": "Pipeline initialization and node routing logic."
+          }
+        ],
+        "may_change": [
+          {
+            "path": "backend/tests/regression/test_regression_pipeline_graph_wiring.py",
+            "change": ""
+          }
+        ],
+        "must_not_change": [
+          "backend/src/lean_ai/workflow/graph.py"
+        ],
+        "allowed_tools": [
+          "create_file",
+          "read_file",
+          "list_directory",
+          "directory_tree",
+          "grep_files",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url",
+          "task_complete"
+        ],
+        "output_shape": "Python regression test file under tests/regression/. Asserts correct node ID sequence (Planning -> SecurityReview -> Approval) and validates no import breakage or routing disruption.",
+        "success_checks": [
+          {
+            "description": "Pipeline wiring regression test collects successfully.",
+            "tool": "",
+            "command": "cd backend && python -m pytest tests/regression/test_regression_pipeline_graph_wiring.py --collect-only",
+            "expected": "Exit code 0"
+          }
+        ],
+        "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+        "tool": "create_file",
+        "file_path": "backend/tests/regression/test_regression_pipeline_graph_wiring.py",
+        "instruction": "Create a regression test suite named `test_regression_pipeline_graph_wiring.py` in `backend/tests/regression/`. Implement two tests pinning down the load-bearing wiring block: 1) `test_import_and_initialization_no_breakage`: Import and construct the workflow graph with default configuration. Assert no ImportError or AttributeError occurs related to missing SecurityReviewNode, verifying dependency resolution stability. 2) `test_node_sequence_invariant_under_default_config`: Traverse initialized node IDs from the graph structure. Assert the exact sequence matches Planning -> SecurityReview -> ApprovalExtended when using default routing flags. Mock downstream node execution methods to prevent side effects during traversal. Include regression docstrings explaining that this invariant prevents accidental removal or reordering of the security gate in future refactors.",
+        "reason": "REGRESSION: Ensures Phase 3 core functionality tag for pipeline graph wiring block remains intact, preventing accidental removal or reordering of the security gate between planning and approval stages in future refactors."
+      }
+    ],
+    "affected_files": [
+      "backend/src/lean_ai/workflow/security_review.py",
+      "backend/src/lean_ai/workflow/pipeline.py",
+      "backend/tests/unit/workflow/test_security_review_node.py",
+      "backend/tests/regression/test_regression_security_review_node.py",
+      "backend/tests/unit/workflow/test_pipeline_security_wiring.py",
+      "backend/tests/regression/test_regression_pipeline_graph_wiring.py"
+    ],
+    "test_strategy": "pytest with asyncio support. Tests reside under backend/tests/unit/workflow/. Employs AsyncMock/MagicMock to isolate LLM clients, planners, and graph builders. Verifies silent revision loops, iteration caps, metadata flag attachment, and deterministic node sequencing without live infrastructure.",
+    "plan_validation_warnings": [
+      "invented path: backend/src/lean_ai/workflow/security_review.py",
+      "write target not found in prior-phase paths: backend/src/lean_ai/workflow/security_review.py",
+      "TDD contract requires an authored test and an implementation run_tests check naming that test for: backend/src/lean_ai/workflow/pipeline.py"
+    ],
+    "core_functionality": [
+      {
+        "entity": "SecurityReviewNode",
+        "file_path": "backend/src/lean_ai/workflow/security_review.py",
+        "reason": "Directly fulfills primary deliverable; orchestrates silent correction loop, audit logic, and metadata flagging.",
+        "source_signal": "phase1_deliverable",
+        "confidence": "high"
+      },
+      {
+        "entity": "_SECURITY_AUDIT_SYSTEM_PROMPT",
+        "file_path": "backend/src/lean_ai/workflow/security_review.py",
+        "reason": "Embeds the OWASP rubric driving auditor verdicts; consumed by test suites and indirectly affects approval UI rendering.",
+        "source_signal": "downstream_consumer",
+        "confidence": "medium"
+      },
+      {
+        "entity": "Pipeline graph wiring block",
+        "file_path": "backend/src/lean_ai/workflow/pipeline.py",
+        "reason": "Workflow execution entry point that inserts the security gate between planning and approval stages.",
+        "source_signal": "phase1_deliverable",
+        "confidence": "high"
+      },
+      {
+        "entity": "MAX_SECURITY_REVISIONS",
+        "file_path": "backend/src/lean_ai/workflow/security_review.py",
+        "reason": "Controls the iteration cap preventing infinite regeneration loops while allowing sufficient corrective attempts.",
+        "source_signal": "critical_risk_adjacent",
+        "confidence": "medium"
+      },
+      {
+        "entity": "security_warning_flag metadata attachment logic",
+        "file_path": "backend/src/lean_ai/workflow/security_review.py",
+        "reason": "Approval UI controllers and frontend components rely on this flag to warn users when automatic fixes are exhausted.",
+        "source_signal": "downstream_consumer",
+        "confidence": "high"
+      }
+    ]
+  },
+  "session_metadata": {
+    "plan": {
+      "scope": "Implement SecurityReviewNode for OWASP LLM Top 10 audit, silent correction loop capped at 2 iterations, pipeline integration between PlanningNode and ApprovalNodeExtended, and security_warning_flag attachment on exhaustion.",
+      "user_summary": "",
+      "naming_conventions": [],
+      "name_registry": [],
+      "steps": [
+        {
+          "step_number": 5,
+          "job": "Create SecurityReviewNode module with OWASP audit rubric and silent correction loop logic.",
+          "inputs": [
+            {
+              "source": "backend/src/lean_ai/workflow/graph.py",
+              "details": "Node base class, Continue/Fail/Suspend result types, execute signature."
+            },
+            {
+              "source": "backend/src/lean_ai/workflow/validation.py",
+              "details": "_run_semantic_review lifecycle, _SEMANTIC_MAX_ITERATIONS=2 pattern, structured audit via chat_structured."
+            },
+            {
+              "source": "backend/src/lean_ai/llm/planner.py",
+              "details": "create_plan(revision_context=...) signature and delegation to _revise_plan."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/src/lean_ai/workflow/security_review.py",
+              "change": "Create file implementing SecurityReviewNode, OWASP system prompt, iteration cap, silent loop, and metadata flag attachment."
+            }
+          ],
+          "must_not_change": [
+            "Existing workflow nodes, base graph classes, planner implementation details outside revision_context handling"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "task_complete",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url"
+          ],
+          "output_shape": "Module exports SecurityReviewNode class inheriting Node. Contains _SECURITY_AUDIT_SYSTEM_PROMPT embedding OWASP LLM08/LLM07/LLM06/LLM02/LLM05 rubric, MAX_SECURITY_REVISIONS=2 constant, and execute method implementing silent correction loop via create_plan(revision_context=findings). Includes dependency injection seam for LLM client to enable test mocking. Attach security_warning_flag to state.session_metadata on exhaustion.",
+          "success_checks": [
+            {
+              "description": "Module defines SecurityReviewNode class inheriting from Node.",
+              "tool": "read_file",
+              "command": "grep -n 'class SecurityReviewNode' backend/src/lean_ai/workflow/security_review.py",
+              "expected": "Matches expected class definition."
+            },
+            {
+              "description": "OWASP rubric categories are present in system prompt.",
+              "tool": "read_file",
+              "command": "grep -E 'LLM0[25678]' backend/src/lean_ai/workflow/security_review.py",
+              "expected": "Contains all five OWASP category identifiers."
+            },
+            {
+              "description": "Iteration cap constant is defined as 2.",
+              "tool": "read_file",
+              "command": "grep -n 'MAX_SECURITY_REVISIONS' backend/src/lean_ai/workflow/security_review.py",
+              "expected": "Constant equals integer 2."
+            }
+          ],
+          "blocked_protocol": "If validation.py pattern differs significantly, adapt iteration cap logic but preserve max 2 attempts. Stop if planner revision_context signature mismatches exploration evidence.",
+          "tool": "create_file",
+          "file_path": "backend/src/lean_ai/workflow/security_review.py",
+          "instruction": "Create SecurityReviewNode module with OWASP audit rubric and silent correction loop logic.",
+          "reason": "Core deliverable implementing automated security audit and silent correction loop per OWASP guidelines. Establishes the behavioral contract tested in Phase 4b."
+        },
+        {
+          "step_number": 6,
+          "job": "Wire SecurityReviewNode into workflow graph between PlanningNode and ApprovalNodeExtended.",
+          "inputs": [
+            {
+              "source": "backend/src/lean_ai/workflow/pipeline.py",
+              "details": "Lines 107-330: PlanningNode and ApprovalNodeExtended patterns, existing graph builder usage."
+            },
+            {
+              "source": "backend/src/lean_ai/workflow/graph.py",
+              "details": "_find_node_index sequential execution pattern, add_node fluent builder."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/src/lean_ai/workflow/pipeline.py",
+              "change": "Import SecurityReviewNode and insert into graph wiring block after PlanningNode registration."
+            }
+          ],
+          "must_not_change": [
+            "Existing node routing logic, conditional branches unrelated to security gate, state persistence mechanisms"
+          ],
+          "allowed_tools": [
+            "edit_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "task_complete",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url"
+          ],
+          "output_shape": "Imports SecurityReviewNode and registers it in the graph builder immediately after PlanningNode using _find_node_index or equivalent fluent pattern. Preserves deterministic execution order without disrupting existing approval or execution flows.",
+          "success_checks": [
+            {
+              "description": "SecurityReviewNode is imported in pipeline.py.",
+              "tool": "read_file",
+              "command": "grep -n 'from lean_ai.workflow.security_review import SecurityReviewNode' backend/src/lean_ai/workflow/pipeline.py",
+              "expected": "Import statement present."
+            },
+            {
+              "description": "Node is registered between Planning and Approval nodes.",
+              "tool": "read_file",
+              "command": "grep -A 5 'SecurityReviewNode' backend/src/lean_ai/workflow/pipeline.py",
+              "expected": "Registration call appears after PlanningNode setup and before ApprovalNodeExtended."
+            }
+          ],
+          "blocked_protocol": "If _find_node_index lookup fails due to ID conflicts, generate a unique node ID matching project conventions. Stop if graph builder API changes unexpectedly or imports cannot resolve.",
+          "tool": "edit_file",
+          "file_path": "backend/src/lean_ai/workflow/pipeline.py",
+          "instruction": "Wire SecurityReviewNode into workflow graph between PlanningNode and ApprovalNodeExtended.",
+          "reason": "Pipeline integration requirement mandates placing the security gate between planning and approval stages without breaking existing routing or state propagation."
+        }
+      ],
+      "tdd_mode": true,
+      "tdd_test_steps": [
+        {
+          "step_number": 1,
+          "job": "Create unit tests for SecurityReviewNode audit logic and revision triggering",
+          "inputs": [
+            {
+              "source": "backend/src/lean_ai/workflow/security_review.py",
+              "details": "Target module implementing SecurityReviewNode, _SECURITY_AUDIT_SYSTEM_PROMPT, MAX_SECURITY_REVISIONS, and structured Pydantic audit schema."
+            },
+            {
+              "source": "backend/tests/unit/workflow/test_graph.py",
+              "details": "Reference for NodeResult assertions, Continue/Fail types, and pytest-asyncio patterns."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/tests/unit/workflow/test_security_review_node.py",
+              "change": ""
+            }
+          ],
+          "must_not_change": [
+            "backend/src/lean_ai/workflow/graph.py",
+            "backend/src/lean_ai/workflow/state.py"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Python test file using pytest and pytest-asyncio. Contains async test functions mocking LLM audit calls, asserting revision signals with structured findings, and validating over-blocking mitigation for user-requested admin tasks.",
+          "success_checks": [
+            {
+              "description": "Test module imports without errors.",
+              "tool": "",
+              "command": "cd backend && python -m pytest tests/unit/workflow/test_security_review_node.py --collect-only",
+              "expected": "Exit code 0"
+            }
+          ],
+          "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+          "tool": "create_file",
+          "file_path": "backend/tests/unit/workflow/test_security_review_node.py",
+          "instruction": "Create a pytest-asyncio test suite named `test_security_review_node.py` in `backend/tests/unit/workflow/`. Implement three async test functions: 1) `test_sensitive_info_disclosure_triggers_revision`: Scenario where WorkflowState contains an ExecutionPlan with code `print(os.environ['API_KEY'])`. Mock the internal LLM audit client to return a verdict flagging LLM06 sensitive data disclosure. Assert that `node.execute(state)` returns a revision signal (not Continue) and that the result carries structured findings containing prescriptive replacement patterns, verifying mitigation against planner misinterpretation. 2) `test_over_blocking_mitigation_allows_intended_admin`: Scenario where plan performs intentional `chmod 754 config` explicitly requested by user. Mock auditor to recognize scope/user intent and return safe verdict. Assert result is Continue with no revision signal. 3) `test_audit_schema_contains_actionable_findings`: Verify that any flagged audit response includes a structured findings field mapping vulnerability codes to specific code replacements, ensuring the planner receives actionable feedback. Use AsyncMock for LLM client injection via WorkflowState or constructor parameters. Add module docstring and per-test comments explaining scenarios and assertion rationale.",
+          "reason": "Verifies Phase 3 change_designs for SecurityReviewNode audit logic, silent revision triggering, structured findings schema to prevent planner misinterpretation, and over-blocking mitigation for legitimate admin tasks. Uses pytest-asyncio matching repo conventions."
+        },
+        {
+          "step_number": 2,
+          "job": "Create regression tests for core SecurityReviewNode functionality",
+          "inputs": [
+            {
+              "source": "backend/src/lean_ai/workflow/security_review.py",
+              "details": "Contains _SECURITY_AUDIT_SYSTEM_PROMPT, MAX_SECURITY_REVISIONS constant, and session_metadata flagging logic."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/tests/regression/test_regression_security_review_node.py",
+              "change": ""
+            }
+          ],
+          "must_not_change": [
+            "backend/src/lean_ai/workflow/security_review.py"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Python regression test file under tests/regression/. Asserts OWASP rubric completeness, iteration cap value of 2, and security_warning_flag attachment on cap exhaustion via deterministic AsyncMock loops.",
+          "success_checks": [
+            {
+              "description": "Regression tests collect successfully.",
+              "tool": "",
+              "command": "cd backend && python -m pytest tests/regression/test_regression_security_review_node.py --collect-only",
+              "expected": "Exit code 0"
+            }
+          ],
+          "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+          "tool": "create_file",
+          "file_path": "backend/tests/regression/test_regression_security_review_node.py",
+          "instruction": "Create a regression test suite named `test_regression_security_review_node.py` in `backend/tests/regression/`. Implement three tests targeting load-bearing core entities: 1) `test_audit_prompt_contains_full_owasp_rubric`: Assert that `_SECURITY_AUDIT_SYSTEM_PROMPT` string explicitly contains OWASP category identifiers LLM08, LLM07, LLM06, LLM02, and LLM05. Fail if any are missing. 2) `test_max_security_revisions_cap_equals_two`: Assert the module constant `MAX_SECURITY_REVISIONS` equals exactly integer 2 to enforce silent loop bounds. 3) `test_flag_attachment_on_iteration_exhaustion`: Mock the auditor to repeatedly flag risks across three consecutive calls. Simulate the node's internal revision loop exceeding the cap. Assert that `state.session_metadata` is updated with a `security_warning_flag` key set to True (or equivalent marker), ensuring downstream UI components receive the warning. Use deterministic mocks for all LLM interactions. Include regression docstrings detailing invariants.",
+          "reason": "REGRESSION: Pins down Phase 3 core functionality tags for _SECURITY_AUDIT_SYSTEM_PROMPT completeness, MAX_SECURITY_REVISIONS iteration cap, and security_warning_flag metadata attachment logic to prevent future regressions in audit enforcement and UI warning propagation."
+        },
+        {
+          "step_number": 3,
+          "job": "Create unit tests for pipeline graph wiring and dependency resolution",
+          "inputs": [
+            {
+              "source": "backend/src/lean_ai/workflow/pipeline.py",
+              "details": "Contains run_workflow, graph.add_node wiring, and node sequencing logic."
+            },
+            {
+              "source": "backend/tests/unit/workflow/test_pipeline_integration.py",
+              "details": "Reference for _setup_mock_modules() and async workflow execution patterns."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/tests/unit/workflow/test_pipeline_security_wiring.py",
+              "change": ""
+            }
+          ],
+          "must_not_change": [
+            "backend/src/lean_ai/workflow/pipeline.py"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "grep_files",
+            "list_directory",
+            "directory_tree",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Python test file using pytest-asyncio. Mocks graph builder to verify SecurityReviewNode insertion order, validates LLMClient injection via WorkflowState/constructor, and confirms deterministic execution preservation.",
+          "success_checks": [
+            {
+              "description": "Pipeline wiring tests collect successfully.",
+              "tool": "",
+              "command": "cd backend && python -m pytest tests/unit/workflow/test_pipeline_security_wiring.py --collect-only",
+              "expected": "Exit code 0"
+            }
+          ],
+          "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+          "tool": "create_file",
+          "file_path": "backend/tests/unit/workflow/test_pipeline_security_wiring.py",
+          "instruction": "Create a pytest-asyncio test suite named `test_pipeline_security_wiring.py` in `backend/tests/unit/workflow/`. Implement three async tests: 1) `test_node_insertion_preserves_deterministic_order`: Mock the workflow graph builder to capture node registration calls. Assert that SecurityReviewNode is registered immediately after PlanningNode and before ApprovalNodeExtended, preserving existing routing logic without insertion index collisions. 2) `test_llm_client_dependency_resolution_via_state`: Instantiate SecurityReviewNode by passing a mocked LLMClient through WorkflowState injection or constructor parameters matching the validation.py pattern. Assert successful instantiation without signature breakage against the base Node.execute contract. 3) `test_sequential_execution_no_breakage_on_mock_traversal`: Drive a mock workflow traversal using _find_node_index patterns to verify deterministic execution flow proceeds Planning -> SecurityReview -> Approval without raising routing errors or skipping nodes. Add module docstring and assertion comments specifying expected graph order.",
+          "reason": "Validates Phase 3 change_designs for pipeline.py graph wiring block, verifies mitigation of graph disruption risk by preserving deterministic sequencing, and confirms LLMClient injection seam matches validation.py patterns without breaking Node base contract."
+        },
+        {
+          "step_number": 4,
+          "job": "Create regression test for pipeline graph wiring core functionality",
+          "inputs": [
+            {
+              "source": "backend/src/lean_ai/workflow/pipeline.py",
+              "details": "Pipeline initialization and node routing logic."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/tests/regression/test_regression_pipeline_graph_wiring.py",
+              "change": ""
+            }
+          ],
+          "must_not_change": [
+            "backend/src/lean_ai/workflow/graph.py"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Python regression test file under tests/regression/. Asserts correct node ID sequence (Planning -> SecurityReview -> Approval) and validates no import breakage or routing disruption.",
+          "success_checks": [
+            {
+              "description": "Pipeline wiring regression test collects successfully.",
+              "tool": "",
+              "command": "cd backend && python -m pytest tests/regression/test_regression_pipeline_graph_wiring.py --collect-only",
+              "expected": "Exit code 0"
+            }
+          ],
+          "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+          "tool": "create_file",
+          "file_path": "backend/tests/regression/test_regression_pipeline_graph_wiring.py",
+          "instruction": "Create a regression test suite named `test_regression_pipeline_graph_wiring.py` in `backend/tests/regression/`. Implement two tests pinning down the load-bearing wiring block: 1) `test_import_and_initialization_no_breakage`: Import and construct the workflow graph with default configuration. Assert no ImportError or AttributeError occurs related to missing SecurityReviewNode, verifying dependency resolution stability. 2) `test_node_sequence_invariant_under_default_config`: Traverse initialized node IDs from the graph structure. Assert the exact sequence matches Planning -> SecurityReview -> ApprovalExtended when using default routing flags. Mock downstream node execution methods to prevent side effects during traversal. Include regression docstrings explaining that this invariant prevents accidental removal or reordering of the security gate in future refactors.",
+          "reason": "REGRESSION: Ensures Phase 3 core functionality tag for pipeline graph wiring block remains intact, preventing accidental removal or reordering of the security gate between planning and approval stages in future refactors."
+        }
+      ],
+      "affected_files": [
+        "backend/src/lean_ai/workflow/security_review.py",
+        "backend/src/lean_ai/workflow/pipeline.py",
+        "backend/tests/unit/workflow/test_security_review_node.py",
+        "backend/tests/regression/test_regression_security_review_node.py",
+        "backend/tests/unit/workflow/test_pipeline_security_wiring.py",
+        "backend/tests/regression/test_regression_pipeline_graph_wiring.py"
+      ],
+      "test_strategy": "pytest with asyncio support. Tests reside under backend/tests/unit/workflow/. Employs AsyncMock/MagicMock to isolate LLM clients, planners, and graph builders. Verifies silent revision loops, iteration caps, metadata flag attachment, and deterministic node sequencing without live infrastructure.",
+      "plan_validation_warnings": [
+        "invented path: backend/src/lean_ai/workflow/security_review.py",
+        "write target not found in prior-phase paths: backend/src/lean_ai/workflow/security_review.py",
+        "TDD contract requires an authored test and an implementation run_tests check naming that test for: backend/src/lean_ai/workflow/pipeline.py"
+      ],
+      "core_functionality": [
+        {
+          "entity": "SecurityReviewNode",
+          "file_path": "backend/src/lean_ai/workflow/security_review.py",
+          "reason": "Directly fulfills primary deliverable; orchestrates silent correction loop, audit logic, and metadata flagging.",
+          "source_signal": "phase1_deliverable",
+          "confidence": "high"
+        },
+        {
+          "entity": "_SECURITY_AUDIT_SYSTEM_PROMPT",
+          "file_path": "backend/src/lean_ai/workflow/security_review.py",
+          "reason": "Embeds the OWASP rubric driving auditor verdicts; consumed by test suites and indirectly affects approval UI rendering.",
+          "source_signal": "downstream_consumer",
+          "confidence": "medium"
+        },
+        {
+          "entity": "Pipeline graph wiring block",
+          "file_path": "backend/src/lean_ai/workflow/pipeline.py",
+          "reason": "Workflow execution entry point that inserts the security gate between planning and approval stages.",
+          "source_signal": "phase1_deliverable",
+          "confidence": "high"
+        },
+        {
+          "entity": "MAX_SECURITY_REVISIONS",
+          "file_path": "backend/src/lean_ai/workflow/security_review.py",
+          "reason": "Controls the iteration cap preventing infinite regeneration loops while allowing sufficient corrective attempts.",
+          "source_signal": "critical_risk_adjacent",
+          "confidence": "medium"
+        },
+        {
+          "entity": "security_warning_flag metadata attachment logic",
+          "file_path": "backend/src/lean_ai/workflow/security_review.py",
+          "reason": "Approval UI controllers and frontend components rely on this flag to warn users when automatic fixes are exhausted.",
+          "source_signal": "downstream_consumer",
+          "confidence": "high"
+        }
+      ]
+    },
+    "planning_checkpoint_id": null,
+    "approved_plan": {
+      "scope": "Implement SecurityReviewNode for OWASP LLM Top 10 audit, silent correction loop capped at 2 iterations, pipeline integration between PlanningNode and ApprovalNodeExtended, and security_warning_flag attachment on exhaustion.",
+      "user_summary": "",
+      "naming_conventions": [],
+      "name_registry": [],
+      "steps": [
+        {
+          "step_number": 5,
+          "job": "Create SecurityReviewNode module with OWASP audit rubric and silent correction loop logic.",
+          "inputs": [
+            {
+              "source": "backend/src/lean_ai/workflow/graph.py",
+              "details": "Node base class, Continue/Fail/Suspend result types, execute signature."
+            },
+            {
+              "source": "backend/src/lean_ai/workflow/validation.py",
+              "details": "_run_semantic_review lifecycle, _SEMANTIC_MAX_ITERATIONS=2 pattern, structured audit via chat_structured."
+            },
+            {
+              "source": "backend/src/lean_ai/llm/planner.py",
+              "details": "create_plan(revision_context=...) signature and delegation to _revise_plan."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/src/lean_ai/workflow/security_review.py",
+              "change": "Create file implementing SecurityReviewNode, OWASP system prompt, iteration cap, silent loop, and metadata flag attachment."
+            }
+          ],
+          "must_not_change": [
+            "Existing workflow nodes, base graph classes, planner implementation details outside revision_context handling"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "task_complete",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url"
+          ],
+          "output_shape": "Module exports SecurityReviewNode class inheriting Node. Contains _SECURITY_AUDIT_SYSTEM_PROMPT embedding OWASP LLM08/LLM07/LLM06/LLM02/LLM05 rubric, MAX_SECURITY_REVISIONS=2 constant, and execute method implementing silent correction loop via create_plan(revision_context=findings). Includes dependency injection seam for LLM client to enable test mocking. Attach security_warning_flag to state.session_metadata on exhaustion.",
+          "success_checks": [
+            {
+              "description": "Module defines SecurityReviewNode class inheriting from Node.",
+              "tool": "read_file",
+              "command": "grep -n 'class SecurityReviewNode' backend/src/lean_ai/workflow/security_review.py",
+              "expected": "Matches expected class definition."
+            },
+            {
+              "description": "OWASP rubric categories are present in system prompt.",
+              "tool": "read_file",
+              "command": "grep -E 'LLM0[25678]' backend/src/lean_ai/workflow/security_review.py",
+              "expected": "Contains all five OWASP category identifiers."
+            },
+            {
+              "description": "Iteration cap constant is defined as 2.",
+              "tool": "read_file",
+              "command": "grep -n 'MAX_SECURITY_REVISIONS' backend/src/lean_ai/workflow/security_review.py",
+              "expected": "Constant equals integer 2."
+            }
+          ],
+          "blocked_protocol": "If validation.py pattern differs significantly, adapt iteration cap logic but preserve max 2 attempts. Stop if planner revision_context signature mismatches exploration evidence.",
+          "tool": "create_file",
+          "file_path": "backend/src/lean_ai/workflow/security_review.py",
+          "instruction": "Create SecurityReviewNode module with OWASP audit rubric and silent correction loop logic.",
+          "reason": "Core deliverable implementing automated security audit and silent correction loop per OWASP guidelines. Establishes the behavioral contract tested in Phase 4b."
+        },
+        {
+          "step_number": 6,
+          "job": "Wire SecurityReviewNode into workflow graph between PlanningNode and ApprovalNodeExtended.",
+          "inputs": [
+            {
+              "source": "backend/src/lean_ai/workflow/pipeline.py",
+              "details": "Lines 107-330: PlanningNode and ApprovalNodeExtended patterns, existing graph builder usage."
+            },
+            {
+              "source": "backend/src/lean_ai/workflow/graph.py",
+              "details": "_find_node_index sequential execution pattern, add_node fluent builder."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/src/lean_ai/workflow/pipeline.py",
+              "change": "Import SecurityReviewNode and insert into graph wiring block after PlanningNode registration."
+            }
+          ],
+          "must_not_change": [
+            "Existing node routing logic, conditional branches unrelated to security gate, state persistence mechanisms"
+          ],
+          "allowed_tools": [
+            "edit_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "task_complete",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url"
+          ],
+          "output_shape": "Imports SecurityReviewNode and registers it in the graph builder immediately after PlanningNode using _find_node_index or equivalent fluent pattern. Preserves deterministic execution order without disrupting existing approval or execution flows.",
+          "success_checks": [
+            {
+              "description": "SecurityReviewNode is imported in pipeline.py.",
+              "tool": "read_file",
+              "command": "grep -n 'from lean_ai.workflow.security_review import SecurityReviewNode' backend/src/lean_ai/workflow/pipeline.py",
+              "expected": "Import statement present."
+            },
+            {
+              "description": "Node is registered between Planning and Approval nodes.",
+              "tool": "read_file",
+              "command": "grep -A 5 'SecurityReviewNode' backend/src/lean_ai/workflow/pipeline.py",
+              "expected": "Registration call appears after PlanningNode setup and before ApprovalNodeExtended."
+            }
+          ],
+          "blocked_protocol": "If _find_node_index lookup fails due to ID conflicts, generate a unique node ID matching project conventions. Stop if graph builder API changes unexpectedly or imports cannot resolve.",
+          "tool": "edit_file",
+          "file_path": "backend/src/lean_ai/workflow/pipeline.py",
+          "instruction": "Wire SecurityReviewNode into workflow graph between PlanningNode and ApprovalNodeExtended.",
+          "reason": "Pipeline integration requirement mandates placing the security gate between planning and approval stages without breaking existing routing or state propagation."
+        }
+      ],
+      "tdd_mode": true,
+      "tdd_test_steps": [
+        {
+          "step_number": 1,
+          "job": "Create unit tests for SecurityReviewNode audit logic and revision triggering",
+          "inputs": [
+            {
+              "source": "backend/src/lean_ai/workflow/security_review.py",
+              "details": "Target module implementing SecurityReviewNode, _SECURITY_AUDIT_SYSTEM_PROMPT, MAX_SECURITY_REVISIONS, and structured Pydantic audit schema."
+            },
+            {
+              "source": "backend/tests/unit/workflow/test_graph.py",
+              "details": "Reference for NodeResult assertions, Continue/Fail types, and pytest-asyncio patterns."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/tests/unit/workflow/test_security_review_node.py",
+              "change": ""
+            }
+          ],
+          "must_not_change": [
+            "backend/src/lean_ai/workflow/graph.py",
+            "backend/src/lean_ai/workflow/state.py"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Python test file using pytest and pytest-asyncio. Contains async test functions mocking LLM audit calls, asserting revision signals with structured findings, and validating over-blocking mitigation for user-requested admin tasks.",
+          "success_checks": [
+            {
+              "description": "Test module imports without errors.",
+              "tool": "",
+              "command": "cd backend && python -m pytest tests/unit/workflow/test_security_review_node.py --collect-only",
+              "expected": "Exit code 0"
+            }
+          ],
+          "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+          "tool": "create_file",
+          "file_path": "backend/tests/unit/workflow/test_security_review_node.py",
+          "instruction": "Create a pytest-asyncio test suite named `test_security_review_node.py` in `backend/tests/unit/workflow/`. Implement three async test functions: 1) `test_sensitive_info_disclosure_triggers_revision`: Scenario where WorkflowState contains an ExecutionPlan with code `print(os.environ['API_KEY'])`. Mock the internal LLM audit client to return a verdict flagging LLM06 sensitive data disclosure. Assert that `node.execute(state)` returns a revision signal (not Continue) and that the result carries structured findings containing prescriptive replacement patterns, verifying mitigation against planner misinterpretation. 2) `test_over_blocking_mitigation_allows_intended_admin`: Scenario where plan performs intentional `chmod 754 config` explicitly requested by user. Mock auditor to recognize scope/user intent and return safe verdict. Assert result is Continue with no revision signal. 3) `test_audit_schema_contains_actionable_findings`: Verify that any flagged audit response includes a structured findings field mapping vulnerability codes to specific code replacements, ensuring the planner receives actionable feedback. Use AsyncMock for LLM client injection via WorkflowState or constructor parameters. Add module docstring and per-test comments explaining scenarios and assertion rationale.",
+          "reason": "Verifies Phase 3 change_designs for SecurityReviewNode audit logic, silent revision triggering, structured findings schema to prevent planner misinterpretation, and over-blocking mitigation for legitimate admin tasks. Uses pytest-asyncio matching repo conventions."
+        },
+        {
+          "step_number": 2,
+          "job": "Create regression tests for core SecurityReviewNode functionality",
+          "inputs": [
+            {
+              "source": "backend/src/lean_ai/workflow/security_review.py",
+              "details": "Contains _SECURITY_AUDIT_SYSTEM_PROMPT, MAX_SECURITY_REVISIONS constant, and session_metadata flagging logic."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/tests/regression/test_regression_security_review_node.py",
+              "change": ""
+            }
+          ],
+          "must_not_change": [
+            "backend/src/lean_ai/workflow/security_review.py"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Python regression test file under tests/regression/. Asserts OWASP rubric completeness, iteration cap value of 2, and security_warning_flag attachment on cap exhaustion via deterministic AsyncMock loops.",
+          "success_checks": [
+            {
+              "description": "Regression tests collect successfully.",
+              "tool": "",
+              "command": "cd backend && python -m pytest tests/regression/test_regression_security_review_node.py --collect-only",
+              "expected": "Exit code 0"
+            }
+          ],
+          "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+          "tool": "create_file",
+          "file_path": "backend/tests/regression/test_regression_security_review_node.py",
+          "instruction": "Create a regression test suite named `test_regression_security_review_node.py` in `backend/tests/regression/`. Implement three tests targeting load-bearing core entities: 1) `test_audit_prompt_contains_full_owasp_rubric`: Assert that `_SECURITY_AUDIT_SYSTEM_PROMPT` string explicitly contains OWASP category identifiers LLM08, LLM07, LLM06, LLM02, and LLM05. Fail if any are missing. 2) `test_max_security_revisions_cap_equals_two`: Assert the module constant `MAX_SECURITY_REVISIONS` equals exactly integer 2 to enforce silent loop bounds. 3) `test_flag_attachment_on_iteration_exhaustion`: Mock the auditor to repeatedly flag risks across three consecutive calls. Simulate the node's internal revision loop exceeding the cap. Assert that `state.session_metadata` is updated with a `security_warning_flag` key set to True (or equivalent marker), ensuring downstream UI components receive the warning. Use deterministic mocks for all LLM interactions. Include regression docstrings detailing invariants.",
+          "reason": "REGRESSION: Pins down Phase 3 core functionality tags for _SECURITY_AUDIT_SYSTEM_PROMPT completeness, MAX_SECURITY_REVISIONS iteration cap, and security_warning_flag metadata attachment logic to prevent future regressions in audit enforcement and UI warning propagation."
+        },
+        {
+          "step_number": 3,
+          "job": "Create unit tests for pipeline graph wiring and dependency resolution",
+          "inputs": [
+            {
+              "source": "backend/src/lean_ai/workflow/pipeline.py",
+              "details": "Contains run_workflow, graph.add_node wiring, and node sequencing logic."
+            },
+            {
+              "source": "backend/tests/unit/workflow/test_pipeline_integration.py",
+              "details": "Reference for _setup_mock_modules() and async workflow execution patterns."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/tests/unit/workflow/test_pipeline_security_wiring.py",
+              "change": ""
+            }
+          ],
+          "must_not_change": [
+            "backend/src/lean_ai/workflow/pipeline.py"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "grep_files",
+            "list_directory",
+            "directory_tree",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Python test file using pytest-asyncio. Mocks graph builder to verify SecurityReviewNode insertion order, validates LLMClient injection via WorkflowState/constructor, and confirms deterministic execution preservation.",
+          "success_checks": [
+            {
+              "description": "Pipeline wiring tests collect successfully.",
+              "tool": "",
+              "command": "cd backend && python -m pytest tests/unit/workflow/test_pipeline_security_wiring.py --collect-only",
+              "expected": "Exit code 0"
+            }
+          ],
+          "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+          "tool": "create_file",
+          "file_path": "backend/tests/unit/workflow/test_pipeline_security_wiring.py",
+          "instruction": "Create a pytest-asyncio test suite named `test_pipeline_security_wiring.py` in `backend/tests/unit/workflow/`. Implement three async tests: 1) `test_node_insertion_preserves_deterministic_order`: Mock the workflow graph builder to capture node registration calls. Assert that SecurityReviewNode is registered immediately after PlanningNode and before ApprovalNodeExtended, preserving existing routing logic without insertion index collisions. 2) `test_llm_client_dependency_resolution_via_state`: Instantiate SecurityReviewNode by passing a mocked LLMClient through WorkflowState injection or constructor parameters matching the validation.py pattern. Assert successful instantiation without signature breakage against the base Node.execute contract. 3) `test_sequential_execution_no_breakage_on_mock_traversal`: Drive a mock workflow traversal using _find_node_index patterns to verify deterministic execution flow proceeds Planning -> SecurityReview -> Approval without raising routing errors or skipping nodes. Add module docstring and assertion comments specifying expected graph order.",
+          "reason": "Validates Phase 3 change_designs for pipeline.py graph wiring block, verifies mitigation of graph disruption risk by preserving deterministic sequencing, and confirms LLMClient injection seam matches validation.py patterns without breaking Node base contract."
+        },
+        {
+          "step_number": 4,
+          "job": "Create regression test for pipeline graph wiring core functionality",
+          "inputs": [
+            {
+              "source": "backend/src/lean_ai/workflow/pipeline.py",
+              "details": "Pipeline initialization and node routing logic."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/tests/regression/test_regression_pipeline_graph_wiring.py",
+              "change": ""
+            }
+          ],
+          "must_not_change": [
+            "backend/src/lean_ai/workflow/graph.py"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Python regression test file under tests/regression/. Asserts correct node ID sequence (Planning -> SecurityReview -> Approval) and validates no import breakage or routing disruption.",
+          "success_checks": [
+            {
+              "description": "Pipeline wiring regression test collects successfully.",
+              "tool": "",
+              "command": "cd backend && python -m pytest tests/regression/test_regression_pipeline_graph_wiring.py --collect-only",
+              "expected": "Exit code 0"
+            }
+          ],
+          "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+          "tool": "create_file",
+          "file_path": "backend/tests/regression/test_regression_pipeline_graph_wiring.py",
+          "instruction": "Create a regression test suite named `test_regression_pipeline_graph_wiring.py` in `backend/tests/regression/`. Implement two tests pinning down the load-bearing wiring block: 1) `test_import_and_initialization_no_breakage`: Import and construct the workflow graph with default configuration. Assert no ImportError or AttributeError occurs related to missing SecurityReviewNode, verifying dependency resolution stability. 2) `test_node_sequence_invariant_under_default_config`: Traverse initialized node IDs from the graph structure. Assert the exact sequence matches Planning -> SecurityReview -> ApprovalExtended when using default routing flags. Mock downstream node execution methods to prevent side effects during traversal. Include regression docstrings explaining that this invariant prevents accidental removal or reordering of the security gate in future refactors.",
+          "reason": "REGRESSION: Ensures Phase 3 core functionality tag for pipeline graph wiring block remains intact, preventing accidental removal or reordering of the security gate between planning and approval stages in future refactors."
+        }
+      ],
+      "affected_files": [
+        "backend/src/lean_ai/workflow/security_review.py",
+        "backend/src/lean_ai/workflow/pipeline.py",
+        "backend/tests/unit/workflow/test_security_review_node.py",
+        "backend/tests/regression/test_regression_security_review_node.py",
+        "backend/tests/unit/workflow/test_pipeline_security_wiring.py",
+        "backend/tests/regression/test_regression_pipeline_graph_wiring.py"
+      ],
+      "test_strategy": "pytest with asyncio support. Tests reside under backend/tests/unit/workflow/. Employs AsyncMock/MagicMock to isolate LLM clients, planners, and graph builders. Verifies silent revision loops, iteration caps, metadata flag attachment, and deterministic node sequencing without live infrastructure.",
+      "plan_validation_warnings": [
+        "invented path: backend/src/lean_ai/workflow/security_review.py",
+        "write target not found in prior-phase paths: backend/src/lean_ai/workflow/security_review.py",
+        "TDD contract requires an authored test and an implementation run_tests check naming that test for: backend/src/lean_ai/workflow/pipeline.py"
+      ],
+      "core_functionality": [
+        {
+          "entity": "SecurityReviewNode",
+          "file_path": "backend/src/lean_ai/workflow/security_review.py",
+          "reason": "Directly fulfills primary deliverable; orchestrates silent correction loop, audit logic, and metadata flagging.",
+          "source_signal": "phase1_deliverable",
+          "confidence": "high"
+        },
+        {
+          "entity": "_SECURITY_AUDIT_SYSTEM_PROMPT",
+          "file_path": "backend/src/lean_ai/workflow/security_review.py",
+          "reason": "Embeds the OWASP rubric driving auditor verdicts; consumed by test suites and indirectly affects approval UI rendering.",
+          "source_signal": "downstream_consumer",
+          "confidence": "medium"
+        },
+        {
+          "entity": "Pipeline graph wiring block",
+          "file_path": "backend/src/lean_ai/workflow/pipeline.py",
+          "reason": "Workflow execution entry point that inserts the security gate between planning and approval stages.",
+          "source_signal": "phase1_deliverable",
+          "confidence": "high"
+        },
+        {
+          "entity": "MAX_SECURITY_REVISIONS",
+          "file_path": "backend/src/lean_ai/workflow/security_review.py",
+          "reason": "Controls the iteration cap preventing infinite regeneration loops while allowing sufficient corrective attempts.",
+          "source_signal": "critical_risk_adjacent",
+          "confidence": "medium"
+        },
+        {
+          "entity": "security_warning_flag metadata attachment logic",
+          "file_path": "backend/src/lean_ai/workflow/security_review.py",
+          "reason": "Approval UI controllers and frontend components rely on this flag to warn users when automatic fixes are exhausted.",
+          "source_signal": "downstream_consumer",
+          "confidence": "high"
+        }
+      ]
+    },
+    "execution_result": "lean-ai: Implement a \"Security Guardrail\" workflow node based on OWASP LLM securi",
+    "suspend_reason": "Semantic review failed after 2 corrective attempts.\n- No code changes detected in the provided diff.\n- The approved plan requires creating backend/src/lean_ai/workflow/security_review.py, modifying backend/src/lean_ai/workflow/pipeline.py, and adding four test files. None of these were implemented."
+  },
+  "created_at": "2026-06-06T03:41:23.838687+00:00",
+  "updated_at": "2026-06-06T12:57:32.939012+00:00"
+}
