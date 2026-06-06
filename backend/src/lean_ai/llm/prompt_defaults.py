@@ -1011,6 +1011,7 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
             template_vars=[
                 "task",
                 "impl_plan_md",
+                "test_command",
                 "testing_inventory",
                 "verification_targets",
                 "security_concerns",
@@ -1075,8 +1076,14 @@ def register_prompt_defaults(reg: PromptRegistry) -> None:
                 "test steps is unacceptable. Even when the plan only "
                 "modifies existing behavior, write at least one test "
                 "pinning down the post-change contract.\n\n"
-                "Do NOT include a run_tests step — the pipeline executes "
-                "the test command automatically after implementation.\n\n"
+                "Do NOT include a standalone run_tests step. Every test-file "
+                "creation step MUST include a `success_checks` entry with "
+                "`tool` set exactly to `run_tests`, an executable command "
+                "based on `{test_command}` that names that step's concrete "
+                "test file, and the expected passing outcome. Do not use "
+                "`--collect-only` or any command that merely discovers tests. "
+                "The planner copies these checks onto matching implementation "
+                "steps for red/green execution.\n\n"
                 "SELF-CONTAINED INSTRUCTIONS — CRITICAL:\n"
                 "Phase A (the test-writing model) sees ONLY this step's "
                 "`instruction`, `file_path`, and `context` fields. It does "

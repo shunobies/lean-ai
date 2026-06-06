@@ -181,6 +181,13 @@ def test_tdd_contract_accepts_authored_test_steps_for_affected_files():
                 file_path="tests/test_auth.py",
                 instruction="Add tests covering src/auth.py callback state validation.",
                 reason="Pin the intended callback behavior before implementation.",
+                success_checks=[
+                    StepSuccessCheck(
+                        description="Auth tests pass.",
+                        tool="run_tests",
+                        command="pytest tests/test_auth.py -q",
+                    )
+                ],
             )
         ],
         affected_files=["src/auth.py", "tests/test_auth.py"],
@@ -223,6 +230,55 @@ def test_tdd_contract_rejects_structural_check_without_targeted_tests():
                 file_path="tests/test_auth.py",
                 instruction="Add tests covering src/auth.py callback behavior.",
                 reason="Pin behavior.",
+            )
+        ],
+        affected_files=["src/auth.py", "tests/test_auth.py"],
+        test_strategy="Run pytest.",
+    )
+    summary = FileSummary(
+        files_to_modify=[FileObservation(file_path="src/auth.py", role="modify", reason="behavior")]
+    )
+
+    warnings, blocking = _check_tdd_test_contract_cover_affected_files(plan, summary)
+
+    assert blocking is True
+    assert "run_tests check naming that test" in warnings[0]
+
+
+def test_tdd_contract_rejects_collection_only_authored_test_command():
+    plan = ExecutionPlan(
+        scope="Update auth.",
+        tdd_mode=True,
+        steps=[
+            PlanStep(
+                step_number=2,
+                tool="edit_file",
+                file_path="src/auth.py",
+                instruction="Implement auth behavior.",
+                reason="Update auth.",
+                success_checks=[
+                    StepSuccessCheck(
+                        description="Run auth tests.",
+                        tool="run_tests",
+                        command="pytest tests/test_auth.py -q",
+                    )
+                ],
+            )
+        ],
+        tdd_test_steps=[
+            PlanStep(
+                step_number=1,
+                tool="create_file",
+                file_path="tests/test_auth.py",
+                instruction="Test src/auth.py behavior.",
+                reason="Pin auth behavior.",
+                success_checks=[
+                    StepSuccessCheck(
+                        description="Collect auth tests.",
+                        tool="run_tests",
+                        command="pytest tests/test_auth.py --collect-only",
+                    )
+                ],
             )
         ],
         affected_files=["src/auth.py", "tests/test_auth.py"],

@@ -30,6 +30,7 @@ from lean_ai.llm.plan_schema import (
     MissingFile,
     PlanStep,
     ScopeDocument,
+    StepSuccessCheck,
     VerificationPlan,
     plan_to_markdown,
 )
@@ -194,6 +195,10 @@ class PlanningPhase(ABC):
         Returns:
             A dict with phase-specific output data.
         """
+
+
+class PlanValidationError(RuntimeError):
+    """Raised when Phase 4 cannot produce an executable plan contract."""
 
 
 class ScopePhase(PlanningPhase):
@@ -971,6 +976,7 @@ class AssemblyPhase(PlanningPhase):
             tdd_verification, tdd_elapsed = await _run_phase_4b_tdd_test_design(
                 draft_plan=draft_plan,
                 task=task,
+                test_command=test_command,
                 testing_inventory=testing_inventory,
                 verification_targets=verification_targets,
                 security_concerns=security_concerns,
@@ -1140,12 +1146,17 @@ class AssemblyPhase(PlanningPhase):
                 test_command,
             )
 
-        if revision_count >= max_revisions and is_blocking:
-            logger.warning(
-                "Phase 4 revision cap reached (%d iterations) — "
-                "plan ships with %d blocking warning(s)",
+        if is_blocking:
+            detail = "\n".join(f"- {warning}" for warning in plan_warnings)
+            logger.error(
+                "Phase 4 revision cap reached (%d iterations) with "
+                "unresolved blocking warnings:\n%s",
                 max_revisions,
-                len([w for w in plan_warnings if "[BLOCKING]" in w]),
+                detail,
+            )
+            raise PlanValidationError(
+                "Planning could not produce an executable plan after "
+                f"{max_revisions} automatic revisions:\n{detail}"
             )
 
         plan.plan_validation_warnings = plan_warnings
@@ -1417,6 +1428,11 @@ class AssemblyPhaseNode(LLMNode):
                 next_node_id=None,
                 payload={"plan": plan},
             )
+        except PlanValidationError as exc:
+            return Fail(
+                error=str(exc),
+                payload={"plan_validation_error": True},
+            )
         except Exception as exc:
             return Fail(error=f"Assembly phase failed: {exc}")
 
@@ -1685,6 +1701,8 @@ class PlanningPipeline:
             state.current_plan = plan.model_dump()
             self.state_manager.save()
             return plan
+        except PlanValidationError:
+            raise
         except Exception as exc:
             logger.exception("Planning pipeline failed — returning fallback plan")
             plan = _build_fallback_execution_plan(
@@ -1860,6 +1878,8 @@ async def create_plan(
     result = await engine.run(graph, state_manager=state_manager, state=state)
 
     if isinstance(result, Fail):
+        if result.payload.get("plan_validation_error"):
+            raise PlanValidationError(result.error)
         logger.exception("Planning subgraph failed — returning fallback plan")
         plan = _build_fallback_execution_plan(
             task=task,
@@ -2533,22 +2553,30 @@ def _check_tdd_test_contract_cover_affected_files(
     if not code_paths:
         return [], False
 
-    authored_test_files = [
-        step.file_path
-        for step in plan.tdd_test_steps
-        if step.file_path and is_test_file_path(step.file_path)
-    ]
     warnings: list[str] = []
     for code_path in sorted(code_paths):
-        tdd_tested = any(
-            _path_is_covered_in_step(code_path, step) for step in plan.tdd_test_steps
-        )
+        matching_test_steps = [
+            step
+            for step in plan.tdd_test_steps
+            if step.file_path
+            and is_test_file_path(step.file_path)
+            and _path_is_covered_in_step(code_path, step)
+        ]
+        matching_test_files = [
+            step.file_path
+            for step in matching_test_steps
+            if any(
+                _is_executable_tdd_test_check(check)
+                and step.file_path in check.command
+                for check in step.success_checks
+            )
+        ]
+        tdd_tested = bool(matching_test_files)
         targeted_check = any(
             _path_is_covered_in_step(code_path, step)
             and any(
-                check.tool == "run_tests"
-                and bool(check.command.strip())
-                and any(test_file in check.command for test_file in authored_test_files)
+                _is_executable_tdd_test_check(check)
+                and any(test_file in check.command for test_file in matching_test_files)
                 for check in step.success_checks
             )
             for step in plan.steps
@@ -2912,20 +2940,76 @@ def _render_tdd_test_plan_for_phase4(verification: VerificationPlan) -> str:
             lines.append(f"  instruction: {step.instruction}")
         if step.reason:
             lines.append(f"  reason: {step.reason}")
+        for check in step.success_checks:
+            if check.tool == "run_tests" and check.command:
+                lines.append(f"  test command: {check.command}")
     return "\n".join(lines) + "\n\n"
+
+
+def _is_executable_tdd_test_check(check: StepSuccessCheck) -> bool:
+    """Return whether a success check executes tests rather than collecting them."""
+    command = check.command.strip()
+    return (
+        check.tool == "run_tests"
+        and bool(command)
+        and "--collect-only" not in command
+        and "--collectonly" not in command
+    )
+
+
+def _matching_tdd_checks_for_step(
+    implementation_step: PlanStep,
+    tdd_test_steps: list[PlanStep],
+) -> list[StepSuccessCheck]:
+    """Return executable authored-test checks covering an implementation step."""
+    code_paths = [
+        target.path
+        for target in implementation_step.may_change
+        if _has_executable_extension(target.path) and not is_test_file_path(target.path)
+    ]
+    checks: list[StepSuccessCheck] = []
+    seen_commands: set[str] = set()
+    for test_step in tdd_test_steps:
+        if not test_step.file_path or not is_test_file_path(test_step.file_path):
+            continue
+        if not any(_path_is_covered_in_step(path, test_step) for path in code_paths):
+            continue
+        for check in test_step.success_checks:
+            if not _is_executable_tdd_test_check(check):
+                continue
+            if test_step.file_path not in check.command:
+                continue
+            command = check.command.strip()
+            if command in seen_commands:
+                continue
+            seen_commands.add(command)
+            checks.append(check)
+    return checks
 
 
 def _attach_tdd_contract(
     plan: ExecutionPlan,
     tdd_test_steps: list[PlanStep],
 ) -> None:
-    """Attach TDD test steps to a plan and normalize numbering."""
+    """Attach TDD steps, propagate matching checks, and normalize numbering."""
     normalized_test_steps = list(tdd_test_steps)
     for i, step in enumerate(normalized_test_steps, 1):
         step.step_number = i
     offset = len(normalized_test_steps)
     for i, step in enumerate(plan.steps, offset + 1):
         step.step_number = i
+        existing_commands = {
+            check.command.strip()
+            for check in step.success_checks
+            if _is_executable_tdd_test_check(check)
+        }
+        for check in _matching_tdd_checks_for_step(step, normalized_test_steps):
+            if check.command.strip() in existing_commands:
+                continue
+            step.success_checks.append(check.model_copy(deep=True))
+            existing_commands.add(check.command.strip())
+        if existing_commands and "run_tests" not in step.allowed_tools:
+            step.allowed_tools.append("run_tests")
     plan.tdd_mode = bool(normalized_test_steps)
     plan.tdd_test_steps = normalized_test_steps
     _sync_affected_files_from_steps(plan)
@@ -3062,6 +3146,7 @@ async def _run_phase_4b_tdd_test_design(
     *,
     draft_plan: ExecutionPlan,
     task: str,
+    test_command: str,
     testing_inventory: str,
     verification_targets: str,
     security_concerns: str,
@@ -3098,6 +3183,7 @@ async def _run_phase_4b_tdd_test_design(
                 "content": registry.format_text(
                     "planning.verification_user_tdd",
                     task=task,
+                    test_command=test_command or "(none configured yet)",
                     impl_plan_md=plan_to_markdown(draft_plan),
                     testing_inventory=testing_inventory,
                     verification_targets=verification_targets,
