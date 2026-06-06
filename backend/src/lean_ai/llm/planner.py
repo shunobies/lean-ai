@@ -359,8 +359,17 @@ class ScopePhase(PlanningPhase):
                     raise
             if phase1_exc is not None:
                 raise phase1_exc
-            if not scope_prose:
-                raise RuntimeError("Phase 1 produced no scope prose")
+            if not scope_prose or not scope_prose.strip():
+                logger.warning(
+                    "Phase 1 produced no scope prose; continuing with the "
+                    "authoritative task and context"
+                )
+                scope_prose = (
+                    "Phase 1 produced no additional verified findings. "
+                    "Synthesize the scope from the authoritative task and "
+                    "project context, and preserve any unverified details as "
+                    "explicit assumptions."
+                )
             if on_content:
                 await _send_content_done(ws, scope_prose)
 

@@ -235,6 +235,37 @@ class TestScopePhaseNode:
         assert "Scope phase failed" in result.error
 
     @pytest.mark.asyncio
+    async def test_scope_phase_node_recovers_from_empty_scope_prose(self) -> None:
+        """Phase 1a still receives a useful handoff when the tool loop is empty."""
+        client = MockLLMClient()
+        state = _make_state()
+
+        with (
+            patch.object(client, "chat_with_tools", new_callable=AsyncMock) as mock_tools,
+            patch("lean_ai.llm.planner._synthesize_scope", new_callable=AsyncMock) as mock_syn,
+            patch("lean_ai.llm.planner._send_stage", new_callable=AsyncMock),
+            patch("lean_ai.llm.planner._send_stage_done", new_callable=AsyncMock),
+            patch("lean_ai.llm.planner._save_debug_phase", new_callable=MagicMock),
+            patch("lean_ai.training.span_context.trace_span") as mock_span,
+        ):
+            mock_tools.return_value = ([], "")
+            scope_doc = _make_scope_document()
+            mock_syn.return_value = (scope_doc, scope_doc.to_markdown(), True)
+
+            mock_cm = AsyncMock()
+            mock_cm.__aenter__ = AsyncMock(return_value=None)
+            mock_cm.__aexit__ = AsyncMock(return_value=False)
+            mock_span.return_value = mock_cm
+
+            node = ScopePhaseNode(client)
+            result = await node.execute(state)
+
+        assert isinstance(result, Continue)
+        exploration_prose = mock_syn.await_args.kwargs["exploration_prose"]
+        assert "no additional verified findings" in exploration_prose
+        assert state.session_metadata["scope_obj"] is scope_doc
+
+    @pytest.mark.asyncio
     async def test_scope_phase_node_stores_scope_in_state(self) -> None:
         """ScopePhaseNode stores scope_obj and scope markdown in session_metadata."""
         client = MockLLMClient()
