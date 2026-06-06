@@ -58,6 +58,7 @@ from lean_ai.llm.tool_definitions import (
     build_design_tools,
     build_planning_tools,
 )
+from lean_ai.tools.test_file_utils import is_test_file_path
 from lean_ai.training.span_context import trace_span
 from lean_ai.workflow.graph import (
     Continue,
@@ -2515,13 +2516,7 @@ def _check_tdd_test_contract_cover_affected_files(
     plan: ExecutionPlan,
     file_summary: FileSummary | None,
 ) -> tuple[list[str], bool]:
-    """Block when TDD plans omit both authored tests and executable checks.
-
-    In TDD mode, affected executable files need at least one of:
-    1. A Phase 4b-authored test step in ``tdd_test_steps`` that references
-       the file or its primary symbol, or
-    2. An implementation-step success check that references the file.
-    """
+    """Require authored tests plus targeted run_tests checks for TDD code."""
     if not plan.tdd_mode:
         return [], False
 
@@ -2529,18 +2524,30 @@ def _check_tdd_test_contract_cover_affected_files(
     if not code_paths:
         return [], False
 
+    authored_test_files = [
+        step.file_path
+        for step in plan.tdd_test_steps
+        if step.file_path and is_test_file_path(step.file_path)
+    ]
     warnings: list[str] = []
     for code_path in sorted(code_paths):
-        success_checked = any(
-            _path_is_covered_in_step(code_path, step) and step.success_checks
-            for step in plan.steps
-        )
         tdd_tested = any(
             _path_is_covered_in_step(code_path, step) for step in plan.tdd_test_steps
         )
-        if not (success_checked or tdd_tested):
+        targeted_check = any(
+            _path_is_covered_in_step(code_path, step)
+            and any(
+                check.tool == "run_tests"
+                and bool(check.command.strip())
+                and any(test_file in check.command for test_file in authored_test_files)
+                for check in step.success_checks
+            )
+            for step in plan.steps
+        )
+        if not tdd_tested or not targeted_check:
             warnings.append(
-                f"TDD contract missing authored test or success-check coverage: {code_path}"
+                "TDD contract requires an authored test and an implementation "
+                f"run_tests check naming that test for: {code_path}"
             )
     return warnings, bool(warnings)
 

@@ -237,9 +237,9 @@ After the LLM returns, three deterministic checks run and append non-blocking wa
 |---|---|
 | Phase 5 steps appended to `plan.steps` | Phase 5 steps go into `plan.tdd_test_steps`; implementation steps are renumbered to run afterwards |
 | Final step is `run_tests` (safety-net injects one if the LLM omits it) | No `run_tests` step (filter is defensive) |
-| Executed sequentially after implementation | Phase A: expert writes tests → Phase B: primary reviews, can dispute via `request_test_change` → Phase C: primary implements with tests LOCKED |
+| Executed sequentially after implementation | Clean baseline → expert writes tests → targeted commands establish red → primary implements with tests locked → targeted commands turn green |
 
-In TDD Phase C, the tool executor blocks `edit_file` on any test file (via `is_test_file_path`). Disputes are available only in Phase B so behavior is predictable during implementation. The post-validation fix loop also enforces the test-file guard and provides `request_test_change` as a safety net.
+During TDD implementation, the tool executor blocks `edit_file` on any test file (via `is_test_file_path`). Missing test commands, a dirty baseline, unexpectedly passing authored tests, infrastructure failures, and tests that remain red all halt execution.
 
 ### Regression guard
 
@@ -332,7 +332,7 @@ The user sees a final "Task complete" message, a list of modified files (clickab
 | Phase 3 | `FileSummary.key_snippets` is authoritative, memory injection (curated only), anti-fabrication, core-functionality detection | `planning.design_*` |
 | Phase 4 | Four set-membership validators, single auto-revision for blocking missing_files, `testability_requirement` policy block, warning surfacing to approval UI | `planning.assembly_*` + `_run_plan_validations` |
 | Approval | Reject-with-feedback × 5 rounds, cancel any time, dispatcher-routed mid-flight messages | `_wait_for_approval` + `WSMessageDispatcher` |
-| Phase 5 | Strict-test-contract policy (programmatic-only, E2E hooks, game/UI, regression, core-functionality, skip-with-TODO), three validators, `run_tests` safety-net injection, TDD two-phase separation | `planning.verification_*` + `_run_phase5_verification` |
+| Phase 5 | Strict-test-contract policy (programmatic-only, E2E hooks, game/UI, regression, core-functionality, skip-with-TODO), three validators, `run_tests` safety-net injection, deterministic TDD contracts | `planning.verification_*` + `_run_phase5_verification` |
 | Execution | Step prompt isolation, naming/name-registry tables, tool-executor guards (whitelist / TDD / regression / destructive / path-traversal / shell safety), `chat_with_tools` control loop | `executor.py` + `tool_executor.py` + `llm/facade.py` |
 | Post-execution | Deterministic format + lint-fix + lint + test passes, file-scoped fix loop (2 × 30 turns), expert escalation on final retry, REGRESSION-AWARE banner | `validation.py` |
 | Cross-session | Curated memory retrieval (only `user_confirmed` / `high_confidence_auto`), training archive with scrubber, regression_failure flag on validation attempts | `memory/` + `training/` |
@@ -361,7 +361,7 @@ These are field-observed problems and the specific guardrail that addresses each
 
 **The validator warnings are ignored.** `plan.plan_validation_warnings` flows through the `approval_required` WebSocket message into the approval UI, where warnings render as a distinct list alongside the plan. The user can see them before clicking approve. *A deliberate design choice: warnings never BLOCK a plan — they inform it. Blocking gates happen only at hard failures (blocking missing_file triggers auto-revision; `_revise_plan` rounds cap at 5).*
 
-**TDD tests pass without exercising the implementation.** Not yet fully mitigated — the runtime "TDD tests must fail first" check is listed in the plan's out-of-scope section. Today, the primary model's dispute mechanism in Phase B is the safety valve: when a test looks wrong, the primary calls `request_test_change` and the expert either rewrites the test or explains why it is correct. *Observed when the expert wrote a test using a fixture that the primary's implementation could trivially satisfy without exercising the contract.*
+**TDD tests pass without exercising the implementation.** The executor now requires a clean pre-change baseline and then requires every targeted authored-test command to exit nonzero before implementation. An authored command that is already green blocks the workflow instead of accepting a non-discriminating test.
 
 ---
 
@@ -381,7 +381,7 @@ The pipeline is a harness, not a substitute for a capable model. The guardrails 
 
 ## 16. Known Limitations (and Where They're Tracked)
 
-- **TDD "tests must fail first" enforcement**: deferred — `workflow/tdd.py` does not yet run the expert's tests before the primary implements. Tracked in the strengthening plan's out-of-scope section.
+- **TDD red classification is command-level**: the workflow is intentionally test-runner agnostic and uses exit codes rather than parsing framework-specific test cases.
 - **Rename of a regression-guarded entity** requires a manual two-step (create new regression test → `run_command rm` for the old, which goes through destructive-command approval). A dedicated `/rename-regression` command is out of scope for now.
 - **The extension's post-validation settings UI** still exposes the global env vars directly. The per-project commands.json path is now authoritative at the backend, but the UI does not yet reflect the priority inversion — a future extension change.
 - **Parallel Phase 2 path** (when `LEAN_AI_NUM_PARALLEL>=2`) returns free-form text without structured FileSummary synthesis; validators skip cleanly when the structured object is `None`. Documented in `incomplete.md`.

@@ -3,12 +3,12 @@
 from pathlib import Path
 
 from lean_ai.llm.base import ToolCall
-from lean_ai.llm.plan_schema import PlanStep
+from lean_ai.llm.plan_schema import PlanStep, StepSuccessCheck
 from lean_ai.llm.prompts import STEP_EXECUTION_SYSTEM_PROMPT
 from lean_ai.workflow.executor import (
     _append_incomplete_entry,
     _clear_incomplete_file,
-    _collect_tdd_review_files,
+    _collect_tdd_test_files,
     _diff_repo_state,
     _step_completion_error,
     _step_scope_error,
@@ -147,7 +147,7 @@ def test_step_completion_accepts_same_path_fallback_mutation():
     assert error is None
 
 
-def test_collect_tdd_review_files_includes_edited_test_files():
+def test_collect_tdd_test_files_includes_edited_test_files():
     steps = [
         _step("create_file", file_path="tests/test_feature.py"),
         _step("edit_file", file_path="tests/conftest.py"),
@@ -155,9 +155,42 @@ def test_collect_tdd_review_files_includes_edited_test_files():
         _step("edit_file", file_path="tests/conftest.py"),
     ]
 
-    review_files = _collect_tdd_review_files(steps)
+    review_files = _collect_tdd_test_files(steps)
 
     assert review_files == ["tests/test_feature.py", "tests/conftest.py"]
+
+
+def test_step_completion_rejects_failed_attempted_success_check():
+    step = PlanStep(
+        step_number=1,
+        job="Update src/app.py.",
+        may_change=[{"path": "src/app.py", "change": "Change behavior."}],
+        allowed_tools=["edit_file", "run_tests"],
+        output_shape="Behavior is updated.",
+        success_checks=[
+            StepSuccessCheck(
+                description="Targeted tests pass.",
+                tool="run_tests",
+                command="test-runner tests/app.test",
+            )
+        ],
+        blocked_protocol="Report blocker.",
+    )
+    write = ToolCall(tool_name="edit_file", parameters={"path": "src/app.py"})
+    failed_test = ToolCall(
+        tool_name="run_tests",
+        parameters={"command": "test-runner tests/app.test"},
+    )
+
+    error = _step_completion_error(
+        step,
+        task_complete_seen=True,
+        successful_calls=[write],
+        attempted_calls=[write, failed_test],
+    )
+
+    assert error is not None
+    assert "did not run required success check" in error
 
 
 def test_diff_repo_state_reports_added_changed_and_deleted_paths():

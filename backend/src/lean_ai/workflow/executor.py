@@ -1,7 +1,7 @@
 """Plan step execution engine: sequential and parallel step execution.
 
-Handles both normal execution and TDD three-phase execution
-(expert writes tests → primary reviews → primary implements).
+Handles both normal execution and deterministic TDD execution
+(baseline → expert writes tests → red gate → primary implements → green).
 """
 
 import asyncio
@@ -9,6 +9,7 @@ import logging
 import os
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,7 +17,6 @@ from lean_ai.config import settings
 from lean_ai.context.metadata import invalidate_metadata_cache_for_paths
 from lean_ai.indexer.tree import list_repo_tree
 from lean_ai.llm.base import ToolCall
-from lean_ai.llm.role_tuning import ensure_expert_role_tuning, ensure_primary_role_tuning
 from lean_ai.llm.plan_schema import (
     ExecutionPlan,
     PlanStep,
@@ -24,6 +24,7 @@ from lean_ai.llm.plan_schema import (
     format_naming_conventions_for_prompt,
     plan_to_markdown,
 )
+from lean_ai.llm.role_tuning import ensure_expert_role_tuning, ensure_primary_role_tuning
 from lean_ai.llm.tool_definitions import (
     build_implementation_tools,
     build_tdd_implementation_tools,
@@ -44,6 +45,7 @@ from lean_ai.workflow.prompts import (
 from lean_ai.workflow.state import StateManager
 from lean_ai.workflow.tool_executor import make_tool_executor
 from lean_ai.workflow.validation import (
+    _effective_post_commands,
     _run_post_validation,
     _run_validation_fix_loop,
 )
@@ -87,6 +89,26 @@ _READ_ONLY_TOOLS = frozenset(
 _COMPLETION_TOOL = "task_complete"
 _INCOMPLETE_REL_PATH = ".lean_ai/incomplete.md"
 _TDD_MAX_RETRIES = 2
+_INFRASTRUCTURE_EXIT_CODES = frozenset({-1, 126, 127})
+
+
+@dataclass(frozen=True)
+class _TestCommandOutcome:
+    """Language-agnostic result of one configured test command."""
+
+    command: str
+    success: bool
+    output: str
+    error: str | None
+    exit_code: int | None
+
+    @property
+    def infrastructure_failure(self) -> bool:
+        return self.exit_code is None or self.exit_code in _INFRASTRUCTURE_EXIT_CODES
+
+    def summary(self) -> str:
+        detail = self.output or self.error or "No output"
+        return f"$ {self.command}\nexit={self.exit_code}\n{detail}"
 
 
 def read_journal(repo_root: str, session_id: str) -> str:
@@ -120,15 +142,72 @@ async def _run_step_tests(
 
     Returns ``True`` only when every command exits successfully.
     """
+    outcomes = await _run_test_commands(repo_root, test_commands)
+    return all(outcome.success for outcome in outcomes), "\n\n".join(
+        outcome.summary() for outcome in outcomes
+    )
+
+
+async def _run_test_commands(
+    repo_root: str,
+    test_commands: list[str],
+) -> list[_TestCommandOutcome]:
+    """Run test commands without assuming a language or test framework."""
     from lean_ai.tools.shell import run_tests as shell_run_tests
 
-    outputs: list[str] = []
-    for cmd in test_commands:
-        result = await shell_run_tests(cmd, repo_root)
-        outputs.append(str(result))
-        if not result.success:
-            return False, "\n".join(outputs)
-    return True, "\n".join(outputs)
+    outcomes: list[_TestCommandOutcome] = []
+    for command in test_commands:
+        result = await shell_run_tests(command, repo_root)
+        outcomes.append(
+            _TestCommandOutcome(
+                command=command,
+                success=result.success,
+                output=result.output,
+                error=result.error,
+                exit_code=result.exit_code,
+            )
+        )
+    return outcomes
+
+
+def _dedupe_commands(commands: list[str]) -> list[str]:
+    return list(dict.fromkeys(command.strip() for command in commands if command.strip()))
+
+
+def _step_changes_executable_code(step: PlanStep) -> bool:
+    """Return whether a step mutates a source file that needs behavioral tests."""
+    from lean_ai.languages.registry import get_registry
+    from lean_ai.tools.test_file_utils import is_test_file_path
+
+    source_extensions = get_registry().all_source_extensions()
+    paths = _step_may_change_paths(step)
+    return any(
+        Path(path).suffix.lower() in source_extensions and not is_test_file_path(path)
+        for path in paths
+    )
+
+
+def _collect_tdd_test_commands(plan: ExecutionPlan) -> tuple[list[str], list[int]]:
+    """Collect targeted commands and executable steps missing a test contract."""
+    commands: list[str] = []
+    missing_steps: list[int] = []
+    test_files = _collect_tdd_test_files(plan.tdd_test_steps)
+
+    for step in plan.steps:
+        if not _step_changes_executable_code(step):
+            continue
+        step_commands = _collect_step_test_commands(step)
+        tied_commands = [
+            command
+            for command in step_commands
+            if any(_path_mentioned_in(test_file, command) for test_file in test_files)
+        ]
+        if not tied_commands:
+            missing_steps.append(step.step_number)
+            continue
+        commands.extend(tied_commands)
+
+    return _dedupe_commands(commands), missing_steps
 
 
 def _normalize_path(p: str) -> str:
@@ -268,7 +347,7 @@ def _step_primary_action_done(
                     not check.command
                     or tc.parameters.get("command", "").strip() == check.command.strip()
                 )
-                for tc in attempted_calls
+                for tc in successful_calls
             )
             for check in command_checks
         )
@@ -304,7 +383,7 @@ def _step_completion_error(
                 not check.command
                 or tc.parameters.get("command", "").strip() == check.command.strip()
             )
-            for tc in attempted_calls
+            for tc in successful_calls
         )
         if not matched:
             command = f" `{check.command}`" if check.command else ""
@@ -373,11 +452,11 @@ def _diff_repo_state(
     return sorted(changed)
 
 
-def _collect_tdd_review_files(steps: list[PlanStep]) -> list[str]:
-    """Return all changed test-file paths that should enter TDD review."""
+def _collect_tdd_test_files(steps: list[PlanStep]) -> list[str]:
+    """Return the test-file paths authored by TDD test steps."""
     from lean_ai.tools.test_file_utils import is_test_file_path
 
-    review_files: list[str] = []
+    test_files: list[str] = []
     seen: set[str] = set()
     for step in steps:
         if not step.file_path:
@@ -387,8 +466,8 @@ def _collect_tdd_review_files(steps: list[PlanStep]) -> list[str]:
         if step.file_path in seen:
             continue
         seen.add(step.file_path)
-        review_files.append(step.file_path)
-    return review_files
+        test_files.append(step.file_path)
+    return test_files
 
 
 def _build_step_groups(
@@ -931,7 +1010,7 @@ async def execute_plan(
         )
         return True
 
-    # ── TDD three-phase execution ─────────────────────────────────
+    # ── Deterministic TDD execution ───────────────────────────────
     halted_early = False
 
     if tdd_active:
@@ -1144,6 +1223,14 @@ async def execute_plan(
             f"\n- red-green retries: {tdd_metrics['red_green_retries']}"
             f"\n- implementation steps missing test checks: "
             f"{tdd_metrics['steps_missing_test_checks']}"
+            f"\n- baseline commands run: {tdd_metrics.get('baseline_commands_run', 0)}"
+            f"\n- red commands run: {tdd_metrics.get('red_commands_run', 0)}"
+            f"\n- expected red failures: "
+            f"{tdd_metrics.get('red_failures_observed', 0)}"
+            f"\n- infrastructure failures: "
+            f"{tdd_metrics.get('infrastructure_failures', 0)}"
+            f"\n- incomplete implementation steps: "
+            f"{tdd_metrics.get('incomplete_steps', 0)}"
         )
 
     journal_entries = (
@@ -1257,7 +1344,7 @@ async def _run_tdd_execution(
     step_artifacts: dict[str, str],
     run_step: Callable,
 ) -> tuple[bool, dict[str, int | bool | str]]:
-    """TDD two-phase execution: expert writes tests → primary implements."""
+    """Run language-agnostic baseline, red, implementation, and green gates."""
     test_writer_client = expert_llm_client or llm_client
     test_writer_role = "expert" if expert_llm_client is not None else "primary_fallback"
     metrics: dict[str, int | bool | str] = {
@@ -1266,8 +1353,88 @@ async def _run_tdd_execution(
         "implementation_steps_with_test_checks": 0,
         "steps_missing_test_checks": 0,
         "red_green_retries": 0,
+        "baseline_commands_run": 0,
+        "red_commands_run": 0,
+        "red_failures_observed": 0,
+        "infrastructure_failures": 0,
+        "incomplete_steps": 0,
         "test_writer_role": test_writer_role,
     }
+
+    targeted_test_commands, missing_test_steps = _collect_tdd_test_commands(plan)
+    metrics["implementation_steps_with_test_checks"] = sum(
+        1
+        for step in plan.steps
+        if _step_changes_executable_code(step)
+        and step.step_number not in missing_test_steps
+    )
+    metrics["steps_missing_test_checks"] = len(missing_test_steps)
+    if missing_test_steps:
+        detail = (
+            "TDD requires each executable implementation step to run an authored "
+            f"test file; missing exact run_tests checks for steps: {missing_test_steps}."
+        )
+        _append_incomplete_entry(repo_root, step_label="[TDD Contract]", detail=detail)
+        await ws_send(
+            ws,
+            "stage_status",
+            {
+                "stage": "tdd_baseline",
+                "status": "done",
+                "summary": detail,
+            },
+        )
+        return False, metrics
+
+    baseline_command = _effective_post_commands(repo_root).get("test", "").strip()
+    if not baseline_command:
+        detail = (
+            "TDD requires a configured full-suite test command in "
+            ".lean_ai/commands.json or LEAN_AI_POST_TEST_COMMAND."
+        )
+        _append_incomplete_entry(repo_root, step_label="[TDD Baseline]", detail=detail)
+        await ws_send(
+            ws,
+            "stage_status",
+            {"stage": "tdd_baseline", "status": "done", "summary": detail},
+        )
+        return False, metrics
+
+    await ws_send(
+        ws,
+        "stage_status",
+        {
+            "stage": "tdd_baseline",
+            "status": "running",
+            "summary": "TDD: Running the configured pre-change test baseline...",
+        },
+    )
+    baseline_outcomes = await _run_test_commands(repo_root, [baseline_command])
+    metrics["baseline_commands_run"] = len(baseline_outcomes)
+    baseline = baseline_outcomes[0]
+    if baseline.infrastructure_failure or not baseline.success:
+        if baseline.infrastructure_failure:
+            metrics["infrastructure_failures"] += 1
+            reason = "test infrastructure failed"
+        else:
+            reason = "the pre-change test baseline is already failing"
+        detail = f"TDD halted because {reason}:\n{baseline.summary()[:2000]}"
+        _append_incomplete_entry(repo_root, step_label="[TDD Baseline]", detail=detail)
+        await ws_send(
+            ws,
+            "stage_status",
+            {"stage": "tdd_baseline", "status": "done", "summary": detail},
+        )
+        return False, metrics
+    await ws_send(
+        ws,
+        "stage_status",
+        {
+            "stage": "tdd_baseline",
+            "status": "done",
+            "summary": "TDD: Pre-change test baseline is clean.",
+        },
+    )
 
     # ── Phase A: Expert writes tests ──────────────────────────
     await ws_send(
@@ -1352,7 +1519,58 @@ async def _run_tdd_execution(
         },
     )
 
-    # ── Phase C: Primary implements code ──────────────────────
+    # ── Red gate: authored tests must expose missing behavior ──
+    await ws_send(
+        ws,
+        "stage_status",
+        {
+            "stage": "tdd_red_gate",
+            "status": "running",
+            "summary": "TDD: Confirming authored tests fail before implementation...",
+        },
+    )
+    red_outcomes = await _run_test_commands(repo_root, targeted_test_commands)
+    metrics["red_commands_run"] = len(red_outcomes)
+    infrastructure_failures = [
+        outcome for outcome in red_outcomes if outcome.infrastructure_failure
+    ]
+    unexpectedly_green = [outcome for outcome in red_outcomes if outcome.success]
+    metrics["infrastructure_failures"] += len(infrastructure_failures)
+    metrics["red_failures_observed"] = sum(
+        not outcome.success and not outcome.infrastructure_failure
+        for outcome in red_outcomes
+    )
+    if infrastructure_failures or unexpectedly_green:
+        if infrastructure_failures:
+            reason = "one or more authored-test commands had infrastructure failures"
+            failed = infrastructure_failures
+        else:
+            reason = "one or more authored-test commands passed before implementation"
+            failed = unexpectedly_green
+        detail = f"TDD red gate failed because {reason}:\n" + "\n\n".join(
+            outcome.summary()[:1500] for outcome in failed
+        )
+        _append_incomplete_entry(repo_root, step_label="[TDD Red Gate]", detail=detail)
+        await ws_send(
+            ws,
+            "stage_status",
+            {"stage": "tdd_red_gate", "status": "done", "summary": detail},
+        )
+        return False, metrics
+    await ws_send(
+        ws,
+        "stage_status",
+        {
+            "stage": "tdd_red_gate",
+            "status": "done",
+            "summary": (
+                "TDD: Red established for "
+                f"{metrics['red_failures_observed']} targeted test command(s)."
+            ),
+        },
+    )
+
+    # ── Implementation and green gate ─────────────────────────
     await ws_send(
         ws,
         "stage_status",
@@ -1398,9 +1616,7 @@ async def _run_tdd_execution(
 
         test_commands = _collect_step_test_commands(step)
         if test_commands:
-            metrics["implementation_steps_with_test_checks"] += 1
-        else:
-            metrics["steps_missing_test_checks"] += 1
+            test_commands = _dedupe_commands(test_commands)
 
         step_ok = await run_step(
             step,
@@ -1556,7 +1772,8 @@ async def _run_tdd_execution(
             ),
         },
     )
-    return True, metrics
+    metrics["incomplete_steps"] = len(incomplete_results)
+    return not incomplete_results, metrics
 
 
 async def _update_project_context(

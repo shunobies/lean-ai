@@ -1311,7 +1311,7 @@ User Task
     ↓
 4. _execute_plan()
    ├─ Per-step execution (Section 9)
-   ├─ TDD three-phase execution (if enabled)
+   ├─ Deterministic TDD execution (if enabled)
    └─ Post-validation (Section 10)
     ↓
 5. Complete
@@ -1420,44 +1420,28 @@ For each step in the plan:
   - `edit_file`: "Read {file_path} first if context incomplete, then call edit_file"
   - `create_file`: "Call create_file to create {file_path} with the content"
 
-### 9.3 TDD Three-Phase Execution
+### 9.3 Deterministic TDD Execution
 
-When `settings.enable_tdd=True` and expert model is configured:
+When `settings.enable_tdd=True`:
 
-**Phase A — Expert Writes Tests:**
+**Baseline — Verify Existing State:**
+- Run the per-project configured full-suite test command.
+- Halt before writing tests when the command is missing, already failing, times out, or cannot launch.
+
+**Test Writing — Expert Writes Tests:**
 - Expert model executes `plan.tdd_test_steps` using IMPLEMENTATION_TOOLS
-- Full tool access (create_file, edit_file, etc.)
+- Tests may inspect existing public interfaces and repository test conventions.
 
-**Phase B — Primary Reviews Tests:**
-- Primary model reviews all test files
-- Uses `build_tdd_review_prompt()` with test file contents
-- Tools: `build_tdd_implementation_tools()` (standard + `request_test_change`)
-- Can dispute tests via `request_test_change(test_file, test_function, reason)`
-- Each dispute triggers `evaluate_test_dispute()`:
-  - Expert reads test, evaluates reason
-  - Returns "ACCEPTED: {fix explanation}" or "REJECTED: {why test is correct}"
-  - Capped at `tdd_max_disputes_per_step` per step
+**Red Gate — Verify Missing Behavior:**
+- Run the exact targeted `run_tests` commands attached to implementation steps.
+- Every command must exit nonzero after the clean baseline.
+- Exit codes `-1`, `126`, and `127` are infrastructure failures, not valid red results.
 
-**Phase C — Primary Implements Code:**
+**Implementation and Green Gate:**
 - Primary model executes `plan.steps` with test files write-protected
 - `tdd_protect_tests=True` blocks `create_file`/`edit_file` on test files
-- No disputes — must adapt to tests as written (disputes are only in Phase B)
-- Post-validation fix loop retains dispute capability as safety net
-
-### 9.4 TDD Dispute Evaluation
-
-```python
-async def evaluate_test_dispute(
-    *, test_file, test_function, reason, repo_root,
-    expert_client, ws, session_id, dispatcher,
-    plan_context, step_artifacts
-) -> str
-```
-
-- Creates expert session with `DISPUTE_EVALUATION_PROMPT`
-- 10-turn budget with IMPLEMENTATION_TOOLS
-- Artifact context: up to 5 files, 4000 chars each
-- Result: "DISPUTE ACCEPTED — {explanation}" or "DISPUTE REJECTED — {explanation}"
+- Each executable implementation step must name an authored test file in an exact `run_tests` success check.
+- Targeted tests run after each step and must turn green; unresolved failures make execution fail.
 
 ---
 
@@ -1573,7 +1557,6 @@ Other message types always go to `_approval_queue`: `approve`, `approve_tool`, `
 | `search_internet` | `query: str` | query | Web search via configured provider |
 | `fetch_url` | `url: str` | url | Fetch URL, strip HTML, paginate if large |
 | `task_complete` | `summary: str` | summary | Signal task completion |
-| `request_test_change` | `test_file: str`, `test_function: str`, `reason: str` | all | TDD: dispute a test (TDD mode only) |
 
 ### 12.2 Tool Subsets
 
@@ -1582,14 +1565,14 @@ Other message types always go to `_approval_queue`: `approve`, `approve_tool`, `
 | `IMPLEMENTATION_TOOLS` | All 13 standard tools | Plan execution, fix implementation |
 | `PLANNING_TOOLS` | read_file, list_directory, directory_tree, grep_files, task_complete | Planning Phase 2 |
 | `INVESTIGATION_TOOLS` | read_file, list_directory, directory_tree, grep_files, run_tests, run_lint, search_internet, fetch_url, update_scratchpad, task_complete | Fix mode investigation |
-| `build_tdd_implementation_tools()` | IMPLEMENTATION_TOOLS + request_test_change | TDD implementation phase |
+| `build_tdd_implementation_tools()` | IMPLEMENTATION_TOOLS | TDD implementation phase |
 
 ### 12.3 Tool Executor Factory
 
 ```python
 def make_tool_executor(
     repo_root, ws, session_id="", llm_client=None,
-    dispatcher=None, tdd_protect_tests=False, on_test_dispute=None
+    dispatcher=None, tdd_protect_tests=False
 ) -> Callable[[str, dict], Awaitable[str]]
 ```
 

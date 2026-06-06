@@ -172,11 +172,9 @@ def build_tdd_test_writing_prompt(
 ) -> str:
     """Build the system prompt for TDD Phase A — expert writes tests.
 
-    Phase A is invoked BEFORE any implementation code exists. The expert
-    model must design tests from the implementation plan (which is
-    embedded here so it has the full design context), use create_file to
-    write the test files, and not attempt to run tests (they would fail
-    — no implementation yet).
+    Phase A is invoked before implementation changes. The expert model
+    designs tests from the implementation plan and current public
+    interfaces, then the executor runs the configured red gate.
 
     Tools listed in the prompt match the actual tool list passed via the
     ``tools=`` parameter so the model does not hallucinate tool names.
@@ -190,10 +188,11 @@ def build_tdd_test_writing_prompt(
     )
     prompt += (
         "\n\nTDD MODE — TEST WRITING PHASE:\n"
-        "You are writing TESTS BEFORE the implementation exists. The "
-        "implementation files referenced by these tests have NOT been "
-        "created yet — that is intentional. Design tests from the "
-        "IMPLEMENTATION PLAN below, not from existing source files.\n\n"
+        "You are writing TESTS BEFORE implementation changes are made. "
+        "For an existing module, inspect its public interfaces and the "
+        "repository's test conventions before writing tests. For a new "
+        "module, derive its public contract from the IMPLEMENTATION PLAN "
+        "below.\n\n"
         "WHAT TDD MEANS IN THIS PHASE:\n"
         "You are writing an executable specification of intended "
         "behaviour — not testing existing code. Imagine the "
@@ -238,10 +237,7 @@ def build_tdd_test_writing_prompt(
         '        return tuple(int(p) for p in s.split("."))\n\n'
         "FAILURE MODES TO AVOID:\n"
         "1. Do NOT define or stub implementation code in the test "
-        "file. Tests import from the implementation module; the "
-        "import will fail with ImportError until the implementor "
-        "creates the module, and that is fine — the pipeline runs "
-        "tests AFTER implementation.\n"
+        "file. Tests import from the planned implementation module.\n"
         "2. Do NOT test anything the plan does not explicitly "
         'specify. If the plan does not say "result must be sorted," '
         "do not assert sortedness. Extra assertions over-constrain "
@@ -252,20 +248,22 @@ def build_tdd_test_writing_prompt(
         "4. Do NOT assert on exact log wording, call counts on "
         "internal helpers, or the order of steps inside a function "
         "unless the plan explicitly calls that out as a contract.\n"
-        "5. If you cannot tell what a test should assert from the "
-        "plan alone, the plan is ambiguous — write the "
-        "best-interpretation test and add a `# ASSUMPTION:` comment "
-        "on the assert line so the review phase can dispute it if "
-        "wrong.\n\n"
+        "5. If you cannot determine the public contract from the plan "
+        "and existing interfaces, report the ambiguity as a blocker. "
+        "Do not freeze a guessed contract in an ASSUMPTION comment.\n"
+        "6. Do NOT change test count, AST shape, sync/async form, mock "
+        "structure, or internal call counts merely to satisfy a structural "
+        "check. Those details matter only when the plan explicitly defines "
+        "them as public behavior.\n\n"
         "RULES FOR THIS PHASE:\n"
         "- Use create_file to write each new test file in full.\n"
-        "- Use read_file / grep_files / list_directory ONLY to look at "
-        "existing fixtures, conftest.py, or shared test utilities — "
-        "NOT to find implementation code (it does not exist yet).\n"
+        "- Use read_file / grep_files / list_directory to inspect existing "
+        "public interfaces, fixtures, shared test utilities, and nearby "
+        "tests. Do not copy private implementation logic into assertions.\n"
         "- Do NOT call run_tests, run_lint, format_code, or run_command "
-        "in this phase. Tests will fail because the implementation is "
-        "missing — that is the point of TDD. The pipeline will run the "
-        "tests after implementation completes.\n"
+        "in this phase. The executor runs the authored tests immediately "
+        "after creation and requires them to fail relative to a clean "
+        "pre-change baseline before implementation can begin.\n"
         "- Do NOT call edit_file unless extending an existing test file "
         "(e.g. adding cases to a shared conftest).\n"
         "- Each test must assert PUBLIC behaviour described in the plan: "
@@ -295,9 +293,7 @@ def build_tdd_step_system_prompt(
 
     Extends the standard step prompt with TDD implementation constraints:
     test files are read-only and the implementation must adapt to the
-    tests rather than the reverse. Disputes are available as a narrow
-    escape hatch (for tests that are logically impossible to satisfy or
-    that encode a wrong contract) — they route through the expert via
+    tests rather than the reverse.
     """
     prompt = build_step_system_prompt(
         context,
@@ -308,7 +304,7 @@ def build_tdd_step_system_prompt(
     )
     prompt += (
         "\n\nTDD MODE — IMPLEMENTATION PHASE:\n"
-        "- Tests have already been written and reviewed. Your default "
+        "- Tests have already been written and validated by the red gate. Your default "
         "job is to implement code that makes them pass — adapt to the "
         "tests, not the other way round.\n"
         "- Test files are LOCKED — edit_file / create_file targeting a "
@@ -316,111 +312,13 @@ def build_tdd_step_system_prompt(
         "editing a different file that changes what the test loads.\n"
         "- Read the relevant test file(s) first with read_file to "
         "understand the contract before writing implementation code.\n"
-        "\nTest Modification Policy (TDD):\n"
-        "- Default: DO NOT dispute. If a test is hard to satisfy, that "
-        "is usually a signal your implementation is wrong, not the "
-        "test.\n"
-        "- Legitimate dispute reasons (the only ones that should reach "
-        "  1. The test is logically impossible to satisfy with any "
-        "correct implementation (e.g. contradicts another test, "
-        "references a function that cannot exist, asserts behaviour "
-        "the language doesn't support).\n"
-        "  2. The test encodes an old contract that the current task "
-        "explicitly changes — you must cite the task description "
-        "section that requires the contract change.\n"
-        "  3. The test is over-constrained on an internal detail the "
-        "contract does not require (e.g. asserts exact log wording, "
-        "pins a private method signature). Propose a narrower "
-        "assertion.\n"
-        "test_function, reason). Your reason must be one short "
-        "paragraph with the specific technical justification — "
-        '"this test is wrong" will be rejected. The expert evaluates '
-        "and either edits the test or rejects the dispute with an "
-        "implementation hint.\n"
-        "- Regression tests are IMMUTABLE even via dispute. If a "
-        "regression test is genuinely broken, cancel the session and "
-        "open a new one with /fix.\n"
+        "- Every configured run_tests check must pass before the step is "
+        "complete. Do not substitute syntax, AST, grep, or inspection "
+        "checks for behavioral tests.\n"
+        "- If a locked test contradicts the approved plan or cannot be "
+        "satisfied through a correct implementation, report the exact "
+        "contract conflict as a blocker instead of modifying the test.\n"
     )
-    return prompt
-
-
-def build_tdd_review_prompt(
-    context: str,
-    test_files: list[str],
-    *,
-    repo_root: str | None = None,
-    prompt_scope: PromptScope | None = None,
-) -> str:
-    """Build the system prompt for the TDD test review phase.
-
-    The primary model reviews the expert's tests before starting
-    implementation and can dispute any that are flawed.
-    """
-    if repo_root:
-        registry.load(repo_root)
-    prompt = resolve_prompt_text("execution.step_system", scope=prompt_scope)
-
-    if context:
-        prompt += f"\n## Project Context\n\n{context}"
-
-    prompt += (
-        "\n\nTDD TEST REVIEW PHASE:\n"
-        "Review the test files created by the expert model. You are the "
-        "last gate before implementation begins — a flawed test here "
-        "forces the implementor into a corner they cannot code their "
-        "way out of, so catching defects now saves wasted implementation "
-        "effort later.\n\n"
-        "WHAT A CORRECT TDD TEST LOOKS LIKE:\n"
-        "- Imports the not-yet-existing implementation module (the "
-        "import will fail right now — that is expected; the pipeline "
-        "runs these tests AFTER implementation).\n"
-        "- Asserts ONLY on public behaviour the plan specifies: return "
-        "values, raised exceptions, or side effects on injected "
-        "dependencies.\n"
-        "- Uses a descriptive assert message so the implementor "
-        "immediately knows what contract was violated when the test "
-        "fails.\n"
-        "- Has a docstring explaining the behaviour being tested and "
-        "why it matters.\n"
-        "- Does NOT define or stub the implementation inline.\n"
-        "- Does NOT assert on private helpers, internal data "
-        "structures, step ordering inside a function, or exact log "
-        "wording (unless the plan explicitly calls that out).\n\n"
-        "- The test asserts on an implementation detail instead of a "
-        "contract — e.g. `assert obj._internal_cache == ...` or "
-        "`assert helper_spy.call_count == 3`.\n"
-        "- The import path does not match the plan's module "
-        "structure.\n"
-        "- The test file defines or stubs implementation code inline.\n"
-        "- The test's precondition is impossible given the plan — "
-        "e.g. asserts a function returns a list when the plan says it "
-        "returns a generator.\n"
-        "- The assertion contradicts the plan — e.g. plan says "
-        '"raises ValueError on empty input," test asserts `None` is '
-        "returned.\n"
-        "- The test is missing docstrings or assertion messages that "
-        "would tell the implementor what the contract is.\n\n"
-        "DO NOT DISPUTE MERELY BECAUSE:\n"
-        "- The test is hard to make pass — that is the point of TDD. "
-        "Hard ≠ defective.\n"
-        "- You would have written the test differently — stylistic "
-        "differences are not defects.\n"
-        "- You prefer a different assertion, name, or fixture style.\n"
-        "- The test seems overly strict — if it matches the plan's "
-        "contract, it is correct.\n\n"
-        "ADDITIONAL TOOL AVAILABLE IN THIS PHASE:\n"
-        "    test_file:     path to the test file containing the flawed test\n"
-        "    test_function: name of the specific test function being disputed\n"
-        "    reason:        specific, programmatic reason — the failing assertion, "
-        "the contract it violates, and what the test should assert instead, "
-        "all in this single string.\n\n"
-        "Read each test file with read_file before deciding. If all "
-        "tests look correct, call task_complete.\n\n"
-        "Test files to review:\n"
-    )
-    for tf in test_files:
-        prompt += f"  - {tf}\n"
-
     return prompt
 
 

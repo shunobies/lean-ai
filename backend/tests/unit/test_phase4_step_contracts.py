@@ -13,8 +13,8 @@ from lean_ai.llm.planner import (
     _check_core_functionality_success_checked,
     _check_full_suite_command_available,
     _check_success_checks_cover_affected_files,
-    _check_tdd_test_contract_cover_affected_files,
     _check_tdd_required_for_executable_files,
+    _check_tdd_test_contract_cover_affected_files,
 )
 from lean_ai.workflow.executor import _step_scope_error
 
@@ -164,6 +164,13 @@ def test_tdd_contract_accepts_authored_test_steps_for_affected_files():
                 ],
                 allowed_tools=["read_file", "edit_file", "task_complete"],
                 output_shape="src/auth.py rejects missing state.",
+                success_checks=[
+                    StepSuccessCheck(
+                        description="Auth tests pass.",
+                        tool="run_tests",
+                        command="pytest tests/test_auth.py -q",
+                    )
+                ],
                 blocked_protocol="Report blocker.",
             )
         ],
@@ -186,6 +193,49 @@ def test_tdd_contract_accepts_authored_test_steps_for_affected_files():
     )
 
     assert _check_tdd_test_contract_cover_affected_files(plan, summary) == ([], False)
+
+
+def test_tdd_contract_rejects_structural_check_without_targeted_tests():
+    plan = ExecutionPlan(
+        scope="Update auth.",
+        tdd_mode=True,
+        steps=[
+            PlanStep(
+                step_number=2,
+                job="Implement auth callback behavior.",
+                may_change=[StepChangeTarget(path="src/auth.py", change="Edit callback.")],
+                allowed_tools=["edit_file", "run_command"],
+                output_shape="src/auth.py rejects missing state.",
+                success_checks=[
+                    StepSuccessCheck(
+                        description="Inspect the auth AST.",
+                        tool="run_command",
+                        command="python scripts/check_ast.py src/auth.py",
+                    )
+                ],
+                blocked_protocol="Report blocker.",
+            )
+        ],
+        tdd_test_steps=[
+            PlanStep(
+                step_number=1,
+                tool="create_file",
+                file_path="tests/test_auth.py",
+                instruction="Add tests covering src/auth.py callback behavior.",
+                reason="Pin behavior.",
+            )
+        ],
+        affected_files=["src/auth.py", "tests/test_auth.py"],
+        test_strategy="Run pytest.",
+    )
+    summary = FileSummary(
+        files_to_modify=[FileObservation(file_path="src/auth.py", role="modify", reason="behavior")]
+    )
+
+    warnings, blocking = _check_tdd_test_contract_cover_affected_files(plan, summary)
+
+    assert blocking is True
+    assert "run_tests check naming that test" in warnings[0]
 
 
 def test_strict_contract_blocks_executable_plan_without_tdd_steps(monkeypatch):

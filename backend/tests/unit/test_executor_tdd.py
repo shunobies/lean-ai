@@ -7,10 +7,15 @@ from contextlib import asynccontextmanager
 import pytest
 
 from lean_ai.config import settings
-from lean_ai.llm.plan_schema import ExecutionPlan, PlanStep
+from lean_ai.llm.plan_schema import ExecutionPlan, PlanStep, StepSuccessCheck
+from lean_ai.tools.executor import ToolResult
 from lean_ai.workflow import executor as workflow_executor
 from lean_ai.workflow import tool_executor as workflow_tool_executor
 from lean_ai.workflow.executor import _run_tdd_execution, execute_plan
+from lean_ai.workflow.prompts import (
+    build_tdd_step_system_prompt,
+    build_tdd_test_writing_prompt,
+)
 
 
 class FakeSession:
@@ -46,6 +51,13 @@ def _plan() -> ExecutionPlan:
                 file_path="src/auth.py",
                 instruction="Implement the auth callback.",
                 reason="Land the implementation after tests are written.",
+                success_checks=[
+                    StepSuccessCheck(
+                        description="Auth callback tests pass.",
+                        tool="run_tests",
+                        command="test-runner tests/test_auth.py",
+                    )
+                ],
             )
         ],
         tdd_test_steps=[
@@ -108,6 +120,45 @@ def _noop_side_effect(*_args, **_kwargs) -> None:
     return None
 
 
+def _configure_tdd_commands(monkeypatch, results: list[ToolResult]) -> list[str]:
+    calls: list[str] = []
+
+    async def _run_tests(command: str, repo_root: str) -> ToolResult:
+        calls.append(command)
+        return results.pop(0)
+
+    monkeypatch.setattr(
+        workflow_executor,
+        "_effective_post_commands",
+        lambda _repo_root: {"test": "test-runner all"},
+    )
+    monkeypatch.setattr("lean_ai.tools.shell.run_tests", _run_tests)
+    return calls
+
+
+def test_tdd_test_prompt_supports_existing_and_new_modules():
+    prompt = build_tdd_test_writing_prompt(
+        "project context",
+        "Create or update the planned behavior.",
+    )
+
+    assert "For an existing module, inspect its public interfaces" in prompt
+    assert "For a new module, derive its public contract" in prompt
+    assert "requires them to fail relative to a clean pre-change baseline" in prompt
+    assert "report the ambiguity as a blocker" in prompt
+    assert "ASSUMPTION comment" in prompt
+    assert "AST shape" in prompt
+
+
+def test_tdd_implementation_prompt_requires_green_without_disputes():
+    prompt = build_tdd_step_system_prompt("project context")
+
+    assert "validated by the red gate" in prompt
+    assert "Every configured run_tests check must pass" in prompt
+    assert "report the exact contract conflict as a blocker" in prompt
+    assert "request_test_change" not in prompt
+
+
 @pytest.fixture(autouse=True)
 def _disable_unit_test_side_effects(monkeypatch):
     monkeypatch.setattr(workflow_executor, "ensure_primary_role_tuning", _noop_async)
@@ -148,6 +199,14 @@ async def test_run_tdd_execution_falls_back_to_primary_client_for_test_writing(
         "build_tdd_step_system_prompt",
         _const_tdd_impl_prompt,
     )
+    calls = _configure_tdd_commands(
+        monkeypatch,
+        [
+            ToolResult(success=True, output="baseline", exit_code=0),
+            ToolResult(success=False, output="expected red", exit_code=1),
+            ToolResult(success=True, output="green", exit_code=0),
+        ],
+    )
 
     ok, metrics = await _run_tdd_execution(
         plan=_plan(),
@@ -165,7 +224,164 @@ async def test_run_tdd_execution_falls_back_to_primary_client_for_test_writing(
     assert ok is True
     assert seen_clients[0] is primary
     assert metrics["test_writer_role"] == "primary_fallback"
+    assert metrics["red_failures_observed"] == 1
+    assert calls == [
+        "test-runner all",
+        "test-runner tests/test_auth.py",
+        "test-runner tests/test_auth.py",
+    ]
     assert any(msg.get("stage") == "tdd_test_writing" for msg in ws.sent)
+
+
+@pytest.mark.asyncio
+async def test_run_tdd_execution_blocks_when_authored_tests_are_already_green(
+    monkeypatch,
+    tmp_path,
+):
+    phases: list[int] = []
+
+    async def _run_step(step, *_args, **_kwargs):
+        phases.append(step.step_number)
+        return True
+
+    monkeypatch.setattr(workflow_executor, "make_tool_executor", _noop_factory)
+    monkeypatch.setattr(workflow_executor, "load_execution_context", lambda _repo_root: "")
+    monkeypatch.setattr(workflow_executor, "build_tdd_test_writing_prompt", _const_tdd_test_prompt)
+    monkeypatch.setattr(workflow_executor, "build_tdd_step_system_prompt", _const_tdd_impl_prompt)
+    _configure_tdd_commands(
+        monkeypatch,
+        [
+            ToolResult(success=True, output="baseline", exit_code=0),
+            ToolResult(success=True, output="already green", exit_code=0),
+        ],
+    )
+
+    ok, metrics = await _run_tdd_execution(
+        plan=_plan(),
+        repo_root=str(tmp_path),
+        ws=FakeSession(),
+        llm_client=DummyClient("primary"),
+        expert_llm_client=None,
+        session_id="sess-green",
+        dispatcher=None,
+        cb=None,
+        step_artifacts={},
+        run_step=_run_step,
+    )
+
+    assert ok is False
+    assert phases == [1]
+    assert metrics["red_failures_observed"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("baseline", "infrastructure_failures"),
+    [
+        (ToolResult(success=False, output="existing failure", exit_code=1), 0),
+        (ToolResult(success=False, error="not found", exit_code=127), 1),
+    ],
+)
+async def test_run_tdd_execution_requires_clean_runnable_baseline(
+    monkeypatch,
+    tmp_path,
+    baseline,
+    infrastructure_failures,
+):
+    phases: list[int] = []
+
+    async def _run_step(step, *_args, **_kwargs):
+        phases.append(step.step_number)
+        return True
+
+    _configure_tdd_commands(monkeypatch, [baseline])
+
+    ok, metrics = await _run_tdd_execution(
+        plan=_plan(),
+        repo_root=str(tmp_path),
+        ws=FakeSession(),
+        llm_client=DummyClient("primary"),
+        expert_llm_client=None,
+        session_id="sess-baseline",
+        dispatcher=None,
+        cb=None,
+        step_artifacts={},
+        run_step=_run_step,
+    )
+
+    assert ok is False
+    assert phases == []
+    assert metrics["infrastructure_failures"] == infrastructure_failures
+
+
+@pytest.mark.asyncio
+async def test_run_tdd_execution_blocks_missing_targeted_test_check(monkeypatch, tmp_path):
+    plan = _plan()
+    plan.steps[0].success_checks = []
+
+    ok, metrics = await _run_tdd_execution(
+        plan=plan,
+        repo_root=str(tmp_path),
+        ws=FakeSession(),
+        llm_client=DummyClient("primary"),
+        expert_llm_client=None,
+        session_id="sess-contract",
+        dispatcher=None,
+        cb=None,
+        step_artifacts={},
+        run_step=lambda *_args, **_kwargs: None,
+    )
+
+    assert ok is False
+    assert metrics["steps_missing_test_checks"] == 1
+
+
+@pytest.mark.asyncio
+async def test_run_tdd_execution_returns_false_for_unresolved_implementation(
+    monkeypatch,
+    tmp_path,
+):
+    calls = 0
+
+    async def _run_step(step, *_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return step in _plan().tdd_test_steps
+
+    monkeypatch.setattr(workflow_executor, "make_tool_executor", _noop_factory)
+    monkeypatch.setattr(workflow_executor, "load_execution_context", lambda _repo_root: "")
+    monkeypatch.setattr(workflow_executor, "build_tdd_test_writing_prompt", _const_tdd_test_prompt)
+    monkeypatch.setattr(workflow_executor, "build_tdd_step_system_prompt", _const_tdd_impl_prompt)
+    _configure_tdd_commands(
+        monkeypatch,
+        [
+            ToolResult(success=True, output="baseline", exit_code=0),
+            ToolResult(success=False, output="red", exit_code=1),
+            ToolResult(success=False, output="still red", exit_code=1),
+            ToolResult(success=False, output="still red", exit_code=1),
+        ],
+    )
+
+    plan = _plan()
+
+    async def _failing_impl(step, *_args, **_kwargs):
+        return step is plan.tdd_test_steps[0]
+
+    ok, metrics = await _run_tdd_execution(
+        plan=plan,
+        repo_root=str(tmp_path),
+        ws=FakeSession(),
+        llm_client=DummyClient("primary"),
+        expert_llm_client=None,
+        session_id="sess-incomplete",
+        dispatcher=None,
+        cb=None,
+        step_artifacts={},
+        run_step=_failing_impl,
+    )
+
+    assert ok is False
+    assert metrics["incomplete_steps"] == 1
 
 
 @pytest.mark.asyncio
