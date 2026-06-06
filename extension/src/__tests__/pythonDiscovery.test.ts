@@ -2,11 +2,23 @@ import {
     discoverSupportedPython,
     getPythonCandidates,
     isSupportedPythonVersion,
+    normalizeConfiguredPythonPath,
     parsePythonVersion,
     pythonDownloadUrl,
 } from "../pythonDiscovery";
 
 describe("Python discovery", () => {
+    it.each([undefined, "", "   "])(
+        "treats a blank configured path as automatic discovery",
+        (configured) => {
+            expect(normalizeConfiguredPythonPath(configured)).toBe("python");
+        },
+    );
+
+    it("trims an explicitly configured interpreter path", () => {
+        expect(normalizeConfiguredPythonPath(" /opt/python3.13 ")).toBe("/opt/python3.13");
+    });
+
     it("orders Windows launcher candidates from Python 3.13 down", () => {
         expect(getPythonCandidates("win32").slice(0, 4)).toEqual([
             { command: "py", args: ["-3.13"], label: "py -3.13" },

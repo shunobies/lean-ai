@@ -24,6 +24,11 @@ export interface PythonDiscoveryResult {
 
 type VersionRunner = (candidate: PythonCommand) => string;
 
+export function normalizeConfiguredPythonPath(configured?: string): string {
+    const trimmed = configured?.trim();
+    return trimmed || "python";
+}
+
 export function platformDisplayName(platform: NodeJS.Platform): string {
     if (platform === "win32") {
         return "Windows";

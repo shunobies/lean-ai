@@ -201,7 +201,7 @@
         "lean-ai.pythonPath": {
           "type": "string",
           "default": "python",
-          "markdownDescription": "Path to the Python interpreter. Set this to a full virtualenv path if the backend is installed in one, e.g. `/home/user/Code/lean_ai/backend/.venv/bin/python`."
+          "markdownDescription": "Path to the Python interpreter. Leave blank to auto-detect, or set a full virtualenv path if the backend is installed in one, e.g. `/home/user/Code/lean_ai/backend/.venv/bin/python`."
         },
         "lean-ai.backendDir": {
           "type": "string",

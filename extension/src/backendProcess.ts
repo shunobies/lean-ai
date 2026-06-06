@@ -19,6 +19,7 @@ import { spawn, execSync, ChildProcess } from "child_process";
 import { DEFAULT_BACKEND_URL } from "./constants";
 import { buildBackendEnv, buildFullBackendEnv } from "./settingsSync";
 import { ensureBackendInstalled, type BackendInstallResult } from "./backendInstaller";
+import { normalizeConfiguredPythonPath } from "./pythonDiscovery";
 
 const HEALTH_POLL_INTERVAL_MS = 1000;
 const HEALTH_POLL_MAX_ATTEMPTS = 30; // 30 seconds max wait
@@ -67,7 +68,7 @@ function getConfig() {
     const config = vscode.workspace.getConfiguration("lean-ai");
     return {
         autoStart: config.get<boolean>("autoStartBackend", true),
-        pythonPath: config.get<string>("pythonPath", "python"),
+        pythonPath: normalizeConfiguredPythonPath(config.get<string>("pythonPath", "python")),
         backendDir: config.get<string>("backendDir", ""),
         backendUrl: config.get<string>("backendUrl") || DEFAULT_BACKEND_URL,
     };

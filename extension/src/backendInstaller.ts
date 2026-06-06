@@ -16,6 +16,7 @@ import {
     discoverSupportedPython,
     MAX_PYTHON_EXCLUSIVE,
     MIN_PYTHON,
+    normalizeConfiguredPythonPath,
     pythonDownloadUrl,
     pythonInstallGuidance,
     type PythonCommand,
@@ -69,7 +70,9 @@ export async function ensureBackendInstalled(
     // ── Manual mode detection ────────────────────────────────────────────
     const config = vscode.workspace.getConfiguration("lean-ai");
     const explicitBackendDir = config.get<string>("backendDir", "");
-    const explicitPythonPath = config.get<string>("pythonPath", "python");
+    const explicitPythonPath = normalizeConfiguredPythonPath(
+        config.get<string>("pythonPath", "python"),
+    );
     const previousManagedPython = context.globalState.get<string>(MANAGED_PYTHON_PATH_KEY, "");
 
     if (
