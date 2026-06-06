@@ -17,16 +17,31 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
-      - run: npm run copy-backend && npm run build
+      - name: Test first-run Python discovery
+        run: npm test -- --runTestsByPath src/__tests__/pythonDiscovery.test.ts
+      - name: Verify tag matches extension version
+        shell: bash
+        run: |
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          test "v$PACKAGE_VERSION" = "$GITHUB_REF_NAME"
+      - run: npm run package
+      - name: Locate and verify VSIX
+        id: package
+        shell: bash
+        run: |
+          VSIX_PATH="$(find "$PWD" -maxdepth 1 -name 'lean-ai-*.vsix' -print -quit)"
+          test -n "$VSIX_PATH"
+          npm run verify-package -- "$VSIX_PATH"
+          echo "vsixPath=$VSIX_PATH" >> "$GITHUB_OUTPUT"
       - name: Publish to Open VSX Registry
         uses: HaaLeo/publish-vscode-extension@v2
         id: publishToOpenVSX
         with:
           pat: ${{ secrets.OPEN_VSX_TOKEN }}
-          packagePath: extension
+          extensionFile: ${{ steps.package.outputs.vsixPath }}
       - name: Publish to Visual Studio Marketplace
         uses: HaaLeo/publish-vscode-extension@v2
         with:
           pat: ${{ secrets.VS_MARKETPLACE_TOKEN }}
           registryUrl: https://marketplace.visualstudio.com
-          extensionFile: ${{ steps.publishToOpenVSX.outputs.vsixPath }}
+          extensionFile: ${{ steps.package.outputs.vsixPath }}

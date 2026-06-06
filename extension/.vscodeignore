@@ -4,6 +4,8 @@ node_modules/**
 scripts/**
 tsconfig.json
 .eslintrc*
+.ruff_cache
+.ruff_cache/**
 
 # Bundled backend — exclude dev artifacts
 backend/tests/**
@@ -12,3 +14,8 @@ backend/**/*.egg-info/**
 backend/.ruff_cache/**
 backend/.pytest_cache/**
 backend/.env
+backend/.lean_ai/**
+backend/.venv*/**
+backend/**/*.db
+backend/**/*.db-shm
+backend/**/*.db-wal

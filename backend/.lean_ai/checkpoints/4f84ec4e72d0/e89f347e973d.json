@@ -1,0 +1,1168 @@
+{
+  "session_id": "4f84ec4e72d0",
+  "current_phase": "approval",
+  "conversation_history": [],
+  "scratchpad_content": "",
+  "journal_entries": [],
+  "observations": [],
+  "current_plan": {
+    "scope": "Implement a Semantic Diff Review Gate post-validation to prevent semantic drift, using LLM committee review of raw diffs against approved plans, structured rubric evaluation, and an automatic corrective fix loop capped at two iterations.",
+    "user_summary": "",
+    "naming_conventions": [],
+    "name_registry": [],
+    "steps": [
+      {
+        "step_number": 4,
+        "job": "Implement SemanticReviewRubric schema, diff capture, narrative summary generation, committee review orchestration, and corrective plan logic in validation.py",
+        "inputs": [
+          {
+            "source": "backend/src/lean_ai/workflow/validation.py",
+            "details": "_run_post_validation and _run_validation_fix_loop patterns for async execution and state management."
+          },
+          {
+            "source": "backend/src/lean_ai/tools/git_ops.py",
+            "details": "git_diff() returns unified patch text for raw grounding."
+          },
+          {
+            "source": "backend/src/lean_ai/workflow/planner_helpers.py",
+            "details": "_chat_structured_with_repair pattern for guaranteed Pydantic output parsing."
+          }
+        ],
+        "may_change": [
+          {
+            "path": "backend/src/lean_ai/workflow/validation.py",
+            "change": "Add SemanticReviewRubric Pydantic model, _capture_raw_diffs(), _generate_change_summary(), _conduct_committee_review(), _generate_corrective_plan(), and _run_semantic_review() orchestration with 2-iteration cap."
+          }
+        ],
+        "must_not_change": [
+          "_run_post_validation deterministic command execution",
+          "Existing fix loop LLM client wiring"
+        ],
+        "allowed_tools": [
+          "edit_file",
+          "read_file",
+          "grep_files",
+          "task_complete",
+          "list_directory",
+          "directory_tree",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url"
+        ],
+        "output_shape": "validation.py exports SemanticReviewRubric(BaseModel) with overall_score, verdict, blocking_issues, non_blocking_issues, category_scores. Async helpers _capture_raw_diffs(repo_root), _conduct_committee_review(llm_client, approved_plan, summary, raw_diffs), and _run_semantic_review(state, llm_client) enforce iteration tracking via state['semantic_review_iteration'] and route to corrective mini-plans on 'revise' verdict.",
+        "success_checks": [
+          {
+            "description": "_run_semantic_review function exists and imports git_ops/planner_helpers",
+            "tool": "read_file",
+            "command": "",
+            "expected": "Contains async def _run_semantic_review and import from .planner_helpers"
+          },
+          {
+            "description": "Iteration cap logic tracks semantic_review_iteration in state dict",
+            "tool": "grep_files",
+            "command": "cd backend && grep -n 'semantic_review_iteration' src/lean_ai/workflow/validation.py",
+            "expected": "Matches found showing counter initialization and 2-attempt limit check."
+          }
+        ],
+        "blocked_protocol": "If state manager API for session_metadata access differs, adapt to current StateManager.get_state_async() pattern. If corrective plan execution requires a specific executor helper, reuse existing execute_plan_mini or equivalent without modifying core executor signatures.",
+        "tool": "edit_file",
+        "file_path": "backend/src/lean_ai/workflow/validation.py",
+        "instruction": "Add semantic review orchestration to validation.py with rubric schema, diff capture, committee review, and iteration-capped fix loop.",
+        "reason": "Centralizes semantic gate lifecycle within the validation phase alongside existing deterministic checks. Mirrors current fix loop mechanics while introducing semantic-specific blocking/non-blocking routing and strict iteration caps."
+      },
+      {
+        "step_number": 5,
+        "job": "Register SemanticReviewNode in pipeline.py graph builder post-validation success path",
+        "inputs": [
+          {
+            "source": "backend/src/lean_ai/workflow/pipeline.py",
+            "details": "Graph builder registration patterns and ExecutionNode wiring around lines 330-668."
+          },
+          {
+            "source": "backend/src/lean_ai/workflow/graph.py",
+            "details": "Node base class, Continue/Suspend/Fail result types, WorkflowEngine execution model."
+          }
+        ],
+        "may_change": [
+          {
+            "path": "backend/src/lean_ai/workflow/pipeline.py",
+            "change": "Define SemanticReviewNode extending Node, wire it into workflow graph immediately after validation success, handle state handoff and result routing to completion or suspension."
+          }
+        ],
+        "must_not_change": [
+          "PlanningNode and ApprovalNodeExtended logic",
+          "Existing ExecutionNode tool invocation signatures"
+        ],
+        "allowed_tools": [
+          "edit_file",
+          "read_file",
+          "grep_files",
+          "task_complete",
+          "list_directory",
+          "directory_tree",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url"
+        ],
+        "output_shape": "SemanticReviewNode class with async execute() method delegating to _run_semantic_review. Graph builder registers edge from ExecutionNode/validation success to SemanticReviewNode, then routes approved results to commit/completion phase and blocking failures to suspension.",
+        "success_checks": [
+          {
+            "description": "SemanticReviewNode class is defined in pipeline.py",
+            "tool": "read_file",
+            "command": "",
+            "expected": "Contains class SemanticReviewNode(Node) with execute method"
+          },
+          {
+            "description": "Graph builder wires node post-execution",
+            "tool": "grep_files",
+            "command": "cd backend && grep -n 'SemanticReviewNode' src/lean_ai/workflow/pipeline.py",
+            "expected": "Registration calls found in graph construction block."
+          }
+        ],
+        "blocked_protocol": "If graph builder API uses a different fluent method for edge registration, adapt to local conventions. Do not alter ExecutionNode's core plan execution logic; only append the semantic review gate downstream.",
+        "tool": "edit_file",
+        "file_path": "backend/src/lean_ai/workflow/pipeline.py",
+        "instruction": "Register SemanticReviewNode in pipeline.py graph builder post-validation success path.",
+        "reason": "Integrates the semantic review capability into the primary workflow pipeline at the correct architectural boundary (post-deterministic validation, pre-commit). Ensures state flows correctly between deterministic and semantic evaluation phases."
+      },
+      {
+        "step_number": 6,
+        "job": "Update CHANGELOG.md to document Semantic Diff Review Gate feature",
+        "inputs": [
+          {
+            "source": "extension/CHANGELOG.md or backend/CHANGELOG.md",
+            "details": "Existing changelog entries for recent features."
+          },
+          {
+            "source": "Task Requirements",
+            "details": "Semantic gate prevents drift, uses raw diffs + narrative summary, 2-iteration fix loop cap."
+          }
+        ],
+        "may_change": [
+          {
+            "path": "backend/CHANGELOG.md",
+            "change": "Add entry under 'Features' or 'Improvements' describing the semantic review gate integration."
+          }
+        ],
+        "must_not_change": [
+          "Existing changelog entries for unrelated features"
+        ],
+        "allowed_tools": [
+          "edit_file",
+          "read_file",
+          "task_complete",
+          "list_directory",
+          "directory_tree",
+          "grep_files",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url"
+        ],
+        "output_shape": "CHANGELOG.md contains a new entry summarizing the semantic diff review gate, its rubric-based evaluation, raw diff grounding, and automatic corrective loop with 2-iteration cap.",
+        "success_checks": [
+          {
+            "description": "Changelog updated with semantic gate feature",
+            "tool": "read_file",
+            "command": "",
+            "expected": "Contains 'Semantic Diff Review Gate' or similar phrasing under appropriate heading."
+          }
+        ],
+        "blocked_protocol": "If CHANGELOG.md uses a different format (e.g., Keep a Changelog standard), adapt entry structure accordingly. Do not modify unrelated sections.",
+        "tool": "edit_file",
+        "file_path": "backend/CHANGELOG.md",
+        "instruction": "Append changelog entry for Semantic Diff Review Gate feature.",
+        "reason": "Documents the new verification layer for transparency and release tracking."
+      }
+    ],
+    "tdd_mode": true,
+    "tdd_test_steps": [
+      {
+        "step_number": 1,
+        "job": "Create unit tests for semantic review logic covering drift detection, non-blocking approval, rubric validation, diff capture, and corrective plan generation.",
+        "inputs": [
+          {
+            "source": "Implementation Plan Step 1 & Task Requirements",
+            "details": "Defines SemanticReviewRubric schema, _capture_raw_diffs, _conduct_committee_review, _generate_corrective_plan signatures. Requires pytest + asyncio + unittest.mock."
+          }
+        ],
+        "may_change": [
+          {
+            "path": "backend/tests/unit/workflow/test_semantic_review.py",
+            "change": "Create new test module with async unit tests for semantic review core logic."
+          }
+        ],
+        "must_not_change": [
+          "Existing workflow test files",
+          "Production implementation code (TDD mode)"
+        ],
+        "allowed_tools": [
+          "create_file",
+          "read_file",
+          "list_directory",
+          "directory_tree",
+          "grep_files",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url",
+          "task_complete"
+        ],
+        "output_shape": "Python pytest module containing 5 async unit tests mocking LLM clients, git utilities, and state managers.",
+        "success_checks": [
+          {
+            "description": "Test file is syntactically valid Python",
+            "tool": "",
+            "command": "cd backend && python -m py_compile tests/unit/workflow/test_semantic_review.py",
+            "expected": ""
+          },
+          {
+            "description": "Test module imports successfully without resolving production deps",
+            "tool": "",
+            "command": "cd backend && python -c \"import ast; ast.parse(open('tests/unit/workflow/test_semantic_review.py').read()); print('AST OK')\"",
+            "expected": ""
+          }
+        ],
+        "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+        "tool": "create_file",
+        "file_path": "backend/tests/unit/workflow/test_semantic_review.py",
+        "instruction": "EXPECTED BEHAVIOR & SIGNATURES:\n- SemanticReviewRubric(Pydantic BaseModel): fields overall_score(int), verdict(Literal['approved','revise']), blocking_issues(list[str]), non_blocking_issues(list[str]), category_scores(dict).\n- _capture_raw_diffs(repo_root: str) -> str: Returns unified git diff text.\n- _conduct_committee_review(llm_client, expert_llm, request_llm, approved_plan, summary, raw_diffs) -> SemanticReviewRubric: Orchestrates LLM review.\n- _generate_corrective_plan(planner_ref, blocking_issues, current_state) -> ExecutionPlan: Generates fix plan.\n\nCREATE TEST FILE:\nWrite a Python test file using pytest and unittest.mock. Include module-level docstring explaining coverage scope. Use @pytest.mark.asyncio for all tests.\n1. test_rubric_schema_validates_fields: Instantiate SemanticReviewRubric with valid args (overall_score=8, verdict='approved', blocking_issues=[], non_blocking_issues=['style_nit'], category_scores={'intent_alignment': 9}). Assert .verdict == 'approved' and fields match expected types.\n2. test_drift_detected_triggers_revise_verdict: Patch _conduct_committee_review to return a rubric with blocking_issues=['omits_requirement_X'] and verdict='revise'. Call the orchestration logic and assert it enters the corrective loop path by verifying _generate_corrective_plan is called exactly once.\n3. test_non_blocking_issues_allow_approval: Patch review to return only non_blocking_issues=['minor_typo'] with verdict='approved'. Assert execution returns a Continue/Success result without invoking any planner or edit_file tools.\n4. test_capture_raw_diffs_returns_unified_patch: Mock the underlying git diff utility to return a standard unified patch string. Call _capture_raw_diffs(repo_root='/tmp') and assert the returned string contains '--- a/' and '+++ b/' markers, proving raw diffs are captured rather than summaries.\n5. test_generate_corrective_plan_invokes_planner: Mock the LLM planner client's structured output method. Call _generate_corrective_plan(blocking_issues=['fix_drift'], current_state={}). Assert it returns a valid plan object/dict and that the LLM was called with the blocking issues in the prompt context.\n\nMOCKS & ASSERTIONS:\n- Strictly mock external I/O (git, LLM clients, state managers). Never mock the unit under test itself.\n- Each assertion targets ONE specific behavior. Assert exact values or error types/messages where applicable.\n- Include descriptive failure messages on assertions.",
+        "reason": "Verifies Phase 2/3 semantic_review.py design: rubric schema validation, drift detection triggering revise verdict, non-blocking approval path, raw diff capture utility, and corrective plan generation logic. Uses pytest + asyncio matching repo conventions."
+      },
+      {
+        "step_number": 2,
+        "job": "Create regression tests for core functionality entities and security constraints (iteration cap, raw diff grounding).",
+        "inputs": [
+          {
+            "source": "CORE FUNCTIONALITY REQUIRING REGRESSION COVERAGE & SECURITY CONCERNS FROM PHASE 3",
+            "details": "Covers SemanticReviewRubric, _capture_raw_diffs, _generate_corrective_plan, iteration cap enforcement, and raw diff injection security mitigation."
+          }
+        ],
+        "may_change": [
+          {
+            "path": "backend/tests/regression/workflow/regression_semantic_review_core.py",
+            "change": "Create regression test module pinning load-bearing contracts and security mitigations."
+          }
+        ],
+        "must_not_change": [
+          "Existing regression tests",
+          "Production implementation code (TDD mode)"
+        ],
+        "allowed_tools": [
+          "create_file",
+          "read_file",
+          "list_directory",
+          "directory_tree",
+          "grep_files",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url",
+          "task_complete"
+        ],
+        "output_shape": "Python pytest module containing 4 regression tests enforcing core contracts and security boundaries.",
+        "success_checks": [
+          {
+            "description": "Regression test file is syntactically valid",
+            "tool": "",
+            "command": "cd backend && python -m py_compile tests/regression/workflow/regression_semantic_review_core.py",
+            "expected": ""
+          },
+          {
+            "description": "Module parses correctly and defines expected test functions",
+            "tool": "",
+            "command": "cd backend && python -c \"import ast; tree=ast.parse(open('tests/regression/workflow/regression_semantic_review_core.py').read()); funcs=[n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]; assert 'test_rubric_schema_enforces_literal_verdict_constraint' in funcs; print('Regression OK')\"",
+            "expected": ""
+          }
+        ],
+        "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+        "tool": "create_file",
+        "file_path": "backend/tests/regression/workflow/regression_semantic_review_core.py",
+        "instruction": "EXPECTED BEHAVIOR & SIGNATURES:\n- SemanticReviewRubric strictly bounds verdict to 'approved' or 'revise'.\n- _conduct_committee_review MUST inject raw diffs into Expert prompt separately from narrative summary.\n- Validation/Pipeline loop tracks state['semantic_review_iteration'] and forces Suspend on breach of 2 attempts.\n- _generate_corrective_plan handles edge cases gracefully without crashing downstream executor.\n\nCREATE REGRESSION TEST FILE:\nWrite a Python test file using pytest and unittest.mock. Prefix reason with REGRESSION: as mandated. Use @pytest.mark.asyncio where applicable.\n1. test_rubric_schema_enforces_literal_verdict_constraint: Attempt to instantiate SemanticReviewRubric with verdict='fix' (invalid). Assert Pydantic's ValidationError is raised, proving the schema strictly bounds LLM outputs and prevents drift in structured parsing.\n2. test_raw_diffs_grounding_prevents_hallucination_security_risk: Mock the Expert model prompt builder inside _conduct_committee_review. Assert that the constructed prompt explicitly contains a raw diff section (e.g., matches regex '\\nRAW DIFFS:\\n.*---') and does NOT rely solely on the narrative summary. This verifies mitigation for reviewer hallucination risk.\n3. test_two_iteration_hard_cap_suspends_execution_security_risk: Initialize state dict with {'semantic_review_iteration': 2}. Trigger the semantic review loop orchestration function. Assert it immediately raises/returns a Suspend result requesting user intervention, without calling any LLM or diff capture functions. This verifies mitigation for runaway LLM consumption risk.\n4. test_core_corrective_plan_generation_contract: Mock planner dependencies. Call _generate_corrective_plan with empty blocking issues list []. Assert it returns an empty plan dict or gracefully handles the edge case without raising unhandled exceptions, preserving downstream executor stability.\n\nMOCKS & ASSERTIONS:\n- Regression tests are IMMUTABLE contracts. Assertions must fail if implementation deviates from these exact boundaries.\n- Mock external dependencies only. Include descriptive failure messages linking to Phase 3 security mitigations.",
+        "reason": "REGRESSION: Covers core entities SemanticReviewRubric, _capture_raw_diffs, _generate_corrective_plan per Phase 3 tags. Enforces security mitigations for reviewer hallucination (raw diff grounding) and runaway LLM consumption (2-iteration hard cap). Uses pytest + asyncio."
+      },
+      {
+        "step_number": 3,
+        "job": "Create pipeline integration tests verifying node wiring, timing gate constraints, and execution flow.",
+        "inputs": [
+          {
+            "source": "FILES NEEDING TEST COVERAGE & IMPLEMENTATION PLAN Steps 3-4",
+            "details": "Covers backend/src/lean_ai/workflow/pipeline.py registration, validation hand-off, and timing collision mitigation."
+          }
+        ],
+        "may_change": [
+          {
+            "path": "backend/tests/unit/workflow/test_pipeline_semantic_gate.py",
+            "change": "Create integration test module for pipeline graph wiring and execution timing constraints."
+          }
+        ],
+        "must_not_change": [
+          "Existing pipeline tests",
+          "Production implementation code (TDD mode)"
+        ],
+        "allowed_tools": [
+          "create_file",
+          "read_file",
+          "list_directory",
+          "directory_tree",
+          "grep_files",
+          "query_project_context",
+          "search_reference",
+          "search_internet",
+          "fetch_url",
+          "task_complete"
+        ],
+        "output_shape": "Python pytest module containing 3 integration tests verifying graph edges and timing gates.",
+        "success_checks": [
+          {
+            "description": "Pipeline test file is syntactically valid",
+            "tool": "",
+            "command": "cd backend && python -m py_compile tests/unit/workflow/test_pipeline_semantic_gate.py",
+            "expected": ""
+          },
+          {
+            "description": "Module defines expected integration test functions",
+            "tool": "",
+            "command": "cd backend && python -c \"import ast; tree=ast.parse(open('tests/unit/workflow/test_pipeline_semantic_gate.py').read()); funcs=[n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]; assert 'test_timing_gate_prevents_run_on_failed_validation_collision_risk' in funcs; print('Pipeline Tests OK')\"",
+            "expected": ""
+          }
+        ],
+        "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+        "tool": "create_file",
+        "file_path": "backend/tests/unit/workflow/test_pipeline_semantic_gate.py",
+        "instruction": "EXPECTED BEHAVIOR & SIGNATURES:\n- Pipeline graph builder registers SemanticReviewNode immediately after ExecutionNode.\n- Validation hand-off gates semantic review execution behind _run_post_validation() success return.\n- Approved rubric triggers direct continuation to completion phase without fix loops.\n\nCREATE INTEGRATION TEST FILE:\nWrite a Python test file using pytest and unittest.mock. Focus on graph wiring and execution timing constraints per Phase 3 security/design requirements.\n1. test_semantic_node_registered_after_execution_in_graph: Mock the workflow graph builder in pipeline.py. Assert that an edge exists connecting ExecutionNode to SemanticReviewNode, ensuring the gate executes post-implementation but pre-completion as mandated by design.\n2. test_timing_gate_prevents_run_on_failed_validation_collision_risk: Simulate a state where deterministic validation (_run_post_validation) returned a failure/Fail result. Call the semantic review entry point or pipeline executor. Assert it is completely bypassed (zero LLM calls, zero diff captures), verifying mitigation for execution timing collision risk.\n3. test_pipeline_continues_on_semantic_approval: Mock SemanticReviewNode to return Continue/Success with an approved rubric (verdict='approved'). Assert the pipeline proceeds directly to the completion/commit phase without entering any fix loops or generating corrective plans.\n\nMOCKS & ASSERTIONS:\n- Mock graph builder, validation results, and node execution returns.\n- Assert exact state transitions and zero external calls for bypass scenarios.\n- Include descriptive failure messages mapping to Phase 3 timing collision mitigation.",
+        "reason": "Verifies pipeline.py integration per FILES NEEDING TEST COVERAGE. Ensures SemanticReviewNode wiring post-execution, enforces timing gate preventing runs on failed validation (Phase 3 security concern), and validates approval path continuation. Uses pytest + asyncio."
+      }
+    ],
+    "affected_files": [
+      "backend/src/lean_ai/workflow/validation.py",
+      "backend/src/lean_ai/workflow/pipeline.py",
+      "backend/tests/unit/workflow/test_semantic_gate.py",
+      "backend/CHANGELOG.md",
+      "backend/tests/unit/workflow/test_semantic_review.py",
+      "backend/tests/regression/workflow/regression_semantic_review_core.py",
+      "backend/tests/unit/workflow/test_pipeline_semantic_gate.py"
+    ],
+    "test_strategy": "TDD-driven implementation with unit tests verifying rubric schema constraints, drift detection triggering revise verdict, non-blocking approval path, raw diff capture utility, and corrective plan generation logic. All tests use pytest with asyncio support, mocking external LLM clients and git operations to isolate behavioral contracts.",
+    "plan_validation_warnings": [
+      "invented path: backend/CHANGELOG.md",
+      "write target not found in prior-phase paths: backend/CHANGELOG.md",
+      "core-functionality tag missing regression success check: 'SemanticReviewNode' in backend/src/lean_ai/workflow/pipeline.py [phase1_deliverable, confidence=high]",
+      "core-functionality tag missing regression success check: '_run_semantic_review' in backend/src/lean_ai/workflow/validation.py [downstream_consumer, confidence=high]"
+    ],
+    "core_functionality": [
+      {
+        "entity": "SemanticReviewNode",
+        "file_path": "backend/src/lean_ai/workflow/pipeline.py",
+        "reason": "Primary workflow node for semantic review; breaking it removes the entire gate from pipeline execution.",
+        "source_signal": "phase1_deliverable",
+        "confidence": "high"
+      },
+      {
+        "entity": "SemanticReviewRubric",
+        "file_path": "backend/src/lean_ai/workflow/semantic_review.py",
+        "reason": "Pydantic schema enforces structured output; if broken, LLM responses cannot be parsed into rubric format.",
+        "source_signal": "critical_risk_adjacent",
+        "confidence": "high"
+      },
+      {
+        "entity": "_run_semantic_review",
+        "file_path": "backend/src/lean_ai/workflow/validation.py",
+        "reason": "Core orchestration called by executor; named in scope deliverables and risk list for timing corruption.",
+        "source_signal": "downstream_consumer",
+        "confidence": "high"
+      },
+      {
+        "entity": "_capture_raw_diffs",
+        "file_path": "backend/src/lean_ai/workflow/semantic_review.py",
+        "reason": "Provides grounded diff data to reviewers; without it, grounding constraint is violated.",
+        "source_signal": "critical_risk_adjacent",
+        "confidence": "medium"
+      },
+      {
+        "entity": "_generate_corrective_plan",
+        "file_path": "backend/src/lean_ai/workflow/semantic_review.py",
+        "reason": "Prevents bare edit_file calls per constraints; breaking it allows unconstrained fix attempts.",
+        "source_signal": "phase1_deliverable",
+        "confidence": "high"
+      }
+    ]
+  },
+  "session_metadata": {
+    "plan": {
+      "scope": "Implement a Semantic Diff Review Gate post-validation to prevent semantic drift, using LLM committee review of raw diffs against approved plans, structured rubric evaluation, and an automatic corrective fix loop capped at two iterations.",
+      "user_summary": "",
+      "naming_conventions": [],
+      "name_registry": [],
+      "steps": [
+        {
+          "step_number": 4,
+          "job": "Implement SemanticReviewRubric schema, diff capture, narrative summary generation, committee review orchestration, and corrective plan logic in validation.py",
+          "inputs": [
+            {
+              "source": "backend/src/lean_ai/workflow/validation.py",
+              "details": "_run_post_validation and _run_validation_fix_loop patterns for async execution and state management."
+            },
+            {
+              "source": "backend/src/lean_ai/tools/git_ops.py",
+              "details": "git_diff() returns unified patch text for raw grounding."
+            },
+            {
+              "source": "backend/src/lean_ai/workflow/planner_helpers.py",
+              "details": "_chat_structured_with_repair pattern for guaranteed Pydantic output parsing."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/src/lean_ai/workflow/validation.py",
+              "change": "Add SemanticReviewRubric Pydantic model, _capture_raw_diffs(), _generate_change_summary(), _conduct_committee_review(), _generate_corrective_plan(), and _run_semantic_review() orchestration with 2-iteration cap."
+            }
+          ],
+          "must_not_change": [
+            "_run_post_validation deterministic command execution",
+            "Existing fix loop LLM client wiring"
+          ],
+          "allowed_tools": [
+            "edit_file",
+            "read_file",
+            "grep_files",
+            "task_complete",
+            "list_directory",
+            "directory_tree",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url"
+          ],
+          "output_shape": "validation.py exports SemanticReviewRubric(BaseModel) with overall_score, verdict, blocking_issues, non_blocking_issues, category_scores. Async helpers _capture_raw_diffs(repo_root), _conduct_committee_review(llm_client, approved_plan, summary, raw_diffs), and _run_semantic_review(state, llm_client) enforce iteration tracking via state['semantic_review_iteration'] and route to corrective mini-plans on 'revise' verdict.",
+          "success_checks": [
+            {
+              "description": "_run_semantic_review function exists and imports git_ops/planner_helpers",
+              "tool": "read_file",
+              "command": "",
+              "expected": "Contains async def _run_semantic_review and import from .planner_helpers"
+            },
+            {
+              "description": "Iteration cap logic tracks semantic_review_iteration in state dict",
+              "tool": "grep_files",
+              "command": "cd backend && grep -n 'semantic_review_iteration' src/lean_ai/workflow/validation.py",
+              "expected": "Matches found showing counter initialization and 2-attempt limit check."
+            }
+          ],
+          "blocked_protocol": "If state manager API for session_metadata access differs, adapt to current StateManager.get_state_async() pattern. If corrective plan execution requires a specific executor helper, reuse existing execute_plan_mini or equivalent without modifying core executor signatures.",
+          "tool": "edit_file",
+          "file_path": "backend/src/lean_ai/workflow/validation.py",
+          "instruction": "Add semantic review orchestration to validation.py with rubric schema, diff capture, committee review, and iteration-capped fix loop.",
+          "reason": "Centralizes semantic gate lifecycle within the validation phase alongside existing deterministic checks. Mirrors current fix loop mechanics while introducing semantic-specific blocking/non-blocking routing and strict iteration caps."
+        },
+        {
+          "step_number": 5,
+          "job": "Register SemanticReviewNode in pipeline.py graph builder post-validation success path",
+          "inputs": [
+            {
+              "source": "backend/src/lean_ai/workflow/pipeline.py",
+              "details": "Graph builder registration patterns and ExecutionNode wiring around lines 330-668."
+            },
+            {
+              "source": "backend/src/lean_ai/workflow/graph.py",
+              "details": "Node base class, Continue/Suspend/Fail result types, WorkflowEngine execution model."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/src/lean_ai/workflow/pipeline.py",
+              "change": "Define SemanticReviewNode extending Node, wire it into workflow graph immediately after validation success, handle state handoff and result routing to completion or suspension."
+            }
+          ],
+          "must_not_change": [
+            "PlanningNode and ApprovalNodeExtended logic",
+            "Existing ExecutionNode tool invocation signatures"
+          ],
+          "allowed_tools": [
+            "edit_file",
+            "read_file",
+            "grep_files",
+            "task_complete",
+            "list_directory",
+            "directory_tree",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url"
+          ],
+          "output_shape": "SemanticReviewNode class with async execute() method delegating to _run_semantic_review. Graph builder registers edge from ExecutionNode/validation success to SemanticReviewNode, then routes approved results to commit/completion phase and blocking failures to suspension.",
+          "success_checks": [
+            {
+              "description": "SemanticReviewNode class is defined in pipeline.py",
+              "tool": "read_file",
+              "command": "",
+              "expected": "Contains class SemanticReviewNode(Node) with execute method"
+            },
+            {
+              "description": "Graph builder wires node post-execution",
+              "tool": "grep_files",
+              "command": "cd backend && grep -n 'SemanticReviewNode' src/lean_ai/workflow/pipeline.py",
+              "expected": "Registration calls found in graph construction block."
+            }
+          ],
+          "blocked_protocol": "If graph builder API uses a different fluent method for edge registration, adapt to local conventions. Do not alter ExecutionNode's core plan execution logic; only append the semantic review gate downstream.",
+          "tool": "edit_file",
+          "file_path": "backend/src/lean_ai/workflow/pipeline.py",
+          "instruction": "Register SemanticReviewNode in pipeline.py graph builder post-validation success path.",
+          "reason": "Integrates the semantic review capability into the primary workflow pipeline at the correct architectural boundary (post-deterministic validation, pre-commit). Ensures state flows correctly between deterministic and semantic evaluation phases."
+        },
+        {
+          "step_number": 6,
+          "job": "Update CHANGELOG.md to document Semantic Diff Review Gate feature",
+          "inputs": [
+            {
+              "source": "extension/CHANGELOG.md or backend/CHANGELOG.md",
+              "details": "Existing changelog entries for recent features."
+            },
+            {
+              "source": "Task Requirements",
+              "details": "Semantic gate prevents drift, uses raw diffs + narrative summary, 2-iteration fix loop cap."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/CHANGELOG.md",
+              "change": "Add entry under 'Features' or 'Improvements' describing the semantic review gate integration."
+            }
+          ],
+          "must_not_change": [
+            "Existing changelog entries for unrelated features"
+          ],
+          "allowed_tools": [
+            "edit_file",
+            "read_file",
+            "task_complete",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url"
+          ],
+          "output_shape": "CHANGELOG.md contains a new entry summarizing the semantic diff review gate, its rubric-based evaluation, raw diff grounding, and automatic corrective loop with 2-iteration cap.",
+          "success_checks": [
+            {
+              "description": "Changelog updated with semantic gate feature",
+              "tool": "read_file",
+              "command": "",
+              "expected": "Contains 'Semantic Diff Review Gate' or similar phrasing under appropriate heading."
+            }
+          ],
+          "blocked_protocol": "If CHANGELOG.md uses a different format (e.g., Keep a Changelog standard), adapt entry structure accordingly. Do not modify unrelated sections.",
+          "tool": "edit_file",
+          "file_path": "backend/CHANGELOG.md",
+          "instruction": "Append changelog entry for Semantic Diff Review Gate feature.",
+          "reason": "Documents the new verification layer for transparency and release tracking."
+        }
+      ],
+      "tdd_mode": true,
+      "tdd_test_steps": [
+        {
+          "step_number": 1,
+          "job": "Create unit tests for semantic review logic covering drift detection, non-blocking approval, rubric validation, diff capture, and corrective plan generation.",
+          "inputs": [
+            {
+              "source": "Implementation Plan Step 1 & Task Requirements",
+              "details": "Defines SemanticReviewRubric schema, _capture_raw_diffs, _conduct_committee_review, _generate_corrective_plan signatures. Requires pytest + asyncio + unittest.mock."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/tests/unit/workflow/test_semantic_review.py",
+              "change": "Create new test module with async unit tests for semantic review core logic."
+            }
+          ],
+          "must_not_change": [
+            "Existing workflow test files",
+            "Production implementation code (TDD mode)"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Python pytest module containing 5 async unit tests mocking LLM clients, git utilities, and state managers.",
+          "success_checks": [
+            {
+              "description": "Test file is syntactically valid Python",
+              "tool": "",
+              "command": "cd backend && python -m py_compile tests/unit/workflow/test_semantic_review.py",
+              "expected": ""
+            },
+            {
+              "description": "Test module imports successfully without resolving production deps",
+              "tool": "",
+              "command": "cd backend && python -c \"import ast; ast.parse(open('tests/unit/workflow/test_semantic_review.py').read()); print('AST OK')\"",
+              "expected": ""
+            }
+          ],
+          "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+          "tool": "create_file",
+          "file_path": "backend/tests/unit/workflow/test_semantic_review.py",
+          "instruction": "EXPECTED BEHAVIOR & SIGNATURES:\n- SemanticReviewRubric(Pydantic BaseModel): fields overall_score(int), verdict(Literal['approved','revise']), blocking_issues(list[str]), non_blocking_issues(list[str]), category_scores(dict).\n- _capture_raw_diffs(repo_root: str) -> str: Returns unified git diff text.\n- _conduct_committee_review(llm_client, expert_llm, request_llm, approved_plan, summary, raw_diffs) -> SemanticReviewRubric: Orchestrates LLM review.\n- _generate_corrective_plan(planner_ref, blocking_issues, current_state) -> ExecutionPlan: Generates fix plan.\n\nCREATE TEST FILE:\nWrite a Python test file using pytest and unittest.mock. Include module-level docstring explaining coverage scope. Use @pytest.mark.asyncio for all tests.\n1. test_rubric_schema_validates_fields: Instantiate SemanticReviewRubric with valid args (overall_score=8, verdict='approved', blocking_issues=[], non_blocking_issues=['style_nit'], category_scores={'intent_alignment': 9}). Assert .verdict == 'approved' and fields match expected types.\n2. test_drift_detected_triggers_revise_verdict: Patch _conduct_committee_review to return a rubric with blocking_issues=['omits_requirement_X'] and verdict='revise'. Call the orchestration logic and assert it enters the corrective loop path by verifying _generate_corrective_plan is called exactly once.\n3. test_non_blocking_issues_allow_approval: Patch review to return only non_blocking_issues=['minor_typo'] with verdict='approved'. Assert execution returns a Continue/Success result without invoking any planner or edit_file tools.\n4. test_capture_raw_diffs_returns_unified_patch: Mock the underlying git diff utility to return a standard unified patch string. Call _capture_raw_diffs(repo_root='/tmp') and assert the returned string contains '--- a/' and '+++ b/' markers, proving raw diffs are captured rather than summaries.\n5. test_generate_corrective_plan_invokes_planner: Mock the LLM planner client's structured output method. Call _generate_corrective_plan(blocking_issues=['fix_drift'], current_state={}). Assert it returns a valid plan object/dict and that the LLM was called with the blocking issues in the prompt context.\n\nMOCKS & ASSERTIONS:\n- Strictly mock external I/O (git, LLM clients, state managers). Never mock the unit under test itself.\n- Each assertion targets ONE specific behavior. Assert exact values or error types/messages where applicable.\n- Include descriptive failure messages on assertions.",
+          "reason": "Verifies Phase 2/3 semantic_review.py design: rubric schema validation, drift detection triggering revise verdict, non-blocking approval path, raw diff capture utility, and corrective plan generation logic. Uses pytest + asyncio matching repo conventions."
+        },
+        {
+          "step_number": 2,
+          "job": "Create regression tests for core functionality entities and security constraints (iteration cap, raw diff grounding).",
+          "inputs": [
+            {
+              "source": "CORE FUNCTIONALITY REQUIRING REGRESSION COVERAGE & SECURITY CONCERNS FROM PHASE 3",
+              "details": "Covers SemanticReviewRubric, _capture_raw_diffs, _generate_corrective_plan, iteration cap enforcement, and raw diff injection security mitigation."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/tests/regression/workflow/regression_semantic_review_core.py",
+              "change": "Create regression test module pinning load-bearing contracts and security mitigations."
+            }
+          ],
+          "must_not_change": [
+            "Existing regression tests",
+            "Production implementation code (TDD mode)"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Python pytest module containing 4 regression tests enforcing core contracts and security boundaries.",
+          "success_checks": [
+            {
+              "description": "Regression test file is syntactically valid",
+              "tool": "",
+              "command": "cd backend && python -m py_compile tests/regression/workflow/regression_semantic_review_core.py",
+              "expected": ""
+            },
+            {
+              "description": "Module parses correctly and defines expected test functions",
+              "tool": "",
+              "command": "cd backend && python -c \"import ast; tree=ast.parse(open('tests/regression/workflow/regression_semantic_review_core.py').read()); funcs=[n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]; assert 'test_rubric_schema_enforces_literal_verdict_constraint' in funcs; print('Regression OK')\"",
+              "expected": ""
+            }
+          ],
+          "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+          "tool": "create_file",
+          "file_path": "backend/tests/regression/workflow/regression_semantic_review_core.py",
+          "instruction": "EXPECTED BEHAVIOR & SIGNATURES:\n- SemanticReviewRubric strictly bounds verdict to 'approved' or 'revise'.\n- _conduct_committee_review MUST inject raw diffs into Expert prompt separately from narrative summary.\n- Validation/Pipeline loop tracks state['semantic_review_iteration'] and forces Suspend on breach of 2 attempts.\n- _generate_corrective_plan handles edge cases gracefully without crashing downstream executor.\n\nCREATE REGRESSION TEST FILE:\nWrite a Python test file using pytest and unittest.mock. Prefix reason with REGRESSION: as mandated. Use @pytest.mark.asyncio where applicable.\n1. test_rubric_schema_enforces_literal_verdict_constraint: Attempt to instantiate SemanticReviewRubric with verdict='fix' (invalid). Assert Pydantic's ValidationError is raised, proving the schema strictly bounds LLM outputs and prevents drift in structured parsing.\n2. test_raw_diffs_grounding_prevents_hallucination_security_risk: Mock the Expert model prompt builder inside _conduct_committee_review. Assert that the constructed prompt explicitly contains a raw diff section (e.g., matches regex '\\nRAW DIFFS:\\n.*---') and does NOT rely solely on the narrative summary. This verifies mitigation for reviewer hallucination risk.\n3. test_two_iteration_hard_cap_suspends_execution_security_risk: Initialize state dict with {'semantic_review_iteration': 2}. Trigger the semantic review loop orchestration function. Assert it immediately raises/returns a Suspend result requesting user intervention, without calling any LLM or diff capture functions. This verifies mitigation for runaway LLM consumption risk.\n4. test_core_corrective_plan_generation_contract: Mock planner dependencies. Call _generate_corrective_plan with empty blocking issues list []. Assert it returns an empty plan dict or gracefully handles the edge case without raising unhandled exceptions, preserving downstream executor stability.\n\nMOCKS & ASSERTIONS:\n- Regression tests are IMMUTABLE contracts. Assertions must fail if implementation deviates from these exact boundaries.\n- Mock external dependencies only. Include descriptive failure messages linking to Phase 3 security mitigations.",
+          "reason": "REGRESSION: Covers core entities SemanticReviewRubric, _capture_raw_diffs, _generate_corrective_plan per Phase 3 tags. Enforces security mitigations for reviewer hallucination (raw diff grounding) and runaway LLM consumption (2-iteration hard cap). Uses pytest + asyncio."
+        },
+        {
+          "step_number": 3,
+          "job": "Create pipeline integration tests verifying node wiring, timing gate constraints, and execution flow.",
+          "inputs": [
+            {
+              "source": "FILES NEEDING TEST COVERAGE & IMPLEMENTATION PLAN Steps 3-4",
+              "details": "Covers backend/src/lean_ai/workflow/pipeline.py registration, validation hand-off, and timing collision mitigation."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/tests/unit/workflow/test_pipeline_semantic_gate.py",
+              "change": "Create integration test module for pipeline graph wiring and execution timing constraints."
+            }
+          ],
+          "must_not_change": [
+            "Existing pipeline tests",
+            "Production implementation code (TDD mode)"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Python pytest module containing 3 integration tests verifying graph edges and timing gates.",
+          "success_checks": [
+            {
+              "description": "Pipeline test file is syntactically valid",
+              "tool": "",
+              "command": "cd backend && python -m py_compile tests/unit/workflow/test_pipeline_semantic_gate.py",
+              "expected": ""
+            },
+            {
+              "description": "Module defines expected integration test functions",
+              "tool": "",
+              "command": "cd backend && python -c \"import ast; tree=ast.parse(open('tests/unit/workflow/test_pipeline_semantic_gate.py').read()); funcs=[n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]; assert 'test_timing_gate_prevents_run_on_failed_validation_collision_risk' in funcs; print('Pipeline Tests OK')\"",
+              "expected": ""
+            }
+          ],
+          "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+          "tool": "create_file",
+          "file_path": "backend/tests/unit/workflow/test_pipeline_semantic_gate.py",
+          "instruction": "EXPECTED BEHAVIOR & SIGNATURES:\n- Pipeline graph builder registers SemanticReviewNode immediately after ExecutionNode.\n- Validation hand-off gates semantic review execution behind _run_post_validation() success return.\n- Approved rubric triggers direct continuation to completion phase without fix loops.\n\nCREATE INTEGRATION TEST FILE:\nWrite a Python test file using pytest and unittest.mock. Focus on graph wiring and execution timing constraints per Phase 3 security/design requirements.\n1. test_semantic_node_registered_after_execution_in_graph: Mock the workflow graph builder in pipeline.py. Assert that an edge exists connecting ExecutionNode to SemanticReviewNode, ensuring the gate executes post-implementation but pre-completion as mandated by design.\n2. test_timing_gate_prevents_run_on_failed_validation_collision_risk: Simulate a state where deterministic validation (_run_post_validation) returned a failure/Fail result. Call the semantic review entry point or pipeline executor. Assert it is completely bypassed (zero LLM calls, zero diff captures), verifying mitigation for execution timing collision risk.\n3. test_pipeline_continues_on_semantic_approval: Mock SemanticReviewNode to return Continue/Success with an approved rubric (verdict='approved'). Assert the pipeline proceeds directly to the completion/commit phase without entering any fix loops or generating corrective plans.\n\nMOCKS & ASSERTIONS:\n- Mock graph builder, validation results, and node execution returns.\n- Assert exact state transitions and zero external calls for bypass scenarios.\n- Include descriptive failure messages mapping to Phase 3 timing collision mitigation.",
+          "reason": "Verifies pipeline.py integration per FILES NEEDING TEST COVERAGE. Ensures SemanticReviewNode wiring post-execution, enforces timing gate preventing runs on failed validation (Phase 3 security concern), and validates approval path continuation. Uses pytest + asyncio."
+        }
+      ],
+      "affected_files": [
+        "backend/src/lean_ai/workflow/validation.py",
+        "backend/src/lean_ai/workflow/pipeline.py",
+        "backend/tests/unit/workflow/test_semantic_gate.py",
+        "backend/CHANGELOG.md",
+        "backend/tests/unit/workflow/test_semantic_review.py",
+        "backend/tests/regression/workflow/regression_semantic_review_core.py",
+        "backend/tests/unit/workflow/test_pipeline_semantic_gate.py"
+      ],
+      "test_strategy": "TDD-driven implementation with unit tests verifying rubric schema constraints, drift detection triggering revise verdict, non-blocking approval path, raw diff capture utility, and corrective plan generation logic. All tests use pytest with asyncio support, mocking external LLM clients and git operations to isolate behavioral contracts.",
+      "plan_validation_warnings": [
+        "invented path: backend/CHANGELOG.md",
+        "write target not found in prior-phase paths: backend/CHANGELOG.md",
+        "core-functionality tag missing regression success check: 'SemanticReviewNode' in backend/src/lean_ai/workflow/pipeline.py [phase1_deliverable, confidence=high]",
+        "core-functionality tag missing regression success check: '_run_semantic_review' in backend/src/lean_ai/workflow/validation.py [downstream_consumer, confidence=high]"
+      ],
+      "core_functionality": [
+        {
+          "entity": "SemanticReviewNode",
+          "file_path": "backend/src/lean_ai/workflow/pipeline.py",
+          "reason": "Primary workflow node for semantic review; breaking it removes the entire gate from pipeline execution.",
+          "source_signal": "phase1_deliverable",
+          "confidence": "high"
+        },
+        {
+          "entity": "SemanticReviewRubric",
+          "file_path": "backend/src/lean_ai/workflow/semantic_review.py",
+          "reason": "Pydantic schema enforces structured output; if broken, LLM responses cannot be parsed into rubric format.",
+          "source_signal": "critical_risk_adjacent",
+          "confidence": "high"
+        },
+        {
+          "entity": "_run_semantic_review",
+          "file_path": "backend/src/lean_ai/workflow/validation.py",
+          "reason": "Core orchestration called by executor; named in scope deliverables and risk list for timing corruption.",
+          "source_signal": "downstream_consumer",
+          "confidence": "high"
+        },
+        {
+          "entity": "_capture_raw_diffs",
+          "file_path": "backend/src/lean_ai/workflow/semantic_review.py",
+          "reason": "Provides grounded diff data to reviewers; without it, grounding constraint is violated.",
+          "source_signal": "critical_risk_adjacent",
+          "confidence": "medium"
+        },
+        {
+          "entity": "_generate_corrective_plan",
+          "file_path": "backend/src/lean_ai/workflow/semantic_review.py",
+          "reason": "Prevents bare edit_file calls per constraints; breaking it allows unconstrained fix attempts.",
+          "source_signal": "phase1_deliverable",
+          "confidence": "high"
+        }
+      ]
+    },
+    "planning_checkpoint_id": null,
+    "approved_plan": {
+      "scope": "Implement a Semantic Diff Review Gate post-validation to prevent semantic drift, using LLM committee review of raw diffs against approved plans, structured rubric evaluation, and an automatic corrective fix loop capped at two iterations.",
+      "user_summary": "",
+      "naming_conventions": [],
+      "name_registry": [],
+      "steps": [
+        {
+          "step_number": 4,
+          "job": "Implement SemanticReviewRubric schema, diff capture, narrative summary generation, committee review orchestration, and corrective plan logic in validation.py",
+          "inputs": [
+            {
+              "source": "backend/src/lean_ai/workflow/validation.py",
+              "details": "_run_post_validation and _run_validation_fix_loop patterns for async execution and state management."
+            },
+            {
+              "source": "backend/src/lean_ai/tools/git_ops.py",
+              "details": "git_diff() returns unified patch text for raw grounding."
+            },
+            {
+              "source": "backend/src/lean_ai/workflow/planner_helpers.py",
+              "details": "_chat_structured_with_repair pattern for guaranteed Pydantic output parsing."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/src/lean_ai/workflow/validation.py",
+              "change": "Add SemanticReviewRubric Pydantic model, _capture_raw_diffs(), _generate_change_summary(), _conduct_committee_review(), _generate_corrective_plan(), and _run_semantic_review() orchestration with 2-iteration cap."
+            }
+          ],
+          "must_not_change": [
+            "_run_post_validation deterministic command execution",
+            "Existing fix loop LLM client wiring"
+          ],
+          "allowed_tools": [
+            "edit_file",
+            "read_file",
+            "grep_files",
+            "task_complete",
+            "list_directory",
+            "directory_tree",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url"
+          ],
+          "output_shape": "validation.py exports SemanticReviewRubric(BaseModel) with overall_score, verdict, blocking_issues, non_blocking_issues, category_scores. Async helpers _capture_raw_diffs(repo_root), _conduct_committee_review(llm_client, approved_plan, summary, raw_diffs), and _run_semantic_review(state, llm_client) enforce iteration tracking via state['semantic_review_iteration'] and route to corrective mini-plans on 'revise' verdict.",
+          "success_checks": [
+            {
+              "description": "_run_semantic_review function exists and imports git_ops/planner_helpers",
+              "tool": "read_file",
+              "command": "",
+              "expected": "Contains async def _run_semantic_review and import from .planner_helpers"
+            },
+            {
+              "description": "Iteration cap logic tracks semantic_review_iteration in state dict",
+              "tool": "grep_files",
+              "command": "cd backend && grep -n 'semantic_review_iteration' src/lean_ai/workflow/validation.py",
+              "expected": "Matches found showing counter initialization and 2-attempt limit check."
+            }
+          ],
+          "blocked_protocol": "If state manager API for session_metadata access differs, adapt to current StateManager.get_state_async() pattern. If corrective plan execution requires a specific executor helper, reuse existing execute_plan_mini or equivalent without modifying core executor signatures.",
+          "tool": "edit_file",
+          "file_path": "backend/src/lean_ai/workflow/validation.py",
+          "instruction": "Add semantic review orchestration to validation.py with rubric schema, diff capture, committee review, and iteration-capped fix loop.",
+          "reason": "Centralizes semantic gate lifecycle within the validation phase alongside existing deterministic checks. Mirrors current fix loop mechanics while introducing semantic-specific blocking/non-blocking routing and strict iteration caps."
+        },
+        {
+          "step_number": 5,
+          "job": "Register SemanticReviewNode in pipeline.py graph builder post-validation success path",
+          "inputs": [
+            {
+              "source": "backend/src/lean_ai/workflow/pipeline.py",
+              "details": "Graph builder registration patterns and ExecutionNode wiring around lines 330-668."
+            },
+            {
+              "source": "backend/src/lean_ai/workflow/graph.py",
+              "details": "Node base class, Continue/Suspend/Fail result types, WorkflowEngine execution model."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/src/lean_ai/workflow/pipeline.py",
+              "change": "Define SemanticReviewNode extending Node, wire it into workflow graph immediately after validation success, handle state handoff and result routing to completion or suspension."
+            }
+          ],
+          "must_not_change": [
+            "PlanningNode and ApprovalNodeExtended logic",
+            "Existing ExecutionNode tool invocation signatures"
+          ],
+          "allowed_tools": [
+            "edit_file",
+            "read_file",
+            "grep_files",
+            "task_complete",
+            "list_directory",
+            "directory_tree",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url"
+          ],
+          "output_shape": "SemanticReviewNode class with async execute() method delegating to _run_semantic_review. Graph builder registers edge from ExecutionNode/validation success to SemanticReviewNode, then routes approved results to commit/completion phase and blocking failures to suspension.",
+          "success_checks": [
+            {
+              "description": "SemanticReviewNode class is defined in pipeline.py",
+              "tool": "read_file",
+              "command": "",
+              "expected": "Contains class SemanticReviewNode(Node) with execute method"
+            },
+            {
+              "description": "Graph builder wires node post-execution",
+              "tool": "grep_files",
+              "command": "cd backend && grep -n 'SemanticReviewNode' src/lean_ai/workflow/pipeline.py",
+              "expected": "Registration calls found in graph construction block."
+            }
+          ],
+          "blocked_protocol": "If graph builder API uses a different fluent method for edge registration, adapt to local conventions. Do not alter ExecutionNode's core plan execution logic; only append the semantic review gate downstream.",
+          "tool": "edit_file",
+          "file_path": "backend/src/lean_ai/workflow/pipeline.py",
+          "instruction": "Register SemanticReviewNode in pipeline.py graph builder post-validation success path.",
+          "reason": "Integrates the semantic review capability into the primary workflow pipeline at the correct architectural boundary (post-deterministic validation, pre-commit). Ensures state flows correctly between deterministic and semantic evaluation phases."
+        },
+        {
+          "step_number": 6,
+          "job": "Update CHANGELOG.md to document Semantic Diff Review Gate feature",
+          "inputs": [
+            {
+              "source": "extension/CHANGELOG.md or backend/CHANGELOG.md",
+              "details": "Existing changelog entries for recent features."
+            },
+            {
+              "source": "Task Requirements",
+              "details": "Semantic gate prevents drift, uses raw diffs + narrative summary, 2-iteration fix loop cap."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/CHANGELOG.md",
+              "change": "Add entry under 'Features' or 'Improvements' describing the semantic review gate integration."
+            }
+          ],
+          "must_not_change": [
+            "Existing changelog entries for unrelated features"
+          ],
+          "allowed_tools": [
+            "edit_file",
+            "read_file",
+            "task_complete",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url"
+          ],
+          "output_shape": "CHANGELOG.md contains a new entry summarizing the semantic diff review gate, its rubric-based evaluation, raw diff grounding, and automatic corrective loop with 2-iteration cap.",
+          "success_checks": [
+            {
+              "description": "Changelog updated with semantic gate feature",
+              "tool": "read_file",
+              "command": "",
+              "expected": "Contains 'Semantic Diff Review Gate' or similar phrasing under appropriate heading."
+            }
+          ],
+          "blocked_protocol": "If CHANGELOG.md uses a different format (e.g., Keep a Changelog standard), adapt entry structure accordingly. Do not modify unrelated sections.",
+          "tool": "edit_file",
+          "file_path": "backend/CHANGELOG.md",
+          "instruction": "Append changelog entry for Semantic Diff Review Gate feature.",
+          "reason": "Documents the new verification layer for transparency and release tracking."
+        }
+      ],
+      "tdd_mode": true,
+      "tdd_test_steps": [
+        {
+          "step_number": 1,
+          "job": "Create unit tests for semantic review logic covering drift detection, non-blocking approval, rubric validation, diff capture, and corrective plan generation.",
+          "inputs": [
+            {
+              "source": "Implementation Plan Step 1 & Task Requirements",
+              "details": "Defines SemanticReviewRubric schema, _capture_raw_diffs, _conduct_committee_review, _generate_corrective_plan signatures. Requires pytest + asyncio + unittest.mock."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/tests/unit/workflow/test_semantic_review.py",
+              "change": "Create new test module with async unit tests for semantic review core logic."
+            }
+          ],
+          "must_not_change": [
+            "Existing workflow test files",
+            "Production implementation code (TDD mode)"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Python pytest module containing 5 async unit tests mocking LLM clients, git utilities, and state managers.",
+          "success_checks": [
+            {
+              "description": "Test file is syntactically valid Python",
+              "tool": "",
+              "command": "cd backend && python -m py_compile tests/unit/workflow/test_semantic_review.py",
+              "expected": ""
+            },
+            {
+              "description": "Test module imports successfully without resolving production deps",
+              "tool": "",
+              "command": "cd backend && python -c \"import ast; ast.parse(open('tests/unit/workflow/test_semantic_review.py').read()); print('AST OK')\"",
+              "expected": ""
+            }
+          ],
+          "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+          "tool": "create_file",
+          "file_path": "backend/tests/unit/workflow/test_semantic_review.py",
+          "instruction": "EXPECTED BEHAVIOR & SIGNATURES:\n- SemanticReviewRubric(Pydantic BaseModel): fields overall_score(int), verdict(Literal['approved','revise']), blocking_issues(list[str]), non_blocking_issues(list[str]), category_scores(dict).\n- _capture_raw_diffs(repo_root: str) -> str: Returns unified git diff text.\n- _conduct_committee_review(llm_client, expert_llm, request_llm, approved_plan, summary, raw_diffs) -> SemanticReviewRubric: Orchestrates LLM review.\n- _generate_corrective_plan(planner_ref, blocking_issues, current_state) -> ExecutionPlan: Generates fix plan.\n\nCREATE TEST FILE:\nWrite a Python test file using pytest and unittest.mock. Include module-level docstring explaining coverage scope. Use @pytest.mark.asyncio for all tests.\n1. test_rubric_schema_validates_fields: Instantiate SemanticReviewRubric with valid args (overall_score=8, verdict='approved', blocking_issues=[], non_blocking_issues=['style_nit'], category_scores={'intent_alignment': 9}). Assert .verdict == 'approved' and fields match expected types.\n2. test_drift_detected_triggers_revise_verdict: Patch _conduct_committee_review to return a rubric with blocking_issues=['omits_requirement_X'] and verdict='revise'. Call the orchestration logic and assert it enters the corrective loop path by verifying _generate_corrective_plan is called exactly once.\n3. test_non_blocking_issues_allow_approval: Patch review to return only non_blocking_issues=['minor_typo'] with verdict='approved'. Assert execution returns a Continue/Success result without invoking any planner or edit_file tools.\n4. test_capture_raw_diffs_returns_unified_patch: Mock the underlying git diff utility to return a standard unified patch string. Call _capture_raw_diffs(repo_root='/tmp') and assert the returned string contains '--- a/' and '+++ b/' markers, proving raw diffs are captured rather than summaries.\n5. test_generate_corrective_plan_invokes_planner: Mock the LLM planner client's structured output method. Call _generate_corrective_plan(blocking_issues=['fix_drift'], current_state={}). Assert it returns a valid plan object/dict and that the LLM was called with the blocking issues in the prompt context.\n\nMOCKS & ASSERTIONS:\n- Strictly mock external I/O (git, LLM clients, state managers). Never mock the unit under test itself.\n- Each assertion targets ONE specific behavior. Assert exact values or error types/messages where applicable.\n- Include descriptive failure messages on assertions.",
+          "reason": "Verifies Phase 2/3 semantic_review.py design: rubric schema validation, drift detection triggering revise verdict, non-blocking approval path, raw diff capture utility, and corrective plan generation logic. Uses pytest + asyncio matching repo conventions."
+        },
+        {
+          "step_number": 2,
+          "job": "Create regression tests for core functionality entities and security constraints (iteration cap, raw diff grounding).",
+          "inputs": [
+            {
+              "source": "CORE FUNCTIONALITY REQUIRING REGRESSION COVERAGE & SECURITY CONCERNS FROM PHASE 3",
+              "details": "Covers SemanticReviewRubric, _capture_raw_diffs, _generate_corrective_plan, iteration cap enforcement, and raw diff injection security mitigation."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/tests/regression/workflow/regression_semantic_review_core.py",
+              "change": "Create regression test module pinning load-bearing contracts and security mitigations."
+            }
+          ],
+          "must_not_change": [
+            "Existing regression tests",
+            "Production implementation code (TDD mode)"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Python pytest module containing 4 regression tests enforcing core contracts and security boundaries.",
+          "success_checks": [
+            {
+              "description": "Regression test file is syntactically valid",
+              "tool": "",
+              "command": "cd backend && python -m py_compile tests/regression/workflow/regression_semantic_review_core.py",
+              "expected": ""
+            },
+            {
+              "description": "Module parses correctly and defines expected test functions",
+              "tool": "",
+              "command": "cd backend && python -c \"import ast; tree=ast.parse(open('tests/regression/workflow/regression_semantic_review_core.py').read()); funcs=[n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]; assert 'test_rubric_schema_enforces_literal_verdict_constraint' in funcs; print('Regression OK')\"",
+              "expected": ""
+            }
+          ],
+          "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+          "tool": "create_file",
+          "file_path": "backend/tests/regression/workflow/regression_semantic_review_core.py",
+          "instruction": "EXPECTED BEHAVIOR & SIGNATURES:\n- SemanticReviewRubric strictly bounds verdict to 'approved' or 'revise'.\n- _conduct_committee_review MUST inject raw diffs into Expert prompt separately from narrative summary.\n- Validation/Pipeline loop tracks state['semantic_review_iteration'] and forces Suspend on breach of 2 attempts.\n- _generate_corrective_plan handles edge cases gracefully without crashing downstream executor.\n\nCREATE REGRESSION TEST FILE:\nWrite a Python test file using pytest and unittest.mock. Prefix reason with REGRESSION: as mandated. Use @pytest.mark.asyncio where applicable.\n1. test_rubric_schema_enforces_literal_verdict_constraint: Attempt to instantiate SemanticReviewRubric with verdict='fix' (invalid). Assert Pydantic's ValidationError is raised, proving the schema strictly bounds LLM outputs and prevents drift in structured parsing.\n2. test_raw_diffs_grounding_prevents_hallucination_security_risk: Mock the Expert model prompt builder inside _conduct_committee_review. Assert that the constructed prompt explicitly contains a raw diff section (e.g., matches regex '\\nRAW DIFFS:\\n.*---') and does NOT rely solely on the narrative summary. This verifies mitigation for reviewer hallucination risk.\n3. test_two_iteration_hard_cap_suspends_execution_security_risk: Initialize state dict with {'semantic_review_iteration': 2}. Trigger the semantic review loop orchestration function. Assert it immediately raises/returns a Suspend result requesting user intervention, without calling any LLM or diff capture functions. This verifies mitigation for runaway LLM consumption risk.\n4. test_core_corrective_plan_generation_contract: Mock planner dependencies. Call _generate_corrective_plan with empty blocking issues list []. Assert it returns an empty plan dict or gracefully handles the edge case without raising unhandled exceptions, preserving downstream executor stability.\n\nMOCKS & ASSERTIONS:\n- Regression tests are IMMUTABLE contracts. Assertions must fail if implementation deviates from these exact boundaries.\n- Mock external dependencies only. Include descriptive failure messages linking to Phase 3 security mitigations.",
+          "reason": "REGRESSION: Covers core entities SemanticReviewRubric, _capture_raw_diffs, _generate_corrective_plan per Phase 3 tags. Enforces security mitigations for reviewer hallucination (raw diff grounding) and runaway LLM consumption (2-iteration hard cap). Uses pytest + asyncio."
+        },
+        {
+          "step_number": 3,
+          "job": "Create pipeline integration tests verifying node wiring, timing gate constraints, and execution flow.",
+          "inputs": [
+            {
+              "source": "FILES NEEDING TEST COVERAGE & IMPLEMENTATION PLAN Steps 3-4",
+              "details": "Covers backend/src/lean_ai/workflow/pipeline.py registration, validation hand-off, and timing collision mitigation."
+            }
+          ],
+          "may_change": [
+            {
+              "path": "backend/tests/unit/workflow/test_pipeline_semantic_gate.py",
+              "change": "Create integration test module for pipeline graph wiring and execution timing constraints."
+            }
+          ],
+          "must_not_change": [
+            "Existing pipeline tests",
+            "Production implementation code (TDD mode)"
+          ],
+          "allowed_tools": [
+            "create_file",
+            "read_file",
+            "list_directory",
+            "directory_tree",
+            "grep_files",
+            "query_project_context",
+            "search_reference",
+            "search_internet",
+            "fetch_url",
+            "task_complete"
+          ],
+          "output_shape": "Python pytest module containing 3 integration tests verifying graph edges and timing gates.",
+          "success_checks": [
+            {
+              "description": "Pipeline test file is syntactically valid",
+              "tool": "",
+              "command": "cd backend && python -m py_compile tests/unit/workflow/test_pipeline_semantic_gate.py",
+              "expected": ""
+            },
+            {
+              "description": "Module defines expected integration test functions",
+              "tool": "",
+              "command": "cd backend && python -c \"import ast; tree=ast.parse(open('tests/unit/workflow/test_pipeline_semantic_gate.py').read()); funcs=[n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]; assert 'test_timing_gate_prevents_run_on_failed_validation_collision_risk' in funcs; print('Pipeline Tests OK')\"",
+              "expected": ""
+            }
+          ],
+          "blocked_protocol": "Use read-only tools to gather missing context. If still blocked, record the blocker clearly and call task_complete with what is incomplete.",
+          "tool": "create_file",
+          "file_path": "backend/tests/unit/workflow/test_pipeline_semantic_gate.py",
+          "instruction": "EXPECTED BEHAVIOR & SIGNATURES:\n- Pipeline graph builder registers SemanticReviewNode immediately after ExecutionNode.\n- Validation hand-off gates semantic review execution behind _run_post_validation() success return.\n- Approved rubric triggers direct continuation to completion phase without fix loops.\n\nCREATE INTEGRATION TEST FILE:\nWrite a Python test file using pytest and unittest.mock. Focus on graph wiring and execution timing constraints per Phase 3 security/design requirements.\n1. test_semantic_node_registered_after_execution_in_graph: Mock the workflow graph builder in pipeline.py. Assert that an edge exists connecting ExecutionNode to SemanticReviewNode, ensuring the gate executes post-implementation but pre-completion as mandated by design.\n2. test_timing_gate_prevents_run_on_failed_validation_collision_risk: Simulate a state where deterministic validation (_run_post_validation) returned a failure/Fail result. Call the semantic review entry point or pipeline executor. Assert it is completely bypassed (zero LLM calls, zero diff captures), verifying mitigation for execution timing collision risk.\n3. test_pipeline_continues_on_semantic_approval: Mock SemanticReviewNode to return Continue/Success with an approved rubric (verdict='approved'). Assert the pipeline proceeds directly to the completion/commit phase without entering any fix loops or generating corrective plans.\n\nMOCKS & ASSERTIONS:\n- Mock graph builder, validation results, and node execution returns.\n- Assert exact state transitions and zero external calls for bypass scenarios.\n- Include descriptive failure messages mapping to Phase 3 timing collision mitigation.",
+          "reason": "Verifies pipeline.py integration per FILES NEEDING TEST COVERAGE. Ensures SemanticReviewNode wiring post-execution, enforces timing gate preventing runs on failed validation (Phase 3 security concern), and validates approval path continuation. Uses pytest + asyncio."
+        }
+      ],
+      "affected_files": [
+        "backend/src/lean_ai/workflow/validation.py",
+        "backend/src/lean_ai/workflow/pipeline.py",
+        "backend/tests/unit/workflow/test_semantic_gate.py",
+        "backend/CHANGELOG.md",
+        "backend/tests/unit/workflow/test_semantic_review.py",
+        "backend/tests/regression/workflow/regression_semantic_review_core.py",
+        "backend/tests/unit/workflow/test_pipeline_semantic_gate.py"
+      ],
+      "test_strategy": "TDD-driven implementation with unit tests verifying rubric schema constraints, drift detection triggering revise verdict, non-blocking approval path, raw diff capture utility, and corrective plan generation logic. All tests use pytest with asyncio support, mocking external LLM clients and git operations to isolate behavioral contracts.",
+      "plan_validation_warnings": [
+        "invented path: backend/CHANGELOG.md",
+        "write target not found in prior-phase paths: backend/CHANGELOG.md",
+        "core-functionality tag missing regression success check: 'SemanticReviewNode' in backend/src/lean_ai/workflow/pipeline.py [phase1_deliverable, confidence=high]",
+        "core-functionality tag missing regression success check: '_run_semantic_review' in backend/src/lean_ai/workflow/validation.py [downstream_consumer, confidence=high]"
+      ],
+      "core_functionality": [
+        {
+          "entity": "SemanticReviewNode",
+          "file_path": "backend/src/lean_ai/workflow/pipeline.py",
+          "reason": "Primary workflow node for semantic review; breaking it removes the entire gate from pipeline execution.",
+          "source_signal": "phase1_deliverable",
+          "confidence": "high"
+        },
+        {
+          "entity": "SemanticReviewRubric",
+          "file_path": "backend/src/lean_ai/workflow/semantic_review.py",
+          "reason": "Pydantic schema enforces structured output; if broken, LLM responses cannot be parsed into rubric format.",
+          "source_signal": "critical_risk_adjacent",
+          "confidence": "high"
+        },
+        {
+          "entity": "_run_semantic_review",
+          "file_path": "backend/src/lean_ai/workflow/validation.py",
+          "reason": "Core orchestration called by executor; named in scope deliverables and risk list for timing corruption.",
+          "source_signal": "downstream_consumer",
+          "confidence": "high"
+        },
+        {
+          "entity": "_capture_raw_diffs",
+          "file_path": "backend/src/lean_ai/workflow/semantic_review.py",
+          "reason": "Provides grounded diff data to reviewers; without it, grounding constraint is violated.",
+          "source_signal": "critical_risk_adjacent",
+          "confidence": "medium"
+        },
+        {
+          "entity": "_generate_corrective_plan",
+          "file_path": "backend/src/lean_ai/workflow/semantic_review.py",
+          "reason": "Prevents bare edit_file calls per constraints; breaking it allows unconstrained fix attempts.",
+          "source_signal": "phase1_deliverable",
+          "confidence": "high"
+        }
+      ]
+    }
+  },
+  "created_at": "2026-06-05T12:21:56.663605+00:00",
+  "updated_at": "2026-06-05T22:25:15.059785+00:00"
+}

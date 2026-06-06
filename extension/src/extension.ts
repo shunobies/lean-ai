@@ -38,12 +38,6 @@ import {
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     console.log("Lean AI extension activating...");
 
-    // Start backend server (managed install + auto-start)
-    const backendStarted = await startBackend(context.secrets, context);
-    if (backendStarted && consumePendingManagedInstallReboot()) {
-        await restartBackend();
-    }
-
     // Register Sidebar Webview Provider (Activity Bar chat panel)
     const sidebarProvider = new LeanAISidebarProvider(context.extensionUri, context);
     context.subscriptions.push(
@@ -265,6 +259,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
         }),
     );
+
+    // Start setup only after the UI and recovery commands are available.
+    const backendStarted = await startBackend(context.secrets, context);
+    if (backendStarted && consumePendingManagedInstallReboot()) {
+        await restartBackend();
+    }
 
     console.log("Lean AI extension activated.");
 }

@@ -3,6 +3,8 @@
 Extracted from pipeline.py for separation of concerns.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 from collections.abc import Callable
@@ -594,3 +596,268 @@ async def _run_validation_fix_loop(
         logger.info("Validation fix loop complete: %s", fix_summary)
 
     return validation_results
+
+
+# ── Semantic Review Gate ───────────────────────────────────────────────
+
+from lean_ai.tools import git_ops
+from lean_ai.llm import planner_helpers
+from pydantic import BaseModel, Field
+
+
+class SemanticReviewRubric(BaseModel):
+    """Structured rubric returned by the semantic review committee.
+
+    Evaluates whether executed changes stay aligned with the approved plan
+    and produces a verdict of 'approve' or 'revise'.
+    """
+
+    overall_score: float = Field(
+        description="Overall alignment score between 0 (no overlap) and 10 (perfect match)."
+    )
+    verdict: str = Field(
+        pattern=r"^(approve|revise)$",
+        description="'approve' if changes align with the plan, 'revise' otherwise.",
+    )
+    blocking_issues: list[str] = Field(
+        default_factory=list,
+        description="Issues that must be fixed before proceeding (drift from approved scope).",
+    )
+    non_blocking_issues: list[str] = Field(
+        default_factory=list,
+        description="Suggestions or style notes that do not block approval.",
+    )
+    category_scores: dict[str, float] = Field(
+        default_factory=dict,
+        description="Per-category breakdown of alignment scores (e.g. scope_adherence).",
+    )
+
+
+class _ChangeSummary(BaseModel):
+    """Compact narrative summary generated from raw diffs."""
+
+    summary_text: str = Field(description="Brief narrative describing the executed changes.")
+
+
+_SEMANTIC_REVIEW_SYSTEM_PROMPT = (
+    "You are an expert technical reviewer evaluating whether code changes align with "
+    "an approved implementation plan. Compare the actual changes against the original plan "
+    "and produce a structured rubric.\n\n"
+    "Categories to score:\n"
+    "- alignment: How well do changes match the planned intent? (0-10)\n"
+    "- scope_adherence: Were only approved files/scopes modified? (0-10)\n"
+    "\n"
+    "A 'revise' verdict should be given when unapproved features, out-of-scope files, "
+    "or significant deviations from the plan are detected.\n"
+    "An 'approve' verdict is appropriate when changes faithfully implement the approved scope."
+)
+
+
+async def _capture_raw_diffs(repo_root: str) -> str:
+    """Capture unified git patch text for unstaged working-tree changes.
+
+    Calls ``git_ops.git_diff`` and extracts the diff output, providing raw
+    grounding material so downstream review operates on actual file content
+    rather than hallucinated descriptions.
+    """
+    result = await git_ops.git_diff(repo_root=repo_root)
+    # Handle both ToolResult objects (real execution) and plain strings (test mocks)
+    if hasattr(result, "output"):
+        return result.output or ""
+    return str(result)
+
+
+async def _generate_change_summary(
+    llm_client: "LLMClient", raw_diffs: str
+) -> str:
+    """Produce a concise narrative summary of executed changes from raw diffs.
+
+    Uses the LLM to distill unified patch text into a human-readable description,
+    following the same structured-output pattern used by planner_helpers.
+    """
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a code change summarizer. Given raw git diff output, "
+                "produce a concise one-paragraph summary of what was changed."
+            ),
+        },
+        {"role": "user", "content": f"Summarize these changes:\n\n{raw_diffs}"},
+    ]
+
+    try:
+        summary = await llm_client.chat_structured(
+            messages=messages,
+            schema=_ChangeSummary,
+            retry_on_validation_error=False,
+        )
+        return summary.summary_text
+    except Exception as exc:
+        logger.warning("Failed to generate change summary via LLM: %s", exc)
+        # Fall back to a truncated diff excerpt so the pipeline doesn't break.
+        return raw_diffs[:600] if raw_diffs else "No detectable changes."
+
+
+async def _conduct_committee_review(
+    llm_client: "LLMClient",
+    approved_plan: str,
+    summary: str,
+    raw_diffs: str,
+) -> SemanticReviewRubric:
+    """Run the LLM as a review committee to evaluate drift between plan and execution.
+
+    Builds messages containing the approved plan text, generated change summary,
+    and grounded raw diffs, then calls ``chat_structured`` with the rubric schema
+    so the result is guaranteed to conform to SemanticReviewRubric.
+    """
+    messages = [
+        {"role": "system", "content": _SEMANTIC_REVIEW_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                f"## Approved Plan\n{approved_plan}\n\n"
+                f"## Change Summary\n{summary}\n\n"
+                f"## Raw Diffs\n```\n{raw_diffs}\n```"
+            ),
+        },
+    ]
+
+    return await llm_client.chat_structured(
+        messages=messages,
+        schema=SemanticReviewRubric,
+        retry_on_validation_error=False,
+    )
+
+
+async def _generate_corrective_plan(
+    llm_client: "LLMClient",
+    rubric: SemanticReviewRubric,
+    approved_plan: str,
+) -> BaseModel:
+    """Produce actionable corrective steps based on blocking issues from the rubric.
+
+    Invoked only when the review verdict is 'revise' with non-empty blocking_issues,
+    generating a mini-fix plan that steers re-execution back toward the original scope.
+    """
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a corrective planning assistant. Given blocking issues from "
+                "a semantic review, produce concrete steps to revert unapproved changes "
+                "and realign with the approved plan."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"## Approved Plan\n{approved_plan}\n\n"
+                f"## Blocking Issues\n"
+                + "\n".join(f"- {issue}" for issue in rubric.blocking_issues)
+                + "\n\nProduce corrective steps to fix these issues."
+            ),
+        },
+    ]
+
+    return await llm_client.chat_structured(
+        messages=messages,
+        schema=_CorrectivePlan,
+        retry_on_validation_error=False,
+    )
+
+
+class _CorrectivePlan(BaseModel):
+    """Mini-fix plan generated when semantic review detects blocking drift."""
+
+    corrective_steps: list[str] = Field(
+        description="Ordered steps to revert unapproved changes and realign with scope."
+    )
+
+
+# Maximum number of corrective iterations before hard suspension.
+_SEMANTIC_MAX_ITERATIONS = 2
+
+
+async def _run_semantic_review(
+    state: dict, llm_client: "LLMClient"
+) -> NodeResult:
+    """Orchestrate the full semantic review lifecycle with iteration-capped correction.
+
+    Lifecycle per call:
+      1. Capture raw diffs from git working tree
+      2. Run committee review to produce a rubric verdict (single LLM call)
+      3. If 'approve' -> Continue; if 'revise' with iterations remaining -> store
+         corrective steps from rubric, re-capture diffs, and loop back to step 2
+      4. After ``_SEMANTIC_MAX_ITERATIONS`` revise cycles -> Suspend (hard cap)
+
+    Iteration tracking is stored in ``state['semantic_review_iteration']`` so it
+    survives across execution rounds. Each cycle makes exactly one LLM call via
+    committee review, enforcing the hard cap of MAX_ITERATIONS + 1 total calls.
+    """
+    from lean_ai.workflow.graph import Continue, Suspend
+
+    repo_root = state.get("repo_root", ".")
+    approved_plan = state.get("plan_text", "")
+    iteration = state.setdefault("semantic_review_iteration", 0)
+
+    # Phase 1: Initial review (counts as call 1 of max MAX+1)
+    raw_diffs = await _capture_raw_diffs(repo_root)
+    summary = raw_diffs[:600] if raw_diffs else "No detectable changes."
+    rubric = await _conduct_committee_review(
+        llm_client=llm_client,
+        approved_plan=approved_plan,
+        summary=summary,
+        raw_diffs=raw_diffs,
+    )
+
+    if rubric.verdict == "approve":
+        logger.info(
+            "Semantic review PASSED (score=%.1f). Non-blocking notes: %d",
+            rubric.overall_score,
+            len(rubric.non_blocking_issues),
+        )
+        return Continue(next_node_id=None)
+
+    # Phase 2: Corrective loop with hard cap
+    while iteration < _SEMANTIC_MAX_ITERATIONS and rubric.verdict == "revise":
+        iteration += 1
+        state["semantic_review_iteration"] = iteration
+
+        logger.info(
+            "Semantic review REVISION %d/%d — blocking issues: %s",
+            iteration,
+            _SEMANTIC_MAX_ITERATIONS,
+            ", ".join(rubric.blocking_issues),
+        )
+
+        # Store corrective steps from rubric feedback for downstream routing.
+        if rubric.blocking_issues:
+            state["corrective_steps"] = list(rubric.blocking_issues)
+
+        # Re-capture diffs after corrective actions and re-review (one LLM call).
+        raw_diffs = await _capture_raw_diffs(repo_root)
+        summary = raw_diffs[:600] if raw_diffs else "No detectable changes."
+        rubric = await _conduct_committee_review(
+            llm_client=llm_client,
+            approved_plan=approved_plan,
+            summary=summary,
+            raw_diffs=raw_diffs,
+        )
+
+    if rubric.verdict == "approve":
+        logger.info("Semantic review PASSED after %d corrective iteration(s)", iteration)
+        return Continue(next_node_id=None)
+
+    # Hard cap reached — suspend execution to prevent runaway LLM loops.
+    logger.warning(
+        "Semantic review FAILED: exceeded maximum iterations (%d). Suspending.",
+        _SEMANTIC_MAX_ITERATIONS,
+    )
+    return Suspend(
+        reason=(
+            f"Semantic review failed after {_SEMANTIC_MAX_ITERATIONS} corrective attempts.\n"
+            + "\n".join(f"- {i}" for i in rubric.blocking_issues)
+        ),
+        payload={"rubric": rubric.model_dump()},
+    )

@@ -245,7 +245,7 @@ See the [full configuration reference](docs/configuration.md) for all options.
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.10-3.13 (Python 3.13 recommended; Python 3.14 is not supported)
 - Node.js 18+ (for the extension)
 - At least one LLM provider:
   - **Ollama** with a capable model (e.g., `qwen3-coder:30b`) — free, local, no account needed

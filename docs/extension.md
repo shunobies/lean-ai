@@ -8,7 +8,11 @@ The Lean AI extension provides a sidebar chat panel, inline predictions, session
 
 Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=lean-ai.lean-ai) or [OpenVSX](https://open-vsx.org/extension/lean-ai/lean-ai).
 
-On first activation, the extension automatically creates a Python virtual environment and installs the backend server. The only prerequisite is [Ollama](https://ollama.com) with a pulled model (e.g. `ollama pull qwen3-coder:30b`).
+On first activation, the extension automatically selects Python 3.10-3.13
+(preferring Python 3.13), creates a virtual environment, and installs the
+backend server. Python 3.14 is rejected because the voice dependencies require
+Python 3.13 or earlier. The remaining prerequisite is
+[Ollama](https://ollama.com) with a pulled model (e.g. `ollama pull qwen3-coder:30b`).
 
 ### From Source
 

@@ -20,7 +20,11 @@
     "Programming Languages"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onView:lean-ai.chatView",
+    "onView:lean-ai.sessionsView",
+    "onCommand:lean-ai.restartBackend",
+    "onCommand:lean-ai.reinstallBackend"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -1083,8 +1087,10 @@
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
     "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
     "lint": "eslint src --ext ts",
+    "test": "jest --runInBand",
     "copy-backend": "node scripts/copy-backend.js",
-    "package": "npm run copy-backend && npm run build && vsce package"
+    "package": "npm run copy-backend && npm run build && vsce package",
+    "verify-package": "node scripts/verify-vsix.js"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",

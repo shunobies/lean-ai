@@ -10,8 +10,17 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
-import { execFile, execFileSync, execSync } from "child_process";
+import { execFile, execFileSync } from "child_process";
 import { SECRET_KEYS } from "./settingsSync";
+import {
+    discoverSupportedPython,
+    MAX_PYTHON_EXCLUSIVE,
+    MIN_PYTHON,
+    pythonDownloadUrl,
+    pythonInstallGuidance,
+    type PythonCommand,
+    type PythonDiscoveryResult,
+} from "./pythonDiscovery";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -22,7 +31,6 @@ const EXTRAS_PROMPTED_KEY = "lean-ai.extrasPrompted";
 const MANAGED_PYTHON_PATH_KEY = "lean-ai.managedPythonPath";
 const MANAGED_BACKEND_DIR_KEY = "lean-ai.managedBackendDir";
 const LEGACY_VENV_DIR = "backend-venv";
-const MIN_PYTHON: [number, number] = [3, 10];
 const VERIFY_IMPORTS = ["lean_ai", "tree_sitter", "fastapi", "uvicorn", "ollama"];
 const BACKEND_COPY_EXCLUDE_NAMES = new Set([
     ".env",
@@ -124,19 +132,21 @@ export async function ensureBackendInstalled(
                 // Step 1: Resolve system Python (for venv creation)
                 if (!fs.existsSync(venvPython)) {
                     progress.report({ message: "Locating Python..." });
-                    const systemPython = resolveSystemPython();
-                    if (!systemPython) {
-                        showNoPythonError();
-                        throw new Error("Python not found");
+                    const discovery = discoverSupportedPython(process.platform);
+                    channel.appendLine(
+                        `[Lean AI] Detected operating system: ${discovery.platformName} ` +
+                        `(${process.platform})`,
+                    );
+                    if (!discovery.selected) {
+                        showUnsupportedPythonError(discovery);
+                        throw new Error("No supported Python 3.10-3.13 interpreter found");
                     }
 
-                    const versionCheck = checkPythonVersion(systemPython);
-                    if (!versionCheck.ok) {
-                        showPythonVersionError(versionCheck.version);
-                        throw new Error(`Python ${versionCheck.version} < ${MIN_PYTHON.join(".")}`);
-                    }
-
-                    channel.appendLine(`[Lean AI] System Python: ${systemPython} (${versionCheck.version})`);
+                    const systemPython = discovery.selected;
+                    channel.appendLine(
+                        `[Lean AI] System Python: ${systemPython.label} ` +
+                        `(${systemPython.version.display})`,
+                    );
 
                     // Step 2: Create venv
                     progress.report({ message: "Creating virtual environment..." });
@@ -146,11 +156,11 @@ export async function ensureBackendInstalled(
 
                 // Step 3: Install / upgrade backend
                 progress.report({ message: isUpgrade ? "Upgrading backend..." : "Installing backend (this may take a minute)..." });
-                const extras = await detectExtras(context);
-                await installBackend(venvPython, target.backendDir, extras, isUpgrade, channel);
-
                 progress.report({ message: "Upgrading Python packaging tools..." });
                 await upgradePackagingTools(venvPython, channel);
+
+                const extras = await detectExtras(context);
+                await installBackend(venvPython, target.backendDir, extras, isUpgrade, channel);
 
                 // Step 4: Verify core imports
                 progress.report({ message: "Verifying installation..." });
@@ -308,7 +318,6 @@ function getVenvPythonPath(venvPath: string): string {
 function getBundledBackendPath(context: vscode.ExtensionContext): string {
     return path.join(context.extensionPath, "backend");
 }
-
 interface ManagedBackendTarget {
     backendDir: string;
     copiedFrom?: string;
@@ -319,17 +328,17 @@ function resolveManagedBackendTarget(
     channel: vscode.OutputChannel,
 ): ManagedBackendTarget {
     const bundledBackend = getBundledBackendPath(context);
-    if (isUsableBackendDir(bundledBackend) && canWriteDirectory(bundledBackend)) {
-        return { backendDir: bundledBackend };
+    if (!isUsableBackendDir(bundledBackend)) {
+        throw new Error(`Bundled backend source not found at ${bundledBackend}`);
     }
 
     const fallbackBackend = path.join(context.globalStorageUri.fsPath, "backend");
     channel.appendLine(
-        `[Lean AI] Bundled backend is not writable; using managed backend copy at ${fallbackBackend}`,
+        `[Lean AI] Using managed backend at ${fallbackBackend}`,
     );
     return {
         backendDir: fallbackBackend,
-        copiedFrom: isUsableBackendDir(bundledBackend) ? bundledBackend : undefined,
+        copiedFrom: bundledBackend,
     };
 }
 
@@ -337,18 +346,6 @@ function isUsableBackendDir(dir: string): boolean {
     try {
         return fs.statSync(dir).isDirectory()
             && fs.existsSync(path.join(dir, "pyproject.toml"));
-    } catch {
-        return false;
-    }
-}
-
-function canWriteDirectory(dir: string): boolean {
-    try {
-        fs.mkdirSync(dir, { recursive: true });
-        const probe = path.join(dir, `.lean-ai-write-test-${process.pid}-${Date.now()}`);
-        fs.writeFileSync(probe, "");
-        fs.rmSync(probe, { force: true });
-        return true;
     } catch {
         return false;
     }
@@ -432,65 +429,17 @@ function copyRecursive(src: string, dst: string): void {
     fs.copyFileSync(src, dst);
 }
 
-/**
- * Probe PATH for a working Python interpreter.
- * Preference order: python3 → python (Unix), python → py → python3 (Windows).
- */
-function resolveSystemPython(): string | null {
-    const candidates =
-        process.platform === "win32"
-            ? ["python", "py", "python3"]
-            : ["python3", "python"];
-
-    for (const candidate of candidates) {
-        try {
-            const probe =
-                process.platform === "win32"
-                    ? `where ${candidate}`
-                    : `which ${candidate}`;
-            execSync(probe, { timeout: 3000, stdio: "pipe" });
-            return candidate;
-        } catch {
-            // Not on PATH
-        }
-    }
-    return null;
-}
-
-/** Run `python --version` and parse the output. */
-function checkPythonVersion(pythonPath: string): { ok: boolean; version: string } {
-    try {
-        const output = execFileSync(pythonPath, ["--version"], {
-            timeout: 5000,
-            stdio: "pipe",
-            encoding: "utf-8",
-        }).trim();
-        // "Python 3.12.1" → "3.12.1"
-        const match = output.match(/Python\s+(\d+)\.(\d+)/);
-        if (!match) {
-            return { ok: false, version: output };
-        }
-        const major = parseInt(match[1], 10);
-        const minor = parseInt(match[2], 10);
-        const version = output.replace("Python ", "");
-        const ok = major > MIN_PYTHON[0] || (major === MIN_PYTHON[0] && minor >= MIN_PYTHON[1]);
-        return { ok, version };
-    } catch {
-        return { ok: false, version: "unknown" };
-    }
-}
-
 /** Create a Python virtual environment. */
 function createVenv(
-    systemPython: string,
+    systemPython: PythonCommand,
     venvPath: string,
     channel: vscode.OutputChannel,
 ): Promise<void> {
     return new Promise((resolve, reject) => {
         channel.appendLine(`[Lean AI] Creating venv at ${venvPath}`);
         const proc = execFile(
-            systemPython,
-            ["-m", "venv", venvPath],
+            systemPython.command,
+            [...systemPython.args, "-m", "venv", venvPath],
             { timeout: 60_000 },
             (err) => {
                 if (err) {
@@ -523,7 +472,7 @@ function installBackend(
     upgrade: boolean,
     channel: vscode.OutputChannel,
 ): Promise<void> {
-    const allExtras = [...new Set(["dev", ...extras])];
+    const allExtras = [...new Set(extras)];
     const target = allExtras.length > 0
         ? `${backendPath}[${allExtras.join(",")}]`
         : backendPath;
@@ -737,28 +686,22 @@ async function promptOptionalExtras(context: vscode.ExtensionContext): Promise<v
     );
 }
 
-/** Show an error when no Python is found on PATH. */
-function showNoPythonError(): void {
+function showUnsupportedPythonError(discovery: PythonDiscoveryResult): void {
+    const found = discovery.detected.length > 0
+        ? ` Found: ${discovery.detected.map((item) => item.version.display).join(", ")}.`
+        : "";
+    const supported = `${MIN_PYTHON.join(".")} through ` +
+        `${MAX_PYTHON_EXCLUSIVE[0]}.${MAX_PYTHON_EXCLUSIVE[1] - 1}`;
     vscode.window.showErrorMessage(
-        "Lean AI: Python not found. Install Python 3.10+ or set 'lean-ai.pythonPath' in settings.",
+        `Lean AI requires Python ${supported}; Python 3.14 is not supported because ` +
+        `voice dependencies require Python 3.13 or earlier.${found} ` +
+        pythonInstallGuidance(process.platform),
         "Install Python",
         "Open Settings",
     ).then((choice) => {
         if (choice === "Install Python") {
-            vscode.env.openExternal(vscode.Uri.parse("https://www.python.org/downloads/"));
+            vscode.env.openExternal(vscode.Uri.parse(pythonDownloadUrl()));
         } else if (choice === "Open Settings") {
-            vscode.commands.executeCommand("workbench.action.openSettings", "lean-ai.pythonPath");
-        }
-    });
-}
-
-/** Show an error when Python version is too old. */
-function showPythonVersionError(found: string): void {
-    vscode.window.showErrorMessage(
-        `Lean AI: Python ${MIN_PYTHON.join(".")}+ required, found ${found}. Update Python or set 'lean-ai.pythonPath'.`,
-        "Open Settings",
-    ).then((choice) => {
-        if (choice === "Open Settings") {
             vscode.commands.executeCommand("workbench.action.openSettings", "lean-ai.pythonPath");
         }
     });

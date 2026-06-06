@@ -186,7 +186,7 @@ Settings are saved to `backend/config.yaml`. API keys and integration tokens are
 
 ## Requirements
 
-- Python 3.10+ (for the backend server, installed automatically)
+- Python 3.10-3.13 (Python 3.13 recommended; Python 3.14 is not supported)
 - [Ollama](https://ollama.com) with a capable model (e.g., `qwen3-coder:30b`) — or an OpenAI/Anthropic API key
 - **For voice:** portaudio system library + `pip install "lean-ai[voice]"` (optional)
 - **For vision:** an Ollama vision model like `qwen3-vl:8b` (optional)

@@ -386,6 +386,29 @@ class ExecutionNode(Node):
             return Fail(error=str(exc))
 
 
+class SemanticReviewNode(Node):
+    """Marker node for post-execution semantic review gate.
+
+    Placed in the graph immediately after ExecutionNode to mark the
+    architectural boundary where semantic review occurs. The actual
+    review logic runs in run_workflow() after engine.run() returns Continue,
+    ensuring it only executes on successful paths (Fail/Suspend short-circuit).
+    """
+
+    def __init__(
+        self,
+        repo_root: str,
+        llm_client: "LLMClient",
+    ) -> None:
+        super().__init__("semantic_review")
+        self.repo_root = repo_root
+        self.llm_client = llm_client
+
+    async def execute(self, state: WorkflowState) -> NodeResult:
+        """Marker node — always continues; actual review runs post-engine."""
+        return Continue(next_node_id=None)
+
+
 # ── Public API ──────────────────────────────────────────────────────
 
 
@@ -597,6 +620,12 @@ async def run_workflow(
                 state_manager=state_manager,
             )
         )
+        graph.add_node(
+            SemanticReviewNode(
+                repo_root=repo_root,
+                llm_client=llm_client,
+            )
+        )
 
         # Run the graph via WorkflowEngine — state saved after each node
         engine = WorkflowEngine()
@@ -625,6 +654,40 @@ async def run_workflow(
         # Extract the execution result from state
         state = await state_manager.get_state_async()
         result = state.session_metadata.get("execution_result", "")
+
+        # ── Semantic review gate (post-execution, pre-checkpoint) ──
+        # Only reached here when engine.run returned Continue (not Fail/Suspend).
+        # When execution fails, the Fail handler above raises RuntimeError before this point.
+        approved_plan = state.session_metadata.get("approved_plan")
+        plan_text = ""
+        if approved_plan is not None:
+            from lean_ai.llm.plan_schema import ExecutionPlan
+
+            if isinstance(approved_plan, ExecutionPlan):
+                plan_text = approved_plan.model_dump_json(indent=2)
+            else:
+                plan_text = str(approved_plan)
+
+        review_state: dict[str, object] = {
+            "repo_root": repo_root,
+            "plan_text": plan_text,
+        }
+        try:
+            from lean_ai.workflow.validation import _run_semantic_review
+
+            semantic_result = await _run_semantic_review(
+                state=review_state, llm_client=llm_client
+            )
+        except ImportError:
+            logger.debug("Semantic review unavailable — passing through")
+            semantic_result = Continue(next_node_id=None)
+
+        if isinstance(semantic_result, Suspend):
+            logger.warning("Semantic review suspended: %s", semantic_result.reason)
+            state.current_phase = "suspended"
+            state.session_metadata["suspend_reason"] = semantic_result.reason
+            state_manager.save()
+            raise WorkflowSessionClosedError()
 
         # Save checkpoint after execution phase
         state.current_phase = "execution_complete"
