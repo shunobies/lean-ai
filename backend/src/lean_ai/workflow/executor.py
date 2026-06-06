@@ -200,6 +200,7 @@ def _collect_tdd_test_commands(plan: ExecutionPlan) -> tuple[list[str], list[int
         tied_commands = [
             command
             for command in step_commands
+            if _is_executable_test_command(command)
             if any(_path_mentioned_in(test_file, command) for test_file in test_files)
         ]
         if not tied_commands:
@@ -208,6 +209,35 @@ def _collect_tdd_test_commands(plan: ExecutionPlan) -> tuple[list[str], list[int
         commands.extend(tied_commands)
 
     return _dedupe_commands(commands), missing_steps
+
+
+def _is_executable_test_command(command: str) -> bool:
+    """Return whether a command runs tests rather than only collecting them."""
+    normalized = command.strip()
+    return (
+        bool(normalized)
+        and "--collect-only" not in normalized
+        and "--collectonly" not in normalized
+    )
+
+
+def _format_missing_tdd_contracts(
+    plan: ExecutionPlan,
+    missing_steps: list[int],
+) -> str:
+    """Describe missing TDD contracts with source and authored-test paths."""
+    test_files = _collect_tdd_test_files(plan.tdd_test_steps)
+    details: list[str] = []
+    for step in plan.steps:
+        if step.step_number not in missing_steps:
+            continue
+        code_paths = sorted(_step_may_change_paths(step))
+        sources = ", ".join(code_paths) or step.file_path or "(unknown source file)"
+        authored = ", ".join(test_files) or "(no authored test files)"
+        details.append(
+            f"step {step.step_number} [{sources}] must run one of: {authored}"
+        )
+    return "; ".join(details)
 
 
 def _normalize_path(p: str) -> str:
@@ -1370,9 +1400,11 @@ async def _run_tdd_execution(
     )
     metrics["steps_missing_test_checks"] = len(missing_test_steps)
     if missing_test_steps:
+        missing_detail = _format_missing_tdd_contracts(plan, missing_test_steps)
         detail = (
             "TDD requires each executable implementation step to run an authored "
-            f"test file; missing exact run_tests checks for steps: {missing_test_steps}."
+            "test file; missing exact run_tests checks for "
+            f"steps: {missing_test_steps}. {missing_detail}"
         )
         _append_incomplete_entry(repo_root, step_label="[TDD Contract]", detail=detail)
         await ws_send(
@@ -1483,8 +1515,12 @@ async def _run_tdd_execution(
     )
 
     for step in plan.tdd_test_steps:
+        writing_step = step.model_copy(deep=True)
+        writing_step.success_checks = [
+            check for check in writing_step.success_checks if check.tool != "run_tests"
+        ]
         step_ok = await run_step(
-            step,
+            writing_step,
             test_writer_client,
             build_implementation_tools(),
             test_tool_executor,

@@ -67,6 +67,13 @@ def _plan() -> ExecutionPlan:
                 file_path="tests/test_auth.py",
                 instruction="Write tests for src/auth.py callback behavior.",
                 reason="Pin the intended behavior first.",
+                success_checks=[
+                    StepSuccessCheck(
+                        description="Auth callback tests pass.",
+                        tool="run_tests",
+                        command="test-runner tests/test_auth.py",
+                    )
+                ],
             )
         ],
         affected_files=["src/auth.py", "tests/test_auth.py"],
@@ -182,9 +189,11 @@ async def test_run_tdd_execution_falls_back_to_primary_client_for_test_writing(
     ws = FakeSession()
     primary = DummyClient("primary")
     seen_clients: list[DummyClient] = []
+    seen_steps: list[PlanStep] = []
 
     async def _run_step(step, client, tools, executor, sys_prompt, label_prefix="", telemetry=None):
         seen_clients.append(client)
+        seen_steps.append(step)
         return True
 
     monkeypatch.setattr(workflow_executor, "make_tool_executor", _noop_factory)
@@ -208,8 +217,9 @@ async def test_run_tdd_execution_falls_back_to_primary_client_for_test_writing(
         ],
     )
 
+    plan = _plan()
     ok, metrics = await _run_tdd_execution(
-        plan=_plan(),
+        plan=plan,
         repo_root=str(tmp_path),
         ws=ws,
         llm_client=primary,
@@ -223,6 +233,8 @@ async def test_run_tdd_execution_falls_back_to_primary_client_for_test_writing(
 
     assert ok is True
     assert seen_clients[0] is primary
+    assert seen_steps[0].success_checks == []
+    assert plan.tdd_test_steps[0].success_checks[0].tool == "run_tests"
     assert metrics["test_writer_role"] == "primary_fallback"
     assert metrics["red_failures_observed"] == 1
     assert calls == [
@@ -318,6 +330,34 @@ async def test_run_tdd_execution_requires_clean_runnable_baseline(
 async def test_run_tdd_execution_blocks_missing_targeted_test_check(monkeypatch, tmp_path):
     plan = _plan()
     plan.steps[0].success_checks = []
+    ws = FakeSession()
+
+    ok, metrics = await _run_tdd_execution(
+        plan=plan,
+        repo_root=str(tmp_path),
+        ws=ws,
+        llm_client=DummyClient("primary"),
+        expert_llm_client=None,
+        session_id="sess-contract",
+        dispatcher=None,
+        cb=None,
+        step_artifacts={},
+        run_step=lambda *_args, **_kwargs: None,
+    )
+
+    assert ok is False
+    assert metrics["steps_missing_test_checks"] == 1
+    summary = ws.sent[-1]["summary"]
+    assert "src/auth.py" in summary
+    assert "tests/test_auth.py" in summary
+
+
+@pytest.mark.asyncio
+async def test_run_tdd_execution_rejects_collection_only_check(tmp_path):
+    plan = _plan()
+    plan.steps[0].success_checks[0].command = (
+        "test-runner tests/test_auth.py --collect-only"
+    )
 
     ok, metrics = await _run_tdd_execution(
         plan=plan,
@@ -325,7 +365,7 @@ async def test_run_tdd_execution_blocks_missing_targeted_test_check(monkeypatch,
         ws=FakeSession(),
         llm_client=DummyClient("primary"),
         expert_llm_client=None,
-        session_id="sess-contract",
+        session_id="sess-collect-only",
         dispatcher=None,
         cb=None,
         step_artifacts={},
@@ -365,7 +405,7 @@ async def test_run_tdd_execution_returns_false_for_unresolved_implementation(
     plan = _plan()
 
     async def _failing_impl(step, *_args, **_kwargs):
-        return step is plan.tdd_test_steps[0]
+        return step.file_path == plan.tdd_test_steps[0].file_path
 
     ok, metrics = await _run_tdd_execution(
         plan=plan,

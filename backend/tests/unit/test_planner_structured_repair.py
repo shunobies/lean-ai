@@ -26,7 +26,9 @@ from lean_ai.llm.plan_schema import (
 from lean_ai.llm.planner import (
     DesignPhase,
     ExplorationPhase,
+    PlanValidationError,
     ScopePhase,
+    _attach_tdd_contract,
     _assemble_phase4_plan,
     _run_phase5_verification,
     create_plan,
@@ -176,9 +178,113 @@ def _tdd_verification_plan() -> VerificationPlan:
                 file_path="tests/test_app.py",
                 instruction="Add tests covering src/app.py handler behavior.",
                 reason="Pin the intended handler contract before implementation.",
+                success_checks=[
+                    StepSuccessCheck(
+                        description="Run the authored handler tests.",
+                        tool="run_tests",
+                        command="pytest tests/test_app.py -q",
+                        expected="Command exits successfully.",
+                    )
+                ],
             )
         ]
     )
+
+
+def test_attach_tdd_contract_propagates_matching_commands_to_multiple_steps():
+    plan = ExecutionPlan(
+        scope="Update two handlers.",
+        steps=[
+            PlanStep(
+                step_number=1,
+                tool="edit_file",
+                file_path="src/auth.py",
+                instruction="Update auth behavior.",
+                reason="Implement auth changes.",
+            ),
+            PlanStep(
+                step_number=2,
+                tool="edit_file",
+                file_path="src/billing.py",
+                instruction="Update billing behavior.",
+                reason="Implement billing changes.",
+            ),
+        ],
+        affected_files=["src/auth.py", "src/billing.py"],
+        test_strategy="Run pytest.",
+    )
+    test_steps = [
+        PlanStep(
+            step_number=1,
+            tool="create_file",
+            file_path="tests/test_auth.py",
+            instruction="Test src/auth.py behavior.",
+            reason="Pin auth behavior.",
+            success_checks=[
+                StepSuccessCheck(
+                    description="Auth tests pass.",
+                    tool="run_tests",
+                    command="pytest tests/test_auth.py -q",
+                )
+            ],
+        ),
+        PlanStep(
+            step_number=2,
+            tool="create_file",
+            file_path="tests/test_billing.py",
+            instruction="Test src/billing.py behavior.",
+            reason="Pin billing behavior.",
+            success_checks=[
+                StepSuccessCheck(
+                    description="Billing tests pass.",
+                    tool="run_tests",
+                    command="pytest tests/test_billing.py -q",
+                )
+            ],
+        ),
+    ]
+
+    _attach_tdd_contract(plan, test_steps)
+
+    assert [check.command for check in plan.steps[0].success_checks] == [
+        "pytest tests/test_auth.py -q"
+    ]
+    assert [check.command for check in plan.steps[1].success_checks] == [
+        "pytest tests/test_billing.py -q"
+    ]
+    assert all("run_tests" in step.allowed_tools for step in plan.steps)
+
+
+def test_attach_tdd_contract_rejects_collection_only_and_non_test_checks():
+    plan = _execution_plan()
+    test_step = PlanStep(
+        step_number=1,
+        tool="create_file",
+        file_path="tests/test_app.py",
+        instruction="Test src/app.py behavior.",
+        reason="Pin app behavior.",
+        success_checks=[
+            StepSuccessCheck(
+                description="Collect app tests.",
+                tool="run_tests",
+                command="pytest tests/test_app.py --collect-only",
+            ),
+            StepSuccessCheck(
+                description="Inspect app tests.",
+                tool="run_command",
+                command="pytest tests/test_app.py -q",
+            ),
+            StepSuccessCheck(
+                description="Missing command.",
+                tool="run_tests",
+                command="",
+            ),
+        ],
+    )
+
+    _attach_tdd_contract(plan, [test_step])
+
+    assert plan.steps[0].success_checks == []
 
 
 @pytest.mark.asyncio
@@ -529,6 +635,109 @@ async def test_create_plan_strict_mode_builds_tdd_contract(monkeypatch, tmp_path
 
 
 @pytest.mark.asyncio
+async def test_create_plan_blocks_approval_after_tdd_revision_cap(monkeypatch, tmp_path):
+    async def _fake_scope(**kwargs):
+        return (
+            ScopeDocument(
+                problem="Update the handler.",
+                deliverables=["Handler change"],
+                in_scope=["src/app.py"],
+                success_criteria=["Handler behavior is covered by tests."],
+            ),
+            "PROBLEM / PURPOSE:\nUpdate the handler.\n",
+            True,
+        )
+
+    async def _fake_phase2(**kwargs):
+        return (
+            FileSummary(
+                files_to_modify=[
+                    FileObservation(
+                        file_path="src/app.py",
+                        role="modify",
+                        reason="Handler implementation lives here.",
+                    )
+                ],
+                testing_inventory=InventoryModel(
+                    test_framework="pytest",
+                    test_directory="tests/",
+                    test_file_pattern="test_*.py",
+                ),
+            ),
+            "FILES TO MODIFY:\n1. src/app.py\n",
+            0.01,
+        )
+
+    async def _fake_design(**kwargs):
+        return DesignAndRisks(
+            change_designs=[
+                ChangeDesign(
+                    file_path="src/app.py",
+                    decisions="Update handler behavior.",
+                )
+            ]
+        )
+
+    async def _fake_phase4a(*args, **kwargs):
+        return "tests/test_app.py"
+
+    invalid_test_plan = VerificationPlan(
+        steps=[
+            PlanStep(
+                step_number=1,
+                tool="create_file",
+                file_path="tests/test_app.py",
+                instruction="Test src/app.py behavior.",
+                reason="Pin handler behavior.",
+                success_checks=[
+                    StepSuccessCheck(
+                        description="Only collect tests.",
+                        tool="run_tests",
+                        command="pytest tests/test_app.py --collect-only",
+                    )
+                ],
+            )
+        ]
+    )
+    invalid_implementation = _execution_plan()
+
+    monkeypatch.setattr("lean_ai.llm.planner._retrieve_session_memories", AsyncMock(return_value=""))
+    monkeypatch.setattr("lean_ai.llm.planner._synthesize_scope", _fake_scope)
+    monkeypatch.setattr("lean_ai.llm.planner.run_phase2_exploration", _fake_phase2)
+    monkeypatch.setattr("lean_ai.llm.planner._synthesize_design_and_risks", _fake_design)
+    monkeypatch.setattr("lean_ai.llm.planner._run_phase_4a", _fake_phase4a)
+    monkeypatch.setattr(settings, "enable_strict_test_contract", True)
+
+    expert = FakeExpert(
+        [
+            _execution_plan(),
+            invalid_test_plan,
+            invalid_implementation,
+            invalid_implementation.model_copy(deep=True),
+            invalid_implementation.model_copy(deep=True),
+        ]
+    )
+
+    with pytest.raises(PlanValidationError, match="could not produce an executable plan") as excinfo:
+        await create_plan(
+            task="Fix the handler",
+            repo_root=str(tmp_path),
+            llm_client=FakePlannerClient(
+                outputs=[
+                    ([], "phase 1 prose"),
+                    ([], "phase 3 prose"),
+                ]
+            ),
+            context="repo context",
+            expert_llm_client=expert,
+            test_command="pytest -q",
+        )
+
+    assert "run_tests check naming that test for: src/app.py" in str(excinfo.value)
+    assert len(expert.calls) == 5
+
+
+@pytest.mark.asyncio
 async def test_create_plan_non_tdd_mode_stays_single_pass(monkeypatch, tmp_path):
     async def _fake_scope(**kwargs):
         scope = ScopeDocument(
@@ -663,7 +872,16 @@ async def test_create_plan_subgraph_forwards_state_manager_to_phase2(monkeypatch
     monkeypatch.setattr("lean_ai.llm.planner._run_phase_4a", _fake_phase4a)
     monkeypatch.setattr(settings, "enable_strict_test_contract", False)
 
-    expert = FakeExpert([_execution_plan()])
+    valid_plan = _execution_plan()
+    valid_plan.steps[0].success_checks = [
+        StepSuccessCheck(
+            description="Handler module remains readable.",
+            tool="read_file",
+            command="src/app.py",
+            expected="Updated handler is present.",
+        )
+    ]
+    expert = FakeExpert([valid_plan])
     await create_plan(
         task="Fix the handler",
         repo_root=str(tmp_path),
