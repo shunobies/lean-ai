@@ -1097,7 +1097,7 @@
     "@types/vscode": "^1.93.0",
     "@types/ws": "^8.5.0",
     "@vscode/vsce": "^3.9.1",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.1",
     "eslint": "^9.0.0",
     "jest": "^29.7.0",
     "ts-jest": "^29.4.11",
